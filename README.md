@@ -28,9 +28,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Introduction
 
-Welcome to the NVIDIA PhysX source code repository.
+This repository is a research-oriented fork of NVIDIA PhysX focused on integrating an experimental AVBD (Augmented Variable Block Descent) solver into the lowleveldynamics pipeline.
 
-This repository contains source releases of the PhysX, Flow and Blast SDKs and Omniverse PhysX extensions used in NVIDIA Omniverse.
+**Current status (important):**
+- The AVBD Articulation adapter is a **work in progress** and **not production-ready**.
+- Joint type coverage, drive/limit fidelity, and inverse dynamics integration are incomplete.
+- Use this fork for experimentation and evaluation only.
+
+This repo still contains the PhysX, Flow and Blast SDK sources and Omniverse PhysX extensions used in NVIDIA Omniverse.
 
 ## Documentation
 
