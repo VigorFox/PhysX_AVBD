@@ -41,6 +41,7 @@
 #include "DyFeatherstoneArticulation.h"
 #include "DyArticulationCore.h"
 #include "DyVArticulation.h"
+#include "common/PxProfileZone.h"
 
 using namespace physx;
 using namespace physx::Dy;
@@ -218,6 +219,8 @@ void AvbdDynamicsContext::update(
     PxU32 maxArticulationLinks, PxReal dt, const PxVec3 &gravity,
     PxBitMapPinned &changedHandleMap) {
 
+  PX_PROFILE_ZONE("AVBD.update", mContextID);
+
   PX_UNUSED(flushPool);
   PX_UNUSED(postPartitioningTask);
   PX_UNUSED(processLostTouchTask);
@@ -243,15 +246,20 @@ void AvbdDynamicsContext::update(
   PxU32 totalBodyCount = numDynamicBodies + maxArticulationLinks;
 
   // Allocate global arrays - use scratch with main allocator fallback
-  AvbdSolverBody *avbdBodies = reinterpret_cast<AvbdSolverBody *>
-      (allocWithFallback(mScratchAllocator, mAllocatorCallback, 
-                        mHeapFallbackAllocations,
-                        sizeof(AvbdSolverBody) * totalBodyCount, "AvbdSolverBody"));
+  AvbdSolverBody *avbdBodies = nullptr;
+  PxsRigidBody **rigidBodies = nullptr;
+  {
+    PX_PROFILE_ZONE("AVBD.allocateMemory", mContextID);
+    avbdBodies = reinterpret_cast<AvbdSolverBody *>
+        (allocWithFallback(mScratchAllocator, mAllocatorCallback, 
+                          mHeapFallbackAllocations,
+                          sizeof(AvbdSolverBody) * totalBodyCount, "AvbdSolverBody"));
 
-  PxsRigidBody **rigidBodies = reinterpret_cast<PxsRigidBody **>
-      (allocWithFallback(mScratchAllocator, mAllocatorCallback,
-                        mHeapFallbackAllocations,
-                        sizeof(PxsRigidBody *) * totalBodyCount, "RigidBodies"));
+    rigidBodies = reinterpret_cast<PxsRigidBody **>
+        (allocWithFallback(mScratchAllocator, mAllocatorCallback,
+                          mHeapFallbackAllocations,
+                          sizeof(PxsRigidBody *) * totalBodyCount, "RigidBodies"));
+  }
 
   // Check if allocation failed completely
   if (!avbdBodies || !rigidBodies) {
@@ -534,6 +542,9 @@ void AvbdDynamicsContext::update(
     config.outerIterations = 2;
     config.innerIterations = 4;
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
+    config.maxRho = AvbdConstants::AVBD_MAX_PENALTY_RHO;
+    config.baumgarte = 0.3f;
+    config.enableLocal6x6Solve = false;
     mSolver.initialize(
         config, *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback));
     mSolverInitialized = true;
@@ -701,6 +712,30 @@ void AvbdDynamicsContext::update(
     batch.islandEnd = i + 1;
     batch.colorBatches = nullptr;
     batch.numColors = 0;
+    
+    // Build constraint-to-body mappings for O(1) lookup in solver
+    // This eliminates O(N²) complexity in the inner loop
+    if (batch.numBodies > 0) {
+      PxAllocatorCallback& allocator = *reinterpret_cast<PxAllocatorCallback*>(mAllocatorCallback);
+      if (batch.numConstraints > 0 && batch.constraints) {
+        batch.contactMap.build(batch.numBodies, batch.constraints, batch.numConstraints, allocator);
+      }
+      if (batch.numSpherical > 0 && batch.sphericalJoints) {
+        batch.sphericalMap.build(batch.numBodies, batch.sphericalJoints, batch.numSpherical, allocator);
+      }
+      if (batch.numFixed > 0 && batch.fixedJoints) {
+        batch.fixedMap.build(batch.numBodies, batch.fixedJoints, batch.numFixed, allocator);
+      }
+      if (batch.numRevolute > 0 && batch.revoluteJoints) {
+        batch.revoluteMap.build(batch.numBodies, batch.revoluteJoints, batch.numRevolute, allocator);
+      }
+      if (batch.numPrismatic > 0 && batch.prismaticJoints) {
+        batch.prismaticMap.build(batch.numBodies, batch.prismaticJoints, batch.numPrismatic, allocator);
+      }
+      if (batch.numD6 > 0 && batch.d6Joints) {
+        batch.d6Map.build(batch.numBodies, batch.d6Joints, batch.numD6, allocator);
+      }
+    }
 
     // Constraint coloring for large islands
     const PxU32 largeIslandThreshold = mSolver.getConfig().largeIslandThreshold;

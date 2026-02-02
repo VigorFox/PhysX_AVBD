@@ -222,7 +222,7 @@ struct AvbdSolverConfig {
         rhoScale(2.0f), maxRho(1e8f), defaultCompliance(1e-6f),
         contactCompliance(0.0f), jointCompliance(1e-8f), damping(0.5f),
         angularDamping(0.95f), rotationThreshold(0.001f), angularScale(400.0f),
-        baumgarte(0.2f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        baumgarte(0.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
         maxLambda(1e6f), enableParallelization(true), enableLocal6x6Solve(false),
         enableMassWeightedWeld(false),
@@ -738,6 +738,148 @@ struct AvbdKahanAccumulator {
     }
     
     PX_FORCE_INLINE physx::PxVec3 getSum() const { return sum; }
+};
+
+/**
+ * @brief Pre-computed constraint-to-body mapping for O(1) constraint lookup
+ * 
+ * This structure eliminates O(N²) complexity in the solver by pre-computing
+ * which constraints affect each body. Instead of iterating all constraints
+ * for each body, we can directly access only the relevant constraints.
+ */
+struct AvbdBodyConstraintMap {
+    physx::PxU32* constraintOffsets;    //!< Per-body start offset into constraintIndices
+    physx::PxU32* constraintCounts;     //!< Per-body constraint count
+    physx::PxU32* constraintIndices;    //!< Packed array of constraint indices
+    physx::PxU32 numBodies;
+    physx::PxU32 totalConstraintRefs;   //!< Total entries in constraintIndices
+    physx::PxU32 capacity;
+    
+    PX_FORCE_INLINE AvbdBodyConstraintMap() 
+        : constraintOffsets(nullptr), constraintCounts(nullptr), 
+          constraintIndices(nullptr), numBodies(0), totalConstraintRefs(0), capacity(0) {}
+    
+    /**
+     * @brief Build the mapping from constraint array
+     * @param numBodiesIn Number of bodies
+     * @param numConstraints Number of constraints
+     * @param bodyIndicesA Array of bodyIndexA for each constraint
+     * @param bodyIndicesB Array of bodyIndexB for each constraint
+     * @param allocator Allocator for memory
+     */
+    template<typename ConstraintType>
+    void build(physx::PxU32 numBodiesIn, 
+               const ConstraintType* constraints,
+               physx::PxU32 numConstraints,
+               physx::PxAllocatorCallback& allocator) {
+        
+        // Release old data if any
+        if (constraintOffsets) {
+            release(allocator);
+        }
+        
+        numBodies = numBodiesIn;
+        
+        // Allocate count array
+        constraintCounts = static_cast<physx::PxU32*>(
+            allocator.allocate(sizeof(physx::PxU32) * numBodies, 
+                              "AvbdBodyConstraintMap::counts", __FILE__, __LINE__));
+        
+        // First pass: count constraints per body
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+            constraintCounts[i] = 0;
+        }
+        
+        for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+            physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+            physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+            if (bodyA < numBodies) constraintCounts[bodyA]++;
+            if (bodyB < numBodies) constraintCounts[bodyB]++;
+        }
+        
+        // Compute offsets (prefix sum)
+        constraintOffsets = static_cast<physx::PxU32*>(
+            allocator.allocate(sizeof(physx::PxU32) * (numBodies + 1), 
+                              "AvbdBodyConstraintMap::offsets", __FILE__, __LINE__));
+        
+        constraintOffsets[0] = 0;
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+            constraintOffsets[i + 1] = constraintOffsets[i] + constraintCounts[i];
+        }
+        totalConstraintRefs = constraintOffsets[numBodies];
+        
+        // Allocate constraint indices array
+        if (totalConstraintRefs > 0) {
+            constraintIndices = static_cast<physx::PxU32*>(
+                allocator.allocate(sizeof(physx::PxU32) * totalConstraintRefs, 
+                                  "AvbdBodyConstraintMap::indices", __FILE__, __LINE__));
+        }
+        
+        // Reset counts for second pass
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+            constraintCounts[i] = 0;
+        }
+        
+        // Second pass: fill constraint indices
+        for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+            physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+            physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+            
+            if (bodyA < numBodies) {
+                physx::PxU32 idx = constraintOffsets[bodyA] + constraintCounts[bodyA];
+                constraintIndices[idx] = c;
+                constraintCounts[bodyA]++;
+            }
+            if (bodyB < numBodies) {
+                physx::PxU32 idx = constraintOffsets[bodyB] + constraintCounts[bodyB];
+                constraintIndices[idx] = c;
+                constraintCounts[bodyB]++;
+            }
+        }
+        
+        capacity = numBodies;
+    }
+    
+    /**
+     * @brief Get constraints for a specific body
+     * @param bodyIndex Body index
+     * @param outIndices Output pointer to constraint indices
+     * @param outCount Output count of constraints
+     */
+    PX_FORCE_INLINE void getBodyConstraints(physx::PxU32 bodyIndex, 
+                                            const physx::PxU32*& outIndices, 
+                                            physx::PxU32& outCount) const {
+        // Safety check: ensure all required pointers are valid
+        if (constraintOffsets && constraintCounts && constraintIndices && 
+            bodyIndex < numBodies) {
+            outIndices = constraintIndices + constraintOffsets[bodyIndex];
+            outCount = constraintCounts[bodyIndex];
+        } else {
+            outIndices = nullptr;
+            outCount = 0;
+        }
+    }
+    
+    /**
+     * @brief Release allocated memory
+     */
+    void release(physx::PxAllocatorCallback& allocator) {
+        if (constraintOffsets) {
+            allocator.deallocate(constraintOffsets);
+            constraintOffsets = nullptr;
+        }
+        if (constraintCounts) {
+            allocator.deallocate(constraintCounts);
+            constraintCounts = nullptr;
+        }
+        if (constraintIndices) {
+            allocator.deallocate(constraintIndices);
+            constraintIndices = nullptr;
+        }
+        numBodies = 0;
+        totalConstraintRefs = 0;
+        capacity = 0;
+    }
 };
 
 } // namespace Dy

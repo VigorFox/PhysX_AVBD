@@ -33,9 +33,13 @@
 #include <cstdio>
 
 // Debug logging macro
-#define AVBD_LOG(fmt, ...)                                                     \
-  printf("[AVBD] " fmt "\n", ##__VA_ARGS__);                                   \
-  fflush(stdout)
+#if defined(AVBD_ENABLE_LOG)
+  #define AVBD_LOG(fmt, ...)                                                   \
+    printf("[AVBD] " fmt "\n", ##__VA_ARGS__);                               \
+    fflush(stdout)
+#else
+  #define AVBD_LOG(...) do { } while (0)
+#endif
 
 namespace physx {
 namespace Dy {
@@ -47,6 +51,21 @@ void AvbdTask::release() {
   PxLightCpuTask::release();
   // After base class release, destroy ourselves
   mContext.destroyTask(this);
+}
+
+void AvbdSolveIslandTask::release() {
+  // Release constraint maps to prevent memory leak
+  // Each frame builds new maps, so we must free them when task completes
+  PxAllocatorCallback& allocator = mContext.getAllocator();
+  mBatch.contactMap.release(allocator);
+  mBatch.sphericalMap.release(allocator);
+  mBatch.fixedMap.release(allocator);
+  mBatch.revoluteMap.release(allocator);
+  mBatch.prismaticMap.release(allocator);
+  mBatch.d6Map.release(allocator);
+  
+  // Call base class release
+  AvbdTask::release();
 }
 
 void AvbdWriteBackTask::run() {

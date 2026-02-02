@@ -30,6 +30,7 @@
 #include "DyAvbdConstraint.h"
 #include "DyAvbdSolver.h"
 #include "DyAvbdSolverBody.h"
+#include "DyAvbdTypes.h"
 #include "foundation/PxSimpleTypes.h"
 #include "task/PxTask.h"
 #include <cstdio>
@@ -81,6 +82,15 @@ struct AvbdIslandBatch {
   AvbdColorBatch
       *colorBatches; //!< Array of color batches (nullptr if not colored)
   PxU32 numColors;   //!< Number of colors used (0 if not colored)
+  
+  // Pre-computed constraint-to-body mappings for O(1) lookup
+  // These are built once per island and reused across solver iterations
+  AvbdBodyConstraintMap contactMap;
+  AvbdBodyConstraintMap sphericalMap;
+  AvbdBodyConstraintMap fixedMap;
+  AvbdBodyConstraintMap revoluteMap;
+  AvbdBodyConstraintMap prismaticMap;
+  AvbdBodyConstraintMap d6Map;
 };
 
 //=============================================================================
@@ -112,26 +122,21 @@ public:
         mGravity(gravity) {}
 
   virtual void run() override {
-    printf("[AVBD] AvbdSolveIslandTask::run() START - island=%u, bodies=%u, "
-           "contacts=%u, spherical=%u, fixed=%u, revolute=%u, prismatic=%u, d6=%u\n",
-           mBatch.islandStart, mBatch.numBodies, mBatch.numConstraints,
-           mBatch.numSpherical, mBatch.numFixed, mBatch.numRevolute,
-           mBatch.numPrismatic, mBatch.numD6);
-    fflush(stdout);
-
     // Use solveWithJoints to handle all constraint types
+    // Pass pre-computed constraint mappings for O(M) optimization
     mSolver.solveWithJoints(
         mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
         mBatch.numConstraints, mBatch.sphericalJoints, mBatch.numSpherical,
         mBatch.fixedJoints, mBatch.numFixed, mBatch.revoluteJoints,
         mBatch.numRevolute, mBatch.prismaticJoints, mBatch.numPrismatic,
         mBatch.d6Joints, mBatch.numD6,
-        mGravity, mBatch.colorBatches, mBatch.numColors);
-
-    printf("[AVBD] AvbdSolveIslandTask::run() END - island=%u\n",
-           mBatch.islandStart);
-    fflush(stdout);
+        mGravity,
+        &mBatch.contactMap, &mBatch.sphericalMap, &mBatch.fixedMap,
+        &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map,
+        mBatch.colorBatches, mBatch.numColors);
   }
+  
+  virtual void release() override;
 
   virtual const char *getName() const override { return "AvbdSolveIslandTask"; }
 
@@ -179,8 +184,6 @@ public:
       : AvbdTask(context), mContinuation(continuation) {}
 
   virtual void run() override {
-    printf("[AVBD] AvbdCoordinatorTask::run() - sync point reached\n");
-    fflush(stdout);
   }
 
   virtual const char *getName() const override { return "AvbdCoordinatorTask"; }

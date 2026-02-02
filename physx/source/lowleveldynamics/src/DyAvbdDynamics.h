@@ -70,6 +70,11 @@ public:
    * @brief Destroy AVBD task (called by task->release())
    */
   void destroyTask(AvbdTask *task);
+  
+  /**
+   * @brief Get allocator callback for constraint map cleanup
+   */
+  PxAllocatorCallback& getAllocator() { return *reinterpret_cast<PxAllocatorCallback*>(mAllocatorCallback); }
 
   virtual void update(Cm::FlushPool &flushPool, PxBaseTask *continuation,
                       PxBaseTask *postPartitioningTask,

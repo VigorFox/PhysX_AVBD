@@ -108,6 +108,12 @@ public:
    * @param d6Joints Array of D6 joint constraints
    * @param numD6 Number of D6 joints
    * @param gravity Gravity vector
+   * @param contactMap Pre-computed contact-to-body mapping (optional)
+   * @param sphericalMap Pre-computed spherical joint mapping (optional)
+   * @param fixedMap Pre-computed fixed joint mapping (optional)
+   * @param revoluteMap Pre-computed revolute joint mapping (optional)
+   * @param prismaticMap Pre-computed prismatic joint mapping (optional)
+   * @param d6Map Pre-computed D6 joint mapping (optional)
    * @param colorBatches Pre-computed color batches (nullptr for no coloring)
    * @param numColors Number of colors in colorBatches (0 if not colored)
    */
@@ -119,7 +125,14 @@ public:
       AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
       AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      const physx::PxVec3 &gravity, AvbdColorBatch *colorBatches = nullptr,
+      const physx::PxVec3 &gravity, 
+      const AvbdBodyConstraintMap *contactMap = nullptr,
+      const AvbdBodyConstraintMap *sphericalMap = nullptr,
+      const AvbdBodyConstraintMap *fixedMap = nullptr,
+      const AvbdBodyConstraintMap *revoluteMap = nullptr,
+      const AvbdBodyConstraintMap *prismaticMap = nullptr,
+      const AvbdBodyConstraintMap *d6Map = nullptr,
+      AvbdColorBatch *colorBatches = nullptr,
       physx::PxU32 numColors = 0);
 
   /**
@@ -408,9 +421,72 @@ private:
       mParallelColoring; //!< Constraint-based parallel coloring
   AvbdBodyParallelColoring
       mBodyColoring; //!< Body-based parallel coloring for BCD
+  AvbdBodyConstraintMap
+      mContactMap;    //!< Pre-computed contact-to-body mapping for O(1) lookup
+  AvbdBodyConstraintMap
+      mSphericalMap;  //!< Pre-computed spherical joint mapping
+  AvbdBodyConstraintMap
+      mFixedMap;      //!< Pre-computed fixed joint mapping
+  AvbdBodyConstraintMap
+      mRevoluteMap;   //!< Pre-computed revolute joint mapping
+  AvbdBodyConstraintMap
+      mPrismaticMap;  //!< Pre-computed prismatic joint mapping
+  AvbdBodyConstraintMap
+      mD6Map;         //!< Pre-computed D6 joint mapping
 
   physx::PxAllocatorCallback *mAllocator;
   bool mInitialized;
+
+  //-------------------------------------------------------------------------
+  // Optimized solving with pre-computed constraint mapping
+  //-------------------------------------------------------------------------
+  
+  /**
+   * @brief Build constraint-to-body mapping for efficient lookup
+   */
+  void buildConstraintMapping(AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+                              physx::PxU32 numBodies);
+  
+  /**
+   * @brief Optimized version using pre-computed constraint map - O(constraints per body)
+   */
+  void solveBodyLocalConstraintsFast(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      physx::PxU32 bodyIndex,
+      AvbdContactConstraint *contacts);
+  
+  /**
+   * @brief Build all constraint mappings for joints (called once before solve iterations)
+   */
+  void buildAllConstraintMappings(
+      physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
+      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6);
+  
+  /**
+   * @brief Optimized version of solveBodyAllConstraints using pre-computed mappings
+   * Complexity: O(constraints connected to this body) instead of O(all constraints)
+   */
+  void solveBodyAllConstraintsFast(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      physx::PxU32 bodyIndex,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
+      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      const AvbdBodyConstraintMap &contactMap,
+      const AvbdBodyConstraintMap &sphericalMap,
+      const AvbdBodyConstraintMap &fixedMap,
+      const AvbdBodyConstraintMap &revoluteMap,
+      const AvbdBodyConstraintMap &prismaticMap,
+      const AvbdBodyConstraintMap &d6Map,
+      physx::PxReal dt);
 };
 
 //=============================================================================
@@ -422,6 +498,15 @@ inline AvbdSolver::AvbdSolver() : mAllocator(nullptr), mInitialized(false) {
   mColoring.colorGroups = nullptr;
   mColoring.numColors = 0;
   mColoring.maxColors = 0;
+  
+  // Explicitly initialize all constraint mappings to safe defaults
+  // (redundant if default constructors work, but safer)
+  mContactMap = AvbdBodyConstraintMap();
+  mSphericalMap = AvbdBodyConstraintMap();
+  mFixedMap = AvbdBodyConstraintMap();
+  mRevoluteMap = AvbdBodyConstraintMap();
+  mPrismaticMap = AvbdBodyConstraintMap();
+  mD6Map = AvbdBodyConstraintMap();
 }
 
 inline AvbdSolver::~AvbdSolver() { release(); }
@@ -435,8 +520,17 @@ inline void AvbdSolver::initialize(const AvbdSolverConfig &config,
 }
 
 inline void AvbdSolver::release() {
-  if (mInitialized && mAllocator && mColoring.colorGroups != nullptr) {
-    mColoring.release(*mAllocator);
+  if (mInitialized && mAllocator) {
+    if (mColoring.colorGroups != nullptr) {
+      mColoring.release(*mAllocator);
+    }
+    // Release all constraint mappings
+    mContactMap.release(*mAllocator);
+    mSphericalMap.release(*mAllocator);
+    mFixedMap.release(*mAllocator);
+    mRevoluteMap.release(*mAllocator);
+    mPrismaticMap.release(*mAllocator);
+    mD6Map.release(*mAllocator);
   }
   mInitialized = false;
 }

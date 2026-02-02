@@ -138,10 +138,9 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
                                          const physx::PxVec3 &gravity) {
     if (invMass > 0.0f) {
       // Explicit Euler prediction with gravity
-      physx::PxVec3 acceleration =
-          gravity; // External forces can be added here
-      predictedPosition =
-          position + linearVelocity * dt + acceleration * (0.5f * dt * dt);
+      physx::PxVec3 acceleration = gravity;
+      linearVelocity += acceleration * dt;
+      predictedPosition = position + linearVelocity * dt;
 
       // Quaternion integration for rotation prediction
       physx::PxVec3 angVelHalf = angularVelocity * (0.5f * dt);

@@ -28,6 +28,7 @@
 #include "foundation/PxAssert.h"
 #include "foundation/PxArray.h"
 #include "DyAvbdJointSolver.h"
+#include "common/PxProfileZone.h"
 
 #include <algorithm>
 
@@ -56,36 +57,48 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
                        physx::PxU32 numBodies, AvbdContactConstraint *contacts,
                        physx::PxU32 numContacts, const physx::PxVec3 &gravity,
                        AvbdColorBatch *colorBatches, physx::PxU32 numColors) {
+  PX_PROFILE_ZONE("AVBD.solve", 0);
+  
   if (!mInitialized || numBodies == 0) {
     return;
   }
 
   mStats.reset();
+  mStats.numBodies = numBodies;
+  mStats.numContacts = numContacts;
 
   physx::PxReal invDt = 1.0f / dt;
 
   // Stage 1: Prediction
-  computePrediction(bodies, numBodies, dt, gravity);
+  {
+    PX_PROFILE_ZONE("AVBD.prediction", 0);
+    computePrediction(bodies, numBodies, dt, gravity);
+  }
 
   // Stage 2: Graph Coloring (skip if pre-computed coloring is provided)
   if (mConfig.enableParallelization && numColors == 0) {
+    PX_PROFILE_ZONE("AVBD.graphColoring", 0);
     computeGraphColoring(bodies, numBodies, contacts, numContacts);
   }
 
   // Initialize positions to predicted values, save current as previous
-  for (physx::PxU32 i = 0; i < numBodies; ++i) {
-    // Save current state before prediction for velocity calculation
-    bodies[i].prevPosition = bodies[i].position;
-    bodies[i].prevRotation = bodies[i].rotation;
-    // Start from predicted position
-    bodies[i].position = bodies[i].predictedPosition;
-    bodies[i].rotation = bodies[i].predictedRotation;
+  {
+    PX_PROFILE_ZONE("AVBD.initPositions", 0);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      // Save current state before prediction for velocity calculation
+      bodies[i].prevPosition = bodies[i].position;
+      bodies[i].prevRotation = bodies[i].rotation;
+      // Start from predicted position
+      bodies[i].position = bodies[i].predictedPosition;
+      bodies[i].rotation = bodies[i].predictedRotation;
+    }
   }
 
   // Outer loop: Augmented Lagrangian iterations
   if (mConfig.isDeterministic() &&
       (mConfig.determinismFlags & AvbdDeterminismFlags::eSORT_CONSTRAINTS) &&
       numContacts > 1) {
+    PX_PROFILE_ZONE("AVBD.sortConstraints", 0);
     std::sort(contacts, contacts + numContacts,
               [](const AvbdContactConstraint &a,
                  const AvbdContactConstraint &b) {
@@ -97,37 +110,53 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
               });
   }
 
-  for (physx::PxU32 outerIter = 0; outerIter < mConfig.outerIterations;
-       ++outerIter) {
+  // Build constraint-to-body mapping for O(1) lookup (eliminates O(N²))
+  if (numContacts > 0 && numBodies > 0) {
+    PX_PROFILE_ZONE("AVBD.buildConstraintMap", 0);
+    buildConstraintMapping(contacts, numContacts, numBodies);
+  }
 
-    // Inner loop: Block descent iterations
-    for (physx::PxU32 innerIter = 0; innerIter < mConfig.innerIterations;
-         ++innerIter) {
-      // Pass pre-computed coloring if available
-      blockDescentIteration(bodies, numBodies, contacts, numContacts, dt,
-                            colorBatches, numColors);
-      mStats.totalIterations++;
+  {
+    PX_PROFILE_ZONE("AVBD.solveIterations", 0);
+    for (physx::PxU32 outerIter = 0; outerIter < mConfig.outerIterations;
+         ++outerIter) {
+
+      // Inner loop: Block descent iterations
+      for (physx::PxU32 innerIter = 0; innerIter < mConfig.innerIterations;
+           ++innerIter) {
+        PX_PROFILE_ZONE("AVBD.blockDescent", 0);
+        // Pass pre-computed coloring if available
+        blockDescentIteration(bodies, numBodies, contacts, numContacts, dt,
+                              colorBatches, numColors);
+        mStats.totalIterations++;
+      }
+
+      // Update Lagrangian multipliers
+      {
+        PX_PROFILE_ZONE("AVBD.updateLambda", 0);
+        updateLagrangianMultipliers(bodies, numBodies, contacts, numContacts);
+      }
     }
-
-    // Update Lagrangian multipliers
-    updateLagrangianMultipliers(bodies, numBodies, contacts, numContacts);
   }
 
   // Stage 5: Update velocities from position/rotation change
-  for (physx::PxU32 i = 0; i < numBodies; ++i) {
-    if (bodies[i].invMass > 0.0f) {
-      // Linear velocity: v = (x - x_old) / dt
-      bodies[i].linearVelocity = (bodies[i].position - bodies[i].prevPosition) * invDt;
+  {
+    PX_PROFILE_ZONE("AVBD.updateVelocities", 0);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      if (bodies[i].invMass > 0.0f) {
+        // Linear velocity: v = (x - x_old) / dt
+        bodies[i].linearVelocity = (bodies[i].position - bodies[i].prevPosition) * invDt;
 
-      // Angular velocity from quaternion difference:  = 2 * (q * q_old^-1).xyz / dt
-      physx::PxQuat deltaQ = bodies[i].rotation * bodies[i].prevRotation.getConjugate();
-      if (deltaQ.w < 0.0f) {
-        deltaQ = -deltaQ; // Ensure shortest path
+        // Angular velocity from quaternion difference:  = 2 * (q * q_old^-1).xyz / dt
+        physx::PxQuat deltaQ = bodies[i].rotation * bodies[i].prevRotation.getConjugate();
+        if (deltaQ.w < 0.0f) {
+          deltaQ = -deltaQ; // Ensure shortest path
+        }
+        bodies[i].angularVelocity = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
+        
+        // Apply angular damping
+        bodies[i].angularVelocity *= mConfig.angularDamping;
       }
-      bodies[i].angularVelocity = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
-      
-      // Apply angular damping
-      bodies[i].angularVelocity *= mConfig.angularDamping;
     }
   }
 
@@ -499,6 +528,9 @@ void AvbdSolver::blockDescentIteration(
       solveLocalSystem(bodies[i], contacts, numContacts, dt, invDt2);
     }
   } else {
+    // Use fast O(1) lookup if constraint mapping is available
+    const bool useFastPath = (mContactMap.numBodies > 0 && mContactMap.constraintIndices != nullptr);
+    
     for (physx::PxU32 idx = 0; idx < numBodies; ++idx) {
       const physx::PxU32 i = orderPtr ? orderPtr[idx] : idx;
       // Skip static bodies
@@ -506,8 +538,13 @@ void AvbdSolver::blockDescentIteration(
         continue;
       }
 
-      // Solve local system for this body using Gauss-Seidel on all its constraints
-      solveBodyLocalConstraints(bodies, numBodies, i, contacts, numContacts);
+      if (useFastPath) {
+        // Optimized path: O(constraints per body) instead of O(all constraints)
+        solveBodyLocalConstraintsFast(bodies, numBodies, i, contacts);
+      } else {
+        // Fallback: O(N²) path
+        solveBodyLocalConstraints(bodies, numBodies, i, contacts, numContacts);
+      }
     }
   }
 }
@@ -1407,8 +1444,17 @@ void AvbdSolver::solveWithJoints(
     AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
     AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
     AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    const physx::PxVec3 &gravity, AvbdColorBatch *colorBatches,
+    const physx::PxVec3 &gravity,
+    const AvbdBodyConstraintMap *contactMap,
+    const AvbdBodyConstraintMap *sphericalMap,
+    const AvbdBodyConstraintMap *fixedMap,
+    const AvbdBodyConstraintMap *revoluteMap,
+    const AvbdBodyConstraintMap *prismaticMap,
+    const AvbdBodyConstraintMap *d6Map,
+    AvbdColorBatch *colorBatches,
     physx::PxU32 numColors) {
+
+  PX_PROFILE_ZONE("AVBD.solveWithJoints", 0);
 
   PX_UNUSED(colorBatches);
   PX_UNUSED(numColors);
@@ -1416,13 +1462,26 @@ void AvbdSolver::solveWithJoints(
   if (!mInitialized || numBodies == 0) {
     return;
   }
+  
+  // Check if we have pre-computed constraint mappings for O(M) optimization
+  const bool hasConstraintMappings = (contactMap != nullptr) || 
+                                     (sphericalMap != nullptr) ||
+                                     (fixedMap != nullptr) ||
+                                     (revoluteMap != nullptr) ||
+                                     (prismaticMap != nullptr) ||
+                                     (d6Map != nullptr);
 
   mStats.reset();
+  mStats.numBodies = numBodies;
+  mStats.numContacts = numContacts;
   mStats.numJoints = numSpherical + numFixed + numRevolute + numPrismatic + numD6;
 
   physx::PxReal invDt = 1.0f / dt;
 
-  computePrediction(bodies, numBodies, dt, gravity);
+  {
+    PX_PROFILE_ZONE("AVBD.prediction", 0);
+    computePrediction(bodies, numBodies, dt, gravity);
+  }
 
   for (physx::PxU32 i = 0; i < numBodies; ++i) {
     bodies[i].prevPosition = bodies[i].position;
@@ -1431,53 +1490,87 @@ void AvbdSolver::solveWithJoints(
     bodies[i].rotation = bodies[i].predictedRotation;
   }
 
-  for (physx::PxU32 outerIter = 0; outerIter < mConfig.outerIterations; ++outerIter) {
-    for (physx::PxU32 innerIter = 0; innerIter < mConfig.innerIterations; ++innerIter) {
-      for (physx::PxU32 bodyIdx = 0; bodyIdx < numBodies; ++bodyIdx) {
-        if (bodies[bodyIdx].invMass <= 0.0f) {
-          continue;
+  // Empty mappings for fallback when nullptr is passed
+  static const AvbdBodyConstraintMap emptyMap;
+
+  {
+    PX_PROFILE_ZONE("AVBD.solveIterations", 0);
+    for (physx::PxU32 outerIter = 0; outerIter < mConfig.outerIterations; ++outerIter) {
+      for (physx::PxU32 innerIter = 0; innerIter < mConfig.innerIterations; ++innerIter) {
+        PX_PROFILE_ZONE("AVBD.blockDescentWithJoints", 0);
+        for (physx::PxU32 bodyIdx = 0; bodyIdx < numBodies; ++bodyIdx) {
+          if (bodies[bodyIdx].invMass <= 0.0f) {
+            continue;
+          }
+          
+          if (hasConstraintMappings) {
+            // Use optimized O(M) version with pre-computed constraint mappings
+            solveBodyAllConstraintsFast(
+                bodies, numBodies, bodyIdx,
+                contacts, numContacts,
+                sphericalJoints, numSpherical,
+                fixedJoints, numFixed,
+                revoluteJoints, numRevolute,
+                prismaticJoints, numPrismatic,
+                d6Joints, numD6,
+                contactMap ? *contactMap : emptyMap,
+                sphericalMap ? *sphericalMap : emptyMap,
+                fixedMap ? *fixedMap : emptyMap,
+                revoluteMap ? *revoluteMap : emptyMap,
+                prismaticMap ? *prismaticMap : emptyMap,
+                d6Map ? *d6Map : emptyMap,
+                dt);
+          } else {
+            // Fallback to original O(N*M) version
+            solveBodyAllConstraints(
+                bodies, numBodies, bodyIdx,
+                contacts, numContacts,
+                sphericalJoints, numSpherical,
+                fixedJoints, numFixed,
+                revoluteJoints, numRevolute,
+                prismaticJoints, numPrismatic,
+                d6Joints, numD6,
+                dt);
+          }
         }
-        solveBodyAllConstraints(
-            bodies, numBodies, bodyIdx,
-            contacts, numContacts,
-            sphericalJoints, numSpherical,
-            fixedJoints, numFixed,
-            revoluteJoints, numRevolute,
-            prismaticJoints, numPrismatic,
-            d6Joints, numD6,
-            dt);
+        mStats.totalIterations++;
       }
-      mStats.totalIterations++;
-    }
 
-    updateLagrangianMultipliers(bodies, numBodies, contacts, numContacts);
+      {
+        PX_PROFILE_ZONE("AVBD.updateLambda", 0);
+        updateLagrangianMultipliers(bodies, numBodies, contacts, numContacts);
 
-    for (physx::PxU32 j = 0; j < numSpherical; ++j) {
-      updateSphericalJointMultiplier(sphericalJoints[j], bodies, numBodies, mConfig);
-    }
-    for (physx::PxU32 j = 0; j < numFixed; ++j) {
-      updateFixedJointMultiplier(fixedJoints[j], bodies, numBodies, mConfig);
-    }
-    for (physx::PxU32 j = 0; j < numRevolute; ++j) {
-      updateRevoluteJointMultiplier(revoluteJoints[j], bodies, numBodies, mConfig);
-    }
-    for (physx::PxU32 j = 0; j < numPrismatic; ++j) {
-      updatePrismaticJointMultiplier(prismaticJoints[j], bodies, numBodies, mConfig);
-    }
-    for (physx::PxU32 j = 0; j < numD6; ++j) {
-      updateD6JointMultiplier(d6Joints[j], bodies, numBodies, mConfig);
+        for (physx::PxU32 j = 0; j < numSpherical; ++j) {
+          updateSphericalJointMultiplier(sphericalJoints[j], bodies, numBodies, mConfig);
+        }
+        for (physx::PxU32 j = 0; j < numFixed; ++j) {
+          updateFixedJointMultiplier(fixedJoints[j], bodies, numBodies, mConfig);
+        }
+        for (physx::PxU32 j = 0; j < numRevolute; ++j) {
+          updateRevoluteJointMultiplier(revoluteJoints[j], bodies, numBodies, mConfig);
+        }
+        for (physx::PxU32 j = 0; j < numPrismatic; ++j) {
+          updatePrismaticJointMultiplier(prismaticJoints[j], bodies, numBodies, mConfig);
+        }
+        for (physx::PxU32 j = 0; j < numD6; ++j) {
+          updateD6JointMultiplier(d6Joints[j], bodies, numBodies, mConfig);
+        }
+      }
     }
   }
 
-  for (physx::PxU32 i = 0; i < numBodies; ++i) {
-    if (bodies[i].invMass > 0.0f) {
-      bodies[i].linearVelocity = (bodies[i].position - bodies[i].prevPosition) * invDt;
-      physx::PxQuat deltaQ = bodies[i].rotation * bodies[i].prevRotation.getConjugate();
-      if (deltaQ.w < 0.0f) {
-        deltaQ = -deltaQ;
+  {
+    PX_PROFILE_ZONE("AVBD.updateVelocities", 0);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      if (bodies[i].invMass > 0.0f) {
+        bodies[i].linearVelocity = (bodies[i].position - bodies[i].prevPosition) * invDt;
+        physx::PxQuat deltaQ = bodies[i].rotation * bodies[i].prevRotation.getConjugate();
+        if (deltaQ.w < 0.0f) {
+          deltaQ = -deltaQ;
+        }
+        bodies[i].angularVelocity = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
+        bodies[i].angularVelocity *= mConfig.angularDamping;
       }
-      bodies[i].angularVelocity = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
-      bodies[i].angularVelocity *= mConfig.angularDamping;
     }
   }
 }
@@ -1618,6 +1711,363 @@ physx::PxReal AvbdSolver::performLineSearch(AvbdSolverBody &body, const AvbdVec6
   body.position = savedPosition;
   body.rotation = savedRotation;
   return alpha;
+}
+
+//=============================================================================
+// Optimized Constraint Mapping and Solving
+//=============================================================================
+
+void AvbdSolver::buildConstraintMapping(AvbdContactConstraint *contacts, 
+                                        physx::PxU32 numContacts,
+                                        physx::PxU32 numBodies) {
+  if (!mAllocator || numContacts == 0 || numBodies == 0) {
+    return;
+  }
+  
+  mContactMap.build(numBodies, contacts, numContacts, *mAllocator);
+}
+
+void AvbdSolver::solveBodyLocalConstraintsFast(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 bodyIndex,
+    AvbdContactConstraint *contacts) {
+  
+  AvbdSolverBody &body = bodies[bodyIndex];
+  
+  if (body.invMass <= 0.0f) {
+    return;
+  }
+  
+  // Get only the constraints affecting this body - O(1) lookup!
+  const physx::PxU32 *constraintIndices = nullptr;
+  physx::PxU32 numBodyConstraints = 0;
+  mContactMap.getBodyConstraints(bodyIndex, constraintIndices, numBodyConstraints);
+  
+  if (numBodyConstraints == 0 || constraintIndices == nullptr) {
+    return;
+  }
+  
+  // Accumulate position and rotation corrections
+  physx::PxVec3 totalDeltaPos(0.0f);
+  physx::PxVec3 totalDeltaTheta(0.0f);
+  physx::PxReal totalWeight = 0.0f;
+  
+  // Only iterate over constraints that affect this body
+  for (physx::PxU32 ci = 0; ci < numBodyConstraints; ++ci) {
+    const physx::PxU32 c = constraintIndices[ci];
+    AvbdContactConstraint &contact = contacts[c];
+    
+    const physx::PxU32 bodyAIdx = contact.header.bodyIndexA;
+    const physx::PxU32 bodyBIdx = contact.header.bodyIndexB;
+    
+    // Determine which body we are
+    bool isBodyA = (bodyAIdx == bodyIndex);
+    
+    // Get the other body
+    AvbdSolverBody *otherBody = nullptr;
+    if (isBodyA && bodyBIdx < numBodies) {
+      otherBody = &bodies[bodyBIdx];
+    } else if (!isBodyA && bodyAIdx < numBodies) {
+      otherBody = &bodies[bodyAIdx];
+    }
+    
+    // Compute world positions of contact points
+    physx::PxVec3 worldPosA, worldPosB;
+    physx::PxVec3 r;  // Contact arm for this body
+    
+    if (isBodyA) {
+      r = body.rotation.rotate(contact.contactPointA);
+      worldPosA = body.position + r;
+      if (otherBody) {
+        worldPosB = otherBody->position + otherBody->rotation.rotate(contact.contactPointB);
+      } else {
+        worldPosB = contact.contactPointB;
+      }
+    } else {
+      r = body.rotation.rotate(contact.contactPointB);
+      if (otherBody) {
+        worldPosA = otherBody->position + otherBody->rotation.rotate(contact.contactPointA);
+      } else {
+        worldPosA = contact.contactPointA;
+      }
+      worldPosB = body.position + r;
+    }
+    
+    // Compute separation (negative = penetration)
+    const physx::PxVec3 &normal = contact.contactNormal;
+    physx::PxReal separation = (worldPosA - worldPosB).dot(normal) + contact.penetrationDepth;
+    
+    // Only correct if penetrating
+    if (separation >= 0.0f) {
+      continue;
+    }
+    
+    // Compute generalized inverse mass for normal direction
+    physx::PxVec3 rCrossN = r.cross(normal);
+    physx::PxReal w = body.invMass + rCrossN.dot(body.invInertiaWorld * rCrossN);
+    
+    // Add other body's contribution if dynamic
+    physx::PxVec3 rOther(0.0f);
+    if (otherBody && otherBody->invMass > 0.0f) {
+      rOther = isBodyA ?
+          otherBody->rotation.rotate(contact.contactPointB) :
+          otherBody->rotation.rotate(contact.contactPointA);
+      physx::PxVec3 rOtherCrossN = rOther.cross(normal);
+      w += otherBody->invMass + rOtherCrossN.dot(otherBody->invInertiaWorld * rOtherCrossN);
+    }
+    
+    if (w <= 1e-6f) {
+      continue;
+    }
+    
+    // Compute normal correction magnitude
+    physx::PxReal normalCorrectionMag = -separation / w;
+    normalCorrectionMag *= mConfig.baumgarte;
+    
+    // Direction sign for this body
+    physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
+    
+    // Normal position and rotation corrections
+    physx::PxVec3 deltaPos = normal * (normalCorrectionMag * body.invMass * sign);
+    physx::PxVec3 deltaTheta = (body.invInertiaWorld * rCrossN) * (normalCorrectionMag * sign);
+    
+    // Weight by constraint stiffness (rho)
+    physx::PxReal weight = contact.header.rho;
+    totalDeltaPos += deltaPos * weight;
+    totalDeltaTheta += deltaTheta * weight;
+    totalWeight += weight;
+  }
+  
+  // Apply averaged corrections
+  if (totalWeight > 0.0f) {
+    physx::PxReal invWeight = 1.0f / totalWeight;
+    
+    // Apply position correction
+    body.position += totalDeltaPos * invWeight;
+    
+    // Apply rotation correction using exponential map
+    physx::PxVec3 avgDeltaTheta = totalDeltaTheta * invWeight;
+    physx::PxReal angle = avgDeltaTheta.magnitude();
+    if (angle > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+      angle = physx::PxMin(angle, 0.1f); // Clamp for stability
+      physx::PxVec3 axis = avgDeltaTheta.getNormalized();
+      physx::PxReal halfAngle = angle * 0.5f;
+      physx::PxQuat deltaQ(axis.x * physx::PxSin(halfAngle),
+                            axis.y * physx::PxSin(halfAngle),
+                            axis.z * physx::PxSin(halfAngle),
+                            physx::PxCos(halfAngle));
+      body.rotation = (deltaQ * body.rotation).getNormalized();
+    }
+  }
+}
+
+//=============================================================================
+// Optimized Constraint Mapping Functions
+//=============================================================================
+
+void AvbdSolver::buildAllConstraintMappings(
+    physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+    AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+    AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
+    AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
+    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6) {
+  
+  if (!mAllocator || numBodies == 0) return;
+  
+  // IMPORTANT: Release all old mappings first to avoid stale data
+  // This prevents accessing old indices when constraint counts change between frames
+  mContactMap.release(*mAllocator);
+  mSphericalMap.release(*mAllocator);
+  mFixedMap.release(*mAllocator);
+  mRevoluteMap.release(*mAllocator);
+  mPrismaticMap.release(*mAllocator);
+  mD6Map.release(*mAllocator);
+  
+  // Build contact mapping
+  if (numContacts > 0 && contacts) {
+    mContactMap.build(numBodies, contacts, numContacts, *mAllocator);
+  }
+  
+  // Build joint mappings
+  if (numSpherical > 0 && sphericalJoints) {
+    mSphericalMap.build(numBodies, sphericalJoints, numSpherical, *mAllocator);
+  }
+  if (numFixed > 0 && fixedJoints) {
+    mFixedMap.build(numBodies, fixedJoints, numFixed, *mAllocator);
+  }
+  if (numRevolute > 0 && revoluteJoints) {
+    mRevoluteMap.build(numBodies, revoluteJoints, numRevolute, *mAllocator);
+  }
+  if (numPrismatic > 0 && prismaticJoints) {
+    mPrismaticMap.build(numBodies, prismaticJoints, numPrismatic, *mAllocator);
+  }
+  if (numD6 > 0 && d6Joints) {
+    mD6Map.build(numBodies, d6Joints, numD6, *mAllocator);
+  }
+}
+
+void AvbdSolver::solveBodyAllConstraintsFast(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 bodyIndex,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+    AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+    AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
+    AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
+    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+    const AvbdBodyConstraintMap &contactMap,
+    const AvbdBodyConstraintMap &sphericalMap,
+    const AvbdBodyConstraintMap &fixedMap,
+    const AvbdBodyConstraintMap &revoluteMap,
+    const AvbdBodyConstraintMap &prismaticMap,
+    const AvbdBodyConstraintMap &d6Map,
+    physx::PxReal dt) {
+  
+  PX_UNUSED(dt);
+  
+  AvbdSolverBody &body = bodies[bodyIndex];
+  
+  if (body.invMass <= 0.0f) {
+    return;
+  }
+  
+  // Accumulate corrections from all constraint types
+  physx::PxVec3 totalDeltaPos(0.0f);
+  physx::PxVec3 totalDeltaTheta(0.0f);
+  physx::PxU32 numActiveConstraints = 0;
+  
+  // Process contact constraints - O(contacts connected to this body)
+  if (contacts && numContacts > 0) {
+    const physx::PxU32 *contactIndices = nullptr;
+    physx::PxU32 numBodyContacts = 0;
+    contactMap.getBodyConstraints(bodyIndex, contactIndices, numBodyContacts);
+    
+    for (physx::PxU32 i = 0; i < numBodyContacts; ++i) {
+      physx::PxU32 c = contactIndices[i];
+      // Bounds check to prevent out-of-range access
+      if (c >= numContacts) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeContactCorrection(contacts[c], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process spherical joint constraints
+  if (sphericalJoints && numSpherical > 0) {
+    const physx::PxU32 *sphericalIndices = nullptr;
+    physx::PxU32 numBodySpherical = 0;
+    sphericalMap.getBodyConstraints(bodyIndex, sphericalIndices, numBodySpherical);
+    
+    for (physx::PxU32 i = 0; i < numBodySpherical; ++i) {
+      physx::PxU32 j = sphericalIndices[i];
+      if (j >= numSpherical) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeSphericalJointCorrection(sphericalJoints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process fixed joint constraints
+  if (fixedJoints && numFixed > 0) {
+    const physx::PxU32 *fixedIndices = nullptr;
+    physx::PxU32 numBodyFixed = 0;
+    fixedMap.getBodyConstraints(bodyIndex, fixedIndices, numBodyFixed);
+    
+    for (physx::PxU32 i = 0; i < numBodyFixed; ++i) {
+      physx::PxU32 j = fixedIndices[i];
+      if (j >= numFixed) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeFixedJointCorrection(fixedJoints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process revolute joint constraints
+  if (revoluteJoints && numRevolute > 0) {
+    const physx::PxU32 *revoluteIndices = nullptr;
+    physx::PxU32 numBodyRevolute = 0;
+    revoluteMap.getBodyConstraints(bodyIndex, revoluteIndices, numBodyRevolute);
+    
+    for (physx::PxU32 i = 0; i < numBodyRevolute; ++i) {
+      physx::PxU32 j = revoluteIndices[i];
+      if (j >= numRevolute) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeRevoluteJointCorrection(revoluteJoints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process prismatic joint constraints
+  if (prismaticJoints && numPrismatic > 0) {
+    const physx::PxU32 *prismaticIndices = nullptr;
+    physx::PxU32 numBodyPrismatic = 0;
+    prismaticMap.getBodyConstraints(bodyIndex, prismaticIndices, numBodyPrismatic);
+    
+    for (physx::PxU32 i = 0; i < numBodyPrismatic; ++i) {
+      physx::PxU32 j = prismaticIndices[i];
+      if (j >= numPrismatic) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computePrismaticJointCorrection(prismaticJoints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process D6 joint constraints
+  if (d6Joints && numD6 > 0) {
+    const physx::PxU32 *d6Indices = nullptr;
+    physx::PxU32 numBodyD6 = 0;
+    d6Map.getBodyConstraints(bodyIndex, d6Indices, numBodyD6);
+    
+    for (physx::PxU32 i = 0; i < numBodyD6; ++i) {
+      physx::PxU32 j = d6Indices[i];
+      if (j >= numD6) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeD6JointCorrection(d6Joints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Apply averaged corrections
+  if (numActiveConstraints > 0) {
+    physx::PxReal invCount = 1.0f / static_cast<physx::PxReal>(numActiveConstraints);
+    
+    // Apply position correction with Baumgarte stabilization
+    body.position += totalDeltaPos * invCount * mConfig.baumgarte;
+    
+    // Apply rotation correction
+    physx::PxVec3 avgDeltaTheta = totalDeltaTheta * invCount * mConfig.baumgarte;
+    physx::PxReal angle = avgDeltaTheta.magnitude();
+    if (angle > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+      angle = physx::PxMin(angle, 0.1f);
+      physx::PxVec3 axis = avgDeltaTheta.getNormalized();
+      physx::PxReal halfAngle = angle * 0.5f;
+      physx::PxQuat deltaQ(axis.x * physx::PxSin(halfAngle),
+                            axis.y * physx::PxSin(halfAngle),
+                            axis.z * physx::PxSin(halfAngle),
+                            physx::PxCos(halfAngle));
+      body.rotation = (deltaQ * body.rotation).getNormalized();
+    }
+  }
 }
 
 } // namespace Dy
