@@ -11,7 +11,7 @@ if "%~1"=="" (
 set "PRESET=%1"
 
 :: Extract the Visual Studio version from the preset
-set "VS_PREFIX=%PRESET:~0,4%"  :: Get the first 4 characters (vc15, vc16, vc17)
+set "VS_PREFIX=%PRESET:~0,4%"  :: Get the first 4 characters (vc15, vc16, vc17, vc18)
 
 :: Determine the correct Visual Studio version based on the preset prefix
 if "%VS_PREFIX%" == "vc15" (
@@ -20,6 +20,8 @@ if "%VS_PREFIX%" == "vc15" (
     set "VS_VERSION=[16.0,17.0)"
 ) else if "%VS_PREFIX%" == "vc17" (
     set "VS_VERSION=[17.0,18.0)"
+) else if "%VS_PREFIX%" == "vc18" (
+    set "VS_VERSION=[18.0,19.0)"
 ) else (
     echo Unsupported Visual Studio version in preset: %PRESET%
     exit /B 1

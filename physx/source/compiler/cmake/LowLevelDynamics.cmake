@@ -74,6 +74,24 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAllocator.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyArticulationContactPrep.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyArticulationMimicJoint.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdArticulationAdapter.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdArticulationAdapter.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdBodyConversion.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdConstraint.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdContactPrep.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdContactPrep.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointSolver.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointSolver.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdParallel.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTasks.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTasks.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTypes.h
 	${LLDYNAMICS_BASE_DIR}/src/DyFeatherstoneArticulation.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyFeatherstoneForwardDynamic.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyFeatherstoneInverseDynamic.cpp

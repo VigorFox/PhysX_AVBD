@@ -46,6 +46,7 @@
 #include "ScSimulationController.h"
 #include "ScSqBoundsManager.h"
 #include "DyIslandManager.h"
+#include "DyAvbdDynamics.h"
 
 #if defined(__APPLE__) && defined(__POWERPC__)
 	#include <ppc_intrinsics.h>
@@ -888,6 +889,16 @@ Sc::Scene::Scene(const PxSceneDesc& desc, PxU64 contextID) :
 			(&mLLContext->getNpMemBlockPool(), mLLContext->getScratchAllocator(),
 				mLLContext->getTaskPool(), mLLContext->getSimStats(), &mLLContext->getTaskManager(), allocatorCallback, &getMaterialManager(),
 				*mSimpleIslandManager, contextID, mEnableStabilization, useEnhancedDeterminism, desc.flags & PxSceneFlag::eSOLVE_ARTICULATION_CONTACT_LAST, desc.maxBiasCoefficient,
+				desc.flags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION, desc.getTolerancesScale().length,
+				desc.flags & PxSceneFlag::eENABLE_SOLVER_RESIDUAL_REPORTING);
+		}
+		else if (desc.solverType == PxSolverType::eAVBD)
+		{
+			mDynamicsContext = createAVBDDynamicsContext
+			(&mLLContext->getNpMemBlockPool(), mLLContext->getScratchAllocator(),
+				mLLContext->getTaskPool(), mLLContext->getSimStats(), &mLLContext->getTaskManager(), allocatorCallback, &getMaterialManager(),
+				*mSimpleIslandManager, contextID, mEnableStabilization, useEnhancedDeterminism, desc.flags & PxSceneFlag::eSOLVE_ARTICULATION_CONTACT_LAST,
+				desc.maxBiasCoefficient,
 				desc.flags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION, desc.getTolerancesScale().length,
 				desc.flags & PxSceneFlag::eENABLE_SOLVER_RESIDUAL_REPORTING);
 		}

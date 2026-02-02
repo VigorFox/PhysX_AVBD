@@ -48,6 +48,12 @@ for /f "usebackq tokens=*" %%i in (`"%PM_vswhere_PATH%\VsWhere.exe  -version [17
   set "VS170COMNTOOLS=%%i\Common7\Tools\"
 )
 
+for /f "usebackq tokens=*" %%i in (`"%PM_vswhere_PATH%\VsWhere.exe  -version [18.0,19.0) -latest -property installationPath"`) do (
+  set "Install2026Dir=%%i"
+  set "VS180PATH=%%i"
+  set "VS180COMNTOOLS=%%i\Common7\Tools\"
+)
+
 if exist "%Install2017Dir%\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt" (
   pushd "%Install2017Dir%\VC\Auxiliary\Build\"
   set /p Version=<Microsoft.VCToolsVersion.default.txt
@@ -79,6 +85,18 @@ if exist "%Install2022Dir%\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.t
 	if not "%%x"=="" (
 	  rem Example hardcodes x64 as the host and target architecture, but you could parse it from arguments
 	  set "VS170CLPATH=%Install2022Dir%\VC\Tools\MSVC\%%x\bin\HostX64\x64\cl.exe"
+	)
+  )
+  popd
+)
+
+if exist "%Install2026Dir%\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt" (
+  pushd "%Install2026Dir%\VC\Auxiliary\Build\"
+  set /p Version=<Microsoft.VCToolsVersion.default.txt
+  for /f "delims=" %%x in (Microsoft.VCToolsVersion.default.txt) do (
+	if not "%%x"=="" (
+	  rem Example hardcodes x64 as the host and target architecture, but you could parse it from arguments
+	  set "VS180CLPATH=%Install2026Dir%\VC\Tools\MSVC\%%x\bin\HostX64\x64\cl.exe"
 	)
   )
   popd

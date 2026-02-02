@@ -233,6 +233,7 @@ void initPhysics()
 	sceneDesc.gravity = PxVec3(0, -9.81f, 0);
 	sceneDesc.cpuDispatcher = gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
+	sceneDesc.solverType = PxSolverType::eAVBD;
 	gScene = gPhysics->createScene(sceneDesc);
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();

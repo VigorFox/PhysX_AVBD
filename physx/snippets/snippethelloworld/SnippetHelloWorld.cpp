@@ -93,6 +93,7 @@ void initPhysics(bool interactive)
 	gDispatcher = PxDefaultCpuDispatcherCreate(2);
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
+	sceneDesc.solverType = PxSolverType::eAVBD;
 	gScene = gPhysics->createScene(sceneDesc);
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();

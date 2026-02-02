@@ -81,13 +81,16 @@ struct PX_DEPRECATED PxFrictionType
 #PxSolverType::ePGS selects the iterative sequential impulse solver. This is the same kind of solver used in PhysX 3.4 and earlier releases.
 
 #PxSolverType::eTGS selects a non linear iterative solver. This kind of solver can lead to improved convergence and handle large mass ratios, long chains and jointed systems better. It is slightly more expensive than the default solver and can introduce more energy to correct joint and contact errors.
+
+#PxSolverType::eAVBD selects the Augmented Variable Block Descent solver. This is an experimental position-based solver with different convergence characteristics and constraints handling compared to PGS/TGS.
 */
 struct PxSolverType
 {
 	enum Enum
 	{
 		ePGS,	//!< Projected Gauss-Seidel iterative solver
-		eTGS	//!< Temporal Gauss-Seidel solver
+		eTGS,	//!< Temporal Gauss-Seidel solver
+		eAVBD	//!< Augmented Variable Block Descent solver (experimental)
 	};
 };
 
@@ -1127,6 +1130,9 @@ PX_INLINE bool PxSceneDesc::isValid() const
 		return false;
 
 	if(solverType == PxSolverType::ePGS && (flags & PxSceneFlag::eENABLE_EXTERNAL_FORCES_EVERY_ITERATION_TGS))
+		return false;
+
+	if(solverType == PxSolverType::eAVBD && (flags & PxSceneFlag::eENABLE_GPU_DYNAMICS))
 		return false;
 
 #if PX_SUPPORT_GPU_PHYSX

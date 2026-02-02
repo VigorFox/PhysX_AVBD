@@ -193,6 +193,7 @@ TARGET_INCLUDE_DIRECTORIES(SimulationController
 
 	PRIVATE ${PHYSX_SOURCE_DIR}/lowleveldynamics/include
 	PRIVATE ${PHYSX_SOURCE_DIR}/lowleveldynamics/shared
+	PRIVATE ${PHYSX_SOURCE_DIR}/lowleveldynamics/src
 
 	PRIVATE ${PHYSX_SOURCE_DIR}/lowlevelaabb/include
 	
