@@ -1,60 +1,88 @@
-# NVIDIA PhysX
+# NVIDIA PhysX + AVBD Solver
 
-Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+> 🔬 **Research Fork**: Experimental AVBD (Augmented Variable Block Descent) constraint solver integrated into NVIDIA PhysX SDK.
 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
- * Redistributions of source code must retain the above copyright
-   notice, this list of conditions and the following disclaimer.
- * Redistributions in binary form must reproduce the above copyright
-   notice, this list of conditions and the following disclaimer in the
-   documentation and/or other materials provided with the distribution.
- * Neither the name of NVIDIA CORPORATION nor the names of its
-   contributors may be used to endorse or promote products derived
-   from this software without specific prior written permission.
+Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause License.
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
-OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+## ⚠️ Project Status
 
-## Introduction
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Rigid Body Solver | ✅ Working | Contacts + 5 joint types |
+| O(M) Constraint Lookup | ✅ Optimized | Eliminates O(N²) complexity |
+| Multi-threaded Islands | ✅ Thread-safe | Per-island constraint mappings |
+| Articulation | ❌ Not Available | Currently unsupported |
+| Sleep / Wake | ❌ Not Available | Not implemented |
+| Friction Model | ⚠️ Basic | Coulomb approximation |
+| Joint Limits | ⚠️ Partial | Basic Revolute/Prismatic limits |
 
-This repository is a research-oriented fork of NVIDIA PhysX focused on integrating an experimental AVBD (Augmented Variable Block Descent) solver into the lowleveldynamics pipeline.
+**For research and evaluation only. Not production-ready.**
 
-**Current status (important):**
-- The AVBD Articulation adapter is a **work in progress** and **not production-ready**.
-- Joint type coverage, drive/limit fidelity, and inverse dynamics integration are incomplete.
-- Use this fork for experimentation and evaluation only.
+## AVBD Solver Overview
 
-This repo still contains the PhysX, Flow and Blast SDK sources and Omniverse PhysX extensions used in NVIDIA Omniverse.
+AVBD is a position-based constraint solver using:
+- **Block Coordinate Descent** - Per-body 6x6 local system solve
+- **Augmented Lagrangian** - Multiplier updates for constraint satisfaction
+- **Island-level Parallelism** - Independent islands solve concurrently
 
-## Documentation
+### Comparison with TGS/PGS
 
-The user guide and API documentation are available on [GitHub Pages](https://nvidia-omniverse.github.io/PhysX). Please create an [Issue](https://github.com/NVIDIA-Omniverse/PhysX/issues/) if you find a documentation issue.
+| Property | PGS | TGS | AVBD |
+|----------|-----|-----|------|
+| Solve Level | Velocity | Velocity | **Position** |
+| Convergence | Linear | Sublinear | Quadratic |
+| Stack Stability | Fair | Good | **Excellent** |
+| Cost per Iteration | Low | Medium | Medium-High |
 
-## Licenses
+## Quick Start
 
-Please see license files in the root folder and in the respective subfolders.
+### Build
 
-## Instructions
+```bash
+cd physx
+./generate_projects.bat  # Windows
+./generate_projects.sh   # Linux
+```
 
-Please see instructions specific to each of the libraries in the respective subfolder.
+### Enable AVBD
 
-## Community-Maintained Build Configuration Fork
+```cpp
+PxSceneDesc sceneDesc(physics->getTolerancesScale());
+sceneDesc.solverType = PxSolverType::eAVBD;
+```
 
-Please see [the O3DE Fork](https://github.com/o3de/PhysX) for community-maintained additional build configurations.
+## Source Structure
 
-## Support
+```
+physx/source/lowleveldynamics/src/
+├── DyAvbdSolver.h/cpp       # Core solver
+├── DyAvbdDynamics.h/cpp     # PhysX integration
+├── DyAvbdTasks.h/cpp        # Multi-threading
+├── DyAvbdTypes.h            # Config & data structures
+├── DyAvbdConstraint.h       # Constraint definitions
+├── DyAvbdJointSolver.h/cpp  # Joint solving
+└── DyAvbdSolverBody.h       # Body state
+```
 
-* Please use GitHub [Discussions](https://github.com/NVIDIA-Omniverse/PhysX/discussions/) for questions and comments.
-* GitHub [Issues](https://github.com/NVIDIA-Omniverse/PhysX/issues) should only be used for bug reports or documentation issues.
-* You can also ask questions in the NVIDIA Omniverse #physics [Discord Channel](https://discord.com/invite/XWQNJDNuaC).
+## Profiling
+
+PVD Profile Zones available:
+- `AVBD.update` - Total update time
+- `AVBD.solveWithJoints` - Main solver loop
+- `AVBD.blockDescentWithJoints` - Constraint iterations
+- `AVBD.updateLambda` - Multiplier updates
+
+## Known Limitations
+
+1. **No Articulation support** - Articulated bodies not implemented
+2. **No Sleep/Wake** - Bodies remain active
+3. **CPU only** - No GPU acceleration
+
+## Original PhysX Documentation
+
+- [PhysX User Guide](https://nvidia-omniverse.github.io/PhysX/physx/index.html)
+- [API Documentation](https://nvidia-omniverse.github.io/PhysX)
+
+## License
+
+NVIDIA PhysX BSD-3-Clause. See [LICENSE.md](LICENSE.md).
