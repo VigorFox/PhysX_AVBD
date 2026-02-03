@@ -1073,39 +1073,81 @@ bool AvbdSolver::computeSphericalJointCorrection(
   physx::PxVec3 error = worldAnchorA - worldAnchorB;
   physx::PxReal errorMag = error.magnitude();
   
-  if (errorMag < AvbdConstants::AVBD_NUMERICAL_EPSILON) {
-    return false;
+  deltaPos = physx::PxVec3(0.0f);
+  deltaTheta = physx::PxVec3(0.0f);
+  bool hasCorrection = false;
+  
+  if (errorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+    physx::PxVec3 direction = error / errorMag;
+    
+    // Compute generalized inverse mass
+    physx::PxVec3 r = isBodyA ?
+        body.rotation.rotate(joint.anchorA) :
+        body.rotation.rotate(joint.anchorB);
+    physx::PxVec3 rCrossD = r.cross(direction);
+    physx::PxReal w = body.invMass + rCrossD.dot(body.invInertiaWorld * rCrossD);
+    
+    if (otherBody && otherBody->invMass > 0.0f) {
+      physx::PxVec3 rOther = isBodyA ?
+          otherBody->rotation.rotate(joint.anchorB) :
+          otherBody->rotation.rotate(joint.anchorA);
+      physx::PxVec3 rOtherCrossD = rOther.cross(direction);
+      w += otherBody->invMass + rOtherCrossD.dot(otherBody->invInertiaWorld * rOtherCrossD);
+    }
+    
+    if (w > 1e-6f) {
+      // Compute correction
+      physx::PxReal correctionMag = -errorMag / w;
+      physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
+      
+      deltaPos = direction * (correctionMag * body.invMass * sign);
+      deltaTheta = (body.invInertiaWorld * rCrossD) * (correctionMag * sign);
+      hasCorrection = true;
+    }
   }
   
-  physx::PxVec3 direction = error / errorMag;
-  
-  // Compute generalized inverse mass
-  physx::PxVec3 r = isBodyA ?
-      body.rotation.rotate(joint.anchorA) :
-      body.rotation.rotate(joint.anchorB);
-  physx::PxVec3 rCrossD = r.cross(direction);
-  physx::PxReal w = body.invMass + rCrossD.dot(body.invInertiaWorld * rCrossD);
-  
-  if (otherBody && otherBody->invMass > 0.0f) {
-    physx::PxVec3 rOther = isBodyA ?
-        otherBody->rotation.rotate(joint.anchorB) :
-        otherBody->rotation.rotate(joint.anchorA);
-    physx::PxVec3 rOtherCrossD = rOther.cross(direction);
-    w += otherBody->invMass + rOtherCrossD.dot(otherBody->invInertiaWorld * rOtherCrossD);
+  // Process cone limit if enabled
+  if (joint.hasConeLimit && joint.coneAngleLimit > 0.0f) {
+    physx::PxQuat rotA = isBodyA ? body.rotation : (otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity));
+    physx::PxQuat rotB = isBodyA ? (otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity)) : body.rotation;
+    
+    // Compute cone violation
+    physx::PxVec3 worldAxisA = rotA.rotate(joint.coneAxisA);
+    physx::PxVec3 worldAxisB = rotB.rotate(joint.coneAxisA);
+    
+    physx::PxReal cosAngle = worldAxisA.dot(worldAxisB);
+    cosAngle = physx::PxClamp(cosAngle, -1.0f, 1.0f);
+    physx::PxReal angle = physx::PxAcos(cosAngle);
+    
+    if (angle > joint.coneAngleLimit) {
+      // Cone limit violated
+      physx::PxReal violation = angle - joint.coneAngleLimit;
+      
+      // Correction axis is perpendicular to both
+      physx::PxVec3 corrAxis = worldAxisA.cross(worldAxisB);
+      physx::PxReal corrAxisMag = corrAxis.magnitude();
+      
+      if (corrAxisMag > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+        corrAxis /= corrAxisMag;
+        
+        // Compute angular correction
+        physx::PxReal angularW = 0.0f;
+        angularW += (body.invInertiaWorld * corrAxis).dot(corrAxis);
+        if (otherBody && otherBody->invMass > 0.0f) {
+          angularW += (otherBody->invInertiaWorld * corrAxis).dot(corrAxis);
+        }
+        
+        if (angularW > 1e-6f) {
+          physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
+          physx::PxVec3 angCorrection = corrAxis * (violation * 0.5f / angularW * sign);
+          deltaTheta += body.invInertiaWorld * angCorrection;
+          hasCorrection = true;
+        }
+      }
+    }
   }
   
-  if (w <= 1e-6f) {
-    return false;
-  }
-  
-  // Compute correction
-  physx::PxReal correctionMag = -errorMag / w;
-  physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
-  
-  deltaPos = direction * (correctionMag * body.invMass * sign);
-  deltaTheta = (body.invInertiaWorld * rCrossD) * (correctionMag * sign);
-  
-  return true;
+  return hasCorrection;
 }
 
 /**
@@ -1180,7 +1222,56 @@ bool AvbdSolver::computeFixedJointCorrection(
     }
   }
   
-  return (posErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON);
+  // Rotation constraint for fixed joint - lock all 3 rotation axes
+  physx::PxQuat rotA, rotB;
+  if (isBodyA) {
+    rotA = body.rotation;
+    rotB = otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity);
+  } else {
+    rotA = otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity);
+    rotB = body.rotation;
+  }
+  
+  // Target: rotB = rotA * relativeRotation
+  // Current relative rotation vs target
+  physx::PxQuat targetRotB = rotA * joint.relativeRotation;
+  physx::PxQuat errorQ = targetRotB.getConjugate() * rotB;
+  if (errorQ.w < 0.0f) {
+    errorQ = -errorQ;  // Shortest path
+  }
+  
+  // Convert to axis-angle in world space (small angle approximation)
+  // errorQ represents the rotation needed to align rotB with target
+  physx::PxVec3 rotErrorLocal(errorQ.x * 2.0f, errorQ.y * 2.0f, errorQ.z * 2.0f);
+  // Transform to world space
+  physx::PxVec3 rotError = rotB.rotate(rotErrorLocal);
+  physx::PxReal rotErrorMag = rotError.magnitude();
+  
+  if (rotErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+    // Compute effective mass for rotation
+    physx::PxVec3 axis = rotError / rotErrorMag;
+    physx::PxReal w = axis.dot(body.invInertiaWorld * axis);
+    
+    if (otherBody && otherBody->invMass > 0.0f) {
+      w += axis.dot(otherBody->invInertiaWorld * axis);
+    }
+    
+    if (w > 1e-6f) {
+      // Apply damped correction to avoid oscillation
+      physx::PxReal compliance = 0.0001f;  // Small compliance for stability
+      physx::PxReal correctionMag = rotErrorMag / (w + compliance);
+      correctionMag = physx::PxMin(correctionMag, rotErrorMag * 0.8f);  // Limit correction
+      
+      // Body B should rotate towards target (negative correction)
+      // Body A should rotate away (positive correction)
+      physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
+      physx::PxVec3 deltaOmega = axis * (correctionMag * sign);
+      deltaTheta += body.invInertiaWorld * deltaOmega / w;
+    }
+  }
+  
+  return (posErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON || 
+          rotErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON);
 }
 
 /**
@@ -1384,6 +1475,8 @@ bool AvbdSolver::computeD6JointCorrection(
   deltaPos = physx::PxVec3(0.0f);
   deltaTheta = physx::PxVec3(0.0f);
   
+  bool hasCorrection = false;
+  
   physx::PxVec3 worldAnchorA, worldAnchorB;
   if (isBodyA) {
     worldAnchorA = body.position + body.rotation.rotate(joint.anchorA);
@@ -1399,6 +1492,7 @@ bool AvbdSolver::computeD6JointCorrection(
   
   physx::PxVec3 posError = worldAnchorA - worldAnchorB;
   
+  // Position constraint (linear locked)
   if (joint.linearMotion == 0) {
     physx::PxReal posErrorMag = posError.magnitude();
     if (posErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
@@ -1425,11 +1519,11 @@ bool AvbdSolver::computeD6JointCorrection(
         deltaPos = direction * (correctionMag * body.invMass * sign);
         deltaTheta = (body.invInertiaWorld * rCrossD) * (correctionMag * sign);
       }
-      return true;
+      hasCorrection = true;
     }
   }
   
-  return false;
+  return hasCorrection;
 }
 
 //=============================================================================
@@ -1570,6 +1664,28 @@ void AvbdSolver::solveWithJoints(
         }
         bodies[i].angularVelocity = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
         bodies[i].angularVelocity *= mConfig.angularDamping;
+      }
+    }
+    
+    // Apply D6 joint angular damping to connected bodies
+    for (physx::PxU32 j = 0; j < numD6; ++j) {
+      const AvbdD6JointConstraint &joint = d6Joints[j];
+      physx::PxReal maxDamping = physx::PxMax(joint.angularDamping.x, 
+                                  physx::PxMax(joint.angularDamping.y, joint.angularDamping.z));
+      if (maxDamping > 0.0f && joint.driveFlags != 0) {
+        // Compute damping factor (normalize to reasonable range)
+        // For damping=1000, we want strong damping ~0.9
+        physx::PxReal dampingFactor = 1.0f / (1.0f + maxDamping * dt * 0.1f);
+        dampingFactor = physx::PxMax(dampingFactor, 0.1f);  // Minimum 10% velocity retained
+        
+        // Apply damping to body A
+        if (joint.header.bodyIndexA < numBodies && bodies[joint.header.bodyIndexA].invMass > 0.0f) {
+          bodies[joint.header.bodyIndexA].angularVelocity *= dampingFactor;
+        }
+        // Apply damping to body B
+        if (joint.header.bodyIndexB < numBodies && bodies[joint.header.bodyIndexB].invMass > 0.0f) {
+          bodies[joint.header.bodyIndexB].angularVelocity *= dampingFactor;
+        }
       }
     }
   }

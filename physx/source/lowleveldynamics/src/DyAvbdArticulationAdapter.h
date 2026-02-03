@@ -41,6 +41,7 @@ class FeatherstoneArticulation;
 class ArticulationData;
 struct ArticulationLink;
 class ArticulationJointCoreData;
+struct ArticulationJointCore;
 } // namespace Dy
 
 namespace Dy {
@@ -243,8 +244,10 @@ private:
 
   /**
    * @brief Convert joint type to AVBD constraint type
+   * @param jointCore The ArticulationJointCore containing the joint type
+   * @return 0=Spherical, 1=Fixed, 2=Revolute, 3=Prismatic
    */
-  PxU32 getJointType(const ArticulationJointCoreData &jointData);
+  static PxU32 getJointType(const ArticulationJointCore &jointCore);
 
   /**
    * @brief Extract joint parameters from articulation

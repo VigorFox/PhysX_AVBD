@@ -79,6 +79,7 @@ static void createScene()
 	gDispatcher = PxDefaultCpuDispatcherCreate(2);
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
+	sceneDesc.solverType = PxSolverType::eAVBD;
 #if PX_SUPPORT_GPU_PHYSX
 	if(gUseGPU)
 	{

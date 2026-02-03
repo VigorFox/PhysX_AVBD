@@ -309,9 +309,21 @@ void AvbdArticulationAdapter::buildAvbdJoints(
 }
 
 PxU32 AvbdArticulationAdapter::getJointType(
-    const ArticulationJointCoreData &jointData) {
-  PX_UNUSED(jointData);
-  return 0;
+    const ArticulationJointCore &jointCore) {
+  // Map PhysX articulation joint type to AVBD constraint type
+  switch (static_cast<PxArticulationJointType::Enum>(jointCore.jointType)) {
+  case PxArticulationJointType::eSPHERICAL:
+    return 0; // Spherical (ball-and-socket)
+  case PxArticulationJointType::eFIX:
+    return 1; // Fixed (welded)
+  case PxArticulationJointType::eREVOLUTE:
+  case PxArticulationJointType::eREVOLUTE_UNWRAPPED:
+    return 2; // Revolute (hinge)
+  case PxArticulationJointType::ePRISMATIC:
+    return 3; // Prismatic (slider)
+  default:
+    return 0; // Default to spherical
+  }
 }
 
 static PX_FORCE_INLINE PxArticulationAxis::Enum getFirstUnlockedAxis(
