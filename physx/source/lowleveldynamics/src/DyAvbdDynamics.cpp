@@ -1147,18 +1147,27 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
       PxU32 localBody0 = PX_MAX_U32;
       PxU32 localBody1 = PX_MAX_U32;
+      
+      // Check if bodies are static using inverseMass (more reliable than nodeIndex.isStaticBody())
+      // invMass == 0 means infinite mass (static body)
+      bool body0IsStatic = constraint->bodyCore0 && constraint->bodyCore0->inverseMass == 0.0f;
+      bool body1IsStatic = constraint->bodyCore1 && constraint->bodyCore1->inverseMass == 0.0f;
 
-      if (!nodeIndex0.isStaticBody()) {
-        const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex0);
-        if (bodyRemapTable[activeIdx] != PX_MAX_U32) {
-          localBody0 = bodyRemapTable[activeIdx] - bodyOffset;
+      if (!body0IsStatic) {
+        if (!nodeIndex0.isStaticBody()) {
+          const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex0);
+          if (bodyRemapTable[activeIdx] != PX_MAX_U32) {
+            localBody0 = bodyRemapTable[activeIdx] - bodyOffset;
+          }
         }
       }
 
-      if (!nodeIndex1.isStaticBody()) {
-        const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex1);
-        if (bodyRemapTable[activeIdx] != PX_MAX_U32) {
-          localBody1 = bodyRemapTable[activeIdx] - bodyOffset;
+      if (!body1IsStatic) {
+        if (!nodeIndex1.isStaticBody()) {
+          const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex1);
+          if (bodyRemapTable[activeIdx] != PX_MAX_U32) {
+            localBody1 = bodyRemapTable[activeIdx] - bodyOffset;
+          }
         }
       }
 
@@ -1185,8 +1194,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
         PxQuat frameA = physXData->c2b[0].q;
         PxQuat frameB = physXData->c2b[1].q;
         
-        bool body0IsStatic = (localBody0 == PX_MAX_U32 || localBody0 >= islandBodyCount);
-        bool body1IsStatic = (localBody1 == PX_MAX_U32 || localBody1 >= islandBodyCount);
+        // body0IsStatic and body1IsStatic already computed above using inverseMass
         
         if (body0IsStatic) {
           if (constraint->bodyCore0) {
@@ -1281,13 +1289,30 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 c.linearDamping = PxVec3(d6Data->drive[0].damping,
                                          d6Data->drive[1].damping,
                                          d6Data->drive[2].damping);
-                c.angularStiffness = PxVec3(d6Data->drive[3].stiffness,
-                                            d6Data->drive[4].stiffness,
-                                            d6Data->drive[5].stiffness);
-                c.angularDamping = PxVec3(d6Data->drive[3].damping,
-                                          d6Data->drive[4].damping,
-                                          d6Data->drive[5].damping);
+                // Angular drive data indices:
+                // drive[3] = eSWING (deprecated), also used for eSWING1
+                // drive[4] = eTWIST
+                // drive[5] = eSLERP, also used for eSWING2
+                // For AVBD: angularDamping.x = TWIST, .y = SWING1, .z = SWING2/SLERP
+                c.angularStiffness = PxVec3(d6Data->drive[4].stiffness,  // TWIST
+                                            d6Data->drive[3].stiffness,  // SWING1 (uses SWING slot)
+                                            d6Data->drive[5].stiffness); // SWING2/SLERP
+                c.angularDamping = PxVec3(d6Data->drive[4].damping,   // TWIST
+                                          d6Data->drive[3].damping,   // SWING1 (uses SWING slot)
+                                          d6Data->drive[5].damping);  // SWING2/SLERP
                 c.driveFlags = d6Data->driving;
+                
+                // Set target drive velocities
+                c.driveLinearVelocity = d6Data->driveLinearVelocity;
+                c.driveAngularVelocity = d6Data->driveAngularVelocity;
+                
+                // Set max drive forces from drive[i].forceLimit
+                c.driveLinearForce = PxVec3(d6Data->drive[0].forceLimit,
+                                            d6Data->drive[1].forceLimit,
+                                            d6Data->drive[2].forceLimit);
+                c.driveAngularForce = PxVec3(d6Data->drive[4].forceLimit,  // TWIST
+                                             d6Data->drive[3].forceLimit,  // SWING1
+                                             d6Data->drive[5].forceLimit); // SWING2/SLERP
               }
               
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;

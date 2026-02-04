@@ -72,6 +72,10 @@ PX_FORCE_INLINE void writeBackAvbdSolverBody(const AvbdSolverBody &body,
                                              PxsBodyCore &core) {
   // Write position and orientation
   core.body2World.p = body.position;
+  
+  // Quaternion should already be normalized from solver
+  PX_ASSERT(PxAbs(body.rotation.magnitudeSquared() - 1.0f) < 0.01f && 
+            "Quaternion not normalized in writeBackAvbdSolverBody");
   core.body2World.q = body.rotation;
 
   // Write velocities

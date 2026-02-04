@@ -1458,6 +1458,8 @@ bool AvbdSolver::computeD6JointCorrection(
   const physx::PxU32 bodyAIdx = joint.header.bodyIndexA;
   const physx::PxU32 bodyBIdx = joint.header.bodyIndexB;
   
+  bool bodyAIsStatic = (bodyAIdx >= numBodies);
+  
   if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex) {
     return false;
   }
@@ -1477,26 +1479,63 @@ bool AvbdSolver::computeD6JointCorrection(
   
   bool hasCorrection = false;
   
+  // Check if bodies are static (index >= numBodies means static body, frame already in world space)
+  // Note: bodyAIsStatic already defined above for debug purposes
+  bool bodyBIsStatic = (bodyBIdx >= numBodies);
+  
+  // Get rotations for frame transforms
+  physx::PxQuat rotA = bodyAIsStatic ? physx::PxQuat(physx::PxIdentity) : 
+                       (isBodyA ? body.rotation : (otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity)));
+  physx::PxQuat rotB = bodyBIsStatic ? physx::PxQuat(physx::PxIdentity) :
+                       (isBodyA ? (otherBody ? otherBody->rotation : physx::PxQuat(physx::PxIdentity)) : body.rotation);
+  
   physx::PxVec3 worldAnchorA, worldAnchorB;
   if (isBodyA) {
     worldAnchorA = body.position + body.rotation.rotate(joint.anchorA);
     worldAnchorB = otherBody ?
         otherBody->position + otherBody->rotation.rotate(joint.anchorB) :
-        joint.anchorB;
+        joint.anchorB;  // anchorB already in world space for static
   } else {
     worldAnchorA = otherBody ?
         otherBody->position + otherBody->rotation.rotate(joint.anchorA) :
-        joint.anchorA;
+        joint.anchorA;  // anchorA already in world space for static
     worldAnchorB = body.position + body.rotation.rotate(joint.anchorB);
   }
   
   physx::PxVec3 posError = worldAnchorA - worldAnchorB;
   
-  // Position constraint (linear locked)
+  // Position constraint (linear locked) - but skip axes with velocity drive
+  // When velocity drive is active, we want the body to move, not be constrained
   if (joint.linearMotion == 0) {
-    physx::PxReal posErrorMag = posError.magnitude();
+    // Determine which axes have velocity drive (we'll skip position constraint on those)
+    physx::PxU32 linearDriveAxes = joint.driveFlags & 0x7;  // bits 0,1,2 for X,Y,Z
+    
+    // If we have velocity drive, project out the position error along driven axes
+    physx::PxVec3 constrainedPosError = posError;
+    
+    if (linearDriveAxes != 0 && !isBodyA) {
+      // Get joint frame in world space
+      physx::PxQuat jointFrameA = bodyAIsStatic ? joint.localFrameA : (rotA * joint.localFrameA);
+      physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+      if (qMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(qMag2)) {
+        jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
+        
+        // Remove position error component along driven axes
+        for (int axis = 0; axis < 3; ++axis) {
+          if ((linearDriveAxes & (1 << axis)) != 0) {
+            physx::PxVec3 localAxis(0.0f);
+            (&localAxis.x)[axis] = 1.0f;
+            physx::PxVec3 worldAxis = jointFrameA.rotate(localAxis);
+            // Remove the component of position error along this driven axis
+            constrainedPosError -= worldAxis * constrainedPosError.dot(worldAxis);
+          }
+        }
+      }
+    }
+    
+    physx::PxReal posErrorMag = constrainedPosError.magnitude();
     if (posErrorMag > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
-      physx::PxVec3 direction = posError / posErrorMag;
+      physx::PxVec3 direction = constrainedPosError / posErrorMag;
       
       physx::PxVec3 r = isBodyA ?
           body.rotation.rotate(joint.anchorA) :
@@ -1520,6 +1559,180 @@ bool AvbdSolver::computeD6JointCorrection(
         deltaTheta = (body.invInertiaWorld * rCrossD) * (correctionMag * sign);
       }
       hasCorrection = true;
+    }
+  }
+  
+  // Linear velocity drive
+  // PxD6Drive: eX=0, eY=1, eZ=2 -> bits 0,1,2
+  // Only apply delta when processing body B (the driven body)
+  if ((joint.driveFlags & 0x7) != 0 && body.invMass > 0.0f) {
+    // Drive target velocity is in joint frame A's space
+    // If body A is static, use localFrameA directly; otherwise transform it
+    physx::PxQuat jointFrameA = bodyAIsStatic ? joint.localFrameA : (rotA * joint.localFrameA);
+    
+    // Validate and normalize quaternion
+    physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+    if (qMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(qMag2)) {
+      jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
+      
+      for (int axis = 0; axis < 3; ++axis) {
+        if ((joint.driveFlags & (1 << axis)) == 0) continue;
+        
+        physx::PxReal targetVel = (&joint.driveLinearVelocity.x)[axis];
+        physx::PxReal damping = (&joint.linearDamping.x)[axis];
+        
+        // Skip if no damping or invalid values
+        if (damping <= 0.0f || !PxIsFinite(targetVel) || !PxIsFinite(damping)) continue;
+        
+        // Get axis direction in world space
+        physx::PxVec3 localAxis(0.0f);
+        (&localAxis.x)[axis] = 1.0f;
+        physx::PxVec3 worldAxis = jointFrameA.rotate(localAxis);
+        
+        // Validate world axis
+        physx::PxReal axisMag2 = worldAxis.magnitudeSquared();
+        if (axisMag2 < 0.9f || axisMag2 > 1.1f || !PxIsFinite(axisMag2)) continue;
+        
+        // Current relative velocity along this axis
+        // Body B should move in +axis direction for positive target velocity
+        physx::PxVec3 velA = otherBody ? otherBody->linearVelocity : physx::PxVec3(0.0f);
+        physx::PxVec3 velB = body.linearVelocity;
+        physx::PxReal relVel = (velB - velA).dot(worldAxis);
+        
+        if (!PxIsFinite(relVel)) continue;
+        
+        // Velocity error: positive error means we need to speed up in target direction
+        physx::PxReal velError = targetVel - relVel;
+        
+        if (physx::PxAbs(velError) > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+          // Position-based velocity drive: deltaX = targetVel * dt
+          // Scale by damping factor and dt
+          physx::PxReal dt = 1.0f / 60.0f;  // Approximate timestep
+          // Normalize damping: 1000 -> factor for reasonable speed
+          physx::PxReal dampingFactor = physx::PxMin(damping / 30000.0f, 0.05f);
+          
+          // Direct position change based on target velocity
+          // Positive targetVel -> body B moves in +worldAxis direction
+          physx::PxVec3 posDelta = worldAxis * (targetVel * dt * dampingFactor);
+          
+          // Only apply to body B, not body A
+          // When processing body A (isBodyA=true), skip applying the drive
+          if (!isBodyA) {
+            // Validate correction before applying
+            if (PxIsFinite(posDelta.x) && PxIsFinite(posDelta.y) && PxIsFinite(posDelta.z)) {
+              // Clamp max correction per frame
+              physx::PxReal maxCorrection = 0.005f;
+              posDelta.x = physx::PxClamp(posDelta.x, -maxCorrection, maxCorrection);
+              posDelta.y = physx::PxClamp(posDelta.y, -maxCorrection, maxCorrection);
+              posDelta.z = physx::PxClamp(posDelta.z, -maxCorrection, maxCorrection);
+              deltaPos += posDelta;
+              hasCorrection = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Angular velocity drive
+  // PxD6Drive: eTWIST=4 (bit 4=0x10), eSLERP=5 (bit 5=0x20), 
+  //            eSWING1=6 (bit 6=0x40), eSWING2=7 (bit 7=0x80)
+  // Combined angular mask: 0xF0 (bits 4-7)
+  if ((joint.driveFlags & 0xF0) != 0) {
+    // Drive target velocity is in joint frame A's space
+    // If body A is static, use localFrameA directly; otherwise transform it
+    physx::PxQuat jointFrameA = bodyAIsStatic ? joint.localFrameA : (rotA * joint.localFrameA);
+    
+    // Validate and normalize quaternion
+    physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+    if (qMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(qMag2)) {
+      jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
+      
+      // SLERP drive (PxD6Drive::eSLERP = 5, bit 5 = 0x20)
+      bool slerpDrive = (joint.driveFlags & 0x20) != 0;
+      
+      physx::PxVec3 targetAngVel = joint.driveAngularVelocity;
+      
+      // Validate target angular velocity
+      if (!PxIsFinite(targetAngVel.x) || !PxIsFinite(targetAngVel.y) || !PxIsFinite(targetAngVel.z)) {
+        targetAngVel = physx::PxVec3(0.0f);
+      }
+      
+      // Transform target velocity from joint frame to world frame
+      physx::PxVec3 worldTargetAngVel = jointFrameA.rotate(targetAngVel);
+      
+      physx::PxVec3 thetaDelta(0.0f);
+      physx::PxReal maxDamping = 0.0f;
+      physx::PxReal dt = 1.0f / 60.0f;
+      // Normalize damping: 1000 -> factor for reasonable speed
+      
+      if (slerpDrive) {
+        // SLERP applies to all angular axes
+        // angularDamping.z = SLERP damping
+        maxDamping = joint.angularDamping.z;
+        if (maxDamping > 0.0f && PxIsFinite(maxDamping)) {
+          physx::PxReal dampingFactor = physx::PxMin(maxDamping / 8000.0f, 0.15f);
+          // Apply angular velocity in world space
+          thetaDelta = worldTargetAngVel * (dt * dampingFactor);
+        }
+      } else {
+        // Individual axis drives: TWIST (bit 4), SWING1 (bit 6), SWING2 (bit 7)
+        // TWIST = X axis (PxD6Drive::eTWIST = 4), damping from angularDamping.x
+        if (joint.driveFlags & 0x10) {  // bit 4 = TWIST
+          physx::PxReal damping = joint.angularDamping.x;
+          if (damping > 0.0f && PxIsFinite(damping)) {
+            maxDamping = physx::PxMax(maxDamping, damping);
+            physx::PxVec3 worldAxisX = jointFrameA.rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+            physx::PxReal dampingFactor = physx::PxMin(damping / 8000.0f, 0.15f);
+            physx::PxReal targetOnAxis = worldTargetAngVel.dot(worldAxisX);
+            // Negate for correct direction
+            thetaDelta -= worldAxisX * (targetOnAxis * dt * dampingFactor);
+          }
+        }
+        
+        // SWING1 = Y axis (PxD6Drive::eSWING1 = 6), damping from angularDamping.y
+        if (joint.driveFlags & 0x40) {  // bit 6 = SWING1
+          physx::PxReal damping = joint.angularDamping.y;
+          if (damping > 0.0f && PxIsFinite(damping)) {
+            maxDamping = physx::PxMax(maxDamping, damping);
+            physx::PxVec3 worldAxisY = jointFrameA.rotate(physx::PxVec3(0.0f, 1.0f, 0.0f));
+            physx::PxReal dampingFactor = physx::PxMin(damping / 8000.0f, 0.15f);
+            physx::PxReal targetOnAxis = worldTargetAngVel.dot(worldAxisY);
+            // Negate for correct direction
+            thetaDelta -= worldAxisY * (targetOnAxis * dt * dampingFactor);
+          }
+        }
+        
+        // SWING2 = Z axis (PxD6Drive::eSWING2 = 7), damping from angularDamping.z
+        if (joint.driveFlags & 0x80) {  // bit 7 = SWING2
+          physx::PxReal damping = joint.angularDamping.z;
+          if (damping > 0.0f && PxIsFinite(damping)) {
+            maxDamping = physx::PxMax(maxDamping, damping);
+            physx::PxVec3 worldAxisZ = jointFrameA.rotate(physx::PxVec3(0.0f, 0.0f, 1.0f));
+            physx::PxReal dampingFactor = physx::PxMin(damping / 8000.0f, 0.15f);
+            physx::PxReal targetOnAxis = worldTargetAngVel.dot(worldAxisZ);
+            // Negate for correct direction
+            thetaDelta -= worldAxisZ * (targetOnAxis * dt * dampingFactor);
+          }
+        }
+      }
+      
+      physx::PxReal thetaMag2 = thetaDelta.magnitudeSquared();
+      if (thetaMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(thetaMag2)) {
+        // Only apply to body B, not body A
+        if (!isBodyA) {
+          // Validate correction before applying
+          if (PxIsFinite(thetaDelta.x) && PxIsFinite(thetaDelta.y) && PxIsFinite(thetaDelta.z)) {
+            // Clamp max angular correction
+            physx::PxReal maxAngCorrection = 0.01f;
+            thetaDelta.x = physx::PxClamp(thetaDelta.x, -maxAngCorrection, maxAngCorrection);
+            thetaDelta.y = physx::PxClamp(thetaDelta.y, -maxAngCorrection, maxAngCorrection);
+            thetaDelta.z = physx::PxClamp(thetaDelta.z, -maxAngCorrection, maxAngCorrection);
+            deltaTheta += thetaDelta;
+            hasCorrection = true;
+          }
+        }
+      }
     }
   }
   
@@ -1552,7 +1765,8 @@ void AvbdSolver::solveWithJoints(
 
   PX_UNUSED(colorBatches);
   PX_UNUSED(numColors);
-
+  
+  // Debug: Track solver entry
   if (!mInitialized || numBodies == 0) {
     return;
   }
@@ -1589,9 +1803,11 @@ void AvbdSolver::solveWithJoints(
 
   {
     PX_PROFILE_ZONE("AVBD.solveIterations", 0);
+    
     for (physx::PxU32 outerIter = 0; outerIter < mConfig.outerIterations; ++outerIter) {
       for (physx::PxU32 innerIter = 0; innerIter < mConfig.innerIterations; ++innerIter) {
         PX_PROFILE_ZONE("AVBD.blockDescentWithJoints", 0);
+        
         for (physx::PxU32 bodyIdx = 0; bodyIdx < numBodies; ++bodyIdx) {
           if (bodies[bodyIdx].invMass <= 0.0f) {
             continue;

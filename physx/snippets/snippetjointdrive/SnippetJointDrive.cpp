@@ -53,7 +53,7 @@ static PxCudaContextManager*	gCudaContextManager			= NULL;
 #endif
 static bool						gPause						= false;
 static bool						gOneFrame					= false;
-static bool						gChangeObjectAType			= false;
+static bool						gChangeObjectAType			= false;  // false = PxRigidStatic, true = kinematic PxRigidDynamic
 static bool						gChangeObjectBRotation		= false;
 static bool						gChangeJointFrameARotation	= false;
 static bool						gChangeJointFrameBRotation	= false;
@@ -268,6 +268,10 @@ void renderText()
 		Snippets::print("Current drive: angular slerp (around Y)");
 		break;
 	}
+	if(gChangeObjectAType)
+		Snippets::print("Body0 type: KINEMATIC (dynamic)");
+	else
+		Snippets::print("Body0 type: STATIC");
 #if PX_SUPPORT_GPU_PHYSX
 	if(gUseGPU)
 		Snippets::print("Current mode: GPU");
