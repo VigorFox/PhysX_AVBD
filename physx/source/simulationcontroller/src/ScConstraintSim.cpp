@@ -32,9 +32,39 @@
 #include "ScConstraintSim.h"
 #include "ScConstraintInteraction.h"
 #include "ScElementSimInteraction.h"
+#include "extensions/PxJoint.h"  // For PxJointConcreteType
 
 using namespace physx;
 using namespace Sc;
+
+// Helper to convert PxJointConcreteType to Dy::ConstraintJointType
+static Dy::ConstraintJointType getConstraintJointType(PxConstraintConnector* connector)
+{
+	if (!connector)
+		return Dy::eCONSTRAINT_JOINT_UNKNOWN;
+	
+	// PxJoint derives from both PxBase and PxConstraintConnector
+	// We can get the concrete type from PxBase::getConcreteType()
+	PxBase* base = connector->getSerializable();
+	if (!base)
+		return Dy::eCONSTRAINT_JOINT_UNKNOWN;
+	
+	PxType type = base->getConcreteType();
+	
+	// Convert PxJointConcreteType to ConstraintJointType
+	switch (type)
+	{
+		case PxJointConcreteType::eSPHERICAL:		return Dy::eCONSTRAINT_JOINT_SPHERICAL;
+		case PxJointConcreteType::eREVOLUTE:		return Dy::eCONSTRAINT_JOINT_REVOLUTE;
+		case PxJointConcreteType::ePRISMATIC:		return Dy::eCONSTRAINT_JOINT_PRISMATIC;
+		case PxJointConcreteType::eFIXED:			return Dy::eCONSTRAINT_JOINT_FIXED;
+		case PxJointConcreteType::eDISTANCE:		return Dy::eCONSTRAINT_JOINT_DISTANCE;
+		case PxJointConcreteType::eD6:				return Dy::eCONSTRAINT_JOINT_D6;
+		case PxJointConcreteType::eGEAR:			return Dy::eCONSTRAINT_JOINT_GEAR;
+		case PxJointConcreteType::eRACK_AND_PINION:	return Dy::eCONSTRAINT_JOINT_RACK_AND_PINION;
+		default:									return Dy::eCONSTRAINT_JOINT_UNKNOWN;
+	}
+}
 
 static ConstraintInteraction* createInteraction(ConstraintSim* sim, RigidCore* r0, RigidCore* r1, Scene& scene)
 {
@@ -127,8 +157,9 @@ bool Sc::ConstraintSim::createLLConstraint()
 
 	Dy::Constraint& llc = mLowLevelConstraint;
 	core.getBreakForce(llc.linBreakForce, llc.angBreakForce);
-	llc.flags					= core.getFlags();
+	llc.flags					= PxU8(core.getFlags());  // Cast to PxU8 as flags field is now PxU8
 	llc.constantBlockSize		= PxU16(constantBlockSize);
+	llc.jointType				= getConstraintJointType(core.getPxConnector());
 
 	llc.solverPrep				= core.getSolverPrep();
 	llc.constantBlock			= constantBlock;

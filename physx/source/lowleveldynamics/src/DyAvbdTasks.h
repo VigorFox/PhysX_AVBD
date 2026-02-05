@@ -73,6 +73,9 @@ struct AvbdIslandBatch {
   AvbdD6JointConstraint *d6Joints;
   PxU32 numD6;
 
+  AvbdGearJointConstraint *gearJoints;
+  PxU32 numGear;
+
   PxU32 islandStart;
   PxU32 islandEnd;
 
@@ -91,6 +94,7 @@ struct AvbdIslandBatch {
   AvbdBodyConstraintMap revoluteMap;
   AvbdBodyConstraintMap prismaticMap;
   AvbdBodyConstraintMap d6Map;
+  AvbdBodyConstraintMap gearMap;
 };
 
 //=============================================================================
@@ -130,9 +134,10 @@ public:
         mBatch.fixedJoints, mBatch.numFixed, mBatch.revoluteJoints,
         mBatch.numRevolute, mBatch.prismaticJoints, mBatch.numPrismatic,
         mBatch.d6Joints, mBatch.numD6,
+        mBatch.gearJoints, mBatch.numGear,
         mGravity,
         &mBatch.contactMap, &mBatch.sphericalMap, &mBatch.fixedMap,
-        &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map,
+        &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map, &mBatch.gearMap,
         mBatch.colorBatches, mBatch.numColors);
   }
   

@@ -56,6 +56,7 @@ struct AvbdConstraintType {
     eJOINT_FIXED,     //!< Fixed joint (all DOF locked)
     eJOINT_D6,        //!< Configurable 6-DOF joint
     eJOINT_WELD,      //!< Weld joint (optimized for runtime attachment, e.g., "Ultrahand")
+    eJOINT_GEAR,      //!< Gear joint (angular ratio constraint between two hinges)
     eSOFT_DISTANCE,   //!< Soft body distance constraint
     eSOFT_VOLUME,     //!< Soft body volume preservation
 
@@ -1285,6 +1286,108 @@ struct AvbdConstraintBatch {
   physx::PxU32 count;           //!< Number of constraints
   physx::PxU32 padding;
 };
+
+/**
+ * @brief Gear joint constraint for AVBD solver
+ *
+ * Constrains the relative angular velocities of two revolute joints
+ * such that: omega1 * gearRatio = omega0
+ *
+ * This is used for gear mechanisms where two rotating bodies must
+ * maintain a fixed angular velocity ratio.
+ *
+ * The constraint function is:
+ *   C(x) = theta0 * gearRatio - theta1 - error = 0
+ *
+ * Where:
+ *   - theta0 is the angle of the first hinge joint
+ *   - theta1 is the angle of the second hinge joint
+ *   - gearRatio is the ratio of angular velocities
+ *   - error is the accumulated geometric error
+ */
+struct PX_ALIGN_PREFIX(16) AvbdGearJointConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Gear axes (world space, computed from hinge joint frames)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 gearAxis0;  //!< Rotation axis of first gear (world space)
+  physx::PxReal gearRatio;  //!< Gear ratio: omega1 = omega0 * gearRatio
+
+  physx::PxVec3 gearAxis1;  //!< Rotation axis of second gear (world space)
+  physx::PxReal geometricError;  //!< Accumulated geometric error
+
+  //-------------------------------------------------------------------------
+  // Lagrangian multiplier
+  //-------------------------------------------------------------------------
+
+  physx::PxReal lambdaGear;  //!< Angular constraint multiplier
+  physx::PxReal padding0;
+  physx::PxReal padding1;
+  physx::PxReal padding2;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_GEAR;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    gearAxis0 = physx::PxVec3(0.0f, 0.0f, 1.0f);
+    gearAxis1 = physx::PxVec3(0.0f, 0.0f, 1.0f);
+    gearRatio = 1.0f;
+    geometricError = 0.0f;
+    lambdaGear = 0.0f;
+    padding0 = 0.0f;
+    padding1 = 0.0f;
+    padding2 = 0.0f;
+  }
+
+  /**
+   * @brief Compute angular constraint violation
+   *
+   * The constraint is: angVel0 * gearRatio * axis0 + angVel1 * axis1 = 0
+   * Which means: omega0 * gearRatio = -omega1 (opposite rotation directions)
+   *
+   * @param angVelA Angular velocity of body A (gear 0)
+   * @param angVelB Angular velocity of body B (gear 1)
+   * @return Velocity constraint violation
+   */
+  PX_FORCE_INLINE physx::PxReal computeVelocityViolation(
+      const physx::PxVec3 &angVelA,
+      const physx::PxVec3 &angVelB) const {
+    physx::PxReal omega0 = angVelA.dot(gearAxis0);
+    physx::PxReal omega1 = angVelB.dot(gearAxis1);
+    return omega0 * gearRatio + omega1;  // Should be zero when constraint is satisfied
+  }
+
+  /**
+   * @brief Compute position-level constraint violation
+   *
+   * This uses the accumulated geometric error from the gear joint.
+   *
+   * @return Position constraint violation
+   */
+  PX_FORCE_INLINE physx::PxReal computePositionViolation() const {
+    return geometricError;
+  }
+
+  /**
+   * @brief Compute augmented Lagrangian energy
+   * E = 0.5 * rho * C^2 + lambda * C
+   */
+  PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy() const {
+    physx::PxReal violation = geometricError;
+    physx::PxReal rho = header.rho;
+    return 0.5f * rho * violation * violation + lambdaGear * violation;
+  }
+
+} PX_ALIGN_SUFFIX(16);
 
 } // namespace Dy
 

@@ -8,13 +8,18 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Rigid Body Solver | ✅ Working | Contacts + 5 joint types |
+| Rigid Body Solver | ✅ Working | Contacts + 6 joint types |
+| Joint System | ✅ Working | Revolute, Prismatic, Spherical, Fixed, D6, Gear |
+| Motor Drive | ✅ Working | Torque-based RevoluteJoint motor |
+| Joint Limits | ✅ Working | Revolute, Prismatic, Spherical cone, D6 |
+| Custom Joint | ❌ Not Available | Custom constraint callbacks unsupported |
+| Rack & Pinion | ❌ Not Available | RackAndPinionJoint unsupported |
+| Mimic Joint | ❌ Not Available | MimicJoint unsupported |
 | O(M) Constraint Lookup | ✅ Optimized | Eliminates O(N²) complexity |
 | Multi-threaded Islands | ✅ Thread-safe | Per-island constraint mappings |
 | Articulation | ❌ Not Available | Currently unsupported |
 | Sleep / Wake | ❌ Not Available | Not implemented |
 | Friction Model | ⚠️ Basic | Coulomb approximation |
-| Joint Limits | ⚠️ Partial | Basic Revolute/Prismatic limits |
 
 **For research and evaluation only. Not production-ready.**
 

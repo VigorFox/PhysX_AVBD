@@ -199,7 +199,7 @@ void initPhysics(bool /*interactive*/)
 	gDispatcher = PxDefaultCpuDispatcherCreate(numCores == 0 ? 0 : numCores - 1);
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
-	sceneDesc.solverType = PxSolverType::eTGS;
+	//sceneDesc.solverType = PxSolverType::eAVBD;
 	sceneDesc.filterShader = PxDefaultSimulationFilterShader;
 	gScene = gPhysics->createScene(sceneDesc);
 

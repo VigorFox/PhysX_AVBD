@@ -63,6 +63,7 @@ void AvbdSolveIslandTask::release() {
   mBatch.revoluteMap.release(allocator);
   mBatch.prismaticMap.release(allocator);
   mBatch.d6Map.release(allocator);
+  mBatch.gearMap.release(allocator);
   
   // Call base class release
   AvbdTask::release();

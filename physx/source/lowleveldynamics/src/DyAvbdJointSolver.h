@@ -195,6 +195,36 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
                              physx::PxU32 numBodies,
                              const AvbdSolverConfig &config);
 
+/**
+ * @brief Process a gear joint constraint
+ *
+ * The gear joint constrains the angular velocities of two revolute joints
+ * such that they maintain a fixed ratio. This is used for gear mechanisms.
+ *
+ * Constraint: omega0 * gearRatio + omega1 = 0
+ *
+ * The constraint is applied as an angular impulse to both bodies.
+ *
+ * @param joint The gear joint constraint
+ * @param bodies Array of all solver bodies
+ * @param numBodies Total number of bodies
+ * @param config Solver configuration
+ * @param dt Time step
+ */
+void processGearJointConstraint(AvbdGearJointConstraint &joint,
+                                AvbdSolverBody *bodies,
+                                physx::PxU32 numBodies,
+                                const AvbdSolverConfig &config,
+                                physx::PxReal dt);
+
+/**
+ * @brief Update Lagrangian multipliers for gear joint
+ */
+void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
+                               const AvbdSolverBody *bodies,
+                               physx::PxU32 numBodies,
+                               const AvbdSolverConfig &config);
+
 //=============================================================================
 // Helper Functions
 //=============================================================================

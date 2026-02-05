@@ -32,6 +32,9 @@
 
 #include <algorithm>
 
+// External frame counter from DyAvbdDynamics.cpp
+extern physx::PxU64 getAvbdMotorFrameCounter();
+
 namespace physx {
 namespace Dy {
 
@@ -1739,6 +1742,148 @@ bool AvbdSolver::computeD6JointCorrection(
   return hasCorrection;
 }
 
+/**
+ * @brief Compute correction for gear joint
+ *
+ * The gear joint constrains the angular velocities of two bodies around their
+ * respective axes such that they maintain a fixed ratio:
+ *   omega0 * gearRatio + omega1 = 0
+ *
+ * In position-based form, we constrain the angular displacement:
+ *   deltaTheta0 * gearRatio + deltaTheta1 = 0
+ * 
+ * Where deltaTheta is the change in angle from prevRotation to current rotation.
+ */
+bool AvbdSolver::computeGearJointCorrection(
+    const AvbdGearJointConstraint &joint,
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 bodyIndex,
+    physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta) {
+  
+  const physx::PxU32 bodyAIdx = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIdx = joint.header.bodyIndexB;
+  
+  // Check if this body is involved in the constraint
+  if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex) {
+    return false;
+  }
+  
+  // Check for valid body indices - both must be dynamic for gear to work
+  if (bodyAIdx >= numBodies || bodyBIdx >= numBodies) {
+    return false;  // Gear joint needs both bodies to be dynamic
+  }
+  
+  AvbdSolverBody &bodyA = bodies[bodyAIdx];
+  AvbdSolverBody &bodyB = bodies[bodyBIdx];
+  
+  // Skip if either body is static
+  if (bodyA.invMass <= 0.0f || bodyB.invMass <= 0.0f) {
+    return false;
+  }
+  
+  bool isBodyA = (bodyAIdx == bodyIndex);
+  
+  // Initialize outputs
+  deltaPos = physx::PxVec3(0.0f);
+  deltaTheta = physx::PxVec3(0.0f);
+  
+  // Use joint.gearAxis0/1 as local axes, transform to world space using CURRENT rotation
+  physx::PxVec3 worldAxis0 = bodyA.rotation.rotate(joint.gearAxis0);
+  physx::PxVec3 worldAxis1 = bodyB.rotation.rotate(joint.gearAxis1);
+  
+  // Normalize axes
+  physx::PxReal axis0Len = worldAxis0.magnitude();
+  physx::PxReal axis1Len = worldAxis1.magnitude();
+  if (axis0Len < AvbdConstants::AVBD_NUMERICAL_EPSILON ||
+      axis1Len < AvbdConstants::AVBD_NUMERICAL_EPSILON) {
+    return false;
+  }
+  worldAxis0 /= axis0Len;
+  worldAxis1 /= axis1Len;
+  
+  // Compute angle changes since start of frame (prevRotation -> rotation)
+  // deltaQ = rotation * prevRotation.conjugate()
+  physx::PxQuat deltaQA = bodyA.rotation * bodyA.prevRotation.getConjugate();
+  physx::PxQuat deltaQB = bodyB.rotation * bodyB.prevRotation.getConjugate();
+  
+  // Ensure shortest path
+  if (deltaQA.w < 0.0f) deltaQA = -deltaQA;
+  if (deltaQB.w < 0.0f) deltaQB = -deltaQB;
+  
+  // Extract angle around the gear axis
+  // Use local axis for extraction since we want rotation around the hinge axis
+  physx::PxVec3 localAxis0 = joint.gearAxis0;
+  physx::PxVec3 localAxis1 = joint.gearAxis1;
+  localAxis0.normalize();
+  localAxis1.normalize();
+  
+  // Convert deltaQ to axis-angle and project onto gear axis
+  physx::PxVec3 deltaAngA(deltaQA.x, deltaQA.y, deltaQA.z);
+  physx::PxVec3 deltaAngB(deltaQB.x, deltaQB.y, deltaQB.z);
+  
+  // For small angles: angle ≈ 2 * |imaginary part|, direction = imaginary part / |imaginary part|
+  // So angular displacement vector ≈ 2 * imaginary part
+  deltaAngA *= 2.0f;
+  deltaAngB *= 2.0f;
+  
+  // Transform to local space to get rotation around gear axis
+  physx::PxVec3 localDeltaAngA = bodyA.prevRotation.getConjugate().rotate(deltaAngA);
+  physx::PxVec3 localDeltaAngB = bodyB.prevRotation.getConjugate().rotate(deltaAngB);
+  
+  physx::PxReal thetaA = localDeltaAngA.dot(localAxis0);  // Rotation of body A around its gear axis
+  physx::PxReal thetaB = localDeltaAngB.dot(localAxis1);  // Rotation of body B around its gear axis
+  
+  // Gear constraint: thetaA * gearRatio - thetaB = 0
+  // This means: if A rotates by angle theta, B should rotate by theta * gearRatio (OPPOSITE direction)
+  // The minus sign ensures opposite rotation direction (gears mesh)
+  physx::PxReal violation = thetaA * joint.gearRatio - thetaB + joint.geometricError;
+  
+  // Skip if violation is negligible
+  if (physx::PxAbs(violation) < 1e-6f) {
+    return false;
+  }
+  
+  // Compute effective inertia for angular constraint along axis
+  physx::PxVec3 Iinv_axis0 = bodyA.invInertiaWorld * worldAxis0;
+  physx::PxVec3 Iinv_axis1 = bodyB.invInertiaWorld * worldAxis1;
+  physx::PxReal w0 = worldAxis0.dot(Iinv_axis0);
+  physx::PxReal w1 = worldAxis1.dot(Iinv_axis1);
+  
+  // Effective inverse inertia for gear constraint:
+  // w_eff = gearRatio^2 * w0 + w1
+  physx::PxReal wEff = joint.gearRatio * joint.gearRatio * w0 + w1;
+  
+  if (wEff < 1e-10f) {
+    return false;
+  }
+  
+  // Compute Lagrange multiplier (correction impulse magnitude)
+  physx::PxReal lambda = -violation / wEff;
+  
+  // Apply correction to this body
+  // Constraint: C = thetaA * gearRatio - thetaB = 0
+  // Gradient for A: ∂C/∂thetaA = +gearRatio
+  // Gradient for B: ∂C/∂thetaB = -1
+  if (isBodyA) {
+    // Body A gets impulse along axis0, scaled by gearRatio
+    physx::PxReal impulseMag = joint.gearRatio * lambda;
+    deltaTheta = (bodyA.invInertiaWorld * worldAxis0) * impulseMag;
+  } else {
+    // Body B gets impulse along axis1, with NEGATIVE sign (opposite direction)
+    physx::PxReal impulseMag = -lambda;  // Note: negative because gradient is -1
+    deltaTheta = (bodyB.invInertiaWorld * worldAxis1) * impulseMag;
+  }
+  
+  // Clamp the correction to prevent instability
+  physx::PxReal maxAngCorrection = 0.1f;
+  physx::PxReal thetaMag = deltaTheta.magnitude();
+  if (thetaMag > maxAngCorrection) {
+    deltaTheta *= maxAngCorrection / thetaMag;
+  }
+  
+  return true;
+}
+
 //=============================================================================
 // Solver with Joint Constraints
 //=============================================================================
@@ -1751,6 +1896,7 @@ void AvbdSolver::solveWithJoints(
     AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
     AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
     AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
     const physx::PxVec3 &gravity,
     const AvbdBodyConstraintMap *contactMap,
     const AvbdBodyConstraintMap *sphericalMap,
@@ -1758,6 +1904,7 @@ void AvbdSolver::solveWithJoints(
     const AvbdBodyConstraintMap *revoluteMap,
     const AvbdBodyConstraintMap *prismaticMap,
     const AvbdBodyConstraintMap *d6Map,
+    const AvbdBodyConstraintMap *gearMap,
     AvbdColorBatch *colorBatches,
     physx::PxU32 numColors) {
 
@@ -1777,12 +1924,13 @@ void AvbdSolver::solveWithJoints(
                                      (fixedMap != nullptr) ||
                                      (revoluteMap != nullptr) ||
                                      (prismaticMap != nullptr) ||
-                                     (d6Map != nullptr);
+                                     (d6Map != nullptr) ||
+                                     (gearMap != nullptr);
 
   mStats.reset();
   mStats.numBodies = numBodies;
   mStats.numContacts = numContacts;
-  mStats.numJoints = numSpherical + numFixed + numRevolute + numPrismatic + numD6;
+  mStats.numJoints = numSpherical + numFixed + numRevolute + numPrismatic + numD6 + numGear;
 
   physx::PxReal invDt = 1.0f / dt;
 
@@ -1823,12 +1971,14 @@ void AvbdSolver::solveWithJoints(
                 revoluteJoints, numRevolute,
                 prismaticJoints, numPrismatic,
                 d6Joints, numD6,
+                gearJoints, numGear,
                 contactMap ? *contactMap : emptyMap,
                 sphericalMap ? *sphericalMap : emptyMap,
                 fixedMap ? *fixedMap : emptyMap,
                 revoluteMap ? *revoluteMap : emptyMap,
                 prismaticMap ? *prismaticMap : emptyMap,
                 d6Map ? *d6Map : emptyMap,
+                gearMap ? *gearMap : emptyMap,
                 dt);
           } else {
             // Fallback to original O(N*M) version
@@ -1864,6 +2014,126 @@ void AvbdSolver::solveWithJoints(
         }
         for (physx::PxU32 j = 0; j < numD6; ++j) {
           updateD6JointMultiplier(d6Joints[j], bodies, numBodies, mConfig);
+        }
+        for (physx::PxU32 j = 0; j < numGear; ++j) {
+          updateGearJointMultiplier(gearJoints[j], bodies, numBodies, mConfig);
+        }
+      }
+    }
+  }
+
+  // Process motor drives for RevoluteJoints AFTER all constraint iterations
+  // Motor applies torque (limited by maxForce) to accelerate toward target velocity
+  // This matches TGS behavior where motor gradually accelerates bodies
+  // 
+  // IMPORTANT: The solver may be called multiple times per simulation step
+  // (once per island). We use a global frame counter to track which frame
+  // we're in and only apply motor once per frame per body.
+  {
+    PX_PROFILE_ZONE("AVBD.motorDrives", 0);
+    
+    // Get current frame from global counter (incremented in AvbdDynamicsContext::update)
+    physx::PxU64 currentFrame = getAvbdMotorFrameCounter();
+    
+    // Static tracking for frame-based deduplication
+    static physx::PxU64 lastMotorFrame = 0;
+    static physx::PxU32 processedBodyFlags = 0;  // Bitmask for up to 32 bodies
+    
+    // Reset flags when entering a new frame
+    if (currentFrame != lastMotorFrame) {
+      lastMotorFrame = currentFrame;
+      processedBodyFlags = 0;
+    }
+    
+    for (physx::PxU32 j = 0; j < numRevolute; ++j) {
+      AvbdRevoluteJointConstraint &joint = revoluteJoints[j];
+      if (joint.motorEnabled && joint.motorMaxForce > 0.0f) {
+        const physx::PxU32 idxA = joint.header.bodyIndexA;
+        const physx::PxU32 idxB = joint.header.bodyIndexB;
+        
+        const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
+        const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
+        
+        if (isAStatic && isBStatic) continue;
+        
+        // Check if this body already had motor applied this frame
+        if (idxB < 32 && (processedBodyFlags & (1u << idxB))) {
+          continue;  // Skip - already processed this frame
+        }
+        if (idxB < 32) {
+          processedBodyFlags |= (1u << idxB);  // Mark as processed
+        }
+        
+        AvbdSolverBody &bodyB = bodies[idxB];
+        
+        // Get world-space joint axis
+        physx::PxVec3 worldAxis = isAStatic ? joint.axisA : bodies[idxA].rotation.rotate(joint.axisA);
+        worldAxis.normalize();
+        
+        // Compute current angular velocity around the joint axis
+        // Note: In AVBD, velocity is computed from position difference (prevPosition/rotation)
+        // We need to get the actual angular velocity from the body
+        physx::PxQuat deltaQ = bodyB.rotation * bodyB.prevRotation.getConjugate();
+        if (deltaQ.w < 0.0f) deltaQ = -deltaQ;
+        physx::PxVec3 currentAngVel = physx::PxVec3(deltaQ.x, deltaQ.y, deltaQ.z) * (2.0f * invDt);
+        
+        // Project to joint axis to get current rotation speed around axis
+        physx::PxReal currentAxisVel = currentAngVel.dot(worldAxis);
+        
+        // Velocity error
+        physx::PxReal velocityError = joint.motorTargetVelocity - currentAxisVel;
+        
+        // Compute effective inertia around the joint axis
+        // For a rotation around axis 'n', effective inertia = n^T * I * n
+        // Since we have invInertiaWorld, effective invInertia = n^T * invI * n
+        physx::PxVec3 invITimesAxis = bodyB.invInertiaWorld * worldAxis;
+        physx::PxReal effectiveInvInertia = worldAxis.dot(invITimesAxis);
+        
+        if (effectiveInvInertia < 1e-10f) continue;  // Body is static around this axis
+        
+        physx::PxReal effectiveInertia = 1.0f / effectiveInvInertia;
+        
+        // Required torque to achieve target velocity change
+        // torque = inertia * angular_acceleration = inertia * (deltaVel / dt)
+        physx::PxReal requiredTorque = effectiveInertia * velocityError * invDt;
+        
+        // Clamp torque to maxForce (which is actually max torque for revolute joints)
+        physx::PxReal clampedTorque = physx::PxClamp(requiredTorque, -joint.motorMaxForce, joint.motorMaxForce);
+        
+        // Angular acceleration from clamped torque
+        physx::PxReal angularAccel = clampedTorque * effectiveInvInertia;
+        
+        // Delta angle = 0.5 * alpha * dt^2 (integration from torque to position)
+        // But since we already have velocity changes, use: deltaAngle = deltaVel * dt
+        physx::PxReal deltaVel = angularAccel * dt;
+        physx::PxReal deltaAngle = deltaVel * dt;
+        
+        // Apply rotation around the joint axis
+        physx::PxReal halfAngle = deltaAngle * 0.5f;
+        physx::PxReal sinHalf = physx::PxSin(halfAngle);
+        physx::PxReal cosHalf = physx::PxCos(halfAngle);
+        physx::PxQuat deltaRot(worldAxis.x * sinHalf, worldAxis.y * sinHalf, worldAxis.z * sinHalf, cosHalf);
+        
+        // Apply rotation to body B
+        bodyB.rotation = (deltaRot * bodyB.rotation).getNormalized();
+        
+        // If bodyA is also dynamic, apply opposite rotation (scaled by inertia ratio)
+        if (!isAStatic) {
+          AvbdSolverBody &bodyA = bodies[idxA];
+          physx::PxVec3 invITimesAxisA = bodyA.invInertiaWorld * worldAxis;
+          physx::PxReal effectiveInvInertiaA = worldAxis.dot(invITimesAxisA);
+          
+          if (effectiveInvInertiaA > 1e-10f) {
+            physx::PxReal angularAccelA = clampedTorque * effectiveInvInertiaA;
+            physx::PxReal deltaAngleA = angularAccelA * dt * dt;
+            
+            physx::PxReal halfAngleA = -deltaAngleA * 0.5f;  // Opposite direction
+            physx::PxReal sinHalfA = physx::PxSin(halfAngleA);
+            physx::PxReal cosHalfA = physx::PxCos(halfAngleA);
+            physx::PxQuat deltaRotA(worldAxis.x * sinHalfA, worldAxis.y * sinHalfA, worldAxis.z * sinHalfA, cosHalfA);
+            
+            bodyA.rotation = (deltaRotA * bodyA.rotation).getNormalized();
+          }
         }
       }
     }
@@ -2249,12 +2519,14 @@ void AvbdSolver::solveBodyAllConstraintsFast(
     AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
     AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
     AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
     const AvbdBodyConstraintMap &contactMap,
     const AvbdBodyConstraintMap &sphericalMap,
     const AvbdBodyConstraintMap &fixedMap,
     const AvbdBodyConstraintMap &revoluteMap,
     const AvbdBodyConstraintMap &prismaticMap,
     const AvbdBodyConstraintMap &d6Map,
+    const AvbdBodyConstraintMap &gearMap,
     physx::PxReal dt) {
   
   PX_UNUSED(dt);
@@ -2372,6 +2644,24 @@ void AvbdSolver::solveBodyAllConstraintsFast(
       if (j >= numD6) continue;
       physx::PxVec3 deltaPos, deltaTheta;
       if (computeD6JointCorrection(d6Joints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
+        totalDeltaPos += deltaPos;
+        totalDeltaTheta += deltaTheta;
+        numActiveConstraints++;
+      }
+    }
+  }
+  
+  // Process gear joint constraints
+  if (gearJoints && numGear > 0) {
+    const physx::PxU32 *gearIndices = nullptr;
+    physx::PxU32 numBodyGear = 0;
+    gearMap.getBodyConstraints(bodyIndex, gearIndices, numBodyGear);
+    
+    for (physx::PxU32 i = 0; i < numBodyGear; ++i) {
+      physx::PxU32 j = gearIndices[i];
+      if (j >= numGear) continue;
+      physx::PxVec3 deltaPos, deltaTheta;
+      if (computeGearJointCorrection(gearJoints[j], bodies, numBodies, bodyIndex, deltaPos, deltaTheta)) {
         totalDeltaPos += deltaPos;
         totalDeltaTheta += deltaTheta;
         numActiveConstraints++;

@@ -46,6 +46,15 @@
 using namespace physx;
 using namespace physx::Dy;
 
+// Global frame counter for motor deduplication
+// This is incremented at the start of each update() call
+static physx::PxU64 gAvbdMotorFrameCounter = 0;
+
+// Accessor for the solver to get current frame
+physx::PxU64 getAvbdMotorFrameCounter() {
+  return gAvbdMotorFrameCounter;
+}
+
 // Helper struct for joint data protocol (must match SnippetAvbdDx11)
 struct AvbdSnippetJointData {
   enum Type { eSPHERICAL = 0, eFIXED, eREVOLUTE, ePRISMATIC, eD6 };
@@ -159,43 +168,36 @@ struct PhysXD6JointData : PhysXJointData {
   // More members follow but not needed for detection
 };
 
-// Joint type detection thresholds based on constantBlockSize
-// These are approximate sizes - the actual values may vary slightly
-static const PxU32 JOINT_SIZE_FIXED_MAX = 85;       // FixedJointData ~80 bytes
-static const PxU32 JOINT_SIZE_SPHERICAL_MAX = 120;  // SphericalJointData ~112 bytes
-static const PxU32 JOINT_SIZE_PRISMATIC_MAX = 120;  // PrismaticJointData ~112 bytes (same as spherical)
-static const PxU32 JOINT_SIZE_REVOLUTE_MAX = 140;   // RevoluteJointData ~128 bytes
-static const PxU32 JOINT_SIZE_D6_MIN = 200;         // D6JointData is much larger (~400+ bytes)
+// Mirror of GearJointData (ExtGearJoint.h)
+struct PhysXGearJointData : PhysXJointData {
+  const void* hingeJoint0;  // PxBase* - either PxJoint or PxArticulationJointReducedCoordinate
+  const void* hingeJoint1;  // PxBase* - either PxJoint or PxArticulationJointReducedCoordinate
+  float gearRatio;
+  float error;
+};
 
-// Enum for detected joint types
+// Enum for detected joint types (local copy for compatibility)
 enum PhysXJointType {
   eJOINT_UNKNOWN = -1,
   eJOINT_FIXED = 0,
   eJOINT_SPHERICAL = 1,
   eJOINT_REVOLUTE = 2,
   eJOINT_PRISMATIC = 3,
-  eJOINT_D6 = 4
+  eJOINT_D6 = 4,
+  eJOINT_GEAR = 5
 };
 
-// Helper function to detect joint type from constantBlockSize
-static PhysXJointType detectJointType(PxU16 blockSize) {
-  if (blockSize >= JOINT_SIZE_D6_MIN) {
-    return eJOINT_D6;
-  } else if (blockSize > JOINT_SIZE_REVOLUTE_MAX) {
-    // Between revolute and D6 - could be D6 or unknown
-    return eJOINT_D6;
-  } else if (blockSize > JOINT_SIZE_SPHERICAL_MAX) {
-    // Likely revolute
-    return eJOINT_REVOLUTE;
-  } else if (blockSize > JOINT_SIZE_FIXED_MAX) {
-    // Could be spherical or prismatic - they have similar sizes
-    // Default to spherical as it's more common
-    return eJOINT_SPHERICAL;
-  } else if (blockSize >= sizeof(PhysXJointData)) {
-    // Minimum size - likely fixed joint
-    return eJOINT_FIXED;
+// Helper function to convert Dy::ConstraintJointType to local PhysXJointType
+static PhysXJointType getJointTypeFromConstraint(Dy::ConstraintJointType cjt) {
+  switch (cjt) {
+    case Dy::eCONSTRAINT_JOINT_SPHERICAL:  return eJOINT_SPHERICAL;
+    case Dy::eCONSTRAINT_JOINT_REVOLUTE:   return eJOINT_REVOLUTE;
+    case Dy::eCONSTRAINT_JOINT_PRISMATIC:  return eJOINT_PRISMATIC;
+    case Dy::eCONSTRAINT_JOINT_FIXED:      return eJOINT_FIXED;
+    case Dy::eCONSTRAINT_JOINT_D6:         return eJOINT_D6;
+    case Dy::eCONSTRAINT_JOINT_GEAR:       return eJOINT_GEAR;
+    default:                               return eJOINT_UNKNOWN;
   }
-  return eJOINT_UNKNOWN;
 }
 
 //=============================================================================
@@ -354,6 +356,9 @@ void AvbdDynamicsContext::update(
     PxBitMapPinned &changedHandleMap) {
 
   PX_PROFILE_ZONE("AVBD.update", mContextID);
+  
+  // Increment global frame counter for motor deduplication
+  gAvbdMotorFrameCounter++;
 
   PX_UNUSED(flushPool);
   PX_UNUSED(postPartitioningTask);
@@ -725,6 +730,10 @@ void AvbdDynamicsContext::update(
       (allocWithFallback(mScratchAllocator, mAllocatorCallback,
                         mHeapFallbackAllocations,
                         sizeof(AvbdD6JointConstraint) * totalJointCapacity, "D6Joints"));
+  AvbdGearJointConstraint *gearJoints = reinterpret_cast<AvbdGearJointConstraint *>
+      (allocWithFallback(mScratchAllocator, mAllocatorCallback,
+                        mHeapFallbackAllocations,
+                        sizeof(AvbdGearJointConstraint) * totalJointCapacity, "GearJoints"));
 
   // 6. Create Task Chain
   AvbdWriteBackTask *wbTask = mTaskFactory->createWriteBackTask(
@@ -741,6 +750,7 @@ void AvbdDynamicsContext::update(
   PxU32 currRevoluteIdx = 0;
   PxU32 currPrismaticIdx = 0;
   PxU32 currD6Idx = 0;
+  PxU32 currGearIdx = 0;
   PxU32 tasksSpawned = 0;
 
   // Track color batch allocations for cleanup
@@ -765,6 +775,7 @@ void AvbdDynamicsContext::update(
     PxU32 numRevolute = 0;
     PxU32 numPrismatic = 0;
     PxU32 numD6 = 0;
+    PxU32 numGear = 0;
 
     // Prepare external joint constraints
     if (info.constraintCount > 0) {
@@ -776,6 +787,7 @@ void AvbdDynamicsContext::update(
           revoluteJoints + currRevoluteIdx, numRevolute, totalJointCapacity - currRevoluteIdx,
           prismaticJoints + currPrismaticIdx, numPrismatic, totalJointCapacity - currPrismaticIdx,
           d6Joints + currD6Idx, numD6, totalJointCapacity - currD6Idx,
+          gearJoints + currGearIdx, numGear, totalJointCapacity - currGearIdx,
           i, bodyRemapTable);
     }
     
@@ -830,7 +842,7 @@ void AvbdDynamicsContext::update(
 
     // Skip empty islands
     if (numConstraints == 0 && numSpherical == 0 && numFixed == 0 &&
-        numRevolute == 0 && numPrismatic == 0 && numD6 == 0 && info.bodyCount == 0) {
+        numRevolute == 0 && numPrismatic == 0 && numD6 == 0 && numGear == 0 && info.bodyCount == 0) {
       continue;
     }
 
@@ -851,6 +863,8 @@ void AvbdDynamicsContext::update(
     batch.numPrismatic = numPrismatic;
     batch.d6Joints = &d6Joints[currD6Idx];
     batch.numD6 = numD6;
+    batch.gearJoints = &gearJoints[currGearIdx];
+    batch.numGear = numGear;
 
     batch.islandStart = i;
     batch.islandEnd = i + 1;
@@ -878,6 +892,9 @@ void AvbdDynamicsContext::update(
       }
       if (batch.numD6 > 0 && batch.d6Joints) {
         batch.d6Map.build(batch.numBodies, batch.d6Joints, batch.numD6, allocator);
+      }
+      if (batch.numGear > 0 && batch.gearJoints) {
+        batch.gearMap.build(batch.numBodies, batch.gearJoints, batch.numGear, allocator);
       }
     }
 
@@ -937,6 +954,7 @@ void AvbdDynamicsContext::update(
     currRevoluteIdx += numRevolute;
     currPrismaticIdx += numPrismatic;
     currD6Idx += numD6;
+    currGearIdx += numGear;
 
     // Spawn Solve Task
     AvbdSolveIslandTask *solveTask =
@@ -1122,6 +1140,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
     PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
     PxU32 &numPrismatic, PxU32 maxPrismatic,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
+    AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxU32 islandIndex, PxU32 *bodyRemapTable) {
 
   PX_UNUSED(avbdBodies);
@@ -1135,6 +1154,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
   numRevolute = 0;
   numPrismatic = 0;
   numD6 = 0;
+  numGear = 0;
 
   while (edgeIndex != IG_INVALID_EDGE) {
     const IG::Edge &edge = islandSim.getEdge(edgeIndex);
@@ -1150,6 +1170,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
       
       // Check if bodies are static using inverseMass (more reliable than nodeIndex.isStaticBody())
       // invMass == 0 means infinite mass (static body)
+      // Note: NULL bodyCore means connected to world, which is handled by localBody staying PX_MAX_U32
       bool body0IsStatic = constraint->bodyCore0 && constraint->bodyCore0->inverseMass == 0.0f;
       bool body1IsStatic = constraint->bodyCore1 && constraint->bodyCore1->inverseMass == 0.0f;
 
@@ -1171,55 +1192,78 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
         }
       }
 
-      bool isStandardPhysXJoint = false;
+      // Use the jointType field to detect joint type reliably
+      PhysXJointType jointType = getJointTypeFromConstraint(constraint->jointType);
       
-      if (constraint->constantBlockSize >= sizeof(PhysXJointData)) {
+      if (jointType == eJOINT_GEAR) {
+        // Process GearJoint
+        if (numGear < maxGear && gearConstraints) {
+          const PhysXGearJointData* gearData = 
+              static_cast<const PhysXGearJointData*>(constraint->constantBlock);
+          
+          AvbdGearJointConstraint &c = gearConstraints[numGear++];
+          c.initDefaults();
+          c.header.bodyIndexA = localBody0;
+          c.header.bodyIndexB = localBody1;
+          c.gearRatio = gearData->gearRatio;
+          c.geometricError = gearData->error;
+          c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
+          
+          // Store gear axes in LOCAL body space
+          // In PhysX, RevoluteJoint rotation axis is the X axis in joint local frame
+          PxQuat frameA = gearData->c2b[0].q;
+          PxQuat frameB = gearData->c2b[1].q;
+          
+          // Joint rotation axis is X in joint local frame (PhysX convention)
+          PxVec3 jointAxis = PxVec3(1.0f, 0.0f, 0.0f);
+          
+          // Transform joint axis to body-local space
+          // c2b is "constraint to body" transform, so we rotate the joint axis by it
+          c.gearAxis0 = frameA.rotate(jointAxis);  // Body A local space
+          c.gearAxis1 = frameB.rotate(jointAxis);  // Body B local space
+        }
+      }
+      else if (jointType != eJOINT_UNKNOWN && constraint->constantBlockSize >= sizeof(PhysXJointData)) {
+        // Process standard PhysX joints (Spherical, Revolute, Fixed, D6, etc.)
         const PhysXJointData* physXData = 
             static_cast<const PhysXJointData*>(constraint->constantBlock);
         
+        // Validate joint data
         const float firstFloat = physXData->invMassScale.linear0;
-        if (firstFloat >= 0.5f && firstFloat <= 2.0f) {
-          if (physXData->c2b[0].p.isFinite() && physXData->c2b[1].p.isFinite()) {
-            isStandardPhysXJoint = true;
-          }
-        }
-      }
-
-      if (isStandardPhysXJoint) {
-        const PhysXJointData* physXData = 
-            static_cast<const PhysXJointData*>(constraint->constantBlock);
+        if (firstFloat >= 0.5f && firstFloat <= 2.0f && 
+            physXData->c2b[0].p.isFinite() && physXData->c2b[1].p.isFinite()) {
         
         PxVec3 anchorA = physXData->c2b[0].p;
         PxVec3 anchorB = physXData->c2b[1].p;
         PxQuat frameA = physXData->c2b[0].q;
         PxQuat frameB = physXData->c2b[1].q;
         
-        // body0IsStatic and body1IsStatic already computed above using inverseMass
+        // Handle anchor transformation based on body type:
+        // - NULL bodyCore: connected to world, c2b is already in world space
+        // - Static body (inverseMass == 0): transform c2b from body local to world space
+        // - Dynamic body: c2b stays in body local space for AVBD solver
         
-        if (body0IsStatic) {
-          if (constraint->bodyCore0) {
-            // Static rigid body - transform anchor to world space
-            PxTransform staticPose = constraint->bodyCore0->body2World;
-            PxTransform jointFrame = staticPose * physXData->c2b[0];
-            anchorA = jointFrame.p;
-            frameA = jointFrame.q;
-          }
-          // else: body0 is NULL (world anchor), c2b[0] is already in world space
+        if (!constraint->bodyCore0) {
+          // Connected to world - c2b[0] is already in world space, keep as is
+          // localBody0 = PX_MAX_U32 indicates world anchor
+        } else if (body0IsStatic) {
+          // Static rigid body - transform anchor to world space
+          PxTransform staticPose = constraint->bodyCore0->body2World;
+          PxTransform jointFrame = staticPose * physXData->c2b[0];
+          anchorA = jointFrame.p;
+          frameA = jointFrame.q;
         }
         
-        if (body1IsStatic) {
-          if (constraint->bodyCore1) {
-            // Static rigid body - transform anchor to world space
-            PxTransform staticPose = constraint->bodyCore1->body2World;
-            PxTransform jointFrame = staticPose * physXData->c2b[1];
-            anchorB = jointFrame.p;
-            frameB = jointFrame.q;
-          }
-          // else: body1 is NULL (world anchor), c2b[1] is already in world space
+        if (!constraint->bodyCore1) {
+          // Connected to world - c2b[1] is already in world space, keep as is
+          // localBody1 = PX_MAX_U32 indicates world anchor
+        } else if (body1IsStatic) {
+          // Static rigid body - transform anchor to world space
+          PxTransform staticPose = constraint->bodyCore1->body2World;
+          PxTransform jointFrame = staticPose * physXData->c2b[1];
+          anchorB = jointFrame.p;
+          frameB = jointFrame.q;
         }
-        
-        // Detect joint type based on constantBlockSize
-        PhysXJointType jointType = detectJointType(constraint->constantBlockSize);
         
         switch (jointType) {
           case eJOINT_FIXED:
@@ -1233,6 +1277,56 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.anchorB = anchorB;
               // Compute relative rotation between frames
               c.relativeRotation = frameA.getConjugate() * frameB;
+              c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
+            }
+            break;
+          }
+          
+          case eJOINT_REVOLUTE:
+          {
+            if (numRevolute < maxRevolute) {
+              const PhysXRevoluteJointData* revoluteData = 
+                  static_cast<const PhysXRevoluteJointData*>(constraint->constantBlock);
+              
+              AvbdRevoluteJointConstraint &c = revoluteConstraints[numRevolute++];
+              c.initDefaults();
+              c.header.bodyIndexA = localBody0;
+              c.header.bodyIndexB = localBody1;
+              c.anchorA = anchorA;
+              c.anchorB = anchorB;
+              
+              // Revolute joint rotates around X-axis in joint frame
+              c.axisA = frameA.getBasisVector0();  // X-axis of joint frame A
+              c.axisB = frameB.getBasisVector0();  // X-axis of joint frame B
+              
+              // Reference axis for angle measurement (perpendicular to rotation axis)
+              c.refAxisA = frameA.getBasisVector1();  // Y-axis
+              c.refAxisB = frameB.getBasisVector1();
+              
+              // Check for angle limits
+              // PxRevoluteJointFlag::eLIMIT_ENABLED = 1
+              if (revoluteData->jointFlags & 0x0001) {
+                c.hasAngleLimit = 1;
+                c.angleLimitLower = revoluteData->limit.lower;
+                c.angleLimitUpper = revoluteData->limit.upper;
+              } else {
+                c.hasAngleLimit = 0;
+                c.angleLimitLower = -PxPi;
+                c.angleLimitUpper = PxPi;
+              }
+              
+              // Check for motor/drive
+              // PxRevoluteJointFlag::eDRIVE_ENABLED = 2
+              if (revoluteData->jointFlags & 0x0002) {
+                c.motorEnabled = 1;
+                c.motorTargetVelocity = revoluteData->driveVelocity;
+                c.motorMaxForce = revoluteData->driveForceLimit;
+              } else {
+                c.motorEnabled = 0;
+                c.motorTargetVelocity = 0.0f;
+                c.motorMaxForce = 0.0f;
+              }
+              
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
             }
             break;
@@ -1351,8 +1445,8 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             }
             break;
           }
-        }
-      }
+        }  // end switch (jointType)
+      }  // end else if (jointType != eJOINT_UNKNOWN && ...)
       else if (constraint->constantBlockSize >= sizeof(AvbdSnippetJointData)) {
         const AvbdSnippetJointData *data =
             static_cast<const AvbdSnippetJointData *>(constraint->constantBlock);
@@ -1433,10 +1527,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           }
         }
       }
-    }
+    }  // end else if (AvbdSnippetJointData)
+    }  // end if (constraint && constraint->constantBlock && ...)
     edgeIndex = edge.mNextIslandEdge;
-  }
-}
+  }  // end while (edgeIndex != IG_INVALID_EDGE)
+}  // end prepareAvbdConstraints
 
 //=============================================================================
 // Helper: Get joint axis in world frame

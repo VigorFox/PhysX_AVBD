@@ -151,7 +151,10 @@ private:
       PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
       PxU32 &numPrismatic, PxU32 maxPrismatic,
       AvbdD6JointConstraint *d6Constraints, PxU32 &numD6,
-      PxU32 maxD6, PxU32 islandIndex,
+      PxU32 maxD6, 
+      AvbdGearJointConstraint *gearConstraints, PxU32 &numGear,
+      PxU32 maxGear,
+      PxU32 islandIndex,
       PxU32 *bodyRemapTable);
 
   //-------------------------------------------------------------------------

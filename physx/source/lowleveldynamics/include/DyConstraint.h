@@ -48,6 +48,20 @@ namespace Dy
     #pragma warning(push)
 	#pragma warning( disable : 4324 ) // Padding was added at the end of a structure because of a __declspec(align) value.
 #endif
+// Joint type for AVBD solver (matches PxJointConcreteType values)
+enum ConstraintJointType : PxU8
+{
+	eCONSTRAINT_JOINT_UNKNOWN = 0,
+	eCONSTRAINT_JOINT_SPHERICAL,
+	eCONSTRAINT_JOINT_REVOLUTE,
+	eCONSTRAINT_JOINT_PRISMATIC,
+	eCONSTRAINT_JOINT_FIXED,
+	eCONSTRAINT_JOINT_DISTANCE,
+	eCONSTRAINT_JOINT_D6,
+	eCONSTRAINT_JOINT_GEAR,
+	eCONSTRAINT_JOINT_RACK_AND_PINION
+};
+
 PX_ALIGN_PREFIX(16)
 struct Constraint
 {
@@ -56,7 +70,8 @@ public:
 	PxReal					linBreakForce;
 	PxReal					angBreakForce;
 	PxU16					constantBlockSize;
-	PxU16					flags;
+	PxU8					flags;          // Reduced from PxU16 to PxU8
+	ConstraintJointType		jointType;      // Type of joint for AVBD solver
 
 	PxConstraintSolverPrep	solverPrep;
 	void*					constantBlock;

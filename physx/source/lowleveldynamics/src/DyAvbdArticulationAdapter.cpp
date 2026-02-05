@@ -217,8 +217,10 @@ void AvbdArticulationAdapter::solveForwardDynamics(
   applyJointLimits(bodies, numBodies);
 
   // Solve using AVBD solver
+  // Note: No gear joints for articulation adapter
   solver.solveWithJoints(dt, bodies, numBodies, nullptr, 0, joints, numJoints,
-                        nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, gravity);
+                        nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0,
+                        nullptr, 0, gravity);
 
   // Sync state back to articulation
   syncStateToArticulation();

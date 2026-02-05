@@ -107,6 +107,8 @@ public:
    * @param numPrismatic Number of prismatic joints
    * @param d6Joints Array of D6 joint constraints
    * @param numD6 Number of D6 joints
+   * @param gearJoints Array of gear joint constraints
+   * @param numGear Number of gear joints
    * @param gravity Gravity vector
    * @param contactMap Pre-computed contact-to-body mapping (optional)
    * @param sphericalMap Pre-computed spherical joint mapping (optional)
@@ -114,6 +116,7 @@ public:
    * @param revoluteMap Pre-computed revolute joint mapping (optional)
    * @param prismaticMap Pre-computed prismatic joint mapping (optional)
    * @param d6Map Pre-computed D6 joint mapping (optional)
+   * @param gearMap Pre-computed gear joint mapping (optional)
    * @param colorBatches Pre-computed color batches (nullptr for no coloring)
    * @param numColors Number of colors in colorBatches (0 if not colored)
    */
@@ -125,6 +128,7 @@ public:
       AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
       AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
       const physx::PxVec3 &gravity, 
       const AvbdBodyConstraintMap *contactMap = nullptr,
       const AvbdBodyConstraintMap *sphericalMap = nullptr,
@@ -132,6 +136,7 @@ public:
       const AvbdBodyConstraintMap *revoluteMap = nullptr,
       const AvbdBodyConstraintMap *prismaticMap = nullptr,
       const AvbdBodyConstraintMap *d6Map = nullptr,
+      const AvbdBodyConstraintMap *gearMap = nullptr,
       AvbdColorBatch *colorBatches = nullptr,
       physx::PxU32 numColors = 0);
 
@@ -410,6 +415,15 @@ private:
       physx::PxU32 bodyIndex,
       physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
 
+  /**
+   * @brief Compute angular correction for a gear joint
+   */
+  bool computeGearJointCorrection(
+      const AvbdGearJointConstraint &joint,
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      physx::PxU32 bodyIndex,
+      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+
   //-------------------------------------------------------------------------
   // Member Variables
   //-------------------------------------------------------------------------
@@ -480,12 +494,14 @@ private:
       AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
       AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
       const AvbdBodyConstraintMap &contactMap,
       const AvbdBodyConstraintMap &sphericalMap,
       const AvbdBodyConstraintMap &fixedMap,
       const AvbdBodyConstraintMap &revoluteMap,
       const AvbdBodyConstraintMap &prismaticMap,
       const AvbdBodyConstraintMap &d6Map,
+      const AvbdBodyConstraintMap &gearMap,
       physx::PxReal dt);
 };
 
