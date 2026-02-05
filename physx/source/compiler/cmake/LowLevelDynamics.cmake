@@ -74,8 +74,6 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAllocator.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyArticulationContactPrep.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyArticulationMimicJoint.cpp
-	${LLDYNAMICS_BASE_DIR}/src/DyAvbdArticulationAdapter.cpp
-	${LLDYNAMICS_BASE_DIR}/src/DyAvbdArticulationAdapter.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdBodyConversion.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdConstraint.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdContactPrep.cpp
