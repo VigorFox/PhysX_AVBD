@@ -25,19 +25,21 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 ## AVBD Solver Overview
 
-AVBD is a position-based constraint solver using:
-- **Block Coordinate Descent** - Per-body 6x6 local system solve
-- **Augmented Lagrangian** - Multiplier updates for constraint satisfaction
+This implementation is a **hybrid position-based constraint solver** that combines:
+- **Augmented Lagrangian Method** - Multiplier updates for constraint satisfaction
+- **Per-body Constraint Accumulation** - Lightweight alternative to full 6x6 system solve
 - **Island-level Parallelism** - Independent islands solve concurrently
+
+> ⚠️ **Note**: The default solver path uses a simplified per-constraint correction with weighted averaging, rather than the full 6x6 block system solve described in the original AVBD paper. This provides better performance while maintaining stability. The full 6x6 path is available via `enableLocal6x6Solve` config option. See [SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
 
 ### Comparison with TGS/PGS
 
-| Property | PGS | TGS | AVBD |
-|----------|-----|-----|------|
-| Solve Level | Velocity | Velocity | **Position** |
-| Convergence | Linear | Sublinear | Quadratic |
-| Stack Stability | Fair | Good | **Excellent** |
-| Cost per Iteration | Low | Medium | Medium-High |
+| Property | PGS | TGS | AVBD (default) | AVBD (6x6) |
+|----------|-----|-----|----------------|------------|
+| Solve Level | Velocity | Velocity | **Position** | **Position** |
+| Convergence | Linear | Sublinear | Linear-ish | Quadratic |
+| Stack Stability | Fair | Good | **Excellent** | **Excellent** |
+| Cost per Iteration | Low | Medium | **Low-Medium** | High |
 
 ## Quick Start
 
