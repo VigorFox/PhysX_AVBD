@@ -1,5 +1,30 @@
 # AVBD Solver - Development Notes
 
+## Why AVBD
+
+AVBD (Augmented Variable Block Descent) was introduced into PhysX for the following strategic goals:
+
+1. **High mass-ratio joint stability**: Enable "ultimate hand" gameplay where a kinematic hand (effectively infinite mass) manipulates light objects via joints. TGS/PGS velocity-level solvers suffer from condition number explosion at extreme mass ratios. AVBD's Augmented Lagrangian framework provides mass-ratio-insensitive convergence.
+
+2. **Whole-scene solver**: When AVBD is enabled for ultimate hand joints, it serves as the **sole solver for the entire scene**. All other objects (props, environment, stacked objects) must also solve stably and efficiently under AVBD. Contact stability is therefore a baseline requirement, not a secondary concern.
+
+3. **Multiplayer determinism**: Position-level solvers directly manipulate positions, avoiding the error-accumulation problem of velocity-level integration. This provides better cross-platform floating-point consistency, which is critical for lockstep or state-sync multiplayer architectures.
+
+4. **Cloth & soft body unification**: AVBD's position-level block descent framework naturally extends to deformable bodies. The per-body/per-vertex Jacobi structure maps efficiently to CPU SIMD and GPU compute shaders, enabling a single solver architecture for rigid bodies, cloth, and soft bodies with unified contact handling.
+
+### Roadmap
+
+```
+Contact AL stability (DONE)         Joint AL fix (NEXT)
+  All non-joint objects stable    →    Ultimate hand works
+  AVBD usable as sole solver           High mass-ratio joints stable
+            ↓                                    ↓
+  Lambda warm-starting                 Cloth / soft body / GPU
+  Reduce iterations → perf             Unified solver architecture
+            ↓                                    ↓
+              Multiplayer determinism across all the above
+```
+
 ## Current Configuration
 
 | Parameter            | Value   | Notes                          |

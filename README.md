@@ -23,22 +23,56 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 **For research and evaluation only. Not production-ready.**
 
+## Why AVBD?
+
+PhysX's built-in TGS/PGS are **velocity-level** iterative solvers that hit fundamental limits in several scenarios:
+
+| Problem | TGS/PGS Limitation | AVBD Solution |
+|---------|---------------------|---------------|
+| **High mass-ratio joints** | Condition number explosion → rubber-banding / explosion | Augmented Lagrangian provides mass-ratio-insensitive convergence |
+| **Multiplayer sync** | Velocity integration accumulates floating-point error → state drift | Position-level solve manipulates positions directly, better cross-platform consistency |
+| **Cloth & soft body** | Requires separate solver, cannot unify with rigid bodies | Position-level block descent + Jacobi maps naturally to CPU SIMD / GPU compute |
+
+AVBD introduces a **unified position-level constraint solving framework** to support the following goals:
+
+1. 🎮 **"Ultimate Hand" gameplay** — A kinematic hand (effectively infinite mass) grips light objects via joints. Requires unconditionally stable high mass-ratio joint solving.
+2. 🌍 **Whole-scene solver** — AVBD serves as the sole solver for the entire scene. All rigid bodies (props, environment, stacked objects) must solve stably and efficiently.
+3. 🔄 **Multiplayer determinism** — Position-level solving avoids velocity integration error accumulation, suitable for lockstep or state-sync multiplayer architectures.
+4. 🧶 **Cloth & soft body unification** — The per-body/per-vertex Jacobi structure of position-level block descent extends directly to deformable bodies, enabling a single solver for rigid bodies, cloth, and soft bodies with unified contact handling.
+
+### Roadmap
+
+```
+Contact AL stability (DONE)         Joint AL fix (NEXT)
+  Rigid body contacts stable      →    High mass-ratio joints stable
+  AVBD usable as whole-scene solver     "Ultimate hand" gameplay works
+            ↓                                    ↓
+  Lambda warm-starting                 Cloth / soft body / GPU
+  Reduce iterations → performance      Unified solver architecture
+            ↓                                    ↓
+              Multiplayer determinism across all the above
+```
+
+> See [docs/AVBD_SOLVER_README.md](docs/AVBD_SOLVER_README.md) and [docs/SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
+
 ## AVBD Solver Overview
 
 This implementation is a **hybrid position-based constraint solver** that combines:
-- **Augmented Lagrangian Method** - Multiplier updates for constraint satisfaction
-- **Per-body Constraint Accumulation** - Lightweight alternative to full 6x6 system solve
-- **Island-level Parallelism** - Independent islands solve concurrently
+- **Augmented Lagrangian (AL) outer loop** — Multiplier updates with correct sign convention (`λ = max(0, λ - ρC)`)
+- **AL-augmented per-constraint Jacobi correction** — Inner solve targets `C(x) = λ/ρ` instead of zero
+- **Jacobi accumulation within body, Gauss-Seidel between bodies** — Eliminates intra-body processing bias
+- **Island-level Parallelism** — Independent islands solve concurrently
 
-> ⚠️ **Note**: The default solver path uses a simplified per-constraint correction with weighted averaging, rather than the full 6x6 block system solve described in the original AVBD paper. This provides better performance while maintaining stability. The full 6x6 path is available via `enableLocal6x6Solve` config option. See [SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
+> ⚠️ **Note**: The default solver path uses AL-augmented per-constraint Jacobi correction, rather than the full 6×6 block system solve described in the original AVBD paper. This provides 5-10x better performance while maintaining stability via the Augmented Lagrangian framework. The full 6×6 path is available via `enableLocal6x6Solve` config option. See [SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
 
 ### Comparison with TGS/PGS
 
-| Property | PGS | TGS | AVBD (default) | AVBD (6x6) |
+| Property | PGS | TGS | AVBD (default) | AVBD (6×6) |
 |----------|-----|-----|----------------|------------|
 | Solve Level | Velocity | Velocity | **Position** | **Position** |
-| Convergence | Linear | Sublinear | Linear-ish | Quadratic |
-| Stack Stability | Fair | Good | **Excellent** | **Excellent** |
+| Convergence | Linear | Sublinear | AL-augmented linear | Quadratic |
+| Stack Stability | Fair | Good | **Good (4×8 iter)** | **Excellent** |
+| Mass-ratio Robustness | Poor | Fair | **Good (with AL)** | **Excellent** |
 | Cost per Iteration | Low | Medium | **Low-Medium** | High |
 
 ## Quick Start

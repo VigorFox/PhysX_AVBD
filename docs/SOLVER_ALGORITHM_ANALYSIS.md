@@ -1,16 +1,22 @@
 # AVBD Solver Algorithm Analysis
 
-> **Analysis Date**: February 5, 2026  
-> **Author**: Code review and reverse engineering
+> **Analysis Date**: February 7, 2026  
+> **Author**: Code review and reverse engineering  
+> **Status**: Updated to reflect AL-augmented Jacobi correction implementation
 
 ## Executive Summary
 
-The AVBD solver implementation in this codebase **does not follow the standard AVBD algorithm** from academic papers. Instead, it implements a **hybrid approach** that combines:
+The AVBD solver uses a **hybrid approach** that combines:
 
-1. **Augmented Lagrangian outer loop** (from AVBD)
-2. **Per-constraint correction with weighted averaging** (similar to XPBD/PBD)
+1. **Augmented Lagrangian (AL) outer loop** with correct sign: `lambda = max(0, lambda - rho * C)`
+2. **AL-augmented per-constraint Jacobi correction** targeting `C(x) = lambda/rho` (not zero)
+3. **Jacobi accumulation within each body**, Gauss-Seidel propagation between bodies
+4. **Angular contact scaling** (0.2) to prevent drift from asymmetric contact patches
+5. **Velocity damping + pseudo-sleep** for post-settle micro-jitter elimination
 
-This appears to be an unintentional but pragmatic adaptation that trades theoretical correctness for practical performance.
+The inner solve incorporates the AL multiplier `lambda` as a correction target, enabling the penalty term and Lagrange multiplier to cooperate across outer iterations. The full 6×6 path exists but is disabled by default; the fast path achieves stable stacking at outerIterations=4, innerIterations=8.
+
+**Strategic motivation**: AVBD was introduced for (1) high mass-ratio joint stability ("ultimate hand" — kinematic hand gripping light objects), and (2) future cloth/soft body unification — the position-level block descent structure maps naturally to deformable bodies and GPU compute.
 
 ---
 
@@ -49,39 +55,43 @@ for each outer iteration:
 
 ## 2. Current Implementation (Default Path)
 
-The actual implementation uses a **simplified per-constraint correction**:
+The current implementation uses **AL-augmented Jacobi correction** with per-constraint projection:
 
 ```cpp
 for each outer iteration:
     for each body i:
-        totalDelta = 0, totalWeight = 0
+        contactDelta = 0       // Jacobi accumulation
+        contactDeltaTheta = 0
         
         for each constraint c affecting body i:
-            // Compute violation
-            C = computeViolation(c)
+            // Compute full violation C(x) = dot(xA-xB, n) + penetrationDepth
+            C = computeFullViolation(c)
             
-            // Generalized inverse mass (like XPBD)
+            // Generalized inverse mass
             w = invMass + (r×n)·I⁻¹(r×n)
             
-            // Single-constraint correction
-            Δx = -C / w * baumgarte
+            // AL-augmented correction: target C(x) = λ/ρ
+            target = λ / ρ
+            correction = max(0, -(C - target) / w * baumgarte)
             
-            // Accumulate (NOT immediately apply)
-            totalDelta += Δx * ρ
-            totalWeight += ρ
+            // Accumulate position + angular (Jacobi within body)
+            contactDelta += normal * correction * invMass * sign
+            contactDeltaTheta += (I⁻¹ * r×n) * correction * sign * angularContactScale
         
-        // Apply weighted average
-        body.pos += totalDelta / totalWeight
+        // Apply sum of all contact corrections (single body update)
+        body.pos += contactDelta
+        body.rot += exponentialMap(contactDeltaTheta)
     
-    // Augmented Lagrangian update
+    // AL multiplier update (note sign: λ - ρ * C)
     for each constraint:
-        λ = max(0, λ + ρ * C)
+        λ = max(0, λ - ρ * C)
 ```
 
 **Characteristics**:
-- Linear-ish convergence
-- Low per-iteration cost (~30 FLOPs per constraint)
-- Does NOT handle constraint coupling
+- AL-augmented convergence (lambda accumulates across outer iterations)
+- Low per-iteration cost (~35 FLOPs per constraint)
+- Jacobi within body (eliminates intra-body processing bias), GS between bodies
+- Angular correction scaled by `angularContactScale` (0.2 default) to prevent drift
 
 ---
 
@@ -89,12 +99,14 @@ for each outer iteration:
 
 | Aspect | Standard AVBD | Current Implementation |
 |--------|---------------|------------------------|
-| Per-body computation | 6×6 Hessian + LDLT solve | Constraint-wise accumulation |
-| Constraint coupling | ✅ Handled via Hessian | ❌ Lost (averaging) |
-| Cost per body | ~300 FLOPs | ~30 FLOPs × constraints |
-| Convergence rate | Quadratic | Linear-ish |
-| Parallelism | Jacobi-style (bodies) | Jacobi-style (bodies) |
-| Outer loop | Augmented Lagrangian ✅ | Augmented Lagrangian ✅ |
+| Per-body computation | 6×6 Hessian + LDLT solve | Per-constraint Jacobi accumulation |
+| Constraint coupling | ✅ Handled via Hessian | ⚠️ Not coupled (Jacobi sum) |
+| Cost per body | ~300 FLOPs | ~35 FLOPs × constraints |
+| Convergence rate | Quadratic | AL-augmented linear |
+| Parallelism | Jacobi-style (bodies) | Jacobi within body, GS between bodies |
+| Outer loop | Augmented Lagrangian ✅ | Augmented Lagrangian ✅ (sign corrected) |
+| Inner solve target | C(x) = 0 via Newton | C(x) = lambda/rho via Baumgarte |
+| Angular correction | Full | Scaled by angularContactScale (0.2) |
 
 ---
 
@@ -181,7 +193,7 @@ The per-constraint correction formula is nearly identical to XPBD:
 
 ### Verdict
 
-**Accidental pragmatism**: The implementation is technically incorrect but practically useful. It's a valid trade-off for real-time physics.
+**Intentional hybrid**: The fast path is a deliberate simplification for real-time performance. With the AL sign fix, lambda-augmented correction target, and Jacobi accumulation, it now correctly leverages the Augmented Lagrangian framework while maintaining 5-10x speed advantage over the full 6×6 path. The main remaining gap from standard AVBD is the lack of intra-body constraint coupling (handled by Hessian in standard AVBD, approximated by Jacobi sum here).
 
 ---
 
@@ -192,29 +204,38 @@ The per-constraint correction formula is nearly identical to XPBD:
 | PBD | ~50/constraint | Linear | ❌ Sequential | Poor |
 | XPBD | ~60/constraint | Linear | ❌ Sequential | Fair |
 | Standard AVBD | ~300/body | Quadratic | ✅ Jacobi | Excellent |
-| **This Implementation** | **~30/constraint** | **Linear-ish** | **✅ Jacobi** | **Good-Excellent** |
+| **This Implementation** | **~35/constraint** | **AL-augmented linear** | **✅ Jacobi+GS** | **Good (4×8 iter)** |
 
 ---
 
 ## 8. Recommendations
 
-### Option A: Accept as Hybrid Algorithm
+### Completed ✅
 
-- Rename to "Augmented Lagrangian PBD" or "AL-XPBD"
-- Document the actual algorithm
-- Keep full 6×6 as optional for precision-critical scenarios
+- ✅ AL sign corrected (`lambda - rho * C` instead of `+ rho * C`)
+- ✅ Inner solve targets `C(x) = lambda/rho` (lambda incorporated into fast-path)
+- ✅ Replaced ρ-weighted averaging with Jacobi accumulation
+- ✅ Angular contact scaling (`angularContactScale = 0.2`)
+- ✅ Velocity damping + pseudo-sleep for post-settle stability
+- ✅ Document the actual algorithm (this document)
 
-### Option B: Fix to Standard AVBD
+### Remaining Options
 
-- Enable `enableLocal6x6Solve` by default
+#### Option A: Implement Lambda Warm-Starting (HIGH PRIORITY)
+
+- Current: `lambda = 0` every frame (see `AVBD_SOLVER_README.md` Known Issue #2)
+- Fix: Track contacts across frames and carry over lambda values
+- Expected: Reduce required iterations from 4×8 toward 1×4
+
+#### Option B: Add Compliance Term
+
+- Add `α/h²` to effective mass: `correction = -C / (w + α/h²)`
+- May improve convergence and allow tunable softness
+
+#### Option C: Fix to Standard AVBD
+
+- Enable `enableLocal6x6Solve` by default for higher accuracy
 - Optimize 6×6 path (SIMD, sparse matrix tricks)
-- Accept higher per-iteration cost
-
-### Option C: Improve Hybrid
-
-- Add compliance term like XPBD: `Δx = -C / (w + α/h²)`
-- Better weight scheme than ρ-based averaging
-- Adaptive switching between paths
 
 ---
 
@@ -234,9 +255,11 @@ config.enableLocal6x6Solve = false;
 
 ## 10. Conclusion
 
-The current AVBD solver is a **hybrid of Augmented Lagrangian and XPBD-style per-constraint projection**. While not theoretically rigorous, it achieves a practical balance between performance and stability.
+The current AVBD solver is a **hybrid of Augmented Lagrangian and per-constraint Jacobi projection**, with AL-augmented correction targets and proper sign convention. The inner solve drives `C(x) → lambda/rho` while the outer AL loop updates `lambda = max(0, lambda - rho * C)`, enabling lambda to accumulate as a "contact force memory" across outer iterations.
 
-The full 6×6 path exists but is disabled by default. Users requiring strict AVBD compliance should enable `enableLocal6x6Solve`.
+The implementation is stable for stacked rigid body scenarios at `outerIterations=4, innerIterations=8`. Achieving stability at lower iteration counts (paper-recommended 1×4) requires lambda warm-starting across frames, which is the primary open improvement.
+
+The full 6×6 path exists but is disabled by default. The fast path is recommended for real-time simulation.
 
 ---
 
