@@ -165,6 +165,11 @@ struct AvbdSolverConfig {
                                     //!< rotation (meters, default 0.001)
   physx::PxReal angularScale;      //!< Scale factor for angular velocity from
                                     //!< torque (default 800)
+  physx::PxReal angularContactScale; //!< Scale for angular correction from
+                                      //!< contact normals (0-1, default 0.2).
+                                      //!< Reduced scale prevents drift from
+                                      //!< asymmetric contact patches while
+                                      //!< maintaining rotational stiffness.
   physx::PxReal
       baumgarte; //!< Baumgarte position correction factor (0-1, default 0.2)
 
@@ -218,11 +223,11 @@ struct AvbdSolverConfig {
   //-------------------------------------------------------------------------
 
   AvbdSolverConfig()
-      : outerIterations(2), innerIterations(4), initialRho(1e4f),
+      : outerIterations(1), innerIterations(4), initialRho(1e4f),
         rhoScale(2.0f), maxRho(1e8f), defaultCompliance(1e-6f),
         contactCompliance(0.0f), jointCompliance(1e-8f), damping(0.5f),
         angularDamping(0.95f), rotationThreshold(0.001f), angularScale(400.0f),
-        baumgarte(0.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        angularContactScale(0.2f), baumgarte(0.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
         maxLambda(1e6f), enableParallelization(true), enableLocal6x6Solve(false),
         enableMassWeightedWeld(false),
@@ -362,8 +367,8 @@ struct AvbdGraphColoring {
  * @brief 6x6 block matrix for rigid body local solve
  *
  * Represents the local Hessian contribution for a single body:
- *   H = [ M/h²  0    ]
- *       [ 0     I/h² ]
+ *   H = [ M/h^2  0    ]
+ *       [ 0     I/h^2 ]
  * Plus constraint contributions from connected bodies.
  */
 struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
@@ -406,14 +411,14 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
   initializeDiagonal(physx::PxReal invMass,
                      const physx::PxMat33 & /*invInertia*/,
                      physx::PxReal invDtSq) {
-    // M/h² and I/h² on diagonal
+    // M/h^2 and I/h^2 on diagonal
     physx::PxReal massContrib =
         (invMass > 0.0f) ? (1.0f / invMass) * invDtSq : 0.0f;
     linearLinear = physx::PxMat33(physx::PxVec3(massContrib, 0, 0),
                                    physx::PxVec3(0, massContrib, 0),
                                    physx::PxVec3(0, 0, massContrib));
 
-    // For inertia, we need I/h² (not inverse)
+    // For inertia, we need I/h^2 (not inverse)
     // This is a simplification - full implementation would compute I from invI
     linearAngular = physx::PxMat33(physx::PxZero);
     angularLinear = physx::PxMat33(physx::PxZero);
@@ -743,7 +748,7 @@ struct AvbdKahanAccumulator {
 /**
  * @brief Pre-computed constraint-to-body mapping for O(1) constraint lookup
  * 
- * This structure eliminates O(N²) complexity in the solver by pre-computing
+ * This structure eliminates O(N^2) complexity in the solver by pre-computing
  * which constraints affect each body. Instead of iterating all constraints
  * for each body, we can directly access only the relevant constraints.
  */

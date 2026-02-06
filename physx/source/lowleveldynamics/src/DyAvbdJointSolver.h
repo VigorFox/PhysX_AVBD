@@ -1,4 +1,4 @@
-﻿// Redistribution and use in source and binary forms, with or without
+// Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
 // are met:
 //  * Redistributions of source code must retain the above copyright
@@ -285,7 +285,7 @@ applyPositionCorrection(AvbdSolverBody &body,
 
   // Update rotation using quaternion derivative
   // q' = q + 0.5 * dt * omega_quat * q
-  // For small angles: dq 鈮?[0.5 * delta, 1]
+  // For small angles: dq ~= [0.5 * delta, 1]
   physx::PxQuat deltaQ(angularDelta.x * 0.5f, angularDelta.y * 0.5f,
                         angularDelta.z * 0.5f, 1.0f);
   body.rotation = (deltaQ * body.rotation).getNormalized();

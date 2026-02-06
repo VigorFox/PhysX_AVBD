@@ -195,7 +195,9 @@ private:
    * @brief Solve local 6x6 system for a single body
    * Minimizes: 1/(2h^2) * ||M(x - x_tilde)||^2 + Sum constraint_energy
    */
-  void solveLocalSystem(AvbdSolverBody &body, AvbdContactConstraint *contacts,
+  void solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
+                        physx::PxU32 numBodies,
+                        AvbdContactConstraint *contacts,
                         physx::PxU32 numContacts, physx::PxReal dt,
                         physx::PxReal invDt2);
 
@@ -310,6 +312,8 @@ private:
    * @brief Build Hessian matrix for a body's local system
    */
   void buildHessianMatrix(const AvbdSolverBody &body,
+                          AvbdSolverBody *bodies,
+                          physx::PxU32 numBodies,
                           AvbdContactConstraint *contacts,
                           physx::PxU32 numContacts,
                           physx::PxReal invDt2,
@@ -319,6 +323,8 @@ private:
    * @brief Build gradient vector for a body's local system
    */
   void buildGradientVector(const AvbdSolverBody &body,
+                          AvbdSolverBody *bodies,
+                          physx::PxU32 numBodies,
                           AvbdContactConstraint *contacts,
                           physx::PxU32 numContacts,
                           physx::PxReal invDt2,
@@ -572,8 +578,12 @@ inline physx::PxReal
 AvbdSolver::computeContactViolation(const AvbdContactConstraint &contact,
                                     const AvbdSolverBody &bodyA,
                                     const AvbdSolverBody &bodyB) {
-  return contact.computeViolation(bodyA.position, bodyA.rotation,
-                                  bodyB.position, bodyB.rotation);
+  // Use fullViolation (geometric gap + penetrationDepth) so that the AL
+  // update sees the SAME constraint function as the inner solve.
+  // Without this, the inner solve drives fullViolation->0 which makes
+  // geometricViolation > 0, causing lambda to be clamped to 0 forever.
+  return contact.computeFullViolation(bodyA.position, bodyA.rotation,
+                                      bodyB.position, bodyB.rotation);
 }
 
 inline physx::PxReal
@@ -587,7 +597,7 @@ AvbdSolver::computeContactEnergy(const AvbdContactConstraint &contact,
     return 0.0f;
   }
 
-  // Augmented Lagrangian energy: E = 0.5 * rho * C² + lambda * C
+  // Augmented Lagrangian energy: E = 0.5 * rho * C^2 + lambda * C
   physx::PxReal rho = contact.header.rho;
   physx::PxReal lambda = contact.header.lambda;
 

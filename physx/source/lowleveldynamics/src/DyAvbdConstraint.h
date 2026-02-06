@@ -104,7 +104,7 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
  * @brief Contact constraint for AVBD solver
  *
  * Represents a unilateral (inequality) contact constraint:
- *   C(x) = (pA - pB) · n - d >= 0
+ *   C(x) = (pA - pB) . n - d >= 0
  *
  * Where:
  *   - pA, pB are contact points on bodies A and B
@@ -120,7 +120,7 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
 
   physx::PxVec3 contactPointA; //!< Contact point on body A (local space)
   physx::PxReal
-      penetrationDepth; //!< Current penetration depth (negative = separated)
+      penetrationDepth; //!< Contact separation from narrow phase (negative = penetrating)
 
   physx::PxVec3 contactPointB; //!< Contact point on body B (local space)
   physx::PxReal restitution;   //!< Coefficient of restitution
@@ -142,13 +142,51 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   // Methods
   //-------------------------------------------------------------------------
 
+  //-------------------------------------------------------------------------
+  // Constraint violation design:
+  //
+  //   The solver uses TWO constraint evaluations for different purposes:
+  //
+  //   1. computeViolation() = (worldPointA - worldPointB).dot(n)
+  //      Pure geometric signed gap. Utility function for sub-components.
+  //
+  //   2. computeFullViolation() = computeViolation() + penetrationDepth
+  //      Geometric gap + narrow-phase offset. This is the CANONICAL
+  //      constraint function C(x) used consistently by:
+  //        - Inner solve position correction (all paths)
+  //        - AL multiplier update: lambda = max(0, lambda - rho * C)
+  //        - 6x6 path Hessian/gradient
+  //        - Constraint energy computation
+  //
+  //   IMPORTANT: The AL update and inner solve MUST use the same violation
+  //   function. If AL uses computeViolation() while the inner solve uses
+  //   computeFullViolation(), the inner solve drives fullViolation->0 which
+  //   leaves geometricViolation ~= -penetrationDepth > 0. The AL then sees
+  //   a positive violation and clamps lambda to 0 every iteration, making
+  //   the Augmented Lagrangian mechanism completely non-functional.
+  //
+  //   The inner solve correction targets C(x) = lambda/rho (not 0):
+  //     correctionMag = -(C(x) - lambda/rho) / w * baumgarte
+  //   This lets lambda act as a "contact force memory" that accumulates
+  //   across outer iterations, enabling convergence with fewer iterations.
+  //
+  //   Sign convention:
+  //     contactNormal points from B toward A
+  //     C < 0 => penetration (violated); C >= 0 => separated (satisfied)
+  //     Inequality enforced: C >= 0
+  //     AL update: lambda = max(0, lambda - rho * C_full)
+  //       C < 0 (penetrating) => lambda increases (builds contact force)
+  //       C > 0 (separated)   => lambda decreases toward 0
+  //-------------------------------------------------------------------------
+
   /**
-   * @brief Compute constraint violation C(x)
-   * @param posA World position of body A
-   * @param rotA World rotation of body A
-   * @param posB World position of body B
-   * @param rotB World rotation of body B
-   * @return Constraint violation (negative = penetration)
+   * @brief Compute geometric constraint gap (no penetrationDepth bias)
+   *
+   * C_geom(x) = (worldPointA - worldPointB).dot(n)
+   *
+   * Sub-component of computeFullViolation(). On its own, this only gives
+   * the geometric gap without the narrow-phase offset. Most solver paths
+   * should use computeFullViolation() instead.
    */
   PX_FORCE_INLINE physx::PxReal
   computeViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
@@ -157,6 +195,27 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
     physx::PxVec3 worldPointA = posA + rotA.rotate(contactPointA);
     physx::PxVec3 worldPointB = posB + rotB.rotate(contactPointB);
     return (worldPointA - worldPointB).dot(contactNormal);
+  }
+
+  /**
+   * @brief Compute full constraint violation including penetrationDepth
+   *
+   * C_full(x) = (worldPointA - worldPointB).dot(n) + penetrationDepth
+   *
+   * Used by inner solve paths (fast, slow, 6x6) that need the initial
+   * offset for penetration detection and correction computation.
+   *
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
+   * @return Full violation (negative = penetrating)
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeFullViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                       const physx::PxVec3 &posB,
+                       const physx::PxQuat &rotB) const {
+    return computeViolation(posA, rotA, posB, rotB) + penetrationDepth;
   }
 
   /**
@@ -185,10 +244,19 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   }
 
   /**
-   * @brief Check if this is an active (penetrating) contact
+   * @brief Check if this is an active (penetrating or has multiplier) contact
+   * Uses full violation C(x) = dot(xA-xB, n) + penetrationDepth
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
    */
-  PX_FORCE_INLINE bool isActive() const {
-    return penetrationDepth < 0.0f || header.lambda > 0.0f;
+  PX_FORCE_INLINE bool isActive(const physx::PxVec3 &posA,
+                                const physx::PxQuat &rotA,
+                                const physx::PxVec3 &posB,
+                                const physx::PxQuat &rotB) const {
+    return computeFullViolation(posA, rotA, posB, rotB) < 0.0f ||
+           header.lambda > 0.0f;
   }
 
   /**
@@ -904,7 +972,7 @@ struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
  *   - Free axis: 1 translation DOF along the slide axis
  *
  * The constraint energy is:
- *   E = 0.5/α * ||C||² + λᵀC
+ *   E = 0.5/alpha * ||C||^2 + lambda^T * C
  *
  * Where C includes:
  *   - Perpendicular position error (2D)
@@ -1041,7 +1109,7 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
  * Angular DOFs (3): Rotation around X, Y, Z axes
  *
  * The constraint energy is:
- *   E = 0.5/α * ||C||² + λᵀC
+ *   E = 0.5/alpha * ||C||^2 + lambda^T * C
  *
  * Where C includes:
  *   - Locked linear DOFs (position error)

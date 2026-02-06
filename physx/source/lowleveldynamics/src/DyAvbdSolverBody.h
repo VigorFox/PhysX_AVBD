@@ -56,11 +56,11 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
   physx::PxQuat rotation; //!< Current iteration rotation q_k (quaternion)
 
   //-------------------------------------------------------------------------
-  // Predicted state (x̃, q̃) from explicit integration
+  // Predicted state (x~, q~) from explicit integration
   //-------------------------------------------------------------------------
 
   physx::PxVec3
-      predictedPosition; //!< Predicted position: x̃ = x_n + h*v_n + h²*f_ext/m
+      predictedPosition; //!< Predicted position: x~ = x_n + h*v_n + h^2*f_ext/m
   physx::PxReal padding0; //!< Padding for 16-byte alignment
 
   physx::PxQuat predictedRotation; //!< Predicted rotation from angular
@@ -73,7 +73,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
   physx::PxVec3 linearVelocity; //!< Linear velocity v
   physx::PxReal padding1;
 
-  physx::PxVec3 angularVelocity; //!< Angular velocity ω
+  physx::PxVec3 angularVelocity; //!< Angular velocity omega
   physx::PxReal padding2;
 
   //-------------------------------------------------------------------------
@@ -132,7 +132,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
 
   /**
    * @brief Compute predicted position from current velocity
-   * x̃ = x_n + h*v + h²*gravity/m (if not static)
+   * x~ = x_n + h*v + h^2*gravity/m (if not static)
    */
   PX_FORCE_INLINE void computePrediction(physx::PxReal dt,
                                          const physx::PxVec3 &gravity) {
@@ -167,7 +167,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
     // would wipe out our torque contributions because rotation isn't updated
     // until AFTER this stage.
     /*
-    // ω = 2 * (q_new * q_n^-1).xyz / dt
+    // omega = 2 * (q_new * q_n^-1).xyz / dt
     physx::PxQuat deltaQ = rotation * prevRotation.getConjugate();
     if (deltaQ.w < 0.0f) {
       deltaQ = -deltaQ; // Ensure shortest path

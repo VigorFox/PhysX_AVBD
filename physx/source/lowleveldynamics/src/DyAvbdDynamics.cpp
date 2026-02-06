@@ -678,8 +678,8 @@ void AvbdDynamicsContext::update(
   // 4. Initialize Solver
   if (!mSolverInitialized && mAllocatorCallback) {
     AvbdSolverConfig config;
-    config.outerIterations = 2;
-    config.innerIterations = 4;
+    config.outerIterations = 4;
+    config.innerIterations = 8;
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
     config.maxRho = AvbdConstants::AVBD_MAX_PENALTY_RHO;
     config.baumgarte = 0.3f;
@@ -872,7 +872,7 @@ void AvbdDynamicsContext::update(
     batch.numColors = 0;
     
     // Build constraint-to-body mappings for O(1) lookup in solver
-    // This eliminates O(N²) complexity in the inner loop
+    // This eliminates O(N^2) complexity in the inner loop
     if (batch.numBodies > 0) {
       PxAllocatorCallback& allocator = *reinterpret_cast<PxAllocatorCallback*>(mAllocatorCallback);
       if (batch.numConstraints > 0 && batch.constraints) {
