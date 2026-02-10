@@ -31,10 +31,10 @@
 #include "DyAvbdSolver.h"
 #include "DyAvbdSolverBody.h"
 #include "DyAvbdTypes.h"
+#include "DyFeatherstoneArticulation.h"
 #include "foundation/PxSimpleTypes.h"
 #include "task/PxTask.h"
 #include <cstdio>
-#include "DyFeatherstoneArticulation.h"
 
 namespace physx {
 
@@ -85,7 +85,7 @@ struct AvbdIslandBatch {
   AvbdColorBatch
       *colorBatches; //!< Array of color batches (nullptr if not colored)
   PxU32 numColors;   //!< Number of colors used (0 if not colored)
-  
+
   // Pre-computed constraint-to-body mappings for O(1) lookup
   // These are built once per island and reused across solver iterations
   AvbdBodyConstraintMap contactMap;
@@ -126,21 +126,30 @@ public:
         mGravity(gravity) {}
 
   virtual void run() override {
-    // Use solveWithJoints to handle all constraint types
-    // Pass pre-computed constraint mappings for O(M) optimization
-    mSolver.solveWithJoints(
-        mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
-        mBatch.numConstraints, mBatch.sphericalJoints, mBatch.numSpherical,
-        mBatch.fixedJoints, mBatch.numFixed, mBatch.revoluteJoints,
-        mBatch.numRevolute, mBatch.prismaticJoints, mBatch.numPrismatic,
-        mBatch.d6Joints, mBatch.numD6,
-        mBatch.gearJoints, mBatch.numGear,
-        mGravity,
-        &mBatch.contactMap, &mBatch.sphericalMap, &mBatch.fixedMap,
-        &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map, &mBatch.gearMap,
-        mBatch.colorBatches, mBatch.numColors);
+    // Check if we have any joint constraints
+    const bool hasJoints = (mBatch.numSpherical > 0 || mBatch.numFixed > 0 ||
+                            mBatch.numRevolute > 0 || mBatch.numPrismatic > 0 ||
+                            mBatch.numD6 > 0 || mBatch.numGear > 0);
+
+    if (hasJoints) {
+      // Use full joint solver
+      mSolver.solveWithJoints(
+          mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+          mBatch.numConstraints, mBatch.sphericalJoints, mBatch.numSpherical,
+          mBatch.fixedJoints, mBatch.numFixed, mBatch.revoluteJoints,
+          mBatch.numRevolute, mBatch.prismaticJoints, mBatch.numPrismatic,
+          mBatch.d6Joints, mBatch.numD6, mBatch.gearJoints, mBatch.numGear,
+          mGravity, &mBatch.contactMap, &mBatch.sphericalMap, &mBatch.fixedMap,
+          &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map,
+          &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors);
+    } else {
+      // Optimized contact-only path using external contactMap for thread safety
+      mSolver.solve(mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+                    mBatch.numConstraints, mGravity, &mBatch.contactMap,
+                    mBatch.colorBatches, mBatch.numColors);
+    }
   }
-  
+
   virtual void release() override;
 
   virtual const char *getName() const override { return "AvbdSolveIslandTask"; }
@@ -160,11 +169,10 @@ class AvbdWriteBackTask : public AvbdTask {
 public:
   AvbdWriteBackTask(AvbdDynamicsContext &context, AvbdSolverBody *avbdBodies,
                     PxsRigidBody **rigidBodies, PxU32 numBodies,
-                    FeatherstoneArticulation** articulationForBody = nullptr,
-                    PxU32* linkIndexForBody = nullptr)
+                    FeatherstoneArticulation **articulationForBody = nullptr,
+                    PxU32 *linkIndexForBody = nullptr)
       : AvbdTask(context), mAvbdBodies(avbdBodies), mRigidBodies(rigidBodies),
-        mNumBodies(numBodies), 
-        mArticulationForBody(articulationForBody),
+        mNumBodies(numBodies), mArticulationForBody(articulationForBody),
         mLinkIndexForBody(linkIndexForBody) {}
 
   virtual void run() override; // Implemented in cpp
@@ -175,8 +183,8 @@ private:
   AvbdSolverBody *mAvbdBodies;
   PxsRigidBody **mRigidBodies;
   PxU32 mNumBodies;
-  FeatherstoneArticulation** mArticulationForBody;
-  PxU32* mLinkIndexForBody;
+  FeatherstoneArticulation **mArticulationForBody;
+  PxU32 *mLinkIndexForBody;
 };
 
 //=============================================================================
@@ -188,8 +196,7 @@ public:
   AvbdCoordinatorTask(AvbdDynamicsContext &context, PxBaseTask *continuation)
       : AvbdTask(context), mContinuation(continuation) {}
 
-  virtual void run() override {
-  }
+  virtual void run() override {}
 
   virtual const char *getName() const override { return "AvbdCoordinatorTask"; }
 
@@ -218,17 +225,16 @@ public:
                                                       dt, gravity);
   }
 
-  AvbdWriteBackTask *createWriteBackTask(AvbdDynamicsContext &context,
-                                         AvbdSolverBody *avbdBodies,
-                                         PxsRigidBody **rigidBodies,
-                                         PxU32 numBodies,
-                                         FeatherstoneArticulation** articulationForBody = nullptr,
-                                         PxU32* linkIndexForBody = nullptr) {
+  AvbdWriteBackTask *
+  createWriteBackTask(AvbdDynamicsContext &context, AvbdSolverBody *avbdBodies,
+                      PxsRigidBody **rigidBodies, PxU32 numBodies,
+                      FeatherstoneArticulation **articulationForBody = nullptr,
+                      PxU32 *linkIndexForBody = nullptr) {
     void *mem = mAllocator.allocate(sizeof(AvbdWriteBackTask),
                                     "AvbdWriteBackTask", __FILE__, __LINE__);
-    return PX_PLACEMENT_NEW(mem, AvbdWriteBackTask)(context, avbdBodies,
-                                                    rigidBodies, numBodies,
-                                                    articulationForBody, linkIndexForBody);
+    return PX_PLACEMENT_NEW(mem, AvbdWriteBackTask)(
+        context, avbdBodies, rigidBodies, numBodies, articulationForBody,
+        linkIndexForBody);
   }
 
   AvbdCoordinatorTask *createCoordinatorTask(AvbdDynamicsContext &context,

@@ -32,8 +32,8 @@
 #include "foundation/PxVec3.h"
 
 #pragma warning(push)
-#pragma warning(                                                               \
-    disable : 4324) // Structure was padded due to alignment specifier
+#pragma warning(disable                                                        \
+                : 4324) // Structure was padded due to alignment specifier
 
 namespace physx {
 
@@ -55,10 +55,11 @@ struct AvbdConstraintType {
     eJOINT_PRISMATIC, //!< Prismatic (slider) joint
     eJOINT_FIXED,     //!< Fixed joint (all DOF locked)
     eJOINT_D6,        //!< Configurable 6-DOF joint
-    eJOINT_WELD,      //!< Weld joint (optimized for runtime attachment, e.g., "Ultrahand")
-    eJOINT_GEAR,      //!< Gear joint (angular ratio constraint between two hinges)
-    eSOFT_DISTANCE,   //!< Soft body distance constraint
-    eSOFT_VOLUME,     //!< Soft body volume preservation
+    eJOINT_WELD,      //!< Weld joint (optimized for runtime attachment, e.g.,
+                      //!< "Ultrahand")
+    eJOINT_GEAR, //!< Gear joint (angular ratio constraint between two hinges)
+    eSOFT_DISTANCE, //!< Soft body distance constraint
+    eSOFT_VOLUME,   //!< Soft body volume preservation
 
     eCOUNT
   };
@@ -86,10 +87,11 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
   physx::PxU16 flags;      //!< Constraint flags
 
   physx::PxReal compliance; //!< Constraint compliance (inverse stiffness), 0
-                             //!< for hard constraint
+                            //!< for hard constraint
   physx::PxReal damping; //!< Damping coefficient for velocity-dependent forces
   physx::PxReal lambda;  //!< Augmented Lagrangian multiplier
-  physx::PxReal rho;     //!< Penalty parameter for ALM
+  physx::PxReal rho;     //!< Fixed penalty parameter (material stiffness upper bound)
+  physx::PxReal penalty; //!< Adaptive penalty parameter (grows via beta*|C|, ref AVBD3D Eq.16)
 
   physx::PxU16 colorGroup; //!< Color group for parallel solving
   physx::PxU16 padding0;   //!< Padding for alignment
@@ -97,7 +99,7 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
   PX_FORCE_INLINE AvbdConstraintHeader()
       : bodyIndexA(0xFFFFFFFF), bodyIndexB(0xFFFFFFFF),
         type(AvbdConstraintType::eNONE), flags(0), compliance(0.0f),
-        damping(0.0f), lambda(0.0f), rho(0.0f), colorGroup(0), padding0(0) {}
+        damping(0.0f), lambda(0.0f), rho(0.0f), penalty(0.0f), colorGroup(0), padding0(0) {}
 } PX_ALIGN_SUFFIX(16);
 
 /**
@@ -118,9 +120,9 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   // Contact geometry
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 contactPointA; //!< Contact point on body A (local space)
-  physx::PxReal
-      penetrationDepth; //!< Contact separation from narrow phase (negative = penetrating)
+  physx::PxVec3 contactPointA;    //!< Contact point on body A (local space)
+  physx::PxReal penetrationDepth; //!< Contact separation from narrow phase
+                                  //!< (negative = penetrating)
 
   physx::PxVec3 contactPointB; //!< Contact point on body B (local space)
   physx::PxReal restitution;   //!< Coefficient of restitution
@@ -137,6 +139,28 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
 
   physx::PxVec3 tangent1;       //!< Second friction tangent direction
   physx::PxReal tangentLambda1; //!< Lambda for second friction direction
+
+  //-------------------------------------------------------------------------
+  // Per-row penalty for 3-row AL friction model (ref: AVBD3D)
+  // Each constraint row (normal + 2 tangent) has its own penalty that
+  // grows independently via beta*|C| in the dual update.
+  //-------------------------------------------------------------------------
+
+  physx::PxReal tangentPenalty0; //!< Adaptive penalty for tangent direction 0
+  physx::PxReal tangentPenalty1; //!< Adaptive penalty for tangent direction 1
+
+  //-------------------------------------------------------------------------
+  // Lambda warm-starting cache index
+  //-------------------------------------------------------------------------
+
+  physx::PxU32 cacheIndex; //!< Index into lambda cache for warm-starting
+                           //!< (PX_MAX_U32 = not cached)
+
+  //-------------------------------------------------------------------------
+  // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
+  //-------------------------------------------------------------------------
+
+  physx::PxReal C0; //!< Initial normal constraint violation at step start
 
   //-------------------------------------------------------------------------
   // Methods
@@ -190,8 +214,7 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
    */
   PX_FORCE_INLINE physx::PxReal
   computeViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
-                   const physx::PxVec3 &posB,
-                   const physx::PxQuat &rotB) const {
+                   const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
     physx::PxVec3 worldPointA = posA + rotA.rotate(contactPointA);
     physx::PxVec3 worldPointB = posB + rotB.rotate(contactPointB);
     return (worldPointA - worldPointB).dot(contactNormal);
@@ -264,43 +287,38 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
    * E = 0.5 * rho * C^2 + lambda * C
    */
   PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
-      const physx::PxVec3 &posA,
-      const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB,
-      const physx::PxQuat &rotB) const {
-    
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
     physx::PxReal violation = computeViolation(posA, rotA, posB, rotB);
-    
+
     // For inequality constraint (contact), only penalize if violating
     if (violation >= 0.0f && header.lambda <= 0.0f) {
       return 0.0f;
     }
-    
+
     // Augmented Lagrangian energy: E = 0.5 * rho * C^2 + lambda * C
     physx::PxReal rho = header.rho;
     physx::PxReal lambda = header.lambda;
-    
+
     return 0.5f * rho * violation * violation + lambda * violation;
   }
 
   /**
    * @brief Compute energy gradient w.r.t. body positions and rotations
    */
-  PX_FORCE_INLINE void computeEnergyGradient(
-      const physx::PxVec3 &posA,
-      const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB,
-      const physx::PxQuat &rotB,
-      physx::PxVec3 &gradPosA,
-      physx::PxVec3 &gradRotA,
-      physx::PxVec3 &gradPosB,
-      physx::PxVec3 &gradRotB) const {
-    
+  PX_FORCE_INLINE void
+  computeEnergyGradient(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                        const physx::PxVec3 &posB, const physx::PxQuat &rotB,
+                        physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
+                        physx::PxVec3 &gradPosB,
+                        physx::PxVec3 &gradRotB) const {
+
     physx::PxReal violation = computeViolation(posA, rotA, posB, rotB);
-    
+
     // Constraint force: F = rho * C + lambda
     physx::PxReal force = header.rho * violation + header.lambda;
-    
+
     // For inequality constraint, only apply if active
     if (violation >= 0.0f && header.lambda <= 0.0f) {
       gradPosA = physx::PxVec3(0.0f);
@@ -309,7 +327,7 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
       gradRotB = physx::PxVec3(0.0f);
       return;
     }
-    
+
     // Gradient = force * Jacobian
     computeGradient(rotA, rotB, gradPosA, gradPosB, gradRotA, gradRotB);
     gradPosA *= force;
@@ -340,7 +358,8 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
  *   C_rot(x) = relative rotation error = 0
  *
  * Note: eJOINT_FIXED and eJOINT_WELD both map to this constraint type.
- *       Use eJOINT_FIXED for pre-authored joints, eJOINT_WELD for runtime creation.
+ *       Use eJOINT_FIXED for pre-authored joints, eJOINT_WELD for runtime
+ * creation.
  */
 struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
   AvbdConstraintHeader header;
@@ -349,36 +368,40 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
   // Joint anchors (in local coordinates of each body)
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 anchorA;     //!< Weld point on body A (local space)
-  physx::PxReal massRatioA;  //!< Cached mass contribution ratio for body A
+  physx::PxVec3 anchorA;    //!< Weld point on body A (local space)
+  physx::PxReal massRatioA; //!< Cached mass contribution ratio for body A
 
-  physx::PxVec3 anchorB;     //!< Weld point on body B (local space)
-  physx::PxReal massRatioB;  //!< Cached mass contribution ratio for body B
+  physx::PxVec3 anchorB;    //!< Weld point on body B (local space)
+  physx::PxReal massRatioB; //!< Cached mass contribution ratio for body B
 
   //-------------------------------------------------------------------------
   // Relative orientation at weld time
   //-------------------------------------------------------------------------
 
-  physx::PxQuat relativeRotation;  //!< Target relative rotation (B relative to A)
+  physx::PxQuat
+      relativeRotation; //!< Target relative rotation (B relative to A)
 
   //-------------------------------------------------------------------------
   // Lagrangian multipliers (6 DOF)
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 lambdaPosition;  //!< Position constraint multipliers
-  physx::PxReal breakForce;      //!< Force threshold for breaking (0 = unbreakable)
+  physx::PxVec3 lambdaPosition; //!< Position constraint multipliers
+  physx::PxReal breakForce; //!< Force threshold for breaking (0 = unbreakable)
 
-  physx::PxVec3 lambdaRotation;  //!< Rotation constraint multipliers
-  physx::PxReal breakTorque;     //!< Torque threshold for breaking (0 = unbreakable)
+  physx::PxVec3 lambdaRotation; //!< Rotation constraint multipliers
+  physx::PxReal
+      breakTorque; //!< Torque threshold for breaking (0 = unbreakable)
 
   //-------------------------------------------------------------------------
   // Pre-computed effective mass (for faster solving)
   //-------------------------------------------------------------------------
 
-  physx::PxReal effectiveLinearMass;   //!< Combined effective mass for position
-  physx::PxReal effectiveAngularMass;  //!< Combined effective mass for rotation
-  physx::PxReal accumulatedForce;      //!< Accumulated constraint force magnitude (for break check)
-  physx::PxReal accumulatedTorque;     //!< Accumulated constraint torque magnitude (for break check)
+  physx::PxReal effectiveLinearMass;  //!< Combined effective mass for position
+  physx::PxReal effectiveAngularMass; //!< Combined effective mass for rotation
+  physx::PxReal accumulatedForce;  //!< Accumulated constraint force magnitude
+                                   //!< (for break check)
+  physx::PxReal accumulatedTorque; //!< Accumulated constraint torque magnitude
+                                   //!< (for break check)
 
   //-------------------------------------------------------------------------
   // Flags
@@ -395,34 +418,34 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
 
   /**
    * @brief Initialize as a fixed joint (pre-authored, equal mass distribution)
-   * 
-   * Use this for scene-authored fixed joints where mass ratios are not critical.
+   *
+   * Use this for scene-authored fixed joints where mass ratios are not
+   * critical.
    */
   PX_FORCE_INLINE void initFixed(
-      const physx::PxVec3& localAnchorA,
-      const physx::PxVec3& localAnchorB,
-      const physx::PxQuat& localFrameA = physx::PxQuat(physx::PxIdentity),
-      const physx::PxQuat& localFrameB = physx::PxQuat(physx::PxIdentity)) {
-    
+      const physx::PxVec3 &localAnchorA, const physx::PxVec3 &localAnchorB,
+      const physx::PxQuat &localFrameA = physx::PxQuat(physx::PxIdentity),
+      const physx::PxQuat &localFrameB = physx::PxQuat(physx::PxIdentity)) {
+
     header.type = AvbdConstraintType::eJOINT_FIXED;
     header.compliance = 0.0f;
     header.rho = 1e4f;
-    
+
     anchorA = localAnchorA;
     anchorB = localAnchorB;
-    
+
     // For fixed joints, use target relative rotation from local frames
     relativeRotation = localFrameA.getConjugate() * localFrameB;
-    
+
     // Equal mass distribution for pre-authored joints
     massRatioA = 0.5f;
     massRatioB = 0.5f;
     effectiveLinearMass = 0.0f;
     effectiveAngularMass = 1.0f;
-    
+
     lambdaPosition = physx::PxVec3(0.0f);
     lambdaRotation = physx::PxVec3(0.0f);
-    
+
     // Fixed joints are not breakable by default
     breakForce = 0.0f;
     breakTorque = 0.0f;
@@ -436,9 +459,9 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
 
   /**
    * @brief Initialize weld constraint between two bodies at runtime
-   * 
+   *
    * Use this for "Ultrahand" style runtime attachment.
-   * 
+   *
    * @param posA World position of body A
    * @param rotA World rotation of body A
    * @param invMassA Inverse mass of body A
@@ -447,22 +470,23 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
    * @param invMassB Inverse mass of body B
    * @param worldWeldPoint World-space point where bodies are welded
    */
-  PX_FORCE_INLINE void initializeWeld(
-      const physx::PxVec3& posA, const physx::PxQuat& rotA, physx::PxReal invMassA,
-      const physx::PxVec3& posB, const physx::PxQuat& rotB, physx::PxReal invMassB,
-      const physx::PxVec3& worldWeldPoint) {
-    
+  PX_FORCE_INLINE void
+  initializeWeld(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                 physx::PxReal invMassA, const physx::PxVec3 &posB,
+                 const physx::PxQuat &rotB, physx::PxReal invMassB,
+                 const physx::PxVec3 &worldWeldPoint) {
+
     header.type = AvbdConstraintType::eJOINT_WELD;
-    header.compliance = 0.0f;  // Hard constraint
-    header.rho = 1e5f;         // Higher rho for stiffer welds
-    
+    header.compliance = 0.0f; // Hard constraint
+    header.rho = 1e5f;        // Higher rho for stiffer welds
+
     // Convert world weld point to local coordinates
     anchorA = rotA.rotateInv(worldWeldPoint - posA);
     anchorB = rotB.rotateInv(worldWeldPoint - posB);
-    
+
     // Store relative rotation at weld time
     relativeRotation = rotA.getConjugate() * rotB;
-    
+
     // Compute mass ratios for stable correction distribution
     // The heavier object moves less
     physx::PxReal totalInvMass = invMassA + invMassB;
@@ -473,26 +497,26 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
       massRatioA = 0.5f;
       massRatioB = 0.5f;
     }
-    
+
     // Pre-compute effective mass
     if (totalInvMass > 1e-10f) {
       effectiveLinearMass = 1.0f / totalInvMass;
     } else {
       effectiveLinearMass = 0.0f;
     }
-    effectiveAngularMass = 1.0f;  // Simplified, could be computed from inertias
-    
+    effectiveAngularMass = 1.0f; // Simplified, could be computed from inertias
+
     // Initialize multipliers
     lambdaPosition = physx::PxVec3(0.0f);
     lambdaRotation = physx::PxVec3(0.0f);
-    
+
     // Default: unbreakable
     breakForce = 0.0f;
     breakTorque = 0.0f;
     isBreakable = 0;
     isBroken = 0;
     isNewlyCreated = 1;
-    
+
     accumulatedForce = 0.0f;
     accumulatedTorque = 0.0f;
     padding0 = 0;
@@ -501,7 +525,8 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
   /**
    * @brief Set breakable parameters
    */
-  PX_FORCE_INLINE void setBreakable(physx::PxReal maxForce, physx::PxReal maxTorque) {
+  PX_FORCE_INLINE void setBreakable(physx::PxReal maxForce,
+                                    physx::PxReal maxTorque) {
     breakForce = maxForce;
     breakTorque = maxTorque;
     isBreakable = (maxForce > 0.0f || maxTorque > 0.0f) ? 1 : 0;
@@ -510,48 +535,51 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
   /**
    * @brief Compute position constraint violation (3 components)
    */
-  PX_FORCE_INLINE physx::PxVec3 computePositionViolation(
-      const physx::PxVec3& posA, const physx::PxQuat& rotA,
-      const physx::PxVec3& posB, const physx::PxQuat& rotB) const {
+  PX_FORCE_INLINE physx::PxVec3
+  computePositionViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                           const physx::PxVec3 &posB,
+                           const physx::PxQuat &rotB) const {
     physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
     physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
     return worldAnchorA - worldAnchorB;
   }
 
   /**
-   * @brief Compute rotation constraint violation (3 components as angular error)
-   * 
+   * @brief Compute rotation constraint violation (3 components as angular
+   * error)
+   *
    * We want: rotA.inverse() * rotB == relativeRotation
    * Error: rotA * relativeRotation * rotB.inverse()
    */
-  PX_FORCE_INLINE physx::PxVec3 computeRotationViolation(
-      const physx::PxQuat& rotA, const physx::PxQuat& rotB) const {
-    
+  PX_FORCE_INLINE physx::PxVec3
+  computeRotationViolation(const physx::PxQuat &rotA,
+                           const physx::PxQuat &rotB) const {
+
     // Current relative rotation
     physx::PxQuat currentRelRot = rotA.getConjugate() * rotB;
-    
+
     // Error quaternion
     physx::PxQuat errorQ = currentRelRot * relativeRotation.getConjugate();
     if (errorQ.w < 0.0f) {
-      errorQ = -errorQ;  // Shortest path
+      errorQ = -errorQ; // Shortest path
     }
-    
+
     // Convert to axis-angle (small angle approximation)
     return physx::PxVec3(errorQ.x, errorQ.y, errorQ.z) * 2.0f;
   }
 
   /**
    * @brief Compute position corrections with mass-weighted distribution
-   * 
+   *
    * This is the key optimization for "Ultrahand" scenarios:
    * - Light objects move more, heavy objects move less
    * - Prevents small attached objects from destabilizing large structures
    */
-  PX_FORCE_INLINE void computeMassWeightedCorrections(
-      const physx::PxVec3& violation,
-      physx::PxVec3& correctionA,
-      physx::PxVec3& correctionB) const {
-    
+  PX_FORCE_INLINE void
+  computeMassWeightedCorrections(const physx::PxVec3 &violation,
+                                 physx::PxVec3 &correctionA,
+                                 physx::PxVec3 &correctionB) const {
+
     // Body A gets correction proportional to its inverse mass ratio
     // (heavier bodies have lower inverse mass, so they move less)
     correctionA = -violation * massRatioA;
@@ -562,22 +590,23 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
    * @brief Check if weld should break based on accumulated forces
    * @return true if weld is broken
    */
-  PX_FORCE_INLINE bool checkBreak(physx::PxReal forceThisFrame, physx::PxReal torqueThisFrame) {
+  PX_FORCE_INLINE bool checkBreak(physx::PxReal forceThisFrame,
+                                  physx::PxReal torqueThisFrame) {
     if (!isBreakable || isBroken) {
       return isBroken != 0;
     }
-    
+
     // Accumulate forces (with some smoothing)
     accumulatedForce = accumulatedForce * 0.9f + forceThisFrame * 0.1f;
     accumulatedTorque = accumulatedTorque * 0.9f + torqueThisFrame * 0.1f;
-    
+
     // Check break threshold
     if ((breakForce > 0.0f && accumulatedForce > breakForce) ||
         (breakTorque > 0.0f && accumulatedTorque > breakTorque)) {
       isBroken = 1;
       return true;
     }
-    
+
     return false;
   }
 
@@ -605,14 +634,16 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
    * @brief Compute augmented Lagrangian energy
    */
   PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
-      const physx::PxVec3& posA, const physx::PxQuat& rotA,
-      const physx::PxVec3& posB, const physx::PxQuat& rotB) const {
-    
-    if (isBroken) return 0.0f;
-    
-    physx::PxVec3 posViolation = computePositionViolation(posA, rotA, posB, rotB);
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
+    if (isBroken)
+      return 0.0f;
+
+    physx::PxVec3 posViolation =
+        computePositionViolation(posA, rotA, posB, rotB);
     physx::PxVec3 rotViolation = computeRotationViolation(rotA, rotB);
-    
+
     return computeEnergy(posViolation, rotViolation);
   }
 
@@ -646,10 +677,10 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
 
 /**
  * @brief Alias for backward compatibility
- * 
+ *
  * AvbdFixedJointConstraint is now unified with AvbdWeldJointConstraint.
  * Both eJOINT_FIXED and eJOINT_WELD use the same underlying structure.
- * 
+ *
  * For new code, prefer using AvbdWeldJointConstraint directly.
  */
 typedef AvbdWeldJointConstraint AvbdFixedJointConstraint;
@@ -695,8 +726,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSphericalJointConstraint {
    */
   PX_FORCE_INLINE physx::PxVec3
   computeViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
-                   const physx::PxVec3 &posB,
-                   const physx::PxQuat &rotB) const {
+                   const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
     physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
     physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
     return worldAnchorA - worldAnchorB;
@@ -748,52 +778,48 @@ struct PX_ALIGN_PREFIX(16) AvbdSphericalJointConstraint {
    * E = 0.5 * rho * ||C||^2 + lambda^T * C
    */
   PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
-      const physx::PxVec3 &posA,
-      const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB,
-      const physx::PxQuat &rotB) const {
-    
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
     physx::PxVec3 violation = computeViolation(posA, rotA, posB, rotB);
     physx::PxReal rho = header.rho;
-    
+
     physx::PxReal energy = 0.0f;
     for (int i = 0; i < 3; ++i) {
-      energy += 0.5f * rho * violation[i] * violation[i] + lambda[i] * violation[i];
+      energy +=
+          0.5f * rho * violation[i] * violation[i] + lambda[i] * violation[i];
     }
-    
+
     return energy;
   }
 
   /**
    * @brief Compute energy gradient w.r.t. body positions and rotations
    */
-  PX_FORCE_INLINE void computeEnergyGradient(
-      const physx::PxVec3 &posA,
-      const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB,
-      const physx::PxQuat &rotB,
-      physx::PxVec3 &gradPosA,
-      physx::PxVec3 &gradRotA,
-      physx::PxVec3 &gradPosB,
-      physx::PxVec3 &gradRotB) const {
-    
+  PX_FORCE_INLINE void
+  computeEnergyGradient(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                        const physx::PxVec3 &posB, const physx::PxQuat &rotB,
+                        physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
+                        physx::PxVec3 &gradPosB,
+                        physx::PxVec3 &gradRotB) const {
+
     physx::PxVec3 violation = computeViolation(posA, rotA, posB, rotB);
     physx::PxReal rho = header.rho;
-    
+
     // Gradient = (rho * C + lambda) * Jacobian
     // For spherical joint, Jacobian is identity for position
     physx::PxVec3 force(0.0f);
     for (int i = 0; i < 3; ++i) {
       force[i] = rho * violation[i] + lambda[i];
     }
-    
+
     gradPosA = force;
     gradPosB = -force;
-    
+
     // Rotation gradient: d(R*r)/dq
     physx::PxVec3 rA = rotA.rotate(anchorA);
     physx::PxVec3 rB = rotB.rotate(anchorB);
-    
+
     gradRotA = rA.cross(force);
     gradRotB = -rB.cross(force);
   }
@@ -833,12 +859,10 @@ struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
   // Reference frames for angle measurement
   //-------------------------------------------------------------------------
 
-  physx::PxVec3
-      refAxisA; //!< Reference axis on body A (perpendicular to axisA)
+  physx::PxVec3 refAxisA; //!< Reference axis on body A (perpendicular to axisA)
   physx::PxReal padding0;
 
-  physx::PxVec3
-      refAxisB; //!< Reference axis on body B (perpendicular to axisB)
+  physx::PxVec3 refAxisB; //!< Reference axis on body B (perpendicular to axisB)
   physx::PxReal padding1;
 
   //-------------------------------------------------------------------------
@@ -849,7 +873,7 @@ struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
   physx::PxReal lambdaAngleLimit; //!< Angle limit multiplier
 
   physx::PxVec3 lambdaAxisAlign; //!< Axis alignment multipliers (2 DOF stored
-                                  //!< as Vec3, z unused)
+                                 //!< as Vec3, z unused)
   physx::PxReal padding2;
 
   //-------------------------------------------------------------------------
@@ -868,9 +892,10 @@ struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
   /**
    * @brief Compute position constraint violation (3 components)
    */
-  PX_FORCE_INLINE physx::PxVec3 computePositionViolation(
-      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+  PX_FORCE_INLINE physx::PxVec3
+  computePositionViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                           const physx::PxVec3 &posB,
+                           const physx::PxQuat &rotB) const {
     physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
     physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
     return worldAnchorA - worldAnchorB;
@@ -896,8 +921,8 @@ struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
   /**
    * @brief Compute current joint angle
    */
-  PX_FORCE_INLINE physx::PxReal
-  computeAngle(const physx::PxQuat &rotA, const physx::PxQuat &rotB) const {
+  PX_FORCE_INLINE physx::PxReal computeAngle(const physx::PxQuat &rotA,
+                                             const physx::PxQuat &rotB) const {
     // Transform reference axes to world space
     physx::PxVec3 worldRefA = rotA.rotate(refAxisA);
     physx::PxVec3 worldRefB = rotB.rotate(refAxisB);
@@ -1015,8 +1040,7 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
   /**
    * @brief Compute world space slide axis
    */
-  PX_FORCE_INLINE physx::PxVec3
-  getWorldAxis(const physx::PxQuat &rotA) const {
+  PX_FORCE_INLINE physx::PxVec3 getWorldAxis(const physx::PxQuat &rotA) const {
     return rotA.rotate(axisA);
   }
 
@@ -1141,25 +1165,27 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxVec3 linearLimitLower; //!< Lower limits for X, Y, Z translation
   physx::PxVec3 linearLimitUpper; //!< Upper limits for X, Y, Z translation
 
-  physx::PxVec3 linearStiffness;  //!< Spring stiffness for X, Y, Z
-  physx::PxVec3 linearDamping;    //!< Spring damping for X, Y, Z
+  physx::PxVec3 linearStiffness; //!< Spring stiffness for X, Y, Z
+  physx::PxVec3 linearDamping;   //!< Spring damping for X, Y, Z
 
   //-------------------------------------------------------------------------
   // Angular DOF configuration (3 axes)
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 angularLimitLower; //!< Lower limits for X, Y, Z rotation (radians)
-  physx::PxVec3 angularLimitUpper; //!< Upper limits for X, Y, Z rotation (radians)
+  physx::PxVec3
+      angularLimitLower; //!< Lower limits for X, Y, Z rotation (radians)
+  physx::PxVec3
+      angularLimitUpper; //!< Upper limits for X, Y, Z rotation (radians)
 
-  physx::PxVec3 angularStiffness;  //!< Spring stiffness for X, Y, Z rotation
-  physx::PxVec3 angularDamping;    //!< Spring damping for X, Y, Z rotation
+  physx::PxVec3 angularStiffness; //!< Spring stiffness for X, Y, Z rotation
+  physx::PxVec3 angularDamping;   //!< Spring damping for X, Y, Z rotation
 
   //-------------------------------------------------------------------------
   // Drive (motor) configuration
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 driveLinearVelocity;  //!< Target linear velocity (X, Y, Z)
-  physx::PxVec3 driveLinearForce;     //!< Max linear drive force (X, Y, Z)
+  physx::PxVec3 driveLinearVelocity; //!< Target linear velocity (X, Y, Z)
+  physx::PxVec3 driveLinearForce;    //!< Max linear drive force (X, Y, Z)
 
   physx::PxVec3 driveAngularVelocity; //!< Target angular velocity (X, Y, Z)
   physx::PxVec3 driveAngularForce;    //!< Max angular drive force (X, Y, Z)
@@ -1175,10 +1201,13 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   // DOF motion flags (bitmask)
   //-------------------------------------------------------------------------
 
-  physx::PxU32 linearMotion;  //!< Linear motion flags (3 bits: 0=LOCKED, 1=LIMITED, 2=FREE)
-  physx::PxU32 angularMotion; //!< Angular motion flags (3 bits: 0=LOCKED, 1=LIMITED, 2=FREE)
+  physx::PxU32 linearMotion;  //!< Linear motion flags (3 bits: 0=LOCKED,
+                              //!< 1=LIMITED, 2=FREE)
+  physx::PxU32 angularMotion; //!< Angular motion flags (3 bits: 0=LOCKED,
+                              //!< 1=LIMITED, 2=FREE)
 
-  physx::PxU32 driveFlags;    //!< Drive enable flags (6 bits: bit 0-2 linear, bit 3-5 angular)
+  physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
+                           //!< 3-5 angular)
   physx::PxU32 padding2;
 
   //-------------------------------------------------------------------------
@@ -1230,10 +1259,11 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
    * @param axis Axis index (0=X, 1=Y, 2=Z)
    * @return Position error along the axis
    */
-  PX_FORCE_INLINE physx::PxReal computeLinearError(
-      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
-      const physx::PxVec3 &posB, const physx::PxQuat &rotB,
-      physx::PxU32 axis) const {
+  PX_FORCE_INLINE physx::PxReal computeLinearError(const physx::PxVec3 &posA,
+                                                   const physx::PxQuat &rotA,
+                                                   const physx::PxVec3 &posB,
+                                                   const physx::PxQuat &rotB,
+                                                   physx::PxU32 axis) const {
     physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
     physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
     physx::PxVec3 diff = worldAnchorB - worldAnchorA;
@@ -1251,9 +1281,9 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
    * @param axis Axis index (0=X, 1=Y, 2=Z)
    * @return Angular error around the axis (radians)
    */
-  PX_FORCE_INLINE physx::PxReal computeAngularError(
-      const physx::PxQuat &rotA, const physx::PxQuat &rotB,
-      physx::PxU32 axis) const {
+  PX_FORCE_INLINE physx::PxReal computeAngularError(const physx::PxQuat &rotA,
+                                                    const physx::PxQuat &rotB,
+                                                    physx::PxU32 axis) const {
     physx::PxQuat worldFrameA = rotA * localFrameA;
     physx::PxQuat worldFrameB = rotB * localFrameB;
 
@@ -1263,7 +1293,8 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
       relRot = -relRot;
 
     // Convert to axis-angle
-    physx::PxReal angle = 2.0f * physx::PxAcos(physx::PxClamp(relRot.w, -1.0f, 1.0f));
+    physx::PxReal angle =
+        2.0f * physx::PxAcos(physx::PxClamp(relRot.w, -1.0f, 1.0f));
     if (angle < 1e-6f)
       return 0.0f;
 
@@ -1284,8 +1315,8 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
    * @param axis Axis index (0=X, 1=Y, 2=Z)
    * @return Limit violation (0 if within limits)
    */
-  PX_FORCE_INLINE physx::PxReal computeLinearLimitViolation(
-      physx::PxReal error, physx::PxU32 axis) const {
+  PX_FORCE_INLINE physx::PxReal
+  computeLinearLimitViolation(physx::PxReal error, physx::PxU32 axis) const {
     if (error < linearLimitLower[axis])
       return error - linearLimitLower[axis];
     if (error > linearLimitUpper[axis])
@@ -1299,8 +1330,8 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
    * @param axis Axis index (0=X, 1=Y, 2=Z)
    * @return Limit violation (0 if within limits)
    */
-  PX_FORCE_INLINE physx::PxReal computeAngularLimitViolation(
-      physx::PxReal error, physx::PxU32 axis) const {
+  PX_FORCE_INLINE physx::PxReal
+  computeAngularLimitViolation(physx::PxReal error, physx::PxU32 axis) const {
     if (error < angularLimitLower[axis])
       return error - angularLimitLower[axis];
     if (error > angularLimitUpper[axis])
@@ -1333,7 +1364,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     driveAngularForce = physx::PxVec3(0.0f);
     lambdaLinear = physx::PxVec3(0.0f);
     lambdaAngular = physx::PxVec3(0.0f);
-    linearMotion = 0; // All locked by default
+    linearMotion = 0;  // All locked by default
     angularMotion = 0; // All locked by default
     driveFlags = 0;
     padding0 = 0.0f;
@@ -1350,8 +1381,8 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
  */
 struct AvbdConstraintBatch {
   AvbdConstraintType::Enum type; //!< Type of constraints in this batch
-  physx::PxU32 startIndex;      //!< Start index in the constraint pool
-  physx::PxU32 count;           //!< Number of constraints
+  physx::PxU32 startIndex;       //!< Start index in the constraint pool
+  physx::PxU32 count;            //!< Number of constraints
   physx::PxU32 padding;
 };
 
@@ -1380,17 +1411,17 @@ struct PX_ALIGN_PREFIX(16) AvbdGearJointConstraint {
   // Gear axes (world space, computed from hinge joint frames)
   //-------------------------------------------------------------------------
 
-  physx::PxVec3 gearAxis0;  //!< Rotation axis of first gear (world space)
-  physx::PxReal gearRatio;  //!< Gear ratio: omega1 = omega0 * gearRatio
+  physx::PxVec3 gearAxis0; //!< Rotation axis of first gear (world space)
+  physx::PxReal gearRatio; //!< Gear ratio: omega1 = omega0 * gearRatio
 
-  physx::PxVec3 gearAxis1;  //!< Rotation axis of second gear (world space)
-  physx::PxReal geometricError;  //!< Accumulated geometric error
+  physx::PxVec3 gearAxis1;      //!< Rotation axis of second gear (world space)
+  physx::PxReal geometricError; //!< Accumulated geometric error
 
   //-------------------------------------------------------------------------
   // Lagrangian multiplier
   //-------------------------------------------------------------------------
 
-  physx::PxReal lambdaGear;  //!< Angular constraint multiplier
+  physx::PxReal lambdaGear; //!< Angular constraint multiplier
   physx::PxReal padding0;
   physx::PxReal padding1;
   physx::PxReal padding2;
@@ -1426,12 +1457,13 @@ struct PX_ALIGN_PREFIX(16) AvbdGearJointConstraint {
    * @param angVelB Angular velocity of body B (gear 1)
    * @return Velocity constraint violation
    */
-  PX_FORCE_INLINE physx::PxReal computeVelocityViolation(
-      const physx::PxVec3 &angVelA,
-      const physx::PxVec3 &angVelB) const {
+  PX_FORCE_INLINE physx::PxReal
+  computeVelocityViolation(const physx::PxVec3 &angVelA,
+                           const physx::PxVec3 &angVelB) const {
     physx::PxReal omega0 = angVelA.dot(gearAxis0);
     physx::PxReal omega1 = angVelB.dot(gearAxis1);
-    return omega0 * gearRatio + omega1;  // Should be zero when constraint is satisfied
+    return omega0 * gearRatio +
+           omega1; // Should be zero when constraint is satisfied
   }
 
   /**

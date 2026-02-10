@@ -87,6 +87,7 @@ public:
   void solve(physx::PxReal dt, AvbdSolverBody *bodies, physx::PxU32 numBodies,
              AvbdContactConstraint *contacts, physx::PxU32 numContacts,
              const physx::PxVec3 &gravity,
+             const AvbdBodyConstraintMap *contactMap = nullptr,
              AvbdColorBatch *colorBatches = nullptr,
              physx::PxU32 numColors = 0);
 
@@ -129,7 +130,7 @@ public:
       AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
       AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-      const physx::PxVec3 &gravity, 
+      const physx::PxVec3 &gravity,
       const AvbdBodyConstraintMap *contactMap = nullptr,
       const AvbdBodyConstraintMap *sphericalMap = nullptr,
       const AvbdBodyConstraintMap *fixedMap = nullptr,
@@ -137,8 +138,7 @@ public:
       const AvbdBodyConstraintMap *prismaticMap = nullptr,
       const AvbdBodyConstraintMap *d6Map = nullptr,
       const AvbdBodyConstraintMap *gearMap = nullptr,
-      AvbdColorBatch *colorBatches = nullptr,
-      physx::PxU32 numColors = 0);
+      AvbdColorBatch *colorBatches = nullptr, physx::PxU32 numColors = 0);
 
   /**
    * @brief Get solver statistics from last solve
@@ -166,16 +166,16 @@ private:
    * @brief Stage 2: Build constraint graph and compute body coloring
    */
   void computeGraphColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                           AvbdContactConstraint *contacts,
-                           physx::PxU32 numContacts);
+                            AvbdContactConstraint *contacts,
+                            physx::PxU32 numContacts);
 
   /**
    * @brief Stage 2b: Compute body-based coloring for block coordinate descent
    * Bodies sharing constraints get different colors, enabling parallel BCD.
    */
   void computeBodyColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                          AvbdContactConstraint *contacts,
-                          physx::PxU32 numContacts);
+                           AvbdContactConstraint *contacts,
+                           physx::PxU32 numContacts);
 
   /**
    * @brief Stage 3: Block coordinate descent iteration
@@ -188,6 +188,7 @@ private:
   void blockDescentIteration(AvbdSolverBody *bodies, physx::PxU32 numBodies,
                              AvbdContactConstraint *contacts,
                              physx::PxU32 numContacts, physx::PxReal dt,
+                             const AvbdBodyConstraintMap *contactMap = nullptr,
                              AvbdColorBatch *colorBatches = nullptr,
                              physx::PxU32 numColors = 0);
 
@@ -196,26 +197,40 @@ private:
    * Minimizes: 1/(2h^2) * ||M(x - x_tilde)||^2 + Sum constraint_energy
    */
   void solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
-                        physx::PxU32 numBodies,
-                        AvbdContactConstraint *contacts,
+                        physx::PxU32 numBodies, AvbdContactConstraint *contacts,
                         physx::PxU32 numContacts, physx::PxReal dt,
-                        physx::PxReal invDt2);
+                        physx::PxReal invDt2,
+                        const AvbdBodyConstraintMap *contactMap = nullptr);
 
   /**
-   * @brief Stage 4: Update Augmented Lagrangian multipliers
-   * lambda <- lambda + rho * C(x)
+   * @brief Solve decoupled 3x3 system for a single body
+   * Block-diagonal approximation of the 6x6 system:
+   *   Pass 1: 3x3 linear (position) solve
+   *   Pass 2: 3x3 angular (rotation) solve
+   * Uses same AL framework and 3-row friction as solveLocalSystem.
+   */
+  void solveLocalSystem3x3(AvbdSolverBody &body, AvbdSolverBody *bodies,
+                           physx::PxU32 numBodies,
+                           AvbdContactConstraint *contacts,
+                           physx::PxU32 numContacts, physx::PxReal dt,
+                           physx::PxReal invDt2,
+                           const AvbdBodyConstraintMap *contactMap = nullptr);
+
+  /**
+   * @brief Stage 4: Update Augmented Lagrangian multipliers with XPBD
+   * compliance Uses XPBD formula: ¦¤¦Ë = (-C - ¦Á?¡¤¦Ë) / (w + ¦Á?) where ¦Á? = ¦Á/dt2
    */
   void updateLagrangianMultipliers(AvbdSolverBody *bodies,
                                    physx::PxU32 numBodies,
                                    AvbdContactConstraint *contacts,
-                                   physx::PxU32 numContacts);
+                                   physx::PxU32 numContacts, physx::PxReal dt);
 
   /**
    * @brief Stage 5: Update velocities from position change
    * v = (x_new - x_n) / dt
    */
   void updateVelocities(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                       physx::PxReal invDt);
+                        physx::PxReal invDt);
 
   //-------------------------------------------------------------------------
   // Energy Minimization Framework
@@ -232,52 +247,62 @@ private:
    * - E_potential = -m * g * h (gravity potential)
    * - E_constraint = Sum(0.5 * rho * C(x)^2 + lambda * C(x))
    */
-  physx::PxReal computeTotalEnergy(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-                                    const physx::PxVec3 &gravity);
+  physx::PxReal computeTotalEnergy(AvbdSolverBody *bodies,
+                                   physx::PxU32 numBodies,
+                                   AvbdContactConstraint *contacts,
+                                   physx::PxU32 numContacts,
+                                   const physx::PxVec3 &gravity);
 
   /**
    * @brief Compute kinetic energy of the system
    * E_kinetic = 0.5 * Sum(m * v^2 + I * omega^2)
    */
-  physx::PxReal computeKineticEnergy(AvbdSolverBody *bodies, physx::PxU32 numBodies);
+  physx::PxReal computeKineticEnergy(AvbdSolverBody *bodies,
+                                     physx::PxU32 numBodies);
 
   /**
    * @brief Compute potential energy of the system
    * E_potential = -Sum(m * g * h)
    */
-  physx::PxReal computePotentialEnergy(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                        const physx::PxVec3 &gravity);
+  physx::PxReal computePotentialEnergy(AvbdSolverBody *bodies,
+                                       physx::PxU32 numBodies,
+                                       const physx::PxVec3 &gravity);
 
   /**
    * @brief Compute augmented Lagrangian constraint energy
    * E_constraint = Sum(0.5 * rho * C(x)^2 + lambda * C(x))
    */
-  physx::PxReal computeConstraintEnergy(AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-                                         AvbdSolverBody *bodies, physx::PxU32 numBodies);
+  physx::PxReal computeConstraintEnergy(AvbdContactConstraint *contacts,
+                                        physx::PxU32 numContacts,
+                                        AvbdSolverBody *bodies,
+                                        physx::PxU32 numBodies);
 
   /**
    * @brief Compute energy gradient for a single body
    * Returns the 6D gradient vector [dE/dp, dE/dtheta]
    */
-  void computeEnergyGradient(physx::PxU32 bodyIndex, AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                            AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-                            physx::PxReal invDt2, AvbdVec6 &gradient);
+  void computeEnergyGradient(physx::PxU32 bodyIndex, AvbdSolverBody *bodies,
+                             physx::PxU32 numBodies,
+                             AvbdContactConstraint *contacts,
+                             physx::PxU32 numContacts, physx::PxReal invDt2,
+                             AvbdVec6 &gradient);
 
   /**
    * @brief Check convergence based on energy change
    * Returns true if |E_new - E_old| < tolerance
    */
   bool checkEnergyConvergence(physx::PxReal oldEnergy, physx::PxReal newEnergy,
-                             physx::PxReal tolerance) const;
+                              physx::PxReal tolerance) const;
 
   /**
    * @brief Perform line search for optimal step size
    * Uses Armijo backtracking to ensure sufficient energy decrease
    */
-  physx::PxReal performLineSearch(AvbdSolverBody &body, const AvbdVec6 &direction,
-                                   physx::PxReal initialStep, physx::PxReal energy,
-                                   physx::PxReal c1, physx::PxReal rho);
+  physx::PxReal performLineSearch(AvbdSolverBody &body,
+                                  const AvbdVec6 &direction,
+                                  physx::PxReal initialStep,
+                                  physx::PxReal energy, physx::PxReal c1,
+                                  physx::PxReal rho);
 
   //-------------------------------------------------------------------------
   // Helper Methods
@@ -287,15 +312,15 @@ private:
    * @brief Compute constraint violation for a contact
    */
   physx::PxReal computeContactViolation(const AvbdContactConstraint &contact,
-                                         const AvbdSolverBody &bodyA,
-                                         const AvbdSolverBody &bodyB);
+                                        const AvbdSolverBody &bodyA,
+                                        const AvbdSolverBody &bodyB);
 
   /**
    * @brief Compute constraint energy contribution
    */
   physx::PxReal computeContactEnergy(const AvbdContactConstraint &contact,
-                                      const AvbdSolverBody &bodyA,
-                                      const AvbdSolverBody &bodyB);
+                                     const AvbdSolverBody &bodyA,
+                                     const AvbdSolverBody &bodyB);
 
   /**
    * @brief Compute gradient of constraint energy w.r.t. body position
@@ -303,40 +328,34 @@ private:
   void computeContactGradient(const AvbdContactConstraint &contact,
                               const AvbdSolverBody &bodyA,
                               const AvbdSolverBody &bodyB,
-                              physx::PxVec3 &gradPosA,
-                              physx::PxVec3 &gradRotA,
-                              physx::PxVec3 &gradPosB,
-                              physx::PxVec3 &gradRotB);
+                              physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
+                              physx::PxVec3 &gradPosB, physx::PxVec3 &gradRotB);
 
   /**
    * @brief Build Hessian matrix for a body's local system
    */
-  void buildHessianMatrix(const AvbdSolverBody &body,
-                          AvbdSolverBody *bodies,
+  void buildHessianMatrix(const AvbdSolverBody &body, AvbdSolverBody *bodies,
                           physx::PxU32 numBodies,
                           AvbdContactConstraint *contacts,
-                          physx::PxU32 numContacts,
-                          physx::PxReal invDt2,
+                          physx::PxU32 numContacts, physx::PxReal invDt2,
                           AvbdBlock6x6 &H);
 
   /**
    * @brief Build gradient vector for a body's local system
    */
-  void buildGradientVector(const AvbdSolverBody &body,
-                          AvbdSolverBody *bodies,
-                          physx::PxU32 numBodies,
-                          AvbdContactConstraint *contacts,
-                          physx::PxU32 numContacts,
-                          physx::PxReal invDt2,
-                          AvbdVec6 &g);
+  void buildGradientVector(const AvbdSolverBody &body, AvbdSolverBody *bodies,
+                           physx::PxU32 numBodies,
+                           AvbdContactConstraint *contacts,
+                           physx::PxU32 numContacts, physx::PxReal invDt2,
+                           AvbdVec6 &g);
 
   /**
    * @brief Collect all constraints affecting a specific body
    */
   physx::PxU32 collectBodyConstraints(physx::PxU32 bodyIndex,
-                                       AvbdContactConstraint *contacts,
-                                       physx::PxU32 numContacts,
-                                       physx::PxU32 *constraintIndices);
+                                      AvbdContactConstraint *contacts,
+                                      physx::PxU32 numContacts,
+                                      physx::PxU32 *constraintIndices);
 
   //-------------------------------------------------------------------------
   // Block Coordinate Descent - Body-Centric Constraint Solving
@@ -356,79 +375,76 @@ private:
    * This is the core AVBD block descent step for joint solving.
    */
   void solveBodyAllConstraints(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
+      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
       AvbdContactConstraint *contacts, physx::PxU32 numContacts,
       AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
       AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
       AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
       AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      physx::PxReal dt);
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6, physx::PxReal dt);
 
   /**
    * @brief Compute position/rotation correction for a contact constraint
    * @return true if constraint is active and correction was computed
    */
-  bool computeContactCorrection(
-      const AvbdContactConstraint &contact,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+  bool computeContactCorrection(const AvbdContactConstraint &contact,
+                                AvbdSolverBody *bodies, physx::PxU32 numBodies,
+                                physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
+                                physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a spherical joint
    */
   bool computeSphericalJointCorrection(
-      const AvbdSphericalJointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+      const AvbdSphericalJointConstraint &joint, AvbdSolverBody *bodies,
+      physx::PxU32 numBodies, physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
+      physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a fixed joint
    */
-  bool computeFixedJointCorrection(
-      const AvbdFixedJointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+  bool computeFixedJointCorrection(const AvbdFixedJointConstraint &joint,
+                                   AvbdSolverBody *bodies,
+                                   physx::PxU32 numBodies,
+                                   physx::PxU32 bodyIndex,
+                                   physx::PxVec3 &deltaPos,
+                                   physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a revolute joint
    */
-  bool computeRevoluteJointCorrection(
-      const AvbdRevoluteJointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+  bool computeRevoluteJointCorrection(const AvbdRevoluteJointConstraint &joint,
+                                      AvbdSolverBody *bodies,
+                                      physx::PxU32 numBodies,
+                                      physx::PxU32 bodyIndex,
+                                      physx::PxVec3 &deltaPos,
+                                      physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a prismatic joint
    */
   bool computePrismaticJointCorrection(
-      const AvbdPrismaticJointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+      const AvbdPrismaticJointConstraint &joint, AvbdSolverBody *bodies,
+      physx::PxU32 numBodies, physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
+      physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a D6 joint
    */
-  bool computeD6JointCorrection(
-      const AvbdD6JointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+  bool computeD6JointCorrection(const AvbdD6JointConstraint &joint,
+                                AvbdSolverBody *bodies, physx::PxU32 numBodies,
+                                physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
+                                physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute angular correction for a gear joint
    */
-  bool computeGearJointCorrection(
-      const AvbdGearJointConstraint &joint,
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      physx::PxVec3 &deltaPos, physx::PxVec3 &deltaTheta);
+  bool computeGearJointCorrection(const AvbdGearJointConstraint &joint,
+                                  AvbdSolverBody *bodies,
+                                  physx::PxU32 numBodies,
+                                  physx::PxU32 bodyIndex,
+                                  physx::PxVec3 &deltaPos,
+                                  physx::PxVec3 &deltaTheta);
 
   //-------------------------------------------------------------------------
   // Member Variables
@@ -442,17 +458,12 @@ private:
   AvbdBodyParallelColoring
       mBodyColoring; //!< Body-based parallel coloring for BCD
   AvbdBodyConstraintMap
-      mContactMap;    //!< Pre-computed contact-to-body mapping for O(1) lookup
-  AvbdBodyConstraintMap
-      mSphericalMap;  //!< Pre-computed spherical joint mapping
-  AvbdBodyConstraintMap
-      mFixedMap;      //!< Pre-computed fixed joint mapping
-  AvbdBodyConstraintMap
-      mRevoluteMap;   //!< Pre-computed revolute joint mapping
-  AvbdBodyConstraintMap
-      mPrismaticMap;  //!< Pre-computed prismatic joint mapping
-  AvbdBodyConstraintMap
-      mD6Map;         //!< Pre-computed D6 joint mapping
+      mContactMap; //!< Pre-computed contact-to-body mapping for O(1) lookup
+  AvbdBodyConstraintMap mSphericalMap; //!< Pre-computed spherical joint mapping
+  AvbdBodyConstraintMap mFixedMap;     //!< Pre-computed fixed joint mapping
+  AvbdBodyConstraintMap mRevoluteMap;  //!< Pre-computed revolute joint mapping
+  AvbdBodyConstraintMap mPrismaticMap; //!< Pre-computed prismatic joint mapping
+  AvbdBodyConstraintMap mD6Map;        //!< Pre-computed D6 joint mapping
 
   physx::PxAllocatorCallback *mAllocator;
   bool mInitialized;
@@ -460,40 +471,50 @@ private:
   //-------------------------------------------------------------------------
   // Optimized solving with pre-computed constraint mapping
   //-------------------------------------------------------------------------
-  
+
   /**
    * @brief Build constraint-to-body mapping for efficient lookup
    */
-  void buildConstraintMapping(AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-                              physx::PxU32 numBodies);
-  
+  void buildConstraintMapping(AvbdContactConstraint *contacts,
+                              physx::PxU32 numContacts, physx::PxU32 numBodies);
+
   /**
-   * @brief Optimized version using pre-computed constraint map - O(constraints per body)
+   * @brief Optimized version using pre-computed constraint map - O(constraints
+   * per body)
    */
-  void solveBodyLocalConstraintsFast(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
-      AvbdContactConstraint *contacts);
-  
+  void solveBodyLocalConstraintsFast(AvbdSolverBody *bodies,
+                                     physx::PxU32 numBodies,
+                                     physx::PxU32 bodyIndex,
+                                     AvbdContactConstraint *contacts);
+
   /**
-   * @brief Build all constraint mappings for joints (called once before solve iterations)
+   * @brief Thread-safe version using external constraint map - O(constraints
+   * per body)
+   */
+  void solveBodyLocalConstraintsFastWithMap(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
+      AvbdContactConstraint *contacts, const AvbdBodyConstraintMap &contactMap);
+
+  /**
+   * @brief Build all constraint mappings for joints (called once before solve
+   * iterations)
    */
   void buildAllConstraintMappings(
-      physx::PxU32 numBodies,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
-      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6);
-  
+      physx::PxU32 numBodies, AvbdContactConstraint *contacts,
+      physx::PxU32 numContacts, AvbdSphericalJointConstraint *sphericalJoints,
+      physx::PxU32 numSpherical, AvbdFixedJointConstraint *fixedJoints,
+      physx::PxU32 numFixed, AvbdRevoluteJointConstraint *revoluteJoints,
+      physx::PxU32 numRevolute, AvbdPrismaticJointConstraint *prismaticJoints,
+      physx::PxU32 numPrismatic, AvbdD6JointConstraint *d6Joints,
+      physx::PxU32 numD6);
+
   /**
-   * @brief Optimized version of solveBodyAllConstraints using pre-computed mappings
-   * Complexity: O(constraints connected to this body) instead of O(all constraints)
+   * @brief Optimized version of solveBodyAllConstraints using pre-computed
+   * mappings Complexity: O(constraints connected to this body) instead of O(all
+   * constraints)
    */
   void solveBodyAllConstraintsFast(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      physx::PxU32 bodyIndex,
+      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
       AvbdContactConstraint *contacts, physx::PxU32 numContacts,
       AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
       AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
@@ -506,8 +527,7 @@ private:
       const AvbdBodyConstraintMap &fixedMap,
       const AvbdBodyConstraintMap &revoluteMap,
       const AvbdBodyConstraintMap &prismaticMap,
-      const AvbdBodyConstraintMap &d6Map,
-      const AvbdBodyConstraintMap &gearMap,
+      const AvbdBodyConstraintMap &d6Map, const AvbdBodyConstraintMap &gearMap,
       physx::PxReal dt);
 };
 
@@ -520,7 +540,7 @@ inline AvbdSolver::AvbdSolver() : mAllocator(nullptr), mInitialized(false) {
   mColoring.colorGroups = nullptr;
   mColoring.numColors = 0;
   mColoring.maxColors = 0;
-  
+
   // Explicitly initialize all constraint mappings to safe defaults
   // (redundant if default constructors work, but safer)
   mContactMap = AvbdBodyConstraintMap();
@@ -607,8 +627,7 @@ AvbdSolver::computeContactEnergy(const AvbdContactConstraint &contact,
 inline void AvbdSolver::computeContactGradient(
     const AvbdContactConstraint &contact, const AvbdSolverBody &bodyA,
     const AvbdSolverBody &bodyB, physx::PxVec3 &gradPosA,
-    physx::PxVec3 &gradRotA, physx::PxVec3 &gradPosB,
-    physx::PxVec3 &gradRotB) {
+    physx::PxVec3 &gradRotA, physx::PxVec3 &gradPosB, physx::PxVec3 &gradRotB) {
   contact.computeGradient(bodyA.rotation, bodyB.rotation, gradPosA, gradPosB,
                           gradRotA, gradRotB);
 

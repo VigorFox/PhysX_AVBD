@@ -27,18 +27,20 @@
 #include "DyAvbdTasks.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdDynamics.h"
-#include "PxsRigidBody.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyVArticulation.h"
+#include "PxsRigidBody.h"
 #include <cstdio>
 
 // Debug logging macro
 #if defined(AVBD_ENABLE_LOG)
-  #define AVBD_LOG(fmt, ...)                                                   \
-    printf("[AVBD] " fmt "\n", ##__VA_ARGS__);                               \
-    fflush(stdout)
+#define AVBD_LOG(fmt, ...)                                                     \
+  printf("[AVBD] " fmt "\n", ##__VA_ARGS__);                                   \
+  fflush(stdout)
 #else
-  #define AVBD_LOG(...) do { } while (0)
+#define AVBD_LOG(...)                                                          \
+  do {                                                                         \
+  } while (0)
 #endif
 
 namespace physx {
@@ -54,9 +56,19 @@ void AvbdTask::release() {
 }
 
 void AvbdSolveIslandTask::release() {
+  // Write back lambda values to the cache for warm-starting next frame
+  // This is thread-safe because each island writes to disjoint cache indices
+  {
+    AvbdContactConstraint *constraints = mBatch.constraints;
+    PxU32 numConstraints = mBatch.numConstraints;
+
+    // Function declared as friend in AvbdDynamicsContext class
+    writeLambdaToCache(mContext, constraints, numConstraints);
+  }
+
   // Release constraint maps to prevent memory leak
   // Each frame builds new maps, so we must free them when task completes
-  PxAllocatorCallback& allocator = mContext.getAllocator();
+  PxAllocatorCallback &allocator = mContext.getAllocator();
   mBatch.contactMap.release(allocator);
   mBatch.sphericalMap.release(allocator);
   mBatch.fixedMap.release(allocator);
@@ -64,38 +76,37 @@ void AvbdSolveIslandTask::release() {
   mBatch.prismaticMap.release(allocator);
   mBatch.d6Map.release(allocator);
   mBatch.gearMap.release(allocator);
-  
+
   // Call base class release
   AvbdTask::release();
 }
 
 void AvbdWriteBackTask::run() {
   AVBD_LOG("AvbdWriteBackTask::run() START - numBodies=%u", mNumBodies);
-  
+
   for (PxU32 i = 0; i < mNumBodies; ++i) {
     if (mAvbdBodies[i].isStatic())
       continue;
-      
+
     if (mRigidBodies[i]) {
       // Regular rigid body - writeback to body core
       writeBackAvbdSolverBody(mAvbdBodies[i], mRigidBodies[i]->getCore());
-    }
-    else if (mArticulationForBody && mLinkIndexForBody) {
+    } else if (mArticulationForBody && mLinkIndexForBody) {
       // Articulation link - writeback to articulation link body core
-      FeatherstoneArticulation* articulation = mArticulationForBody[i];
+      FeatherstoneArticulation *articulation = mArticulationForBody[i];
       PxU32 linkIndex = mLinkIndexForBody[i];
-      
+
       if (articulation && linkIndex != PX_MAX_U32) {
-        ArticulationData& artData = articulation->getArticulationData();
+        ArticulationData &artData = articulation->getArticulationData();
         if (linkIndex < artData.getLinkCount()) {
-          ArticulationLink& link = artData.getLink(linkIndex);
-          PxsBodyCore* bodyCore = link.bodyCore;
-          
+          ArticulationLink &link = artData.getLink(linkIndex);
+          PxsBodyCore *bodyCore = link.bodyCore;
+
           if (bodyCore) {
             // Write back position and rotation
             bodyCore->body2World.p = mAvbdBodies[i].position;
             bodyCore->body2World.q = mAvbdBodies[i].rotation;
-            
+
             // Write back velocities
             bodyCore->linearVelocity = mAvbdBodies[i].linearVelocity;
             bodyCore->angularVelocity = mAvbdBodies[i].angularVelocity;
@@ -104,7 +115,7 @@ void AvbdWriteBackTask::run() {
       }
     }
   }
-  
+
   AVBD_LOG("AvbdWriteBackTask::run() END");
 }
 

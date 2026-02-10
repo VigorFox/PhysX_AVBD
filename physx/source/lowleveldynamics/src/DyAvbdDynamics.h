@@ -45,6 +45,13 @@ namespace Dy {
  */
 class AvbdDynamicsContext : public DynamicsContextBase {
   PX_NOCOPY(AvbdDynamicsContext)
+
+  // Friend function for lambda cache write-back from task (needs access to
+  // private mLambdaCache)
+  friend void writeLambdaToCache(AvbdDynamicsContext &ctx,
+                                 AvbdContactConstraint *constraints,
+                                 PxU32 numConstraints);
+
 public:
   AvbdDynamicsContext(PxcNpMemBlockPool *memBlockPool,
                       PxcScratchAllocator &scratchAllocator,
@@ -70,11 +77,13 @@ public:
    * @brief Destroy AVBD task (called by task->release())
    */
   void destroyTask(AvbdTask *task);
-  
+
   /**
    * @brief Get allocator callback for constraint map cleanup
    */
-  PxAllocatorCallback& getAllocator() { return *reinterpret_cast<PxAllocatorCallback*>(mAllocatorCallback); }
+  PxAllocatorCallback &getAllocator() {
+    return *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback);
+  }
 
   virtual void update(Cm::FlushPool &flushPool, PxBaseTask *continuation,
                       PxBaseTask *postPartitioningTask,
@@ -92,6 +101,37 @@ public:
   virtual PxSolverType::Enum getSolverType() const override {
     return PxSolverType::eAVBD;
   }
+
+  //-------------------------------------------------------------------------
+  // Lambda Warm-Starting Cache (Public for external access)
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Cached lambda values for warm-starting across frames
+   *
+   * Indexed by [cmIndex * 4 + contactIdx] where:
+   * - cmIndex: PxsContactManager::getIndex()
+   * - contactIdx: contact index within patch (0-3, max 4 contacts per CM)
+   */
+  struct CachedLambda {
+    PxReal lambda;          //!< Normal constraint lambda
+    PxReal tangentLambda0;  //!< Friction lambda 1
+    PxReal tangentLambda1;  //!< Friction lambda 2
+    PxReal penalty;         //!< Adaptive penalty for normal (persists across frames)
+    PxReal tangentPenalty0;  //!< Adaptive penalty for tangent 0
+    PxReal tangentPenalty1;  //!< Adaptive penalty for tangent 1
+    PxU8 frameAge;          //!< Frames since last update (0 = current frame)
+    PxU8 padding[3];
+  };
+
+  PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
+  bool mEnableLambdaWarmStart; //!< Enable lambda warm-starting (default: true)
+
+  static const PxU32 MAX_CONTACTS_PER_CM =
+      4; //!< Max contact points per ContactManager
+  static const PxU8 LAMBDA_MAX_AGE = 3; //!< Max frames to keep cached lambda
+  static constexpr PxReal LAMBDA_WARMSTART_SCALE =
+      0.9f; //!< Damping for warm-started lambda
 
 private:
   //-------------------------------------------------------------------------
@@ -150,12 +190,9 @@ private:
       AvbdRevoluteJointConstraint *revoluteConstraints, PxU32 &numRevolute,
       PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
       PxU32 &numPrismatic, PxU32 maxPrismatic,
-      AvbdD6JointConstraint *d6Constraints, PxU32 &numD6,
-      PxU32 maxD6, 
-      AvbdGearJointConstraint *gearConstraints, PxU32 &numGear,
-      PxU32 maxGear,
-      PxU32 islandIndex,
-      PxU32 *bodyRemapTable);
+      AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
+      AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
+      PxU32 islandIndex, PxU32 *bodyRemapTable);
 
   //-------------------------------------------------------------------------
   // Member Variables
@@ -180,24 +217,30 @@ private:
   PxVirtualAllocatorCallback *mAllocatorCallback; //!< Memory allocator
   bool mFrictionEveryIteration; //!< Apply friction every iteration
   bool mSolverInitialized;      //!< Whether solver has been initialized
-  
+
   //!< Track heap fallback allocations for cleanup at frame end
-  //!< No mutex needed since update() and mergeResults() are called from single-threaded contexts
-  PxArray<void*> mHeapFallbackAllocations;
+  //!< No mutex needed since update() and mergeResults() are called from
+  //!< single-threaded contexts
+  PxArray<void *> mHeapFallbackAllocations;
 };
+
+// Lambda cache write-back function (declared friend in AvbdDynamicsContext)
+void writeLambdaToCache(AvbdDynamicsContext &ctx,
+                        AvbdContactConstraint *constraints,
+                        PxU32 numConstraints);
 
 /**
  * @brief Factory function to create AVBD dynamics context
  */
 Context *createAVBDDynamicsContext(
-  PxcNpMemBlockPool *memBlockPool, PxcScratchAllocator &scratchAllocator,
-  Cm::FlushPool &taskPool, PxvSimStats &simStats, PxTaskManager *taskManager,
-  PxVirtualAllocatorCallback *allocatorCallback,
-  PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
-  PxU64 contextID, bool enableStabilization, bool useEnhancedDeterminism,
-  bool solveArticulationContactLast, PxReal maxBiasCoefficient,
-  bool frictionEveryIteration, PxReal lengthScale,
-  bool isResidualReportingEnabled);
+    PxcNpMemBlockPool *memBlockPool, PxcScratchAllocator &scratchAllocator,
+    Cm::FlushPool &taskPool, PxvSimStats &simStats, PxTaskManager *taskManager,
+    PxVirtualAllocatorCallback *allocatorCallback,
+    PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
+    PxU64 contextID, bool enableStabilization, bool useEnhancedDeterminism,
+    bool solveArticulationContactLast, PxReal maxBiasCoefficient,
+    bool frictionEveryIteration, PxReal lengthScale,
+    bool isResidualReportingEnabled);
 
 } // namespace Dy
 

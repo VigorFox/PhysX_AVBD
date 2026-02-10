@@ -37,74 +37,75 @@ namespace physx {
 /**
  * @brief AVBD numerical constants
  *
- * These constants define the numerical parameters used throughout the AVBD solver.
- * They are centralized here to avoid magic numbers in the code.
+ * These constants define the numerical parameters used throughout the AVBD
+ * solver. They are centralized here to avoid magic numbers in the code.
  */
 namespace AvbdConstants {
-  // Position step size limits
-  static const PxReal AVBD_MAX_POSITION_STEP = 0.1f;
+// Position step size limits
+static const PxReal AVBD_MAX_POSITION_STEP = 0.1f;
 
-  // Friction correction coefficient
-  static const PxReal AVBD_FRICTION_CORRECTION = 0.1f;
+// Friction correction coefficient
+static const PxReal AVBD_FRICTION_CORRECTION = 0.1f;
 
-  // Constraint damping
-  static const PxReal AVBD_CONSTRAINT_DAMPING = 0.1f;
+// Constraint damping
+static const PxReal AVBD_CONSTRAINT_DAMPING = 0.1f;
 
-  // Numerical precision
-  static const PxReal AVBD_NUMERICAL_EPSILON = 1e-6f;
+// Numerical precision
+static const PxReal AVBD_NUMERICAL_EPSILON = 1e-6f;
 
-  // Position error threshold (for early exit when constraint is satisfied)
-  static const PxReal AVBD_POSITION_ERROR_THRESHOLD = 1e-7f;
+// Position error threshold (for early exit when constraint is satisfied)
+static const PxReal AVBD_POSITION_ERROR_THRESHOLD = 1e-7f;
 
-  // Rotation error threshold (for early exit when constraint is satisfied)
-  static const PxReal AVBD_ROTATION_ERROR_THRESHOLD = 1e-6f;
+// Rotation error threshold (for early exit when constraint is satisfied)
+static const PxReal AVBD_ROTATION_ERROR_THRESHOLD = 1e-6f;
 
-  // Angle limit violation threshold
-  static const PxReal AVBD_ANGLE_LIMIT_THRESHOLD = 1e-4f;
+// Angle limit violation threshold
+static const PxReal AVBD_ANGLE_LIMIT_THRESHOLD = 1e-4f;
 
-  // Infinite mass threshold (for detecting static bodies)
-  static const PxReal AVBD_INFINITE_MASS_THRESHOLD = 1e-10f;
+// Infinite mass threshold (for detecting static bodies)
+static const PxReal AVBD_INFINITE_MASS_THRESHOLD = 1e-10f;
 
-  // Motor gain coefficient
-  static const PxReal AVBD_MOTOR_GAIN = 0.5f;
+// Motor gain coefficient
+static const PxReal AVBD_MOTOR_GAIN = 0.5f;
 
-  // Axis selection threshold (for building perpendicular basis)
-  static const PxReal AVBD_AXIS_SELECTION_THRESHOLD = 0.9f;
+// Axis selection threshold (for building perpendicular basis)
+static const PxReal AVBD_AXIS_SELECTION_THRESHOLD = 0.9f;
 
-  // Quaternion half factor (for converting angular velocity to quaternion)
-  static const PxReal AVBD_QUATERNION_HALF_FACTOR = 0.5f;
+// Quaternion half factor (for converting angular velocity to quaternion)
+static const PxReal AVBD_QUATERNION_HALF_FACTOR = 0.5f;
 
-  // Default penalty parameters
-  static const PxReal AVBD_DEFAULT_PENALTY_RHO_LOW = 1e4f;
-  static const PxReal AVBD_DEFAULT_PENALTY_RHO_HIGH = 1e6f;
+// Default penalty parameters
+static const PxReal AVBD_DEFAULT_PENALTY_RHO_LOW = 1e5f; // Increased from 1e4
+static const PxReal AVBD_DEFAULT_PENALTY_RHO_HIGH = 1e6f;
 
-  // Maximum penalty parameter
-  static const PxReal AVBD_MAX_PENALTY_RHO = 1e8f;
+// Maximum penalty parameter
+static const PxReal AVBD_MAX_PENALTY_RHO = 1e8f;
 
-  // Minimum penalty parameter
-  static const PxReal AVBD_MIN_PENALTY_RHO = 1e2f;
+// Minimum penalty parameter
+static const PxReal AVBD_MIN_PENALTY_RHO = 1e2f;
 
-  // Penalty parameter increase factor
-  static const PxReal AVBD_RHO_INCREASE_FACTOR = 2.0f;
+// Penalty parameter increase factor
+static const PxReal AVBD_RHO_INCREASE_FACTOR = 2.0f;
 
-  // Penalty parameter decrease factor
-  static const PxReal AVBD_RHO_DECREASE_FACTOR = 0.5f;
+// Penalty parameter decrease factor
+static const PxReal AVBD_RHO_DECREASE_FACTOR = 0.5f;
 
-  // Violation threshold
-  static const PxReal AVBD_VIOLATION_THRESHOLD = 1e-3f;
+// Violation threshold
+static const PxReal AVBD_VIOLATION_THRESHOLD =
+    1e-2f; // Increased from 1e-3 to skip near-satisfied constraints
 
-  // Maximum Lagrangian multiplier
-  static const PxReal AVBD_MAX_LAMBDA = 1e6f;
+// Maximum Lagrangian multiplier
+static const PxReal AVBD_MAX_LAMBDA = 1e6f;
 
-  // LDLT decomposition threshold for singularity detection
-  static const PxReal AVBD_LDLT_SINGULAR_THRESHOLD = 1e-10f;
+// LDLT decomposition threshold for singularity detection
+static const PxReal AVBD_LDLT_SINGULAR_THRESHOLD = 1e-10f;
 
-  // Condition number threshold for ill-conditioned matrices
-  static const PxReal AVBD_CONDITION_NUMBER_THRESHOLD = 1e8f;
+// Condition number threshold for ill-conditioned matrices
+static const PxReal AVBD_CONDITION_NUMBER_THRESHOLD = 1e8f;
 
-  // Regularization coefficient for ill-conditioned matrices
-  static const PxReal AVBD_REGULARIZATION_COEFFICIENT = 1e-6f;
-}
+// Regularization coefficient for ill-conditioned matrices
+static const PxReal AVBD_REGULARIZATION_COEFFICIENT = 1e-6f;
+} // namespace AvbdConstants
 
 namespace Dy {
 
@@ -112,15 +113,18 @@ namespace Dy {
  * @brief Configuration flags for deterministic simulation
  */
 struct AvbdDeterminismFlags {
-    enum Enum {
-        eNONE                    = 0,
-        eSORT_CONSTRAINTS        = (1 << 0),  //!< Sort constraints by body pair for consistent ordering
-        eSORT_BODIES             = (1 << 1),  //!< Sort bodies by ID before iteration
-        eUSE_KAHAN_SUMMATION     = (1 << 2),  //!< Use Kahan summation for accumulation
-        eFIXED_POINT_MATH        = (1 << 3),  //!< Use fixed-point math where possible (future)
-        
-        eDETERMINISTIC_DEFAULT   = eSORT_CONSTRAINTS | eSORT_BODIES | eUSE_KAHAN_SUMMATION
-    };
+  enum Enum {
+    eNONE = 0,
+    eSORT_CONSTRAINTS =
+        (1 << 0), //!< Sort constraints by body pair for consistent ordering
+    eSORT_BODIES = (1 << 1),         //!< Sort bodies by ID before iteration
+    eUSE_KAHAN_SUMMATION = (1 << 2), //!< Use Kahan summation for accumulation
+    eFIXED_POINT_MATH =
+        (1 << 3), //!< Use fixed-point math where possible (future)
+
+    eDETERMINISTIC_DEFAULT =
+        eSORT_CONSTRAINTS | eSORT_BODIES | eUSE_KAHAN_SUMMATION
+  };
 };
 
 /**
@@ -134,7 +138,7 @@ struct AvbdSolverConfig {
   physx::PxU32
       outerIterations; //!< Number of outer ALM iterations (typically 1-4)
   physx::PxU32 innerIterations; //!< Number of inner block descent iterations
-                                 //!< per outer (typically 2-8)
+                                //!< per outer (typically 2-8)
 
   //-------------------------------------------------------------------------
   // Augmented Lagrangian parameters
@@ -142,7 +146,7 @@ struct AvbdSolverConfig {
 
   physx::PxReal initialRho; //!< Initial penalty parameter for ALM
   physx::PxReal
-      rhoScale; //!< Scale factor for rho adaptation per outer iteration
+      rhoScale;         //!< Scale factor for rho adaptation per outer iteration
   physx::PxReal maxRho; //!< Maximum penalty parameter
 
   //-------------------------------------------------------------------------
@@ -151,27 +155,32 @@ struct AvbdSolverConfig {
 
   physx::PxReal defaultCompliance; //!< Default compliance for soft constraints
   physx::PxReal contactCompliance; //!< Compliance for contact constraints
-                                    //!< (usually 0 or very small)
-  physx::PxReal jointCompliance; //!< Default compliance for joint constraints
+                                   //!< (usually 0 or very small)
+  physx::PxReal jointCompliance;   //!< Default compliance for joint constraints
+  physx::PxReal contactDamping; //!< XPBD-style damping for contact constraints
+                                //!< (0-1, higher = more energy dissipation)
   physx::PxReal damping; //!< Step size damping for gradient descent (0-1)
 
   //-------------------------------------------------------------------------
   // Rotation dynamics
   //-------------------------------------------------------------------------
 
-  physx::PxReal angularDamping; //!< Angular velocity damping per frame (0-1,
-                                 //!< default 0.98)
+  physx::PxReal angularDamping;    //!< Angular velocity damping per frame (0-1,
+                                   //!< default 0.98)
   physx::PxReal rotationThreshold; //!< Penetration threshold to trigger
-                                    //!< rotation (meters, default 0.001)
+                                   //!< rotation (meters, default 0.001)
   physx::PxReal angularScale;      //!< Scale factor for angular velocity from
-                                    //!< torque (default 800)
+                                   //!< torque (default 800)
   physx::PxReal angularContactScale; //!< Scale for angular correction from
-                                      //!< contact normals (0-1, default 0.2).
-                                      //!< Reduced scale prevents drift from
-                                      //!< asymmetric contact patches while
-                                      //!< maintaining rotational stiffness.
+                                     //!< contact normals (0-1, default 0.2).
+                                     //!< Reduced scale prevents drift from
+                                     //!< asymmetric contact patches while
+                                     //!< maintaining rotational stiffness.
   physx::PxReal
       baumgarte; //!< Baumgarte position correction factor (0-1, default 0.2)
+  physx::PxReal
+      omega; //!< SOR over-relaxation factor (1.0-2.0, default 1.3)
+             //!< Values > 1 accelerate convergence but may cause instability
 
   //-------------------------------------------------------------------------
   // Convergence
@@ -186,11 +195,11 @@ struct AvbdSolverConfig {
   //-------------------------------------------------------------------------
 
   physx::PxReal maxPositionCorrection; //!< Maximum position correction per
-                                        //!< iteration (meters, default 0.2)
+                                       //!< iteration (meters, default 0.2)
   physx::PxReal maxAngularCorrection;  //!< Maximum angular correction per
-                                        //!< iteration (radians, default 0.5)
+                                       //!< iteration (radians, default 0.5)
   physx::PxReal maxLambda;             //!< Maximum Lagrangian multiplier
-                                        //!< magnitude (default 1e6)
+                                       //!< magnitude (default 1e6)
 
   //-------------------------------------------------------------------------
   // Parallelization
@@ -200,23 +209,42 @@ struct AvbdSolverConfig {
                               //!< updates
 
   bool enableLocal6x6Solve; //!< Use 6x6 local system solve in block descent
-                             //!< (fallback to Gauss-Seidel when false)
+                            //!< (fallback to Gauss-Seidel when false)
 
   bool enableMassWeightedWeld; //!< Use mass-ratio weighted corrections for weld
                                //!< joints (runtime attachment stability)
 
   physx::PxU32 largeIslandThreshold; //!< Constraint count threshold to trigger
-                                      //!< internal island parallelization.
-                                      //!< Islands with more constraints use
-                                      //!< constraint coloring for better cache
-                                      //!< locality. Default: 128
+                                     //!< internal island parallelization.
+                                     //!< Islands with more constraints use
+                                     //!< constraint coloring for better cache
+                                     //!< locality. Default: 128
+
+  //-------------------------------------------------------------------------
+  // AVBD Reference Parameters (from AVBD3D solver.cpp)
+  //   alpha: Stabilization parameter for constraint error correction (0-1).
+  //          Higher = slower/smoother correction. Reference default: 0.95
+  //   beta:  Penalty growth rate. penalty += beta * |C| each dual update.
+  //          Reference default: 1000
+  //   gamma: Warmstart decay factor for penalty and lambda each frame.
+  //          lambda *= alpha*gamma, penalty = clamp(penalty*gamma, MIN, MAX).
+  //          Reference default: 0.99
+  //   penaltyMin/Max: Bounds for adaptive penalty parameter.
+  //          Reference: 1000 / 1e9
+  //-------------------------------------------------------------------------
+
+  physx::PxReal avbdAlpha;      //!< Stabilization (error correction speed)
+  physx::PxReal avbdBeta;       //!< Penalty growth rate (dual update)
+  physx::PxReal avbdGamma;      //!< Warmstart decay factor
+  physx::PxReal avbdPenaltyMin; //!< Minimum adaptive penalty
+  physx::PxReal avbdPenaltyMax; //!< Maximum adaptive penalty
 
   //-------------------------------------------------------------------------
   // Determinism (for multi-platform synchronization)
   //-------------------------------------------------------------------------
 
-  physx::PxU32 determinismFlags;   //!< Bitmask of AvbdDeterminismFlags::Enum
-                                    //!< for cross-platform determinism
+  physx::PxU32 determinismFlags; //!< Bitmask of AvbdDeterminismFlags::Enum
+                                 //!< for cross-platform determinism
 
   //-------------------------------------------------------------------------
   // Defaults
@@ -225,35 +253,41 @@ struct AvbdSolverConfig {
   AvbdSolverConfig()
       : outerIterations(1), innerIterations(4), initialRho(1e4f),
         rhoScale(2.0f), maxRho(1e8f), defaultCompliance(1e-6f),
-        contactCompliance(0.0f), jointCompliance(1e-8f), damping(0.5f),
-        angularDamping(0.95f), rotationThreshold(0.001f), angularScale(400.0f),
-        angularContactScale(0.2f), baumgarte(0.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        contactCompliance(1e-4f), jointCompliance(1e-8f), contactDamping(0.5f),
+        damping(0.5f), angularDamping(0.95f), rotationThreshold(0.001f),
+        angularScale(400.0f), angularContactScale(0.2f), baumgarte(0.3f),
+        omega(1.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
-        maxLambda(1e6f), enableParallelization(true), enableLocal6x6Solve(false),
-        enableMassWeightedWeld(false),
-        largeIslandThreshold(128), determinismFlags(0) {}
-  
+        maxLambda(1e6f), enableParallelization(true),
+        enableLocal6x6Solve(false), enableMassWeightedWeld(false),
+        largeIslandThreshold(128),
+        avbdAlpha(0.95f), avbdBeta(1000.0f), avbdGamma(0.99f),
+        avbdPenaltyMin(1000.0f), avbdPenaltyMax(1e9f),
+        determinismFlags(0) {}
+
   /**
    * @brief Enable deterministic simulation for cross-platform synchronization
-   * 
+   *
    * When enabled, the solver will:
    * - Sort constraints by body pair indices for consistent iteration order
    * - Sort bodies by node index before each solve iteration
    * - Use Kahan summation to reduce floating-point rounding errors
-   * 
+   *
    * Note: This may reduce performance slightly but ensures identical
    * results across different platforms (x86, ARM, etc.)
    */
   void enableDeterminism() {
     determinismFlags = AvbdDeterminismFlags::eDETERMINISTIC_DEFAULT;
-    enableParallelization = false;  // Disable parallelization for strict determinism
+    enableParallelization =
+        false; // Disable parallelization for strict determinism
   }
-  
+
   /**
    * @brief Check if determinism is enabled
    */
   bool isDeterministic() const {
-    return (determinismFlags & AvbdDeterminismFlags::eDETERMINISTIC_DEFAULT) != 0;
+    return (determinismFlags & AvbdDeterminismFlags::eDETERMINISTIC_DEFAULT) !=
+           0;
   }
 };
 
@@ -312,8 +346,8 @@ struct AvbdBodyColorGroup {
  */
 struct AvbdGraphColoring {
   AvbdBodyColorGroup *colorGroups; //!< Array of color groups
-  physx::PxU32 numColors;         //!< Number of colors used
-  physx::PxU32 maxColors;         //!< Maximum colors allocated
+  physx::PxU32 numColors;          //!< Number of colors used
+  physx::PxU32 maxColors;          //!< Maximum colors allocated
 
   /**
    * @brief Initialize coloring structure
@@ -407,23 +441,25 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
   /**
    * @brief Initialize diagonal blocks from inverse mass and inertia
    */
-  PX_FORCE_INLINE void
-  initializeDiagonal(physx::PxReal invMass,
-                     const physx::PxMat33 & /*invInertia*/,
-                     physx::PxReal invDtSq) {
-    // M/h^2 and I/h^2 on diagonal
+  PX_FORCE_INLINE void initializeDiagonal(physx::PxReal invMass,
+                                          const physx::PxMat33 &invInertia,
+                                          physx::PxReal invDtSq) {
+    // M/h^2 on linear diagonal
     physx::PxReal massContrib =
         (invMass > 0.0f) ? (1.0f / invMass) * invDtSq : 0.0f;
     linearLinear = physx::PxMat33(physx::PxVec3(massContrib, 0, 0),
-                                   physx::PxVec3(0, massContrib, 0),
-                                   physx::PxVec3(0, 0, massContrib));
+                                  physx::PxVec3(0, massContrib, 0),
+                                  physx::PxVec3(0, 0, massContrib));
 
-    // For inertia, we need I/h^2 (not inverse)
-    // This is a simplification - full implementation would compute I from invI
+    // I/h^2 on angular diagonal: compute I = inv(invInertia) using full
+    // 3x3 matrix inverse, since invInertiaWorld has off-diagonal terms
+    // after rotation to world space.
     linearAngular = physx::PxMat33(physx::PxZero);
     angularLinear = physx::PxMat33(physx::PxZero);
-    angularAngular =
-        physx::PxMat33(physx::PxIdentity) * invDtSq; // Placeholder
+
+    // Compute inertia tensor I = inv(invInertia) for angular block
+    physx::PxMat33 inertiaTensor = invInertia.getInverse();
+    angularAngular = inertiaTensor * invDtSq;
   }
 
   /**
@@ -493,10 +529,10 @@ struct PX_ALIGN_PREFIX(16) AvbdVec6 {
  * Used for solving H * x = b in the local system solver.
  */
 struct PX_ALIGN_PREFIX(16) AvbdLDLT {
-  AvbdBlock6x6 L;  // Lower triangular matrix (diagonal = 1)
-  AvbdVec6 D;      // Diagonal matrix (stored as vector)
-  physx::PxReal conditionNumber;  // Condition number of the matrix
-  
+  AvbdBlock6x6 L;                // Lower triangular matrix (diagonal = 1)
+  AvbdVec6 D;                    // Diagonal matrix (stored as vector)
+  physx::PxReal conditionNumber; // Condition number of the matrix
+
   /**
    * @brief Compute condition number from diagonal D
    * @return Condition number (max(D) / min(D))
@@ -504,7 +540,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
   PX_FORCE_INLINE physx::PxReal computeConditionNumber() const {
     physx::PxReal minD = PX_MAX_F32;
     physx::PxReal maxD = 0.0f;
-    
+
     for (int i = 0; i < 3; ++i) {
       if (D.linear[i] > 0.0f) {
         minD = physx::PxMin(minD, D.linear[i]);
@@ -515,38 +551,39 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
         maxD = physx::PxMax(maxD, D.angular[i]);
       }
     }
-    
+
     return (minD > 0.0f) ? (maxD / minD) : PX_MAX_F32;
   }
-  
+
   /**
    * @brief Regularize matrix A by adding small diagonal terms
    * @param A Input matrix to regularize
    * @param reg Regularization coefficient
    * @return Regularized matrix
    */
-  PX_FORCE_INLINE AvbdBlock6x6 regularizeMatrix(const AvbdBlock6x6& A, physx::PxReal reg) const {
+  PX_FORCE_INLINE AvbdBlock6x6 regularizeMatrix(const AvbdBlock6x6 &A,
+                                                physx::PxReal reg) const {
     AvbdBlock6x6 A_reg = A;
-    
+
     // Add regularization to diagonal blocks
     for (int i = 0; i < 3; ++i) {
       A_reg.linearLinear(i, i) += reg;
       A_reg.angularAngular(i, i) += reg;
     }
-    
+
     return A_reg;
   }
-  
+
   /**
    * @brief Decompose matrix A into L * D * L^T with numerical stability checks
    * @param A Input symmetric positive definite matrix
    * @return true if decomposition succeeded, false if matrix is singular
    */
-  PX_FORCE_INLINE bool decompose(const AvbdBlock6x6& A) {
+  PX_FORCE_INLINE bool decompose(const AvbdBlock6x6 &A) {
     // For a 6x6 matrix stored as 4 3x3 blocks:
     // A = [A11 A12; A21 A22] where A21 = A12^T
     // We need to compute L = [L11 0; L21 L22] and D = [D1 0; 0 D2]
-    
+
     // First, decompose the top-left 3x3 block
     // L11 * D1 * L11^T = A11
     for (int i = 0; i < 3; ++i) {
@@ -566,18 +603,19 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
         }
       }
     }
-    
-    // Compute L21: L21 * D1 * L11^T = A21
+
+    // Compute L21: A21 = L21 * D1 * L11^T
+    // Solving for L21 row by row: L21[i][j] = (A21[i][j] - sum_{k<j} L21[i][k] * D1[k] * L11[j][k]) / D1[j]
     for (int i = 0; i < 3; ++i) {
       for (int j = 0; j < 3; ++j) {
         physx::PxReal sum = A.angularLinear(i, j);
-        for (int k = 0; k < 3; ++k) {
-          sum -= L.angularAngular(i, k) * D.angular[k] * L.linearLinear(j, k);
+        for (int k = 0; k < j; ++k) {
+          sum -= L.angularLinear(i, k) * D.linear[k] * L.linearLinear(j, k);
         }
         L.angularLinear(i, j) = sum / D.linear[j];
       }
     }
-    
+
     // Compute L22: L22 * D2 * L22^T = A22 - L21 * D1 * L21^T
     AvbdBlock6x6 S; // Schur complement
     for (int i = 0; i < 3; ++i) {
@@ -589,7 +627,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
         S.angularAngular(i, j) = sum;
       }
     }
-    
+
     // Decompose the Schur complement
     for (int i = 0; i < 3; ++i) {
       for (int j = 0; j <= i; ++j) {
@@ -608,26 +646,28 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
         }
       }
     }
-    
+
     // L12 = 0 (upper triangular is zero)
     L.linearAngular = physx::PxMat33(physx::PxZero);
-    
+
     // Compute condition number for numerical stability check
     conditionNumber = computeConditionNumber();
-    
+
     return true;
   }
-  
+
   /**
-   * @brief Decompose matrix A with automatic regularization for ill-conditioned matrices
+   * @brief Decompose matrix A with automatic regularization for ill-conditioned
+   * matrices
    * @param A Input symmetric positive definite matrix
    * @param maxRegAttempts Maximum number of regularization attempts
    * @return true if decomposition succeeded, false if matrix is singular
    */
-  PX_FORCE_INLINE bool decomposeWithRegularization(const AvbdBlock6x6& A, int maxRegAttempts = 3) {
+  PX_FORCE_INLINE bool decomposeWithRegularization(const AvbdBlock6x6 &A,
+                                                   int maxRegAttempts = 3) {
     AvbdBlock6x6 A_reg = A;
     physx::PxReal reg = AvbdConstants::AVBD_REGULARIZATION_COEFFICIENT;
-    
+
     for (int attempt = 0; attempt <= maxRegAttempts; ++attempt) {
       if (decompose(A_reg)) {
         // Check condition number
@@ -653,18 +693,18 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
         }
       }
     }
-    
+
     return false;
   }
-  
+
   /**
    * @brief Solve L * D * L^T * x = b
    * @param b Right-hand side vector
    * @return Solution vector x
    */
-  PX_FORCE_INLINE AvbdVec6 solve(const AvbdVec6& b) const {
+  PX_FORCE_INLINE AvbdVec6 solve(const AvbdVec6 &b) const {
     AvbdVec6 y, x;
-    
+
     // Forward substitution: L * y = b
     for (int i = 0; i < 3; ++i) {
       physx::PxReal sum = b.linear[i];
@@ -673,7 +713,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
       }
       y.linear[i] = sum;
     }
-    
+
     for (int i = 0; i < 3; ++i) {
       physx::PxReal sum = b.angular[i];
       for (int j = 0; j < 3; ++j) {
@@ -684,7 +724,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
       }
       y.angular[i] = sum;
     }
-    
+
     // Scale by D: D * z = y => z = D^-1 * y
     for (int i = 0; i < 3; ++i) {
       y.linear[i] /= D.linear[i];
@@ -692,7 +732,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
     for (int i = 0; i < 3; ++i) {
       y.angular[i] /= D.angular[i];
     }
-    
+
     // Backward substitution: L^T * x = z
     for (int i = 2; i >= 0; --i) {
       physx::PxReal sum = y.angular[i];
@@ -701,7 +741,7 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
       }
       x.angular[i] = sum;
     }
-    
+
     for (int i = 2; i >= 0; --i) {
       physx::PxReal sum = y.linear[i];
       for (int j = i + 1; j < 3; ++j) {
@@ -712,10 +752,10 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
       }
       x.linear[i] = sum;
     }
-    
+
     return x;
   }
-  
+
   PX_FORCE_INLINE AvbdLDLT() {
     L.setZero();
     D = AvbdVec6();
@@ -725,166 +765,169 @@ struct PX_ALIGN_PREFIX(16) AvbdLDLT {
 
 /**
  * @brief Kahan summation accumulator for deterministic floating-point addition
- * 
+ *
  * This helps ensure identical results across different platforms by reducing
  * floating-point rounding errors and making the summation order-independent.
  */
 struct AvbdKahanAccumulator {
-    physx::PxVec3 sum;
-    physx::PxVec3 compensation;
-    
-    PX_FORCE_INLINE AvbdKahanAccumulator() : sum(0.0f), compensation(0.0f) {}
-    
-    PX_FORCE_INLINE void add(const physx::PxVec3& value) {
-        physx::PxVec3 y = value - compensation;
-        physx::PxVec3 t = sum + y;
-        compensation = (t - sum) - y;
-        sum = t;
-    }
-    
-    PX_FORCE_INLINE physx::PxVec3 getSum() const { return sum; }
+  physx::PxVec3 sum;
+  physx::PxVec3 compensation;
+
+  PX_FORCE_INLINE AvbdKahanAccumulator() : sum(0.0f), compensation(0.0f) {}
+
+  PX_FORCE_INLINE void add(const physx::PxVec3 &value) {
+    physx::PxVec3 y = value - compensation;
+    physx::PxVec3 t = sum + y;
+    compensation = (t - sum) - y;
+    sum = t;
+  }
+
+  PX_FORCE_INLINE physx::PxVec3 getSum() const { return sum; }
 };
 
 /**
  * @brief Pre-computed constraint-to-body mapping for O(1) constraint lookup
- * 
+ *
  * This structure eliminates O(N^2) complexity in the solver by pre-computing
  * which constraints affect each body. Instead of iterating all constraints
  * for each body, we can directly access only the relevant constraints.
  */
 struct AvbdBodyConstraintMap {
-    physx::PxU32* constraintOffsets;    //!< Per-body start offset into constraintIndices
-    physx::PxU32* constraintCounts;     //!< Per-body constraint count
-    physx::PxU32* constraintIndices;    //!< Packed array of constraint indices
-    physx::PxU32 numBodies;
-    physx::PxU32 totalConstraintRefs;   //!< Total entries in constraintIndices
-    physx::PxU32 capacity;
-    
-    PX_FORCE_INLINE AvbdBodyConstraintMap() 
-        : constraintOffsets(nullptr), constraintCounts(nullptr), 
-          constraintIndices(nullptr), numBodies(0), totalConstraintRefs(0), capacity(0) {}
-    
-    /**
-     * @brief Build the mapping from constraint array
-     * @param numBodiesIn Number of bodies
-     * @param numConstraints Number of constraints
-     * @param bodyIndicesA Array of bodyIndexA for each constraint
-     * @param bodyIndicesB Array of bodyIndexB for each constraint
-     * @param allocator Allocator for memory
-     */
-    template<typename ConstraintType>
-    void build(physx::PxU32 numBodiesIn, 
-               const ConstraintType* constraints,
-               physx::PxU32 numConstraints,
-               physx::PxAllocatorCallback& allocator) {
-        
-        // Release old data if any
-        if (constraintOffsets) {
-            release(allocator);
-        }
-        
-        numBodies = numBodiesIn;
-        
-        // Allocate count array
-        constraintCounts = static_cast<physx::PxU32*>(
-            allocator.allocate(sizeof(physx::PxU32) * numBodies, 
-                              "AvbdBodyConstraintMap::counts", __FILE__, __LINE__));
-        
-        // First pass: count constraints per body
-        for (physx::PxU32 i = 0; i < numBodies; ++i) {
-            constraintCounts[i] = 0;
-        }
-        
-        for (physx::PxU32 c = 0; c < numConstraints; ++c) {
-            physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
-            physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
-            if (bodyA < numBodies) constraintCounts[bodyA]++;
-            if (bodyB < numBodies) constraintCounts[bodyB]++;
-        }
-        
-        // Compute offsets (prefix sum)
-        constraintOffsets = static_cast<physx::PxU32*>(
-            allocator.allocate(sizeof(physx::PxU32) * (numBodies + 1), 
-                              "AvbdBodyConstraintMap::offsets", __FILE__, __LINE__));
-        
-        constraintOffsets[0] = 0;
-        for (physx::PxU32 i = 0; i < numBodies; ++i) {
-            constraintOffsets[i + 1] = constraintOffsets[i] + constraintCounts[i];
-        }
-        totalConstraintRefs = constraintOffsets[numBodies];
-        
-        // Allocate constraint indices array
-        if (totalConstraintRefs > 0) {
-            constraintIndices = static_cast<physx::PxU32*>(
-                allocator.allocate(sizeof(physx::PxU32) * totalConstraintRefs, 
-                                  "AvbdBodyConstraintMap::indices", __FILE__, __LINE__));
-        }
-        
-        // Reset counts for second pass
-        for (physx::PxU32 i = 0; i < numBodies; ++i) {
-            constraintCounts[i] = 0;
-        }
-        
-        // Second pass: fill constraint indices
-        for (physx::PxU32 c = 0; c < numConstraints; ++c) {
-            physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
-            physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
-            
-            if (bodyA < numBodies) {
-                physx::PxU32 idx = constraintOffsets[bodyA] + constraintCounts[bodyA];
-                constraintIndices[idx] = c;
-                constraintCounts[bodyA]++;
-            }
-            if (bodyB < numBodies) {
-                physx::PxU32 idx = constraintOffsets[bodyB] + constraintCounts[bodyB];
-                constraintIndices[idx] = c;
-                constraintCounts[bodyB]++;
-            }
-        }
-        
-        capacity = numBodies;
+  physx::PxU32
+      *constraintOffsets; //!< Per-body start offset into constraintIndices
+  physx::PxU32 *constraintCounts;  //!< Per-body constraint count
+  physx::PxU32 *constraintIndices; //!< Packed array of constraint indices
+  physx::PxU32 numBodies;
+  physx::PxU32 totalConstraintRefs; //!< Total entries in constraintIndices
+  physx::PxU32 capacity;
+
+  PX_FORCE_INLINE AvbdBodyConstraintMap()
+      : constraintOffsets(nullptr), constraintCounts(nullptr),
+        constraintIndices(nullptr), numBodies(0), totalConstraintRefs(0),
+        capacity(0) {}
+
+  /**
+   * @brief Build the mapping from constraint array
+   * @param numBodiesIn Number of bodies
+   * @param numConstraints Number of constraints
+   * @param bodyIndicesA Array of bodyIndexA for each constraint
+   * @param bodyIndicesB Array of bodyIndexB for each constraint
+   * @param allocator Allocator for memory
+   */
+  template <typename ConstraintType>
+  void build(physx::PxU32 numBodiesIn, const ConstraintType *constraints,
+             physx::PxU32 numConstraints,
+             physx::PxAllocatorCallback &allocator) {
+
+    // Release old data if any
+    if (constraintOffsets) {
+      release(allocator);
     }
-    
-    /**
-     * @brief Get constraints for a specific body
-     * @param bodyIndex Body index
-     * @param outIndices Output pointer to constraint indices
-     * @param outCount Output count of constraints
-     */
-    PX_FORCE_INLINE void getBodyConstraints(physx::PxU32 bodyIndex, 
-                                            const physx::PxU32*& outIndices, 
-                                            physx::PxU32& outCount) const {
-        // Safety check: ensure all required pointers are valid
-        if (constraintOffsets && constraintCounts && constraintIndices && 
-            bodyIndex < numBodies) {
-            outIndices = constraintIndices + constraintOffsets[bodyIndex];
-            outCount = constraintCounts[bodyIndex];
-        } else {
-            outIndices = nullptr;
-            outCount = 0;
-        }
+
+    numBodies = numBodiesIn;
+
+    // Allocate count array
+    constraintCounts = static_cast<physx::PxU32 *>(allocator.allocate(
+        sizeof(physx::PxU32) * numBodies, "AvbdBodyConstraintMap::counts",
+        __FILE__, __LINE__));
+
+    // First pass: count constraints per body
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      constraintCounts[i] = 0;
     }
-    
-    /**
-     * @brief Release allocated memory
-     */
-    void release(physx::PxAllocatorCallback& allocator) {
-        if (constraintOffsets) {
-            allocator.deallocate(constraintOffsets);
-            constraintOffsets = nullptr;
-        }
-        if (constraintCounts) {
-            allocator.deallocate(constraintCounts);
-            constraintCounts = nullptr;
-        }
-        if (constraintIndices) {
-            allocator.deallocate(constraintIndices);
-            constraintIndices = nullptr;
-        }
-        numBodies = 0;
-        totalConstraintRefs = 0;
-        capacity = 0;
+
+    for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+      physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+      physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+      if (bodyA < numBodies)
+        constraintCounts[bodyA]++;
+      if (bodyB < numBodies)
+        constraintCounts[bodyB]++;
     }
+
+    // Compute offsets (prefix sum)
+    constraintOffsets = static_cast<physx::PxU32 *>(allocator.allocate(
+        sizeof(physx::PxU32) * (numBodies + 1),
+        "AvbdBodyConstraintMap::offsets", __FILE__, __LINE__));
+
+    constraintOffsets[0] = 0;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      constraintOffsets[i + 1] = constraintOffsets[i] + constraintCounts[i];
+    }
+    totalConstraintRefs = constraintOffsets[numBodies];
+
+    // Allocate constraint indices array
+    if (totalConstraintRefs > 0) {
+      constraintIndices = static_cast<physx::PxU32 *>(allocator.allocate(
+          sizeof(physx::PxU32) * totalConstraintRefs,
+          "AvbdBodyConstraintMap::indices", __FILE__, __LINE__));
+    }
+
+    // Reset counts for second pass
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      constraintCounts[i] = 0;
+    }
+
+    // Second pass: fill constraint indices
+    for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+      physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+      physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+
+      if (bodyA < numBodies) {
+        physx::PxU32 idx = constraintOffsets[bodyA] + constraintCounts[bodyA];
+        constraintIndices[idx] = c;
+        constraintCounts[bodyA]++;
+      }
+      if (bodyB < numBodies) {
+        physx::PxU32 idx = constraintOffsets[bodyB] + constraintCounts[bodyB];
+        constraintIndices[idx] = c;
+        constraintCounts[bodyB]++;
+      }
+    }
+
+    capacity = numBodies;
+  }
+
+  /**
+   * @brief Get constraints for a specific body
+   * @param bodyIndex Body index
+   * @param outIndices Output pointer to constraint indices
+   * @param outCount Output count of constraints
+   */
+  PX_FORCE_INLINE void getBodyConstraints(physx::PxU32 bodyIndex,
+                                          const physx::PxU32 *&outIndices,
+                                          physx::PxU32 &outCount) const {
+    // Safety check: ensure all required pointers are valid
+    if (constraintOffsets && constraintCounts && constraintIndices &&
+        bodyIndex < numBodies) {
+      outIndices = constraintIndices + constraintOffsets[bodyIndex];
+      outCount = constraintCounts[bodyIndex];
+    } else {
+      outIndices = nullptr;
+      outCount = 0;
+    }
+  }
+
+  /**
+   * @brief Release allocated memory
+   */
+  void release(physx::PxAllocatorCallback &allocator) {
+    if (constraintOffsets) {
+      allocator.deallocate(constraintOffsets);
+      constraintOffsets = nullptr;
+    }
+    if (constraintCounts) {
+      allocator.deallocate(constraintCounts);
+      constraintCounts = nullptr;
+    }
+    if (constraintIndices) {
+      allocator.deallocate(constraintIndices);
+      constraintIndices = nullptr;
+    }
+    numBodies = 0;
+    totalConstraintRefs = 0;
+    capacity = 0;
+  }
 };
 
 } // namespace Dy

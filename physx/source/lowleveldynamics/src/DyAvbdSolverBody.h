@@ -67,11 +67,27 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
                                     //!< velocity integration
 
   //-------------------------------------------------------------------------
+  // Inertial target state (for AVBD RHS computation)
+  // This is the pure inertial prediction (gravity-only, no warmstarting).
+  // The RHS of the AVBD linear system uses (position - inertialPosition)
+  // so that the inertia term is non-zero when position is warm-started.
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3
+      inertialPosition; //!< Pure inertial target: x_n + h*v + h^2*g
+  physx::PxReal padding0b;
+
+  physx::PxQuat inertialRotation; //!< Pure inertial rotation target
+
+  //-------------------------------------------------------------------------
   // Velocity state (for final velocity computation)
   //-------------------------------------------------------------------------
 
   physx::PxVec3 linearVelocity; //!< Linear velocity v
   physx::PxReal padding1;
+
+  physx::PxVec3 prevLinearVelocity; //!< Previous frame linear velocity (for adaptive warmstart)
+  physx::PxReal padding1b;
 
   physx::PxVec3 angularVelocity; //!< Angular velocity omega
   physx::PxReal padding2;
@@ -120,7 +136,10 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
     prevRotation = globalPose.q;
     predictedPosition = globalPose.p;
     predictedRotation = globalPose.q;
+    inertialPosition = globalPose.p;
+    inertialRotation = globalPose.q;
     linearVelocity = linVel;
+    prevLinearVelocity = linVel;
     angularVelocity = angVel;
     invMass = invMassIn;
     invInertiaWorld = invInertiaIn;
@@ -137,20 +156,29 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
   PX_FORCE_INLINE void computePrediction(physx::PxReal dt,
                                          const physx::PxVec3 &gravity) {
     if (invMass > 0.0f) {
-      // Explicit Euler prediction with gravity
-      physx::PxVec3 acceleration = gravity;
-      linearVelocity += acceleration * dt;
-      predictedPosition = position + linearVelocity * dt;
+      // Prediction: x_pred = x + (v + g*dt)*dt = x + v*dt + g*dt^2
+      // NOTE: We do NOT modify linearVelocity here (no gravity kick).
+      // linearVelocity always holds the clean post-solve velocity from the
+      // previous frame. This is essential for the adaptive warmstart which
+      // computes acceleration = (v_current - v_previous) / dt.
+      // prevLinearVelocity is updated at end-of-solve, NOT here.
+      predictedPosition = position + (linearVelocity + gravity * dt) * dt;
 
       // Quaternion integration for rotation prediction
       physx::PxVec3 angVelHalf = angularVelocity * (0.5f * dt);
       physx::PxQuat deltaQ(angVelHalf.x, angVelHalf.y, angVelHalf.z, 0.0f);
       predictedRotation = rotation + deltaQ * rotation;
       predictedRotation.normalize();
+
+      // Inertial target = pure prediction (same as predicted, used as RHS anchor)
+      inertialPosition = predictedPosition;
+      inertialRotation = predictedRotation;
     } else {
       // Static body: prediction equals current state
       predictedPosition = position;
       predictedRotation = rotation;
+      inertialPosition = position;
+      inertialRotation = rotation;
     }
   }
 
