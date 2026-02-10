@@ -331,66 +331,9 @@ private:
                               physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
                               physx::PxVec3 &gradPosB, physx::PxVec3 &gradRotB);
 
-  /**
-   * @brief Build Hessian matrix for a body's local system
-   */
-  void buildHessianMatrix(const AvbdSolverBody &body, AvbdSolverBody *bodies,
-                          physx::PxU32 numBodies,
-                          AvbdContactConstraint *contacts,
-                          physx::PxU32 numContacts, physx::PxReal invDt2,
-                          AvbdBlock6x6 &H);
-
-  /**
-   * @brief Build gradient vector for a body's local system
-   */
-  void buildGradientVector(const AvbdSolverBody &body, AvbdSolverBody *bodies,
-                           physx::PxU32 numBodies,
-                           AvbdContactConstraint *contacts,
-                           physx::PxU32 numContacts, physx::PxReal invDt2,
-                           AvbdVec6 &g);
-
-  /**
-   * @brief Collect all constraints affecting a specific body
-   */
-  physx::PxU32 collectBodyConstraints(physx::PxU32 bodyIndex,
-                                      AvbdContactConstraint *contacts,
-                                      physx::PxU32 numContacts,
-                                      physx::PxU32 *constraintIndices);
-
   //-------------------------------------------------------------------------
   // Block Coordinate Descent - Body-Centric Constraint Solving
   //-------------------------------------------------------------------------
-
-  /**
-   * @brief Solve all constraints (contacts only) affecting a single body
-   * This is the core AVBD block descent step for contact-only solving.
-   */
-  void solveBodyLocalConstraints(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                 physx::PxU32 bodyIndex,
-                                 AvbdContactConstraint *contacts,
-                                 physx::PxU32 numContacts);
-
-  /**
-   * @brief Solve all constraints (contacts + joints) affecting a single body
-   * This is the core AVBD block descent step for joint solving.
-   */
-  void solveBodyAllConstraints(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
-      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6, physx::PxReal dt);
-
-  /**
-   * @brief Compute position/rotation correction for a contact constraint
-   * @return true if constraint is active and correction was computed
-   */
-  bool computeContactCorrection(const AvbdContactConstraint &contact,
-                                AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
-                                physx::PxVec3 &deltaTheta);
 
   /**
    * @brief Compute position/rotation correction for a spherical joint
@@ -508,27 +451,6 @@ private:
       physx::PxU32 numPrismatic, AvbdD6JointConstraint *d6Joints,
       physx::PxU32 numD6);
 
-  /**
-   * @brief Optimized version of solveBodyAllConstraints using pre-computed
-   * mappings Complexity: O(constraints connected to this body) instead of O(all
-   * constraints)
-   */
-  void solveBodyAllConstraintsFast(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
-      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-      const AvbdBodyConstraintMap &contactMap,
-      const AvbdBodyConstraintMap &sphericalMap,
-      const AvbdBodyConstraintMap &fixedMap,
-      const AvbdBodyConstraintMap &revoluteMap,
-      const AvbdBodyConstraintMap &prismaticMap,
-      const AvbdBodyConstraintMap &d6Map, const AvbdBodyConstraintMap &gearMap,
-      physx::PxReal dt);
 };
 
 //=============================================================================

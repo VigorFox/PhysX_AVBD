@@ -9,7 +9,7 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Rigid Body Solver | ✅ Working | Contacts + 6 joint types |
-| Joint System | ✅ Working | Revolute, Prismatic, Spherical, Fixed, D6, Gear |
+| Joint System | ⚠️ In Progress | Revolute, Prismatic, Spherical, Fixed, D6, Gear |
 | Motor Drive | ✅ Working | Torque-based RevoluteJoint motor |
 | Joint Limits | ✅ Working | Revolute, Prismatic, Spherical cone, D6 |
 | Custom Joint | ❌ Not Available | Custom constraint callbacks unsupported |
@@ -57,17 +57,18 @@ Contact AL stability (DONE)         Joint AL fix (NEXT)
 
 ## AVBD Solver Overview
 
-This implementation is a **hybrid position-based constraint solver** that combines:
+This implementation is a **position-based constraint solver** that combines:
 - **Augmented Lagrangian (AL) outer loop** — Multiplier updates with correct sign convention (`λ = max(0, λ - ρC)`)
-- **AL-augmented per-constraint Jacobi correction** — Inner solve targets `C(x) = λ/ρ` instead of zero
-- **Jacobi accumulation within body, Gauss-Seidel between bodies** — Eliminates intra-body processing bias
+- **Local system solve (default 3x3 decoupled)** — Per-body position/rotation solve using AL terms
+- **Optional full 6x6 LDLT solve** — Coupled position+rotation local solve via `enableLocal6x6Solve`
+- **Jacobi within body, Gauss-Seidel between bodies** — Reduces intra-body bias
 - **Island-level Parallelism** — Independent islands solve concurrently
 
-> ⚠️ **Note**: The default solver path uses AL-augmented per-constraint Jacobi correction, rather than the full 6×6 block system solve described in the original AVBD paper. This provides 5-10x better performance while maintaining stability via the Augmented Lagrangian framework. The full 6×6 path is available via `enableLocal6x6Solve` config option. See [SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
+> ⚠️ **Note**: The default path is the decoupled 3x3 local solve (`enableLocal6x6Solve = false`). It preserves the AL formulation while reducing cost compared to the full 6x6 path. The earlier hybrid approach is treated as a long-term research target. See [SOLVER_ALGORITHM_ANALYSIS.md](docs/SOLVER_ALGORITHM_ANALYSIS.md) for details.
 
 ### Comparison with TGS/PGS
 
-| Property | PGS | TGS | AVBD (default) | AVBD (6×6) |
+| Property | PGS | TGS | AVBD (3x3) | AVBD (6x6) |
 |----------|-----|-----|----------------|------------|
 | Solve Level | Velocity | Velocity | **Position** | **Position** |
 | Convergence | Linear | Sublinear | AL-augmented linear | Quadratic |

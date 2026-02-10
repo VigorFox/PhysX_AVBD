@@ -1,7 +1,7 @@
 # Stability Regression Plan (After Unifying Contact Constraint C(x))
 
 > **Goal**: Verify that after unifying the mathematical contact constraint \(C(x)\) and implementing AL-augmented Jacobi correction, the solver becomes **more stable, more predictable, and easier to tune**.  
-> **Changes under test**: (1) All paths use `computeFullViolation()` = dot + penetrationDepth. (2) AL sign corrected: `lambda - rho * C`. (3) Inner solve targets `C(x) = lambda/rho`. (4) Jacobi contact accumulation within bodies. (5) `angularContactScale = 0.2`. (6) Velocity damping + pseudo-sleep.  
+> **Changes under test**: (1) All paths use `computeFullViolation()` = dot + penetrationDepth. (2) AL sign corrected: `lambda - rho * C`. (3) Inner solve targets `C(x) = lambda/rho`. (4) 3x3 decoupled local solve (default). (5) `angularContactScale = 0.2`. (6) Velocity damping + pseudo-sleep.  
 > **Current status**: ✅ Stable at outerIterations=4, innerIterations=8. ⬜ Paper-default 1×4 still insufficient (known issue).
 
 ---
@@ -40,7 +40,7 @@ Log once per simulation step:
   - `initialRho`, `rhoScale`, `maxRho`
   - `baumgarte`, `angularContactScale`
   - `velocityDamping`, `angularDamping`
-  - `enableLocal6x6Solve` (fast vs 6×6)
+  - `enableLocal6x6Solve` (3x3 default vs 6x6)
 - Global solver stats:
   - `mStats.constraintError` (RMS of `computeFullViolation()` over active contacts)
   - `mStats.activeConstraints`
@@ -149,8 +149,8 @@ For each scenario, run a small grid. Keep it minimal to avoid combinatorial expl
 - `enableLocal6x6Solve`: { false, true } (run fewer combinations for true due to cost)
 
 **Recommended execution**:
-- Fast path: run full grid for Scenarios A–E
-- 6×6 path: run reduced grid (dt 1/60, outer 2, inner 4, baumgarte 0.3) + one stress case (Scenario B)
+- 3x3 default path: run full grid for Scenarios A–E
+- 6x6 path: run reduced grid (dt 1/60, outer 2, inner 4, baumgarte 0.3) + one stress case (Scenario B)
 
 ---
 

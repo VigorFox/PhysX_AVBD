@@ -25,18 +25,22 @@ Contact AL stability (DONE)         Joint AL fix (NEXT)
               Multiplayer determinism across all the above
 ```
 
-## Current Configuration
+## Current Configuration (Defaults)
 
 | Parameter            | Value   | Notes                          |
 |----------------------|---------|--------------------------------|
-| outerIterations      | 4       | AL multiplier updates          |
-| innerIterations      | 8       | Block descent iterations per AL step |
+| outerIterations      | 1       | AL multiplier updates          |
+| innerIterations      | 4       | Block descent iterations per AL step |
 | baumgarte            | 0.3     | Position correction factor     |
 | angularContactScale  | 0.2     | Angular correction scale from contact normals |
 | velocityDamping      | 0.99    | Linear velocity damping        |
 | angularDamping       | 0.95    | Angular velocity damping       |
-| initialRho           | 1e6     | Initial AL penalty parameter   |
+| initialRho           | 1e4     | Initial AL penalty parameter   |
 | maxRho               | 1e8     | Maximum AL penalty parameter   |
+
+**Default path**: 3x3 decoupled local solve (`enableLocal6x6Solve = false`).
+
+**Recommended for stability** (stacking/joints): `outerIterations=4`, `innerIterations=8`.
 
 ## Known Issues
 

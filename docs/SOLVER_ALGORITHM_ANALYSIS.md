@@ -6,15 +6,17 @@
 
 ## Executive Summary
 
-The AVBD solver uses a **hybrid approach** that combines:
+The AVBD solver currently uses a **decoupled 3x3 local solve** and reserves
+the prior hybrid approach as a long-term research target. The current path
+combines:
 
 1. **Augmented Lagrangian (AL) outer loop** with correct sign: `lambda = max(0, lambda - rho * C)`
-2. **AL-augmented per-constraint Jacobi correction** targeting `C(x) = lambda/rho` (not zero)
-3. **Jacobi accumulation within each body**, Gauss-Seidel propagation between bodies
+2. **AL local system solve (default 3x3 decoupled)** per body for position and rotation
+3. **Gauss-Seidel between bodies** with Jacobi-style accumulation inside each body
 4. **Angular contact scaling** (0.2) to prevent drift from asymmetric contact patches
 5. **Velocity damping + pseudo-sleep** for post-settle micro-jitter elimination
 
-The inner solve incorporates the AL multiplier `lambda` as a correction target, enabling the penalty term and Lagrange multiplier to cooperate across outer iterations. The full 6×6 path exists but is disabled by default; the fast path achieves stable stacking at outerIterations=4, innerIterations=8.
+The inner solve incorporates the AL multiplier `lambda` as a correction target, enabling the penalty term and Lagrange multiplier to cooperate across outer iterations. The full 6×6 path exists but is disabled by default; the 3x3 path achieves stable stacking at outerIterations=4, innerIterations=8.
 
 **Strategic motivation**: AVBD was introduced for (1) high mass-ratio joint stability ("ultimate hand" — kinematic hand gripping light objects), and (2) future cloth/soft body unification — the position-level block descent structure maps naturally to deformable bodies and GPU compute.
 
@@ -55,32 +57,24 @@ for each outer iteration:
 
 ## 2. Current Implementation (Default Path)
 
-The current implementation uses **AL-augmented Jacobi correction** with per-constraint projection:
+The current implementation uses a **3x3 decoupled local solve** with AL terms:
 
 ```cpp
 for each outer iteration:
     for each body i:
-        contactDelta = 0       // Jacobi accumulation
-        contactDeltaTheta = 0
-        
-        for each constraint c affecting body i:
-            // Compute full violation C(x) = dot(xA-xB, n) + penetrationDepth
-            C = computeFullViolation(c)
-            
-            // Generalized inverse mass
-            w = invMass + (r×n)·I⁻¹(r×n)
-            
-            // AL-augmented correction: target C(x) = λ/ρ
-            target = λ / ρ
-            correction = max(0, -(C - target) / w * baumgarte)
-            
-            // Accumulate position + angular (Jacobi within body)
-            contactDelta += normal * correction * invMass * sign
-            contactDeltaTheta += (I⁻¹ * r×n) * correction * sign * angularContactScale
-        
-        // Apply sum of all contact corrections (single body update)
-        body.pos += contactDelta
-        body.rot += exponentialMap(contactDeltaTheta)
+        // Build 3x3 linear system and 3x3 angular system
+        A_lin = M/h^2 + sum(penalty * Jlin * Jlin^T)
+        A_ang = I/h^2 + sum(penalty * Jang * Jang^T)
+
+        // rhs uses AL force: f = penalty * C + lambda (with unilateral clamp)
+        rhs_lin = M/h^2 * (x - x_tilde) + sum(Jlin * f)
+        rhs_ang = I/h^2 * (theta - theta_tilde) + sum(Jang * f)
+
+        // Solve 3x3 systems and apply update
+        delta_pos = solve(A_lin, rhs_lin)
+        delta_ang = solve(A_ang, rhs_ang)
+        body.pos -= delta_pos
+        body.rot -= delta_ang
     
     // AL multiplier update (note sign: λ - ρ * C)
     for each constraint:
@@ -99,13 +93,13 @@ for each outer iteration:
 
 | Aspect | Standard AVBD | Current Implementation |
 |--------|---------------|------------------------|
-| Per-body computation | 6×6 Hessian + LDLT solve | Per-constraint Jacobi accumulation |
-| Constraint coupling | ✅ Handled via Hessian | ⚠️ Not coupled (Jacobi sum) |
-| Cost per body | ~300 FLOPs | ~35 FLOPs × constraints |
+| Per-body computation | 6×6 Hessian + LDLT solve | 3×3 linear + 3×3 angular solves |
+| Constraint coupling | ✅ Handled via Hessian | ⚠️ Approximated by block-diagonal split |
+| Cost per body | ~300 FLOPs | Low (3×3 solves + per-constraint accumulation) |
 | Convergence rate | Quadratic | AL-augmented linear |
 | Parallelism | Jacobi-style (bodies) | Jacobi within body, GS between bodies |
 | Outer loop | Augmented Lagrangian ✅ | Augmented Lagrangian ✅ (sign corrected) |
-| Inner solve target | C(x) = 0 via Newton | C(x) = lambda/rho via Baumgarte |
+| Inner solve target | C(x) = 0 via Newton | C(x) = lambda/rho via AL force |
 | Angular correction | Full | Scaled by angularContactScale (0.2) |
 
 ---
@@ -118,10 +112,10 @@ for each outer iteration:
 // DyAvbdSolver.cpp, line ~525
 if (mConfig.enableLocal6x6Solve) {
     // Full 6x6 path (disabled by default)
-    solveLocalSystem(bodies[i], contacts, numContacts, dt, invDt2);
+    solveLocalSystem(bodies[i], bodies, numBodies, contacts, numContacts, dt, invDt2);
 } else {
-    // Simplified path (default)
-    solveBodyLocalConstraintsFast(bodies, numBodies, i, contacts);
+    // Default 3x3 decoupled path
+    solveLocalSystem3x3(bodies[i], bodies, numBodies, contacts, numContacts, dt, invDt2);
 }
 ```
 
@@ -143,35 +137,14 @@ bool enableLocal6x6Solve; //!< Use 6x6 local system solve in block descent
 
 ---
 
-## 5. Hypothesis: How This Happened
+## 5. Hybrid Path as Long-Term Research Target
 
 Based on code structure and naming conventions, the likely sequence of events:
 
-### Timeline Reconstruction
-
-1. **Initial Implementation**: AI implemented full 6×6 path (`solveLocalSystem`)
-2. **Performance Issue**: 6×6 LDLT decomposition too slow for real-time
-3. **Fallback Created**: Simplified path added as "temporary fallback"
-4. **Pattern Mixing**: AI unconsciously applied familiar XPBD patterns
-5. **Testing**: Simplified path "worked well enough" in tests
-6. **Default Flipped**: Simplified path became default, 6×6 became optional
-
-### Why XPBD Patterns Leaked In
-
-AI training data heavily contains:
-- XPBD paper implementations (Macklin et al.)
-- PBD tutorials and open-source code
-- PhysX's own PGS/TGS patterns
-
-The per-constraint correction formula is nearly identical to XPBD:
-
-```cpp
-// XPBD standard
-Δλ = -C / (w + α/h²)
-
-// Current implementation
-Δx = -C / w * baumgarte  // Same structure!
-```
+The earlier hybrid idea (AL-augmented Jacobi per-constraint correction) is
+now treated as a **long-term research target** rather than the default. The
+current production path is the 3x3 decoupled local solve, which preserves the
+AL formulation while being cheaper than the full 6x6 system.
 
 ---
 
@@ -193,7 +166,9 @@ The per-constraint correction formula is nearly identical to XPBD:
 
 ### Verdict
 
-**Intentional hybrid**: The fast path is a deliberate simplification for real-time performance. With the AL sign fix, lambda-augmented correction target, and Jacobi accumulation, it now correctly leverages the Augmented Lagrangian framework while maintaining 5-10x speed advantage over the full 6×6 path. The main remaining gap from standard AVBD is the lack of intra-body constraint coupling (handled by Hessian in standard AVBD, approximated by Jacobi sum here).
+**Default is 3x3**: The current solver uses a decoupled 3x3 local solve with
+AL terms as the default path. The hybrid per-constraint Jacobi approach is
+documented as a long-term research direction, not the active default.
 
 ---
 

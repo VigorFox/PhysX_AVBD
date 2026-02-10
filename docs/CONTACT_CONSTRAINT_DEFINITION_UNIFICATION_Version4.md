@@ -1,7 +1,7 @@
-# Unify Contact Constraint Mathematical Definition (AVBD Hybrid Solver)
+# Unify Contact Constraint Mathematical Definition (AVBD Solver, 3x3 default)
 
 > **Status**: ✅ Implementation complete. Document updated after implementation revealed `penetrationDepth` is a required part of C(x), not redundant metadata (see §1.6 for root cause analysis).  
-> **Purpose**: Provide a clear, self-consistent mathematical definition of the contact constraint used by the AVBD hybrid solver, and a concrete refactoring plan so the *fast path*, *6×6 path*, and *Augmented Lagrangian (AL) multiplier update* operate on the **same** constraint function \(C(x)\).  
+> **Purpose**: Provide a clear, self-consistent mathematical definition of the contact constraint used by the AVBD solver, and ensure the *3x3 default path*, *6x6 path*, and *Augmented Lagrangian (AL) multiplier update* operate on the **same** constraint function \(C(x)\).  
 > **Scope**: Contacts (normal constraint). Friction is out-of-scope here except for notes on consistency.
 
 ---
@@ -16,7 +16,7 @@ The solver currently has multiple “contact violation” notions in different p
   \]
   i.e. **signed normal gap** between the two contact points.
 
-- `AvbdSolver::solveBodyLocalConstraintsFast(...)` computes a different scalar:
+- `AvbdSolver::solveLocalSystem3x3(...)` computes a different scalar:
   \[
   s(x) = (worldPointA - worldPointB)\cdot n + \texttt{penetrationDepth}
   \]
@@ -154,15 +154,14 @@ return (worldPointA - worldPointB).dot(contactNormal) + penetrationDepth;
 
 Higher-level wrapper `computeContactViolation(contact, bodyA, bodyB)` delegates to it.
 
-### 4.2 Fast path, slow fallback, shared helper: unified to `dot + penetrationDepth`
+### 4.2 Local solve paths unified to `dot + penetrationDepth`
 
-All three inline solve paths now use the same formula:
+Both local solve paths now use the same formula:
 
 | Location | Variable | Formula |
 |----------|----------|---------|
-| `solveBodyLocalConstraintsFast()` (~L2425) | `violation` | `dot(worldPosA-worldPosB, n) + contact.penetrationDepth` |
-| `solveBodyLocalConstraints()` (~L646) | `violation` | `dot(worldPosA-worldPosB, n) + contacts[c].penetrationDepth` |
-| `computeContactCorrection()` (~L958) | `violation` | `dot(worldPosA-worldPosB, n) + contact.penetrationDepth` |
+| `solveLocalSystem3x3()` | `violation` | `dot(worldPosA-worldPosB, n) + contact.penetrationDepth` |
+| `solveLocalSystem()` (6x6) | `violation` | `dot(worldPosA-worldPosB, n) + contact.penetrationDepth` |
 
 **Changes made**:
 - Renamed `separation` → `violation` throughout for clarity
@@ -180,19 +179,12 @@ Two critical changes were made:
 1. **Sign correction**: AL update changed from `lambda + rho * C` to `lambda - rho * C`. For the inequality constraint `C(x) >= 0`, when `C < 0` (penetrating), `-rho * C` is positive, so `lambda` increases to build contact force. When `C > 0` (separated), `lambda` decreases toward 0.
 2. **Violation unification**: `computeContactViolation()` now delegates to `computeFullViolation()` (not `computeViolation()`), ensuring the AL update sees the same constraint function as the inner solve. Without this fix, the inner solve drives `fullViolation → 0`, which leaves `geometricViolation ≈ -penetrationDepth > 0`, causing lambda to be clamped to 0 every iteration.
 
-### 4.4 6×6 path: upgraded from static `penetrationDepth` to dynamic `computeFullViolation()` ✅
+### 4.4 6×6 path: dynamic violation via current body state ✅
 
-This was the **actual critical bug**. The 6×6 path previously used `contacts[c].penetrationDepth` directly as the violation value — a static value set once during contact creation that never updates as bodies move during solve iterations.
-
-Three functions were updated to call `computeFullViolation()`:
-
-| Function | Old code | New code |
-|----------|----------|----------|
-| `buildHessianMatrix()` | `violation = contacts[c].penetrationDepth` | `violation = contacts[c].computeFullViolation(bA.position, bA.rotation, bB.position, bB.rotation)` |
-| `buildGradientVector()` | `violation = contacts[c].penetrationDepth` | `violation = contacts[c].computeFullViolation(bA.position, bA.rotation, bB.position, bB.rotation)` |
-| `computeEnergyGradient()` | `violation = contacts[c].penetrationDepth` | `violation = contacts[c].computeFullViolation(...)` |
-
-Function signatures for `buildHessianMatrix`, `buildGradientVector`, and `solveLocalSystem` were extended with `AvbdSolverBody *bodies, PxU32 numBodies` to provide body state access.
+The 6×6 local solve now computes violation using the **current** body state
+instead of a static `penetrationDepth` value captured at contact creation.
+This keeps the AL force consistent with the actual configuration during
+iterations.
 
 ### 4.5 `isActive()` updated to body-state-aware
 
@@ -213,21 +205,14 @@ PX_FORCE_INLINE bool isActive(const PxVec3& posA, const PxQuat& rotA,
 ### 4.6 Summary of verification
 
 ```bash
-# Inline paths include penetrationDepth:
+# Local paths include penetrationDepth:
 grep -n 'penetrationDepth' DyAvbdSolver.cpp
-# → 3 hits in fast/slow/shared violation calculations ✅
-
-# 6×6 path calls computeFullViolation():
-grep -n 'computeFullViolation' DyAvbdSolver.cpp
-# → 3 hits in buildHessianMatrix, buildGradientVector, computeEnergyGradient ✅
 
 # AL path calls computeContactViolation():
 grep -n 'computeContactViolation' DyAvbdSolver.cpp
-# → hits in updateLagrangianMultipliers ✅
 
-# No path uses penetrationDepth ALONE as violation (old 6×6 bug):
+# No path uses penetrationDepth ALONE as violation:
 grep -n 'violation = .*penetrationDepth' DyAvbdSolver.cpp
-# → 0 hits ✅
 ```
 
 ---
@@ -291,13 +276,13 @@ After unification:
 All violation computations must use `dot(xA-xB, n) + penetrationDepth`:
 
 ```bash
-# Inline paths must include penetrationDepth
+# Local solve paths must include penetrationDepth
 grep -n 'penetrationDepth' DyAvbdSolver.cpp
-# Expected: 3 hits in fast/slow/shared violation calculations
+# Expected: hits in solveLocalSystem and solveLocalSystem3x3
 
-# 6×6 path and AL update must call computeViolation/computeContactViolation
+# 6x6 path and AL update must call computeViolation/computeContactViolation
 grep -n 'computeViolation' DyAvbdSolver.cpp
-# Expected: hits in buildHessianMatrix, buildGradientVector, computeEnergyGradient
+# Expected: hits in solveLocalSystem (6x6) and/or contact helpers
 grep -n 'computeContactViolation' DyAvbdSolver.cpp
 # Expected: hits in updateLagrangianMultipliers
 
@@ -314,11 +299,11 @@ grep -n 'violation = .*penetrationDepth' DyAvbdSolver.cpp
    - After settling, \(C(x) \approx 0\) for resting contacts.
 
 2. **Consistency check**:
-   - With temporary logging, verify fast path, AL update, and 6×6 path all report the same \(C(x)\) for the same contact at the same iteration.
+  - With temporary logging, verify 3x3 path, AL update, and 6x6 path all report the same \(C(x)\) for the same contact at the same iteration.
 
-3. **6×6 vs fast path**:
-   - Both paths should reduce penetration error in the same direction.
-   - 6×6 path violation should now **change across iterations** (it was constant before the fix).
+3. **6x6 vs 3x3 path**:
+  - Both paths should reduce penetration error in the same direction.
+  - 6x6 path violation should now **change across iterations** (it was constant before the fix).
 
 4. **Regression check** per `STABILITY_REGRESSION_PLAN_CONTACT_C_UNIFICATION_Version4.md`.
 
