@@ -555,11 +555,16 @@ struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
   computeRotationViolation(const physx::PxQuat &rotA,
                            const physx::PxQuat &rotB) const {
 
-    // Current relative rotation
-    physx::PxQuat currentRelRot = rotA.getConjugate() * rotB;
-
-    // Error quaternion
-    physx::PxQuat errorQ = currentRelRot * relativeRotation.getConjugate();
+    // Compute rotation error in WORLD frame.
+    // Target world rotation of B: rotA * relativeRotation
+    // Error: target * rotB^-1  (world frame)
+    //
+    // IMPORTANT: The Jacobian for this constraint uses world-frame axes
+    // (gradRot = e_k * sign), so the error MUST also be in world frame.
+    // Using body-A local frame (rotA^-1 * rotB * relRot^-1) would cause
+    // a frame mismatch leading to chaotic oscillation.
+    physx::PxQuat target = rotA * relativeRotation;
+    physx::PxQuat errorQ = target * rotB.getConjugate();
     if (errorQ.w < 0.0f) {
       errorQ = -errorQ; // Shortest path
     }

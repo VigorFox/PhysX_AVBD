@@ -203,6 +203,34 @@ private:
                         const AvbdBodyConstraintMap *contactMap = nullptr);
 
   /**
+   * @brief Solve local 6x6 system for a single body with BOTH contacts AND joints
+   *
+   * True AVBD: accumulates both contact and joint Jacobians into the same
+   * Hessian matrix H = M/h^2 + sum(rho_c * Jc^T * Jc) + sum(rho_j * Jj^T * Jj)
+   * and gradient g, then solves the 6x6 system in one shot.
+   *
+   * For joints: Jacobian per constraint row is computed and accumulated
+   * the same way as contacts -- pen * J^T * J into LHS, f * J into RHS.
+   */
+  void solveLocalSystemWithJoints(
+      AvbdSolverBody &body, AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
+      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
+      physx::PxReal dt, physx::PxReal invDt2,
+      const AvbdBodyConstraintMap *contactMap = nullptr,
+      const AvbdBodyConstraintMap *sphericalMap = nullptr,
+      const AvbdBodyConstraintMap *fixedMap = nullptr,
+      const AvbdBodyConstraintMap *revoluteMap = nullptr,
+      const AvbdBodyConstraintMap *prismaticMap = nullptr,
+      const AvbdBodyConstraintMap *d6Map = nullptr,
+      const AvbdBodyConstraintMap *gearMap = nullptr);
+
+  /**
    * @brief Solve decoupled 3x3 system for a single body
    * Block-diagonal approximation of the 6x6 system:
    *   Pass 1: 3x3 linear (position) solve
@@ -337,21 +365,30 @@ private:
 
   /**
    * @brief Compute position/rotation correction for a spherical joint
+   *
+   * Uses fused AVBD primal+dual (XPBD equivalent):
+   *   delta_lambda = -(C + alpha * lambda) / (w + alpha / h^2)
+   *   alpha = 1/rho, lambda updated in-place.
    */
   bool computeSphericalJointCorrection(
-      const AvbdSphericalJointConstraint &joint, AvbdSolverBody *bodies,
+      AvbdSphericalJointConstraint &joint, AvbdSolverBody *bodies,
       physx::PxU32 numBodies, physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
-      physx::PxVec3 &deltaTheta);
+      physx::PxVec3 &deltaTheta, physx::PxReal dt);
 
   /**
    * @brief Compute position/rotation correction for a fixed joint
+   *
+   * Uses fused AVBD primal+dual (XPBD equivalent):
+   *   delta_lambda = -(C + alpha * lambda) / (w + alpha / h^2)
+   *   alpha = 1/rho, lambda updated in-place.
    */
-  bool computeFixedJointCorrection(const AvbdFixedJointConstraint &joint,
+  bool computeFixedJointCorrection(AvbdFixedJointConstraint &joint,
                                    AvbdSolverBody *bodies,
                                    physx::PxU32 numBodies,
                                    physx::PxU32 bodyIndex,
                                    physx::PxVec3 &deltaPos,
-                                   physx::PxVec3 &deltaTheta);
+                                   physx::PxVec3 &deltaTheta,
+                                   physx::PxReal dt);
 
   /**
    * @brief Compute position/rotation correction for a revolute joint

@@ -39,18 +39,15 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
                                      physx::PxU32 numBodies,
                                      const AvbdSolverConfig &config,
                                      physx::PxReal dt) {
-  PX_UNUSED(dt);
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
-  // Handle world attachment (static body)
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
   if (isAStatic && isBStatic)
-    return; // Both static, nothing to do
+    return;
 
-  // Get body references (use dummy for static)
   static AvbdSolverBody staticBody;
   staticBody.invMass = 0.0f;
   staticBody.invInertiaWorld = physx::PxMat33(physx::PxZero);
@@ -66,26 +63,26 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
       isBStatic ? joint.anchorB
                 : (bodyB.position + bodyB.rotation.rotate(joint.anchorB));
 
-  // Compute position error
   physx::PxVec3 error = worldAnchorA - worldAnchorB;
   physx::PxReal errorMag = error.magnitude();
 
   if (errorMag < AvbdConstants::AVBD_POSITION_ERROR_THRESHOLD)
-    return; // Already satisfied
+    return;
 
-  // Compute anchor offsets from body centers (world space)
   physx::PxVec3 rA =
       isAStatic ? physx::PxVec3(0) : bodyA.rotation.rotate(joint.anchorA);
   physx::PxVec3 rB =
       isBStatic ? physx::PxVec3(0) : bodyB.rotation.rotate(joint.anchorB);
 
-  // AVBD: Process using augmented Lagrangian energy minimization
-  // Energy: L(x, lambda) = lambda * C(x) + 0.5 * rho * C(x)^2
-  // Gradient: dL/dx = lambda * dC/dx + rho * C(x) * dC/dx
-  
-  physx::PxReal rho = joint.header.rho;
-  
-  // Process each axis independently for better stability
+  // XPBD fused primal+dual (equivalent to AVBD AL):
+  //   alphaHat = 1 / (rho * h^2)
+  //   deltaLambda = -(C + alphaHat * lambda) / (w + alphaHat)
+  //   lambda += deltaLambda
+  //   Both bodies updated simultaneously per constraint.
+  const physx::PxReal rho = joint.header.rho;
+  const physx::PxReal h2 = dt * dt;
+  const physx::PxReal alphaHat = 1.0f / (rho * h2);
+
   for (int axis = 0; axis < 3; ++axis) {
     physx::PxVec3 n(0.0f);
     n[axis] = 1.0f;
@@ -94,25 +91,21 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
     if (physx::PxAbs(C) < AvbdConstants::AVBD_POSITION_ERROR_THRESHOLD)
       continue;
 
-    // Compute effective inverse mass along this axis
     physx::PxReal w = computeEffectiveInverseMass(bodyA, bodyB, rA, rB, n);
-
     if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
-      continue; // Infinite mass in this direction
+      continue;
 
-    // AVBD: Compute gradient of augmented Lagrangian energy
-    // dL/dx = (lambda + rho * C) * dC/dx
-    physx::PxReal gradient = joint.lambda[axis] + rho * C;
-    
-    // Compute step size using effective mass
-    physx::PxReal stepSize = -gradient / w;
-    
-    // Clamp correction for stability
-    physx::PxReal maxCorrection = config.maxPositionCorrection;
-    stepSize = physx::PxClamp(stepSize, -maxCorrection, maxCorrection);
+    // XPBD delta lambda (fused primal+dual)
+    physx::PxReal deltaLambda =
+        -(C + alphaHat * joint.lambda[axis]) / (w + alphaHat);
+    deltaLambda = physx::PxClamp(deltaLambda,
+                                 -config.maxPositionCorrection,
+                                 config.maxPositionCorrection);
 
-    // Compute position corrections
-    physx::PxVec3 impulse = n * stepSize;
+    // Fused dual: accumulate lambda
+    joint.lambda[axis] += deltaLambda;
+
+    physx::PxVec3 impulse = n * deltaLambda;
 
     if (!isAStatic) {
       bodyA.position += impulse * bodyA.invMass;
@@ -135,48 +128,54 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
     }
   }
 
-  // Process cone limit if enabled
+  // Process cone limit if enabled (inequality constraint)
   if (joint.hasConeLimit && joint.coneAngleLimit > 0.0f) {
     physx::PxReal coneViolation =
         joint.computeConeViolation(bodyA.rotation, bodyB.rotation);
     if (coneViolation > 0.0f) {
-      // Cone limit exceeded - apply angular correction
       physx::PxVec3 worldAxisA = bodyA.rotation.rotate(joint.coneAxisA);
       physx::PxVec3 worldAxisB = bodyB.rotation.rotate(joint.coneAxisA);
 
-      // Correction axis is perpendicular to both
       physx::PxVec3 corrAxis = worldAxisA.cross(worldAxisB);
       physx::PxReal corrAxisMag = corrAxis.magnitude();
       if (corrAxisMag > AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD) {
         corrAxis /= corrAxisMag;
 
-        // Simplified angular correction
-        physx::PxReal angularW = 1.0f; // Simplified effective mass
+        physx::PxReal angularW = 0.0f;
         if (!isAStatic)
           angularW += (bodyA.invInertiaWorld * corrAxis).dot(corrAxis);
         if (!isBStatic)
           angularW += (bodyB.invInertiaWorld * corrAxis).dot(corrAxis);
 
-        physx::PxReal deltaLambda = -coneViolation / angularW;
+        if (angularW > AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD) {
+          // XPBD for inequality constraint
+          physx::PxReal deltaLambda =
+              -(coneViolation + alphaHat * joint.coneLambda) /
+              (angularW + alphaHat);
 
-        if (!isAStatic) {
-          physx::PxVec3 angDelta =
-              bodyA.invInertiaWorld * (corrAxis * deltaLambda * 0.5f);
-          physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
-          bodyA.rotation = (dq * bodyA.rotation).getNormalized();
-        }
-        if (!isBStatic) {
-          physx::PxVec3 angDelta =
-              bodyB.invInertiaWorld * (corrAxis * deltaLambda * -0.5f);
-          physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
-          bodyB.rotation = (dq * bodyB.rotation).getNormalized();
-        }
+          // Inequality clamp: coneLambda <= 0 (only resist exceeding limit)
+          physx::PxReal newLambda = joint.coneLambda + deltaLambda;
+          newLambda = physx::PxMin(newLambda, 0.0f);
+          deltaLambda = newLambda - joint.coneLambda;
+          joint.coneLambda = newLambda;
 
-        joint.coneLambda += deltaLambda;
+          if (!isAStatic) {
+            physx::PxVec3 angDelta =
+                bodyA.invInertiaWorld * (corrAxis * deltaLambda);
+            physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                              angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                              angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+            bodyA.rotation = (dq * bodyA.rotation).getNormalized();
+          }
+          if (!isBStatic) {
+            physx::PxVec3 angDelta =
+                bodyB.invInertiaWorld * (corrAxis * (-deltaLambda));
+            physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                              angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                              angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+            bodyB.rotation = (dq * bodyB.rotation).getNormalized();
+          }
+        }
       }
     }
   }
@@ -191,7 +190,6 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
                                  physx::PxU32 numBodies,
                                  const AvbdSolverConfig &config,
                                  physx::PxReal dt) {
-  PX_UNUSED(dt);
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
@@ -217,10 +215,12 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
       config.enableMassWeightedWeld &&
       joint.header.type == AvbdConstraintType::eJOINT_WELD;
 
-  // AVBD: Process using augmented Lagrangian energy minimization
-  physx::PxReal rho = joint.header.rho;
+  // XPBD fused primal+dual (equivalent to AVBD AL)
+  const physx::PxReal rho = joint.header.rho;
+  const physx::PxReal h2 = dt * dt;
+  const physx::PxReal alphaHat = 1.0f / (rho * h2);
 
-  // --- Position Constraint (same as spherical) ---
+  // --- Position Constraint (3 DOF) ---
   physx::PxVec3 worldAnchorA =
       isAStatic ? joint.anchorA
                 : (bodyA.position + bodyA.rotation.rotate(joint.anchorA));
@@ -234,7 +234,6 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
   physx::PxVec3 rB =
       isBStatic ? physx::PxVec3(0) : bodyB.rotation.rotate(joint.anchorB);
 
-  // Process position constraint (3 axes)
   for (int axis = 0; axis < 3; ++axis) {
     physx::PxVec3 n(0.0f);
     n[axis] = 1.0f;
@@ -247,13 +246,15 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
     if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
       continue;
 
-    // AVBD: Compute gradient of augmented Lagrangian energy
-    physx::PxReal gradient = joint.lambdaPosition[axis] + rho * C;
-    physx::PxReal stepSize = -gradient / w;
-    stepSize = physx::PxClamp(stepSize, -config.maxPositionCorrection,
-                               config.maxPositionCorrection);
+    // XPBD delta lambda
+    physx::PxReal deltaLambda =
+        -(C + alphaHat * joint.lambdaPosition[axis]) / (w + alphaHat);
+    deltaLambda = physx::PxClamp(deltaLambda, -config.maxPositionCorrection,
+                                 config.maxPositionCorrection);
 
-    physx::PxVec3 impulse = n * stepSize;
+    joint.lambdaPosition[axis] += deltaLambda;
+
+    physx::PxVec3 impulse = n * deltaLambda;
 
     if (!isAStatic) {
       const physx::PxReal linearScaleA =
@@ -286,7 +287,7 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
     }
   }
 
-  // --- Rotation Constraint (3 axes) ---
+  // --- Rotation Constraint (3 DOF) ---
   physx::PxVec3 rotError =
       joint.computeRotationViolation(bodyA.rotation, bodyB.rotation);
 
@@ -298,7 +299,6 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
     if (physx::PxAbs(C) < AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
       continue;
 
-    // Angular effective mass
     physx::PxReal w = 0.0f;
     if (!isAStatic)
       w += (bodyA.invInertiaWorld * n).dot(n);
@@ -308,13 +308,15 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
     if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
       continue;
 
-    // AVBD: Compute gradient of augmented Lagrangian energy
-    physx::PxReal gradient = joint.lambdaRotation[axis] + rho * C;
-    physx::PxReal stepSize = -gradient / w;
-    stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                               config.maxAngularCorrection);
+    // XPBD delta lambda
+    physx::PxReal deltaLambda =
+        -(C + alphaHat * joint.lambdaRotation[axis]) / (w + alphaHat);
+    deltaLambda = physx::PxClamp(deltaLambda, -config.maxAngularCorrection,
+                                 config.maxAngularCorrection);
 
-    physx::PxVec3 angImpulse = n * stepSize;
+    joint.lambdaRotation[axis] += deltaLambda;
+
+    physx::PxVec3 angImpulse = n * deltaLambda;
 
     if (!isAStatic) {
       const physx::PxReal angularScaleA =
@@ -572,12 +574,16 @@ void updateSphericalJointMultiplier(AvbdSphericalJointConstraint &joint,
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
-  physx::PxVec3 posA = isAStatic ? joint.anchorA : bodies[idxA].position;
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxVec3 posB = isBStatic ? joint.anchorB : bodies[idxB].position;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
-
-  physx::PxVec3 violation = joint.computeViolation(posA, rotA, posB, rotB);
+  // Compute world anchors directly -- do NOT use computeViolation() because
+  // for static bodies anchorA/B is already a world position, and
+  // computeViolation() would double-count it (posA + rotate(anchorA)).
+  physx::PxVec3 worldAnchorA = isAStatic
+      ? joint.anchorA
+      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB = isBStatic
+      ? joint.anchorB
+      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 violation = worldAnchorA - worldAnchorB;
 
   // Augmented Lagrangian update: lambda += rho * C(x)
   physx::PxReal rho = joint.header.rho;
@@ -604,13 +610,19 @@ void updateFixedJointMultiplier(AvbdFixedJointConstraint &joint,
   if (joint.isBroken)
     return;
 
-  physx::PxVec3 posA = isAStatic ? joint.anchorA : bodies[idxA].position;
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxVec3 posB = isBStatic ? joint.anchorB : bodies[idxB].position;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  // Compute world anchors directly -- do NOT use computePositionViolation()
+  // because for static bodies anchorA/B is already a world position, and
+  // computePositionViolation() would double-count it (posA + rotate(anchorA)).
+  physx::PxVec3 worldAnchorA = isAStatic
+      ? joint.anchorA
+      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB = isBStatic
+      ? joint.anchorB
+      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 posViolation = worldAnchorA - worldAnchorB;
 
-  physx::PxVec3 posViolation =
-      joint.computePositionViolation(posA, rotA, posB, rotB);
+  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
   physx::PxVec3 rotViolation = joint.computeRotationViolation(rotA, rotB);
 
   physx::PxReal rho = joint.header.rho;
@@ -626,9 +638,12 @@ void updateFixedJointMultiplier(AvbdFixedJointConstraint &joint,
   }
 
   if (joint.isBreakable && !joint.isBroken) {
-    const physx::PxReal forceThisFrame = joint.lambdaPosition.magnitude();
-    const physx::PxReal torqueThisFrame = joint.lambdaRotation.magnitude();
-    if (joint.checkBreak(forceThisFrame, torqueThisFrame)) {
+    // Break detection: use the CURRENT STEP constraint force (rho * violation),
+    // NOT the accumulated lambda. Lambda grows unboundedly and would falsely
+    // trigger breakage even for gentle constraint forces.
+    const physx::PxReal forceThisStep = (posViolation * rho).magnitude();
+    const physx::PxReal torqueThisStep = (rotViolation * rho).magnitude();
+    if (joint.checkBreak(forceThisStep, torqueThisStep)) {
       joint.lambdaPosition = physx::PxVec3(0.0f);
       joint.lambdaRotation = physx::PxVec3(0.0f);
     }
@@ -646,13 +661,16 @@ void updateRevoluteJointMultiplier(AvbdRevoluteJointConstraint &joint,
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
-  physx::PxVec3 posA = isAStatic ? joint.anchorA : bodies[idxA].position;
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxVec3 posB = isBStatic ? joint.anchorB : bodies[idxB].position;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  physx::PxVec3 worldAnchorA = isAStatic
+      ? joint.anchorA
+      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB = isBStatic
+      ? joint.anchorB
+      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 posViolation = worldAnchorA - worldAnchorB;
 
-  physx::PxVec3 posViolation =
-      joint.computePositionViolation(posA, rotA, posB, rotB);
+  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
   physx::PxVec3 axisViolation = joint.computeAxisViolation(rotA, rotB);
 
   physx::PxReal rho = joint.header.rho;
@@ -837,15 +855,19 @@ void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
-  physx::PxVec3 posA = isAStatic ? joint.anchorA : bodies[idxA].position;
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxVec3 posB = isBStatic ? joint.anchorB : bodies[idxB].position;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
-
-  // Compute position violation (projected onto perpendicular directions)
-  physx::PxVec3 worldAnchorA = posA + rotA.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = posB + rotB.rotate(joint.anchorB);
+  // Compute world anchors directly -- for static bodies anchorA/B is already
+  // a world position; do NOT pass it through computePositionViolation() which
+  // would add rotate(anchor) again, double-counting the offset.
+  physx::PxVec3 worldAnchorA = isAStatic
+      ? joint.anchorA
+      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB = isBStatic
+      ? joint.anchorB
+      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxVec3 posDiff = worldAnchorB - worldAnchorA;
+
+  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
 
   physx::PxVec3 worldAxis = rotA.rotate(joint.axisA);
 
@@ -869,7 +891,9 @@ void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
   // Compute limit violation
   physx::PxReal limitViolation = 0.0f;
   if (joint.hasLimit) {
-    physx::PxReal slidePos = joint.computeSlidePosition(posA, rotA, posB, rotB);
+    // Compute slide position directly from already-correct world anchors
+    physx::PxVec3 diff = worldAnchorB - worldAnchorA;
+    physx::PxReal slidePos = diff.dot(worldAxis);
     limitViolation = joint.computeLimitViolation(slidePos);
   }
 
@@ -1198,15 +1222,25 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
-  physx::PxVec3 posA = isAStatic ? joint.anchorA : bodies[idxA].position;
+  // Compute world anchors directly -- for static bodies anchorA/B is already
+  // a world position; do NOT pass through computeLinearError() which
+  // would add rotate(anchor) again, double-counting the offset.
+  physx::PxVec3 worldAnchorA = isAStatic
+      ? joint.anchorA
+      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB = isBStatic
+      ? joint.anchorB
+      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxVec3 posB = isBStatic ? joint.anchorB : bodies[idxB].position;
   physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
 
   // Update linear multipliers for locked DOFs
   for (physx::PxU32 axis = 0; axis < 3; ++axis) {
     if (joint.getLinearMotion(axis) == 0) { // LOCKED
-      physx::PxReal error = joint.computeLinearError(posA, rotA, posB, rotB, axis);
+      // Inline the linear error computation with correct world anchors
+      physx::PxVec3 diff = worldAnchorB - worldAnchorA;
+      physx::PxVec3 localDiff = rotA.rotateInv(diff);
+      physx::PxReal error = localDiff[axis];
       physx::PxReal rho = joint.header.rho;
       joint.lambdaLinear[axis] += error * rho;
     }
