@@ -36,6 +36,10 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 - ⚠️ `SnippetJointDrive` is currently a known failing scenario after recent AVBD joint algorithm changes
 - ⚠️ 3x3 path is kept for cost/perf fallback, but dense joint-mesh impact scenes should prefer 6x6
 
+## SnippetChainmail Demo
+
+![SnippetChainmail Demo](assets/SnippetChainmail.gif)
+
 ## Why AVBD?
 
 PhysX's built-in TGS/PGS are **velocity-level** iterative solvers that hit fundamental limits in several scenarios:
@@ -48,7 +52,7 @@ PhysX's built-in TGS/PGS are **velocity-level** iterative solvers that hit funda
 
 AVBD introduces a **unified position-level constraint solving framework** to support:
 
-1. **"Ultimate Hand" gameplay** -- A kinematic hand (infinite mass) grips light objects via joints. Requires unconditionally stable high mass-ratio joint solving.
+1. **"Ultra Hand" gameplay** -- A kinematic hand (infinite mass) grips light objects via joints. Requires unconditionally stable high mass-ratio joint solving.
 2. **Whole-scene solver** -- AVBD as the sole solver for the entire scene. All rigid bodies must solve stably.
 3. **Multiplayer determinism** -- Position-level solving avoids velocity integration error accumulation.
 4. **Cloth & soft body unification** -- Per-body Jacobi structure extends to deformable bodies.
