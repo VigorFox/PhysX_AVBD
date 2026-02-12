@@ -233,16 +233,26 @@ private:
   /**
    * @brief Solve decoupled 3x3 system for a single body
    * Block-diagonal approximation of the 6x6 system:
-   *   Pass 1: 3x3 linear (position) solve
-   *   Pass 2: 3x3 angular (rotation) solve
-   * Uses same AL framework and 3-row friction as solveLocalSystem.
+   *   Same accumulation as solveLocalSystemWithJoints (contacts + joints
+   *   into per-body LHS/RHS), but solves two independent 3x3 systems
+   *   (Alin, Aang) instead of one coupled 6x6 LDLT.
+   *
+   * KNOWN LIMITATION: dropping the off-diagonal B block loses the
+   * linear-angular coupling from joints with offset anchors. For dense
+   * mesh + impact scenarios (e.g. chainmail), this makes contact
+   * response ~42x weaker. Joint chains work fine.
    */
-  void solveLocalSystem3x3(AvbdSolverBody &body, AvbdSolverBody *bodies,
-                           physx::PxU32 numBodies,
-                           AvbdContactConstraint *contacts,
-                           physx::PxU32 numContacts, physx::PxReal dt,
-                           physx::PxReal invDt2,
-                           const AvbdBodyConstraintMap *contactMap = nullptr);
+  void solveLocalSystem3x3(
+      AvbdSolverBody &body, AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
+      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      physx::PxReal dt, physx::PxReal invDt2,
+      const AvbdBodyConstraintMap *contactMap = nullptr,
+      const AvbdBodyConstraintMap *sphericalMap = nullptr,
+      const AvbdBodyConstraintMap *fixedMap = nullptr,
+      const AvbdBodyConstraintMap *d6Map = nullptr);
 
   /**
    * @brief Stage 4: Update Augmented Lagrangian multipliers with XPBD

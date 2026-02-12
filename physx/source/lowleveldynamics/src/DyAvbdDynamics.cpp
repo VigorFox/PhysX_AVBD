@@ -768,7 +768,7 @@ void AvbdDynamicsContext::update(
     config.innerIterations = 4;  // Ref AVBD3D uses iterations=10
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
     config.maxRho = AvbdConstants::AVBD_MAX_PENALTY_RHO;
-    config.enableLocal6x6Solve = true;
+    config.enableLocal6x6Solve = false;
     config.contactCompliance = 1e-2f;
     // AVBD reference parameters
     config.avbdAlpha = 0.95f;
