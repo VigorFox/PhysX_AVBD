@@ -38,7 +38,11 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 ## SnippetChainmail Demo
 
-<video src="./assets/SnippetChainmail.mp4" controls="controls" width="60%"></video>
+
+
+https://github.com/user-attachments/assets/2ab299c7-8f7f-4bf2-b8b5-7de8033b17f8
+
+
 
 ## Why AVBD?
 
@@ -177,3 +181,4 @@ PVD Profile Zones:
 ## License
 
 NVIDIA PhysX BSD-3-Clause. See [LICENSE.md](LICENSE.md).
+
