@@ -38,7 +38,7 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 ## SnippetChainmail Demo
 
-![SnippetChainmail Demo](assets/SnippetChainmail.gif)
+<video src="./assets/SnippetChainmail.mp4" controls="controls" width="60%"></video>
 
 ## Why AVBD?
 
