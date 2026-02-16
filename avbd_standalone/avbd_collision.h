@@ -11,9 +11,10 @@
 //   depth > 0 means penetrating
 // =============================================================================
 #pragma once
-#include "avbd_ref_solver.h"
-#include <cmath>
+#include "avbd_solver.h"
 #include <algorithm>
+#include <cmath>
+
 
 namespace AvbdRef {
 
@@ -22,8 +23,9 @@ namespace AvbdRef {
 // Tests all 8 corners, generates contacts for those below or near ground.
 // margin: contacts generated when corner.y < margin (proximity contacts)
 // =============================================================================
-inline int collideBoxGround(Solver& solver, uint32_t boxIdx, float margin = 0.02f) {
-  const Body& box = solver.bodies[boxIdx];
+inline int collideBoxGround(Solver &solver, uint32_t boxIdx,
+                            float margin = 0.02f) {
+  const Body &box = solver.bodies[boxIdx];
   Vec3 he = box.halfExtent;
 
   // 8 corners in local frame
@@ -54,35 +56,46 @@ inline int collideBoxGround(Solver& solver, uint32_t boxIdx, float margin = 0.02
 // ====================== Helpers for SAT Box-Box =============================
 
 // Build 3 orthonormal axes from quaternion
-inline void quatToAxes(const Quat& q, Vec3 axes[3]) {
+inline void quatToAxes(const Quat &q, Vec3 axes[3]) {
   float qw = q.w, qx = q.x, qy = q.y, qz = q.z;
-  axes[0] = {1 - 2*(qy*qy + qz*qz), 2*(qx*qy + qz*qw), 2*(qx*qz - qy*qw)};
-  axes[1] = {2*(qx*qy - qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz + qx*qw)};
-  axes[2] = {2*(qx*qz + qy*qw), 2*(qy*qz - qx*qw), 1 - 2*(qx*qx + qy*qy)};
+  axes[0] = {1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy + qz * qw),
+             2 * (qx * qz - qy * qw)};
+  axes[1] = {2 * (qx * qy - qz * qw), 1 - 2 * (qx * qx + qz * qz),
+             2 * (qy * qz + qx * qw)};
+  axes[2] = {2 * (qx * qz + qy * qw), 2 * (qy * qz - qx * qw),
+             1 - 2 * (qx * qx + qy * qy)};
 }
 
 // Get face vertices most aligned with `localDir` in box local space
-inline void getBoxFace(const Vec3& localDir, const Vec3& he, Vec3 face[4]) {
+inline void getBoxFace(const Vec3 &localDir, const Vec3 &he, Vec3 face[4]) {
   float ax = fabsf(localDir.x), ay = fabsf(localDir.y), az = fabsf(localDir.z);
   if (ax >= ay && ax >= az) {
     float s = localDir.x > 0 ? he.x : -he.x;
-    face[0] = {s, -he.y, -he.z}; face[1] = {s, he.y, -he.z};
-    face[2] = {s, he.y, he.z};   face[3] = {s, -he.y, he.z};
+    face[0] = {s, -he.y, -he.z};
+    face[1] = {s, he.y, -he.z};
+    face[2] = {s, he.y, he.z};
+    face[3] = {s, -he.y, he.z};
   } else if (ay >= az) {
     float s = localDir.y > 0 ? he.y : -he.y;
-    face[0] = {-he.x, s, -he.z}; face[1] = {he.x, s, -he.z};
-    face[2] = {he.x, s, he.z};   face[3] = {-he.x, s, he.z};
+    face[0] = {-he.x, s, -he.z};
+    face[1] = {he.x, s, -he.z};
+    face[2] = {he.x, s, he.z};
+    face[3] = {-he.x, s, he.z};
   } else {
     float s = localDir.z > 0 ? he.z : -he.z;
-    face[0] = {-he.x, -he.y, s}; face[1] = {he.x, -he.y, s};
-    face[2] = {he.x, he.y, s};   face[3] = {-he.x, he.y, s};
+    face[0] = {-he.x, -he.y, s};
+    face[1] = {he.x, -he.y, s};
+    face[2] = {he.x, he.y, s};
+    face[3] = {-he.x, he.y, s};
   }
 }
 
-// Sutherland-Hodgman polygon clipping against half-space: dot(v, planeN) <= planeDist
-inline int clipPolygon(const Vec3* poly, int count, const Vec3& planeN, float planeDist,
-                       Vec3* out, int maxOut = 15) {
-  if (count == 0) return 0;
+// Sutherland-Hodgman polygon clipping against half-space: dot(v, planeN) <=
+// planeDist
+inline int clipPolygon(const Vec3 *poly, int count, const Vec3 &planeN,
+                       float planeDist, Vec3 *out, int maxOut = 15) {
+  if (count == 0)
+    return 0;
   int outCount = 0;
   for (int i = 0; i < count && outCount < maxOut; i++) {
     int j = (i + 1) % count;
@@ -110,9 +123,10 @@ inline int clipPolygon(const Vec3* poly, int count, const Vec3& planeN, float pl
 // margin adds a shell around each box for proximity detection.
 // For perfectly-touching boxes (gap=0), the depth will be ~0.
 // =============================================================================
-inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float margin = 0.02f) {
-  const Body& bA = solver.bodies[idxA];
-  const Body& bB = solver.bodies[idxB];
+inline int collideBoxBox(Solver &solver, uint32_t idxA, uint32_t idxB,
+                         float margin = 0.02f) {
+  const Body &bA = solver.bodies[idxA];
+  const Body &bB = solver.bodies[idxB];
 
   Vec3 axA[3], axB[3];
   quatToAxes(bA.rotation, axA);
@@ -138,21 +152,21 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
   // The axis does NOT need to be normalized here -- we normalize first.
   auto testAxis = [&](Vec3 axis) -> bool {
     float len2 = axis.length2();
-    if (len2 < 1e-10f) return true; // degenerate axis, skip
+    if (len2 < 1e-10f)
+      return true; // degenerate axis, skip
     float invLen = 1.0f / sqrtf(len2);
     Vec3 n = axis * invLen;
 
     // Half-projections of each box onto axis
-    float rA = fabsf(axA[0].dot(n)) * heAf[0] +
-               fabsf(axA[1].dot(n)) * heAf[1] +
+    float rA = fabsf(axA[0].dot(n)) * heAf[0] + fabsf(axA[1].dot(n)) * heAf[1] +
                fabsf(axA[2].dot(n)) * heAf[2];
-    float rB = fabsf(axB[0].dot(n)) * heBf[0] +
-               fabsf(axB[1].dot(n)) * heBf[1] +
+    float rB = fabsf(axB[0].dot(n)) * heBf[0] + fabsf(axB[1].dot(n)) * heBf[1] +
                fabsf(axB[2].dot(n)) * heBf[2];
 
     float dist = n.dot(d); // signed distance from A center to B center along n
     float pen = rA + rB - fabsf(dist) + margin;
-    if (pen < 0) return false; // separating axis!
+    if (pen < 0)
+      return false; // separating axis!
 
     if (pen < minPen) {
       minPen = pen;
@@ -165,16 +179,19 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
 
   // --- 3 face axes of A ---
   for (int i = 0; i < 3; i++)
-    if (!testAxis(axA[i])) return 0;
+    if (!testAxis(axA[i]))
+      return 0;
 
   // --- 3 face axes of B ---
   for (int j = 0; j < 3; j++)
-    if (!testAxis(axB[j])) return 0;
+    if (!testAxis(axB[j]))
+      return 0;
 
   // --- 9 edge-edge cross products ---
   for (int i = 0; i < 3; i++)
     for (int j = 0; j < 3; j++)
-      if (!testAxis(axA[i].cross(axB[j]))) return 0;
+      if (!testAxis(axA[i].cross(axB[j])))
+        return 0;
 
   // =========================================================================
   // No separating axis -> collision!
@@ -193,38 +210,58 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
   //   normal points B->A, so the most aligned A face is the one facing B.
   // For body B: test alignment with `-normal` (the direction facing A).
 
-  float bestDotA = 0; int bestFaceIdxA = 0;
+  float bestDotA = 0;
+  int bestFaceIdxA = 0;
   for (int i = 0; i < 3; i++) {
     float dd = fabsf(normal.dot(axA[i]));
-    if (dd > bestDotA) { bestDotA = dd; bestFaceIdxA = i; }
+    if (dd > bestDotA) {
+      bestDotA = dd;
+      bestFaceIdxA = i;
+    }
   }
-  float bestDotB = 0; int bestFaceIdxB = 0;
+  float bestDotB = 0;
+  int bestFaceIdxB = 0;
   for (int i = 0; i < 3; i++) {
     float dd = fabsf(normal.dot(axB[i]));
-    if (dd > bestDotB) { bestDotB = dd; bestFaceIdxB = i; }
+    if (dd > bestDotB) {
+      bestDotB = dd;
+      bestFaceIdxB = i;
+    }
   }
 
-  const Body* refBody;
-  const Body* incBody;
+  const Body *refBody;
+  const Body *incBody;
   Vec3 refAx[3], incAx[3];
   Vec3 refHe, incHe;
   Vec3 refFaceN; // outward normal of the reference face, in world space
 
   if (bestDotA >= bestDotB) {
     // A is reference face body
-    refBody = &bA; incBody = &bB;
-    for (int i = 0; i < 3; i++) { refAx[i] = axA[i]; incAx[i] = axB[i]; }
-    refHe = heA; incHe = heB;
+    refBody = &bA;
+    incBody = &bB;
+    for (int i = 0; i < 3; i++) {
+      refAx[i] = axA[i];
+      incAx[i] = axB[i];
+    }
+    refHe = heA;
+    incHe = heB;
     // Reference face normal: the axA direction facing toward B
     refFaceN = axA[bestFaceIdxA];
-    if (refFaceN.dot(d) < 0) refFaceN = -refFaceN; // flip to face toward B
+    if (refFaceN.dot(d) < 0)
+      refFaceN = -refFaceN; // flip to face toward B
   } else {
     // B is reference face body
-    refBody = &bB; incBody = &bA;
-    for (int i = 0; i < 3; i++) { refAx[i] = axB[i]; incAx[i] = axA[i]; }
-    refHe = heB; incHe = heA;
+    refBody = &bB;
+    incBody = &bA;
+    for (int i = 0; i < 3; i++) {
+      refAx[i] = axB[i];
+      incAx[i] = axA[i];
+    }
+    refHe = heB;
+    incHe = heA;
     refFaceN = axB[bestFaceIdxB];
-    if (refFaceN.dot(d) > 0) refFaceN = -refFaceN; // flip to face toward A
+    if (refFaceN.dot(d) > 0)
+      refFaceN = -refFaceN; // flip to face toward A
   }
 
   // --- Reference face vertices (world space) ---
@@ -266,8 +303,10 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
 
     Vec3 tmp[16];
     polyCount = clipPolygon(poly, polyCount, sideN, sideDist, tmp);
-    for (int i = 0; i < polyCount; i++) poly[i] = tmp[i];
-    if (polyCount == 0) break;
+    for (int i = 0; i < polyCount; i++)
+      poly[i] = tmp[i];
+    if (polyCount == 0)
+      break;
   }
 
   // --- Output contacts ---
@@ -291,7 +330,8 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
     // A was reference, B was incident -> incident=B should be bodyA
     contactBodyA = idxB;
     contactBodyB = idxA;
-    contactNormal = -normal; // flip: was from B->A, now from A->B (new B is old A)
+    contactNormal =
+        -normal; // flip: was from B->A, now from A->B (new B is old A)
   } else {
     // B was reference, A was incident -> incident=A is already bodyA
     contactBodyA = idxA;
@@ -305,19 +345,20 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
     float separation = poly[i].dot(refFaceN) - refPlaneDist;
     float depth = -separation; // positive = penetrating
 
-    if (depth < -margin) continue; // too far apart
+    if (depth < -margin)
+      continue; // too far apart
 
     // Contact point: project the clipped incident point onto reference plane
     Vec3 contactPt = poly[i] - refFaceN * separation;
 
     // Convert to local frames of the CONTACT bodies (not ref/inc)
     Vec3 rA_local = solver.bodies[contactBodyA].rotation.conjugate().rotate(
-      contactPt - solver.bodies[contactBodyA].position);
+        contactPt - solver.bodies[contactBodyA].position);
     Vec3 rB_local = solver.bodies[contactBodyB].rotation.conjugate().rotate(
-      contactPt - solver.bodies[contactBodyB].position);
+        contactPt - solver.bodies[contactBodyB].position);
 
-    solver.addContact(contactBodyA, contactBodyB, contactNormal,
-                      rA_local, rB_local, depth, fric);
+    solver.addContact(contactBodyA, contactBodyB, contactNormal, rA_local,
+                      rB_local, depth, fric);
     contactCount++;
   }
 
@@ -327,20 +368,22 @@ inline int collideBoxBox(Solver& solver, uint32_t idxA, uint32_t idxB, float mar
 // =============================================================================
 // Convenience: detect all collisions for all body pairs + ground
 // =============================================================================
-inline int collideAll(Solver& solver, float margin = 0.02f) {
+inline int collideAll(Solver &solver, float margin = 0.02f) {
   int totalContacts = 0;
   uint32_t n = (uint32_t)solver.bodies.size();
 
   // Each dynamic body vs ground
   for (uint32_t i = 0; i < n; i++) {
-    if (solver.bodies[i].mass <= 0) continue;
+    if (solver.bodies[i].mass <= 0)
+      continue;
     totalContacts += collideBoxGround(solver, i, margin);
   }
 
   // Each body pair (at least one dynamic)
   for (uint32_t i = 0; i < n; i++) {
     for (uint32_t j = i + 1; j < n; j++) {
-      if (solver.bodies[i].mass <= 0 && solver.bodies[j].mass <= 0) continue;
+      if (solver.bodies[i].mass <= 0 && solver.bodies[j].mass <= 0)
+        continue;
 
       // Quick sphere broadphase
       Vec3 pA = solver.bodies[i].position, pB = solver.bodies[j].position;
@@ -348,7 +391,8 @@ inline int collideAll(Solver& solver, float margin = 0.02f) {
       float rA = std::max({hA.x, hA.y, hA.z}) * 1.74f; // sqrt(3)
       float rB = std::max({hB.x, hB.y, hB.z}) * 1.74f;
       Vec3 diff = pB - pA;
-      if (diff.length() > rA + rB + margin) continue;
+      if (diff.length() > rA + rB + margin)
+        continue;
 
       totalContacts += collideBoxBox(solver, i, j, margin);
     }
