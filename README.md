@@ -15,7 +15,7 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 | Revolute Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
 | Prismatic Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
 | Gear Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
-| Motor Drive | ❌ Regression | `SnippetJointDrive` currently failing after joint algorithm update |
+| Motor Drive | ✅ Working | Linear, Twist, Swing, and SLERP AL drives implemented |
 | Joint Limits | ⚠️ Partial | Limits exist, but drive/limit stability still being retuned |
 | SnippetChainmail | ✅ Added | Extreme stress scene for dense joint mesh + high-speed impact |
 | 3x3 Decoupled Path | ⚠️ Functional with limits | Joints included in accumulation, but dense mesh impact is weaker than 6x6 |
@@ -33,7 +33,7 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 
 - ✅ Joint chain stability under 3x3 and 6x6 local solves (with spherical/fixed/D6 accumulation)
 - ✅ `SnippetChainmail` integrated for extreme impact regression testing
-- ⚠️ `SnippetJointDrive` is currently a known failing scenario after recent AVBD joint algorithm changes
+- ✅ `SnippetJointDrive` fully working with AVBD Slerp, Twist, Swing, and Linear configurations
 - ⚠️ 3x3 path is kept for cost/perf fallback, but dense joint-mesh impact scenes should prefer 6x6
 
 ## SnippetChainmail Demo
@@ -169,9 +169,8 @@ PVD Profile Zones:
 2. **No Sleep/Wake** -- Bodies remain active
 3. **CPU only** -- No GPU acceleration
 4. **3x3 dense-mesh coupling loss** -- 3x3 decoupled local solve drops linear-angular off-diagonal coupling, so dense joint meshes under impact (e.g. small fast ball on chainmail) are significantly weaker than 6x6
-5. **`SnippetJointDrive` regression** -- currently failing after recent AVBD joint algorithm update; drive/limit path is under retuning
-6. **Revolute/Prismatic/Gear not in Hessian** -- still GS fallback, planned for migration into unified local system
-7. **Extreme-scene tuning still in progress** -- chainmail-style stress scenarios required algorithm updates and remain the primary tuning target
+5. **Revolute/Prismatic/Gear not in Hessian** -- still GS fallback, planned for migration into unified local system
+6. **Extreme-scene tuning still in progress** -- chainmail-style stress scenarios required algorithm updates and remain the primary tuning target
 
 ## Original PhysX Documentation
 

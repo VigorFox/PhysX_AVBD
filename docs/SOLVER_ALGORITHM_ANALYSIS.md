@@ -232,7 +232,9 @@ config.enableLocal6x6Solve = false;
 
 The current AVBD solver is a **hybrid of Augmented Lagrangian and per-constraint Jacobi projection**, with AL-augmented correction targets and proper sign convention. The inner solve drives `C(x) → lambda/rho` while the outer AL loop updates `lambda = max(0, lambda - rho * C)`, enabling lambda to accumulate as a "contact force memory" across outer iterations.
 
-The implementation is stable for stacked rigid body scenarios at `outerIterations=4, innerIterations=8`. Achieving stability at lower iteration counts (paper-recommended 1×4) requires lambda warm-starting across frames, which is the primary open improvement.
+Lambda warm-starting has been implemented and is functional as of 2026-02-14. The cache-based approach preserves lambda values across frames with decay factors (`wsAlpha=0.95`, `wsGamma=0.99`) to avoid numerical instability. For details, see [`AVBD_SOLVER_README.md`](AVBD_SOLVER_README.md).
+
+The implementation is stable for stacked rigid body scenarios at `outerIterations=4, innerIterations=8`. Achieving stability at lower iteration counts (paper-recommended 1×4) remains an open improvement, with lambda warm-starting implementation complete but decay factors potentially requiring tuning.
 
 The full 6×6 path exists but is disabled by default. The fast path is recommended for real-time simulation.
 

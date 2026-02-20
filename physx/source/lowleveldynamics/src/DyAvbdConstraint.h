@@ -31,6 +31,21 @@
 #include "foundation/PxSimpleTypes.h"
 #include "foundation/PxVec3.h"
 
+// Forward declarations for D6 joint drive constants
+struct PxD6Drive {
+  enum Enum {
+    eX = 0,
+    eY = 1,
+    eZ = 2,
+    eSWING = 3,
+    eTWIST = 4,
+    eSLERP = 5,
+    eSWING1 = 6,
+    eSWING2 = 7,
+    eCOUNT = 8
+  };
+};
+
 #pragma warning(push)
 #pragma warning(disable                                                        \
                 : 4324) // Structure was padded due to alignment specifier
@@ -90,8 +105,10 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
                             //!< for hard constraint
   physx::PxReal damping; //!< Damping coefficient for velocity-dependent forces
   physx::PxReal lambda;  //!< Augmented Lagrangian multiplier
-  physx::PxReal rho;     //!< Fixed penalty parameter (material stiffness upper bound)
-  physx::PxReal penalty; //!< Adaptive penalty parameter (grows via beta*|C|, ref AVBD3D Eq.16)
+  physx::PxReal
+      rho; //!< Fixed penalty parameter (material stiffness upper bound)
+  physx::PxReal penalty; //!< Adaptive penalty parameter (grows via beta*|C|,
+                         //!< ref AVBD3D Eq.16)
 
   physx::PxU16 colorGroup; //!< Color group for parallel solving
   physx::PxU16 padding0;   //!< Padding for alignment
@@ -99,7 +116,8 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
   PX_FORCE_INLINE AvbdConstraintHeader()
       : bodyIndexA(0xFFFFFFFF), bodyIndexB(0xFFFFFFFF),
         type(AvbdConstraintType::eNONE), flags(0), compliance(0.0f),
-        damping(0.0f), lambda(0.0f), rho(0.0f), penalty(0.0f), colorGroup(0), padding0(0) {}
+        damping(0.0f), lambda(0.0f), rho(0.0f), penalty(0.0f), colorGroup(0),
+        padding0(0) {}
 } PX_ALIGN_SUFFIX(16);
 
 /**
@@ -1202,6 +1220,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxVec3 lambdaLinear;  //!< Linear constraint multipliers (X, Y, Z)
   physx::PxVec3 lambdaAngular; //!< Angular constraint multipliers (X, Y, Z)
 
+  // AL multipliers for velocity-level drive constraints
+  physx::PxVec3 lambdaDriveLinear;  //!< Linear velocity drive multipliers
+  physx::PxVec3 lambdaDriveAngular; //!< Angular velocity drive multipliers
+
   //-------------------------------------------------------------------------
   // DOF motion flags (bitmask)
   //-------------------------------------------------------------------------
@@ -1369,6 +1391,8 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     driveAngularForce = physx::PxVec3(0.0f);
     lambdaLinear = physx::PxVec3(0.0f);
     lambdaAngular = physx::PxVec3(0.0f);
+    lambdaDriveLinear = physx::PxVec3(0.0f);
+    lambdaDriveAngular = physx::PxVec3(0.0f);
     linearMotion = 0;  // All locked by default
     angularMotion = 0; // All locked by default
     driveFlags = 0;

@@ -316,7 +316,7 @@ Status of previously proposed improvements:
 - ✅ **DONE**: Incorporating \(\lambda\) into fast-path correction — inner solve now targets `C(x) = lambda/rho`
 - ✅ **DONE**: Better aggregation — replaced \(\rho\)-weighted averaging with Jacobi accumulation
 - ⬜ **Open**: Adding compliance \(+\alpha/h^2\) to effective mass for tunable softness
-- ⬜ **Open**: Lambda warm-starting across frames (see `AVBD_SOLVER_README.md` Known Issue #2)
+- ✅ **DONE**: Lambda warm-starting across frames - cached lambda values are preserved and decayed across frames (see [`AVBD_SOLVER_README.md`](AVBD_SOLVER_README.md))
 - ⬜ **Open**: Reduce iteration requirements from 4×8 to paper-recommended 1×4
 
 ---

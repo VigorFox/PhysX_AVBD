@@ -31,7 +31,6 @@
 #include "../snippetrender/SnippetCamera.h"
 #include "../snippetrender/SnippetRender.h"
 
-
 using namespace physx;
 
 extern void initPhysics(bool interactive);
@@ -56,7 +55,16 @@ void renderCallback() {
     scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC |
                          PxActorTypeFlag::eRIGID_STATIC,
                      reinterpret_cast<PxActor **>(&actors[0]), nbActors);
-    Snippets::renderActors(&actors[0], static_cast<PxU32>(actors.size()), true);
+    // Chainmail scene has ~2600 shapes (900 node spheres + ~1700 capsule
+    // struts). Disable shadows and wireframe overlay to keep render cost
+    // manageable (each extra pass re-renders all shapes in immediate-mode GL).
+    const PxVec3 color(0.0f, 0.75f, 0.0f);
+    Snippets::renderActors(&actors[0], static_cast<PxU32>(actors.size()),
+                           false, // shadows
+                           color,
+                           NULL,   // triggerRender callback
+                           true,   // changeColorForSleepingActors
+                           false); // wireframePass
   }
 
   Snippets::finishRender();

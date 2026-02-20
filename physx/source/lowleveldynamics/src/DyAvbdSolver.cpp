@@ -79,8 +79,6 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
   mStats.numBodies = numBodies;
   mStats.numContacts = numContacts;
 
-
-
   physx::PxReal invDt = 1.0f / dt;
 
   // Stage 1: Prediction
@@ -111,8 +109,9 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
   //   acceleration = (v_current - v_previous) / dt
   //
   // Now that computePrediction does NOT modify linearVelocity:
-  //   linearVelocity     = v_{N-1, postsolve}  (clean post-solve from last frame)
-  //   prevLinearVelocity  = v_{N-2, postsolve}  (saved at end of frame N-2)
+  //   linearVelocity     = v_{N-1, postsolve}  (clean post-solve from last
+  //   frame) prevLinearVelocity  = v_{N-2, postsolve}  (saved at end of frame
+  //   N-2)
   {
     PX_PROFILE_ZONE("AVBD.initPositions", 0);
 
@@ -227,14 +226,18 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
       const physx::PxU32 bB = contacts[c].header.bodyIndexB;
       // Use prevPosition/prevRotation = positions from START of step
       // (saved before warmstart body positions were applied)
-      physx::PxVec3 wA = (bA < numBodies)
-          ? bodies[bA].prevPosition + bodies[bA].prevRotation.rotate(contacts[c].contactPointA)
-          : contacts[c].contactPointA;
-      physx::PxVec3 wB = (bB < numBodies)
-          ? bodies[bB].prevPosition + bodies[bB].prevRotation.rotate(contacts[c].contactPointB)
-          : contacts[c].contactPointB;
+      physx::PxVec3 wA =
+          (bA < numBodies)
+              ? bodies[bA].prevPosition +
+                    bodies[bA].prevRotation.rotate(contacts[c].contactPointA)
+              : contacts[c].contactPointA;
+      physx::PxVec3 wB =
+          (bB < numBodies)
+              ? bodies[bB].prevPosition +
+                    bodies[bB].prevRotation.rotate(contacts[c].contactPointB)
+              : contacts[c].contactPointB;
       contacts[c].C0 = (wA - wB).dot(contacts[c].contactNormal) +
-                        contacts[c].penetrationDepth;
+                       contacts[c].penetrationDepth;
     }
   }
 
@@ -308,7 +311,6 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
       }
     }
   }
-
 }
 
 //=============================================================================
@@ -474,8 +476,7 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
       // Penalty growth: only when lambda is within bounds (active constraint)
       if (newLambda < 0.0f) {
         physx::PxReal newPenalty = pen + beta * physx::PxAbs(violation);
-        contacts[c].header.penalty =
-            physx::PxMin(newPenalty, penaltyMax);
+        contacts[c].header.penalty = physx::PxMin(newPenalty, penaltyMax);
       }
     }
 
@@ -492,8 +493,9 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
       if (bodyAIdx < numBodies) {
         worldPosA = bodies[bodyAIdx].position +
                     bodies[bodyAIdx].rotation.rotate(contacts[c].contactPointA);
-        prevWorldPosA = bodies[bodyAIdx].prevPosition +
-                        bodies[bodyAIdx].prevRotation.rotate(contacts[c].contactPointA);
+        prevWorldPosA =
+            bodies[bodyAIdx].prevPosition +
+            bodies[bodyAIdx].prevRotation.rotate(contacts[c].contactPointA);
       } else {
         worldPosA = contacts[c].contactPointA;
         prevWorldPosA = contacts[c].contactPointA;
@@ -501,8 +503,9 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
       if (bodyBIdx < numBodies) {
         worldPosB = bodies[bodyBIdx].position +
                     bodies[bodyBIdx].rotation.rotate(contacts[c].contactPointB);
-        prevWorldPosB = bodies[bodyBIdx].prevPosition +
-                        bodies[bodyBIdx].prevRotation.rotate(contacts[c].contactPointB);
+        prevWorldPosB =
+            bodies[bodyBIdx].prevPosition +
+            bodies[bodyBIdx].prevRotation.rotate(contacts[c].contactPointB);
       } else {
         worldPosB = contacts[c].contactPointB;
         prevWorldPosB = contacts[c].contactPointB;
@@ -616,12 +619,10 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
   physx::PxReal mass = (body.invMass > 1e-8f) ? (1.0f / body.invMass) : 0.0f;
   physx::PxReal massInvDt2 = mass * invDt2;
 
-  physx::PxVec3 gLinear =
-      (body.position - body.inertialPosition) * massInvDt2;
+  physx::PxVec3 gLinear = (body.position - body.inertialPosition) * massInvDt2;
 
   // Angular inertia RHS: (I/h^2) * deltaW_inertial
-  physx::PxQuat deltaQ =
-      body.rotation * body.inertialRotation.getConjugate();
+  physx::PxQuat deltaQ = body.rotation * body.inertialRotation.getConjugate();
   if (deltaQ.w < 0.0f) {
     deltaQ = -deltaQ;
   }
@@ -766,7 +767,8 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
         prevWorldPosB = body.prevPosition +
                         body.prevRotation.rotate(contacts[c].contactPointB);
       }
-      physx::PxVec3 relDisp = (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
+      physx::PxVec3 relDisp =
+          (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
 
       // Tangent 0
       {
@@ -775,14 +777,15 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
         physx::PxVec3 tGradPos = t * sign;
         physx::PxVec3 tGradRot = rCrossT * sign;
         physx::PxReal tPen = contacts[c].tangentPenalty0;
-        tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
+        tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
         physx::PxReal tLambda = contacts[c].tangentLambda0;
-        physx::PxReal tC = relDisp.dot(t);  // tangent constraint value
+        physx::PxReal tC = relDisp.dot(t); // tangent constraint value
 
         // LHS += outer(Jt, Jt * penalty) -- UNCONDITIONAL
         A.addConstraintContribution(tGradPos, tGradRot, tPen);
 
-        // Force: f_t = clamp(pen*C_t + lambda_t, -frictionBound, +frictionBound)
+        // Force: f_t = clamp(pen*C_t + lambda_t, -frictionBound,
+        // +frictionBound)
         physx::PxReal ft = tPen * tC + tLambda;
         ft = physx::PxClamp(ft, -frictionBound, frictionBound);
 
@@ -798,7 +801,7 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
         physx::PxVec3 tGradPos = t * sign;
         physx::PxVec3 tGradRot = rCrossT * sign;
         physx::PxReal tPen = contacts[c].tangentPenalty1;
-        tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
+        tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
         physx::PxReal tLambda = contacts[c].tangentLambda1;
         physx::PxReal tC = relDisp.dot(t);
 
@@ -850,7 +853,6 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
     physx::PxQuat dq(deltaTheta.x, deltaTheta.y, deltaTheta.z, 0.0f);
     body.rotation = (body.rotation - dq * body.rotation * 0.5f).getNormalized();
   }
-
 }
 
 //=============================================================================
@@ -885,15 +887,13 @@ void AvbdSolver::solveLocalSystemWithJoints(
     AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
     AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
     AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-    physx::PxReal dt, physx::PxReal invDt2,
-    const AvbdBodyConstraintMap *contactMap,
+    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear, physx::PxReal dt,
+    physx::PxReal invDt2, const AvbdBodyConstraintMap *contactMap,
     const AvbdBodyConstraintMap *sphericalMap,
     const AvbdBodyConstraintMap *fixedMap,
     const AvbdBodyConstraintMap *revoluteMap,
     const AvbdBodyConstraintMap *prismaticMap,
-    const AvbdBodyConstraintMap *d6Map,
-    const AvbdBodyConstraintMap *gearMap) {
+    const AvbdBodyConstraintMap *d6Map, const AvbdBodyConstraintMap *gearMap) {
 
   if (body.invMass <= 0.0f)
     return;
@@ -914,11 +914,9 @@ void AvbdSolver::solveLocalSystemWithJoints(
   physx::PxReal mass = (body.invMass > 1e-8f) ? (1.0f / body.invMass) : 0.0f;
   physx::PxReal massInvDt2 = mass * invDt2;
 
-  physx::PxVec3 gLinear =
-      (body.position - body.inertialPosition) * massInvDt2;
+  physx::PxVec3 gLinear = (body.position - body.inertialPosition) * massInvDt2;
 
-  physx::PxQuat deltaQ =
-      body.rotation * body.inertialRotation.getConjugate();
+  physx::PxQuat deltaQ = body.rotation * body.inertialRotation.getConjugate();
   if (deltaQ.w < 0.0f)
     deltaQ = -deltaQ;
   physx::PxVec3 rotError(deltaQ.x, deltaQ.y, deltaQ.z);
@@ -960,16 +958,16 @@ void AvbdSolver::solveLocalSystemWithJoints(
       if (isBodyA) {
         r = body.rotation.rotate(contacts[c].contactPointA);
         worldPosA = body.position + r;
-        worldPosB =
-            otherBody ? otherBody->position +
-                            otherBody->rotation.rotate(contacts[c].contactPointB)
-                      : contacts[c].contactPointB;
+        worldPosB = otherBody
+                        ? otherBody->position + otherBody->rotation.rotate(
+                                                    contacts[c].contactPointB)
+                        : contacts[c].contactPointB;
       } else {
         r = body.rotation.rotate(contacts[c].contactPointB);
-        worldPosA =
-            otherBody ? otherBody->position +
-                            otherBody->rotation.rotate(contacts[c].contactPointA)
-                      : contacts[c].contactPointA;
+        worldPosA = otherBody
+                        ? otherBody->position + otherBody->rotation.rotate(
+                                                    contacts[c].contactPointA)
+                        : contacts[c].contactPointA;
         worldPosB = body.position + r;
       }
 
@@ -1010,21 +1008,20 @@ void AvbdSolver::solveLocalSystemWithJoints(
         if (isBodyA) {
           prevWorldPosA = body.prevPosition +
                           body.prevRotation.rotate(contacts[c].contactPointA);
-          prevWorldPosB =
-              otherBody
-                  ? otherBody->prevPosition +
-                        otherBody->prevRotation.rotate(contacts[c].contactPointB)
-                  : contacts[c].contactPointB;
+          prevWorldPosB = otherBody ? otherBody->prevPosition +
+                                          otherBody->prevRotation.rotate(
+                                              contacts[c].contactPointB)
+                                    : contacts[c].contactPointB;
         } else {
-          prevWorldPosA =
-              otherBody
-                  ? otherBody->prevPosition +
-                        otherBody->prevRotation.rotate(contacts[c].contactPointA)
-                  : contacts[c].contactPointA;
+          prevWorldPosA = otherBody ? otherBody->prevPosition +
+                                          otherBody->prevRotation.rotate(
+                                              contacts[c].contactPointA)
+                                    : contacts[c].contactPointA;
           prevWorldPosB = body.prevPosition +
                           body.prevRotation.rotate(contacts[c].contactPointB);
         }
-        physx::PxVec3 relDisp = (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
+        physx::PxVec3 relDisp =
+            (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
 
         // Tangent 0
         {
@@ -1033,11 +1030,12 @@ void AvbdSolver::solveLocalSystemWithJoints(
           physx::PxVec3 tGradPos = t * sign;
           physx::PxVec3 tGradRot = rCrossT * sign;
           physx::PxReal tPen = contacts[c].tangentPenalty0;
-          tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
+          tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
           physx::PxReal tLambda = contacts[c].tangentLambda0;
           physx::PxReal tC = relDisp.dot(t);
           A.addConstraintContribution(tGradPos, tGradRot, tPen);
-          physx::PxReal ft = physx::PxClamp(tPen * tC + tLambda, -frictionBound, frictionBound);
+          physx::PxReal ft = physx::PxClamp(tPen * tC + tLambda, -frictionBound,
+                                            frictionBound);
           gLinear += tGradPos * ft;
           gAngular += tGradRot * ft;
         }
@@ -1048,11 +1046,12 @@ void AvbdSolver::solveLocalSystemWithJoints(
           physx::PxVec3 tGradPos = t * sign;
           physx::PxVec3 tGradRot = rCrossT * sign;
           physx::PxReal tPen = contacts[c].tangentPenalty1;
-          tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
+          tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
           physx::PxReal tLambda = contacts[c].tangentLambda1;
           physx::PxReal tC = relDisp.dot(t);
           A.addConstraintContribution(tGradPos, tGradRot, tPen);
-          physx::PxReal ft = physx::PxClamp(tPen * tC + tLambda, -frictionBound, frictionBound);
+          physx::PxReal ft = physx::PxClamp(tPen * tC + tLambda, -frictionBound,
+                                            frictionBound);
           gLinear += tGradPos * ft;
           gAngular += tGradRot * ft;
         }
@@ -1077,7 +1076,8 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numSpherical) continue;
+      if (j >= numSpherical)
+        continue;
       const AvbdSphericalJointConstraint &jnt = sphericalJoints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
@@ -1119,13 +1119,16 @@ void AvbdSolver::solveLocalSystemWithJoints(
       {
         static physx::PxU32 s_sphDbg = 0;
         if (s_sphDbg < 2) {
-          printf("    sph[%u] body%u(%c) r=(%.3f,%.3f,%.3f) C=(%.6f,%.6f,%.6f) rho=%.0f\n",
-                 j, bodyIndex, isBodyA ? 'A' : 'B',
-                 r.x, r.y, r.z, posError.x, posError.y, posError.z, pen);
-          printf("      anchorA_w=(%.4f,%.4f,%.4f) anchorB_w=(%.4f,%.4f,%.4f)\n",
-                 worldAnchorA.x, worldAnchorA.y, worldAnchorA.z,
-                 worldAnchorB.x, worldAnchorB.y, worldAnchorB.z);
-          if (bodyIndex == 4) s_sphDbg++; // increment after last body
+          printf("    sph[%u] body%u(%c) r=(%.3f,%.3f,%.3f) C=(%.6f,%.6f,%.6f) "
+                 "rho=%.0f\n",
+                 j, bodyIndex, isBodyA ? 'A' : 'B', r.x, r.y, r.z, posError.x,
+                 posError.y, posError.z, pen);
+          printf(
+              "      anchorA_w=(%.4f,%.4f,%.4f) anchorB_w=(%.4f,%.4f,%.4f)\n",
+              worldAnchorA.x, worldAnchorA.y, worldAnchorA.z, worldAnchorB.x,
+              worldAnchorB.y, worldAnchorB.z);
+          if (bodyIndex == 4)
+            s_sphDbg++; // increment after last body
         }
       }
 #endif
@@ -1174,14 +1177,16 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numFixed) continue;
+      if (j >= numFixed)
+        continue;
       const AvbdFixedJointConstraint &jnt = fixedJoints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
 
       if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex)
         continue;
-      if (jnt.isBroken) continue;
+      if (jnt.isBroken)
+        continue;
 
       const bool isBodyA = (bodyAIdx == bodyIndex);
       const bool otherIsStatic =
@@ -1199,17 +1204,17 @@ void AvbdSolver::solveLocalSystemWithJoints(
         if (isBodyA) {
           r = body.rotation.rotate(jnt.anchorA);
           worldAnchorA = body.position + r;
-          worldAnchorB = otherIsStatic
-                             ? jnt.anchorB
-                             : bodies[bodyBIdx].position +
-                                   bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
+          worldAnchorB =
+              otherIsStatic ? jnt.anchorB
+                            : bodies[bodyBIdx].position +
+                                  bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
         } else {
           r = body.rotation.rotate(jnt.anchorB);
           worldAnchorB = body.position + r;
-          worldAnchorA = otherIsStatic
-                             ? jnt.anchorA
-                             : bodies[bodyAIdx].position +
-                                   bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
+          worldAnchorA =
+              otherIsStatic ? jnt.anchorA
+                            : bodies[bodyAIdx].position +
+                                  bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
         }
 
         physx::PxVec3 posError = worldAnchorA - worldAnchorB;
@@ -1284,7 +1289,8 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numD6) continue;
+      if (j >= numD6)
+        continue;
       const AvbdD6JointConstraint &jnt = d6Joints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
@@ -1308,23 +1314,24 @@ void AvbdSolver::solveLocalSystemWithJoints(
         if (isBodyA) {
           r = body.rotation.rotate(jnt.anchorA);
           worldAnchorA = body.position + r;
-          worldAnchorB = otherIsStatic
-                             ? jnt.anchorB
-                             : bodies[bodyBIdx].position +
-                                   bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
+          worldAnchorB =
+              otherIsStatic ? jnt.anchorB
+                            : bodies[bodyBIdx].position +
+                                  bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
         } else {
           r = body.rotation.rotate(jnt.anchorB);
           worldAnchorB = body.position + r;
-          worldAnchorA = otherIsStatic
-                             ? jnt.anchorA
-                             : bodies[bodyAIdx].position +
-                                   bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
+          worldAnchorA =
+              otherIsStatic ? jnt.anchorA
+                            : bodies[bodyAIdx].position +
+                                  bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
         }
 
         physx::PxVec3 posError = worldAnchorA - worldAnchorB;
 
         for (int axis = 0; axis < 3; ++axis) {
-          if (jnt.getLinearMotion(axis) != 0) continue; // only LOCKED
+          if (jnt.getLinearMotion(axis) != 0)
+            continue; // only LOCKED
 
           physx::PxReal C = posError[axis];
           physx::PxVec3 n(0.0f);
@@ -1342,39 +1349,172 @@ void AvbdSolver::solveLocalSystemWithJoints(
         }
       }
 
-      // --- Angular velocity damping (SLERP / per-axis drives) ---
-      // Model: penalize angular velocity omega = dTheta / h.
-      //
-      // Energy: E_damp = 0.5 * c * |omega|^2
-      //       = 0.5 * (c / h^2) * |dTheta|^2
-      // Gradient: g = (c / h^2) * deltaW_init
-      // Hessian:  H = (c / h^2) * I
-      //
-      // IMPORTANT: Damping is LOCAL to each body. Do NOT use the joint
-      // sign (signJ) -- it would flip the gradient for body B, making
-      // "damping" inject energy instead of dissipating it.
+      // --- Pure AVBD AL velocity drive constraints ---
+      // Replaces ad-hoc damping. Each driven axis contributes an AL
+      // velocity constraint:
+      //   C = (Δx_B − Δx_A) · axis − v_target · dt   (linear)
+      //   C = (δθ_B − δθ_A) · axis − ω_target · dt   (angular)
+      // Hessian: ρ_drive · (axis ⊗ axis)
+      // RHS:     sign · (ρ_drive · C + λ)
       {
-        physx::PxReal maxDamping = physx::PxMax(
-            jnt.angularDamping.x,
-            physx::PxMax(jnt.angularDamping.y, jnt.angularDamping.z));
+        // Joint frame A in world space
+        physx::PxQuat jointFrameA =
+            otherIsStatic && isBodyA
+                ? jnt.localFrameA
+                : (isBodyA ? body.rotation * jnt.localFrameA
+                           : (otherIsStatic ? jnt.localFrameA
+                                            : bodies[bodyAIdx].rotation *
+                                                  jnt.localFrameA));
 
-        if (maxDamping > 0.0f) {
-          physx::PxReal invDt = 1.0f / dt;
-          physx::PxReal dampEff = maxDamping * invDt * invDt;  // c / h^2
+        physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+        if (qMag2 > 1e-8f && PxIsFinite(qMag2))
+          jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
 
-          // Angular displacement from initial rotation this frame
-          physx::PxQuat dqInit =
+        physx::PxReal dt2 = dt * dt;
+
+        // Get "other body" for relative displacement
+        const AvbdSolverBody *otherBody = nullptr;
+        if (isBodyA && bodyBIdx < numBodies)
+          otherBody = &bodies[bodyBIdx];
+        else if (!isBodyA && bodyAIdx < numBodies)
+          otherBody = &bodies[bodyAIdx];
+
+        // --- Linear velocity drive (AL constraint) ---
+        if ((jnt.driveFlags & 0x7) != 0) {
+          for (int a = 0; a < 3; ++a) {
+            if ((jnt.driveFlags & (1 << a)) == 0)
+              continue;
+            physx::PxReal damping = (&jnt.linearDamping.x)[a];
+            if (damping <= 0.0f)
+              continue;
+
+            // World-space axis
+            physx::PxVec3 localAxis(0.0f);
+            (&localAxis.x)[a] = 1.0f;
+            physx::PxVec3 wAxis = jointFrameA.rotate(localAxis);
+
+            // Displacement of each body from start-of-step
+            physx::PxVec3 dxThis = body.position - body.prevPosition;
+            physx::PxVec3 dxOther =
+                otherBody ? (otherBody->position - otherBody->prevPosition)
+                          : physx::PxVec3(0.0f);
+
+            // Constraint: C = (Δx_B − Δx_A) · axis − v_target · dt
+            physx::PxReal dxB_proj, dxA_proj;
+            if (isBodyA) {
+              dxA_proj = dxThis.dot(wAxis);
+              dxB_proj = dxOther.dot(wAxis);
+            } else {
+              dxB_proj = dxThis.dot(wAxis);
+              dxA_proj = dxOther.dot(wAxis);
+            }
+            physx::PxReal targetVel = (&jnt.driveLinearVelocity.x)[a];
+            physx::PxReal C = (dxB_proj - dxA_proj) - targetVel * dt;
+
+            physx::PxReal rho_drive = damping / dt2;
+            physx::PxReal lam = (&jnt.lambdaDriveLinear.x)[a];
+            physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
+            physx::PxReal f = signAL * (rho_drive * C + lam);
+
+            // Hessian: ρ_drive · (wAxis ⊗ wAxis) on linear block
+            for (int k = 0; k < 3; ++k)
+              for (int l = 0; l < 3; ++l)
+                A.linearLinear(k, l) +=
+                    rho_drive * (&wAxis.x)[k] * (&wAxis.x)[l];
+
+            // RHS
+            gLinear += physx::PxVec3(f * wAxis.x, f * wAxis.y, f * wAxis.z);
+          }
+        }
+
+        // --- Angular velocity drive (AL constraint) ---
+        if ((jnt.driveFlags & 0x38) != 0) {
+          // Angular displacement from start-of-step for this body
+          physx::PxQuat dqThis =
               body.rotation * body.prevRotation.getConjugate();
-          if (dqInit.w < 0.0f) dqInit = -dqInit;
-          physx::PxVec3 deltaWInit(dqInit.x, dqInit.y, dqInit.z);
-          deltaWInit *= 2.0f;
+          if (dqThis.w < 0.0f)
+            dqThis = -dqThis;
+          physx::PxVec3 dThetaThis(dqThis.x, dqThis.y, dqThis.z);
+          dThetaThis *= 2.0f;
 
-          // Add directly to angular Hessian diagonal (no sign)
-          for (int axis = 0; axis < 3; ++axis)
-            A.angularAngular(axis, axis) += dampEff;
+          physx::PxVec3 dThetaOther(0.0f);
+          if (otherBody) {
+            physx::PxQuat dqOther =
+                otherBody->rotation * otherBody->prevRotation.getConjugate();
+            if (dqOther.w < 0.0f)
+              dqOther = -dqOther;
+            dThetaOther = physx::PxVec3(dqOther.x, dqOther.y, dqOther.z) * 2.0f;
+          }
 
-          // Add gradient to angular RHS (no sign)
-          gAngular += deltaWInit * dampEff;
+          physx::PxVec3 dThetaA(0.0f), dThetaB(0.0f);
+          if (isBodyA) {
+            dThetaA = dThetaThis;
+            dThetaB = dThetaOther;
+          } else {
+            dThetaA = dThetaOther;
+            dThetaB = dThetaThis;
+          }
+          physx::PxVec3 relDW = dThetaB - dThetaA;
+          physx::PxVec3 worldAngTarget =
+              jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
+          physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
+
+          bool slerpDrive = (jnt.driveFlags & 0x20) != 0;
+          if (slerpDrive) {
+            physx::PxReal damping =
+                jnt.angularDamping.z; // SLERP uses Z damping slot
+            if (damping > 0.0f) {
+              physx::PxReal rho_drive = damping / dt2;
+              for (int k = 0; k < 3; ++k) {
+                physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
+                physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[k];
+                physx::PxReal f = signAL * (rho_drive * C + lam);
+
+                A.angularAngular(k, k) += rho_drive;
+                (&gAngular.x)[k] += f;
+              }
+            }
+          } else {
+            // Axis mapping: bit3=twist(X), bit4=swing1(Y), bit5=swing2(Z)
+            struct AxisDrive {
+              int bit;
+              int dampIdx;
+              physx::PxVec3 localAxis;
+            };
+            const AxisDrive axes[3] = {
+                {3, 0, physx::PxVec3(1.0f, 0.0f, 0.0f)}, // TWIST
+                {4, 1, physx::PxVec3(0.0f, 1.0f, 0.0f)}, // SWING1
+                {5, 2, physx::PxVec3(0.0f, 0.0f, 1.0f)}, // SWING2
+            };
+
+            for (int a = 0; a < 3; ++a) {
+              if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
+                continue;
+              physx::PxReal damping = (&jnt.angularDamping.x)[axes[a].dampIdx];
+              if (damping <= 0.0f)
+                continue;
+
+              physx::PxVec3 wAxis = jointFrameA.rotate(axes[a].localAxis);
+              // PhysX TGS convention: Twist/Swing target velocities are applied
+              // as (wA - wB), meaning wB - wA = -target. SLERP is applied as wB
+              // - wA = target, which is handled above.
+              physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
+              physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
+
+              physx::PxReal rho_drive = damping / dt2;
+              physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx];
+              physx::PxReal f = signAL * (rho_drive * C + lam);
+
+              // Hessian: ρ_drive · (wAxis ⊗ wAxis) on angular block
+              for (int k = 0; k < 3; ++k)
+                for (int l = 0; l < 3; ++l)
+                  A.angularAngular(k, l) +=
+                      rho_drive * (&wAxis.x)[k] * (&wAxis.x)[l];
+
+              // RHS
+              gAngular += physx::PxVec3(f * wAxis.x, f * wAxis.y, f * wAxis.z);
+            }
+          }
         }
       }
 
@@ -1384,9 +1524,15 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
   // TODO: Add revolute, prismatic, gear joint Jacobian accumulation
   // For now they remain as GS fallback in the body loop.
-  PX_UNUSED(revoluteJoints); PX_UNUSED(numRevolute); PX_UNUSED(revoluteMap);
-  PX_UNUSED(prismaticJoints); PX_UNUSED(numPrismatic); PX_UNUSED(prismaticMap);
-  PX_UNUSED(gearJoints); PX_UNUSED(numGear); PX_UNUSED(gearMap);
+  PX_UNUSED(revoluteJoints);
+  PX_UNUSED(numRevolute);
+  PX_UNUSED(revoluteMap);
+  PX_UNUSED(prismaticJoints);
+  PX_UNUSED(numPrismatic);
+  PX_UNUSED(prismaticMap);
+  PX_UNUSED(gearJoints);
+  PX_UNUSED(numGear);
+  PX_UNUSED(gearMap);
 
   // =========================================================================
   // Step 4: Handle bodies with no constraints at all
@@ -1408,17 +1554,20 @@ void AvbdSolver::solveLocalSystemWithJoints(
     static physx::PxU32 s_debugSolveFrame = 0;
     bool doSolveDebug = (s_debugSolveFrame < 2);
     if (doSolveDebug && (numSpherical > 0 || numFixed > 0)) {
-      printf("  [solveUnified] body%u touching=%u gLin=(%.4f,%.4f,%.4f) gAng=(%.4f,%.4f,%.4f)\n",
+      printf("  [solveUnified] body%u touching=%u gLin=(%.4f,%.4f,%.4f) "
+             "gAng=(%.4f,%.4f,%.4f)\n",
              bodyIndex, numTouching, gLinear.x, gLinear.y, gLinear.z,
              gAngular.x, gAngular.y, gAngular.z);
       printf("    H_diag pos=(%.1f,%.1f,%.1f) rot=(%.1f,%.1f,%.1f)\n",
-             A.linearLinear.column0.x, A.linearLinear.column1.y, A.linearLinear.column2.z,
-             A.angularAngular.column0.x, A.angularAngular.column1.y, A.angularAngular.column2.z);
+             A.linearLinear.column0.x, A.linearLinear.column1.y,
+             A.linearLinear.column2.z, A.angularAngular.column0.x,
+             A.angularAngular.column1.y, A.angularAngular.column2.z);
       printf("    inertialDelta pos=(%.6f,%.6f,%.6f)\n",
              body.position.x - body.inertialPosition.x,
              body.position.y - body.inertialPosition.y,
              body.position.z - body.inertialPosition.z);
-      if (bodyIndex == 0) s_debugSolveFrame++;
+      if (bodyIndex == 0)
+        s_debugSolveFrame++;
     }
   }
 #endif
@@ -1441,12 +1590,10 @@ void AvbdSolver::solveLocalSystemWithJoints(
     bool doSolveDebug = (s_debugSolveFrame2 < 2);
     if (doSolveDebug && (numSpherical > 0 || numFixed > 0)) {
       printf("    delta pos=(%.6f,%.6f,%.6f) rot=(%.6f,%.6f,%.6f)\n",
-             deltaPos.x, deltaPos.y, deltaPos.z,
-             deltaTheta.x, deltaTheta.y, deltaTheta.z);
-      printf("    newPos=(%.4f,%.4f,%.4f)\n",
-             body.position.x - deltaPos.x,
-             body.position.y - deltaPos.y,
-             body.position.z - deltaPos.z);
+             deltaPos.x, deltaPos.y, deltaPos.z, deltaTheta.x, deltaTheta.y,
+             deltaTheta.z);
+      printf("    newPos=(%.4f,%.4f,%.4f)\n", body.position.x - deltaPos.x,
+             body.position.y - deltaPos.y, body.position.z - deltaPos.z);
     }
     // Only increment once per full body loop (not per body)
     if (bodyIndex == 0 && (numSpherical > 0 || numFixed > 0)) {
@@ -1484,12 +1631,10 @@ void AvbdSolver::solveLocalSystem3x3(
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
     AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
     AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    physx::PxReal dt, physx::PxReal invDt2,
-    const AvbdBodyConstraintMap *contactMap,
+    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6, physx::PxReal dt,
+    physx::PxReal invDt2, const AvbdBodyConstraintMap *contactMap,
     const AvbdBodyConstraintMap *sphericalMap,
-    const AvbdBodyConstraintMap *fixedMap,
-    const AvbdBodyConstraintMap *d6Map) {
+    const AvbdBodyConstraintMap *fixedMap, const AvbdBodyConstraintMap *d6Map) {
 
   if (body.invMass <= 0.0f) {
     return;
@@ -1519,11 +1664,9 @@ void AvbdSolver::solveLocalSystem3x3(
   // Step 2: Initialize RHS with inertia terms
   // =========================================================================
 
-  physx::PxVec3 rhsLin =
-      (body.position - body.inertialPosition) * massInvDt2;
+  physx::PxVec3 rhsLin = (body.position - body.inertialPosition) * massInvDt2;
 
-  physx::PxQuat deltaQ =
-      body.rotation * body.inertialRotation.getConjugate();
+  physx::PxQuat deltaQ = body.rotation * body.inertialRotation.getConjugate();
   if (deltaQ.w < 0.0f) {
     deltaQ = -deltaQ;
   }
@@ -1536,163 +1679,161 @@ void AvbdSolver::solveLocalSystem3x3(
   // =========================================================================
   physx::PxU32 numTouching = 0;
   {
-  // Use contactMap for O(K) lookup if available, else O(N) scan
-  const physx::PxU32 *mapIndices = nullptr;
-  physx::PxU32 mapCount = 0;
-  if (contactMap && contactMap->numBodies > 0) {
-    contactMap->getBodyConstraints(bodyIndex, mapIndices, mapCount);
-  }
-  const physx::PxU32 loopCount = mapIndices ? mapCount : numContacts;
-
-  for (physx::PxU32 ci = 0; ci < loopCount; ++ci) {
-    const physx::PxU32 c = mapIndices ? mapIndices[ci] : ci;
-    const physx::PxU32 bodyAIdx = contacts[c].header.bodyIndexA;
-    const physx::PxU32 bodyBIdx = contacts[c].header.bodyIndexB;
-
-    if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex) {
-      continue;
+    // Use contactMap for O(K) lookup if available, else O(N) scan
+    const physx::PxU32 *mapIndices = nullptr;
+    physx::PxU32 mapCount = 0;
+    if (contactMap && contactMap->numBodies > 0) {
+      contactMap->getBodyConstraints(bodyIndex, mapIndices, mapCount);
     }
+    const physx::PxU32 loopCount = mapIndices ? mapCount : numContacts;
 
-    const bool isBodyA = (bodyAIdx == bodyIndex);
+    for (physx::PxU32 ci = 0; ci < loopCount; ++ci) {
+      const physx::PxU32 c = mapIndices ? mapIndices[ci] : ci;
+      const physx::PxU32 bodyAIdx = contacts[c].header.bodyIndexA;
+      const physx::PxU32 bodyBIdx = contacts[c].header.bodyIndexB;
 
-    AvbdSolverBody *otherBody = nullptr;
-    if (isBodyA && bodyBIdx < numBodies) {
-      otherBody = &bodies[bodyBIdx];
-    } else if (!isBodyA && bodyAIdx < numBodies) {
-      otherBody = &bodies[bodyAIdx];
-    }
+      if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex) {
+        continue;
+      }
 
-    physx::PxVec3 worldPosA, worldPosB;
-    physx::PxVec3 r;
+      const bool isBodyA = (bodyAIdx == bodyIndex);
 
-    if (isBodyA) {
-      r = body.rotation.rotate(contacts[c].contactPointA);
-      worldPosA = body.position + r;
-      worldPosB =
-          otherBody ? otherBody->position +
-                          otherBody->rotation.rotate(contacts[c].contactPointB)
-                    : contacts[c].contactPointB;
-    } else {
-      r = body.rotation.rotate(contacts[c].contactPointB);
-      worldPosA =
-          otherBody ? otherBody->position +
-                          otherBody->rotation.rotate(contacts[c].contactPointA)
-                    : contacts[c].contactPointA;
-      worldPosB = body.position + r;
-    }
+      AvbdSolverBody *otherBody = nullptr;
+      if (isBodyA && bodyBIdx < numBodies) {
+        otherBody = &bodies[bodyBIdx];
+      } else if (!isBodyA && bodyAIdx < numBodies) {
+        otherBody = &bodies[bodyAIdx];
+      }
 
-    const physx::PxVec3 &normal = contacts[c].contactNormal;
-    physx::PxReal violation =
-        (worldPosA - worldPosB).dot(normal) + contacts[c].penetrationDepth;
+      physx::PxVec3 worldPosA, worldPosB;
+      physx::PxVec3 r;
 
-    // Alpha blending
-    violation -= mConfig.avbdAlpha * contacts[c].C0;
-
-    physx::PxReal pen = contacts[c].header.penalty;
-    pen = physx::PxMax(pen, 0.005f * massInvDt2);  // 0.5% primal boost
-    physx::PxReal lambda = contacts[c].header.lambda;
-
-    physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
-    physx::PxVec3 rCrossN = r.cross(normal);
-    physx::PxVec3 gradPos = normal * sign;
-    physx::PxVec3 gradRot = rCrossN * sign;
-
-    // LHS += pen * J * J^T (unconditional, decoupled into linear & angular)
-    Alin.column0 += gradPos * (gradPos.x * pen);
-    Alin.column1 += gradPos * (gradPos.y * pen);
-    Alin.column2 += gradPos * (gradPos.z * pen);
-
-    Aang.column0 += gradRot * (gradRot.x * pen);
-    Aang.column1 += gradRot * (gradRot.y * pen);
-    Aang.column2 += gradRot * (gradRot.z * pen);
-
-    numTouching++;
-
-    // Force: f = clamp(pen * C + lambda, -inf, 0)
-    physx::PxReal f = physx::PxMin(0.0f, pen * violation + lambda);
-
-    if (f < 0.0f) {
-      rhsLin += gradPos * f;
-      rhsAng += gradRot * f;
-    }
-
-    // Friction: 3-row AL (same as 6x6)
-    if (contacts[c].friction > 0.0f) {
-      physx::PxReal frictionBound =
-          physx::PxAbs(contacts[c].header.lambda) * contacts[c].friction;
-
-      physx::PxVec3 prevWorldPosA, prevWorldPosB;
       if (isBodyA) {
-        prevWorldPosA = body.prevPosition +
-                        body.prevRotation.rotate(contacts[c].contactPointA);
-        prevWorldPosB =
-            otherBody
-                ? otherBody->prevPosition +
-                      otherBody->prevRotation.rotate(contacts[c].contactPointB)
-                : contacts[c].contactPointB;
+        r = body.rotation.rotate(contacts[c].contactPointA);
+        worldPosA = body.position + r;
+        worldPosB = otherBody
+                        ? otherBody->position + otherBody->rotation.rotate(
+                                                    contacts[c].contactPointB)
+                        : contacts[c].contactPointB;
       } else {
-        prevWorldPosA =
-            otherBody
-                ? otherBody->prevPosition +
-                      otherBody->prevRotation.rotate(contacts[c].contactPointA)
-                : contacts[c].contactPointA;
-        prevWorldPosB = body.prevPosition +
-                        body.prevRotation.rotate(contacts[c].contactPointB);
-      }
-      physx::PxVec3 relDisp =
-          (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
-
-      // Tangent 0
-      {
-        const physx::PxVec3 &t = contacts[c].tangent0;
-        physx::PxVec3 rCrossT = r.cross(t);
-        physx::PxVec3 tGradPos = t * sign;
-        physx::PxVec3 tGradRot = rCrossT * sign;
-        physx::PxReal tPen = contacts[c].tangentPenalty0;
-        tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
-        physx::PxReal tLambda = contacts[c].tangentLambda0;
-        physx::PxReal tC = relDisp.dot(t);
-
-        Alin.column0 += tGradPos * (tGradPos.x * tPen);
-        Alin.column1 += tGradPos * (tGradPos.y * tPen);
-        Alin.column2 += tGradPos * (tGradPos.z * tPen);
-        Aang.column0 += tGradRot * (tGradRot.x * tPen);
-        Aang.column1 += tGradRot * (tGradRot.y * tPen);
-        Aang.column2 += tGradRot * (tGradRot.z * tPen);
-
-        physx::PxReal ft = tPen * tC + tLambda;
-        ft = physx::PxClamp(ft, -frictionBound, frictionBound);
-
-        rhsLin += tGradPos * ft;
-        rhsAng += tGradRot * ft;
+        r = body.rotation.rotate(contacts[c].contactPointB);
+        worldPosA = otherBody
+                        ? otherBody->position + otherBody->rotation.rotate(
+                                                    contacts[c].contactPointA)
+                        : contacts[c].contactPointA;
+        worldPosB = body.position + r;
       }
 
-      // Tangent 1
-      {
-        const physx::PxVec3 &t = contacts[c].tangent1;
-        physx::PxVec3 rCrossT = r.cross(t);
-        physx::PxVec3 tGradPos = t * sign;
-        physx::PxVec3 tGradRot = rCrossT * sign;
-        physx::PxReal tPen = contacts[c].tangentPenalty1;
-        tPen = physx::PxMax(tPen, 0.005f * massInvDt2);  // 0.5% primal boost
-        physx::PxReal tLambda = contacts[c].tangentLambda1;
-        physx::PxReal tC = relDisp.dot(t);
+      const physx::PxVec3 &normal = contacts[c].contactNormal;
+      physx::PxReal violation =
+          (worldPosA - worldPosB).dot(normal) + contacts[c].penetrationDepth;
 
-        Alin.column0 += tGradPos * (tGradPos.x * tPen);
-        Alin.column1 += tGradPos * (tGradPos.y * tPen);
-        Alin.column2 += tGradPos * (tGradPos.z * tPen);
-        Aang.column0 += tGradRot * (tGradRot.x * tPen);
-        Aang.column1 += tGradRot * (tGradRot.y * tPen);
-        Aang.column2 += tGradRot * (tGradRot.z * tPen);
+      // Alpha blending
+      violation -= mConfig.avbdAlpha * contacts[c].C0;
 
-        physx::PxReal ft = tPen * tC + tLambda;
-        ft = physx::PxClamp(ft, -frictionBound, frictionBound);
+      physx::PxReal pen = contacts[c].header.penalty;
+      pen = physx::PxMax(pen, 0.005f * massInvDt2); // 0.5% primal boost
+      physx::PxReal lambda = contacts[c].header.lambda;
 
-        rhsLin += tGradPos * ft;
-        rhsAng += tGradRot * ft;
+      physx::PxReal sign = isBodyA ? 1.0f : -1.0f;
+      physx::PxVec3 rCrossN = r.cross(normal);
+      physx::PxVec3 gradPos = normal * sign;
+      physx::PxVec3 gradRot = rCrossN * sign;
+
+      // LHS += pen * J * J^T (unconditional, decoupled into linear & angular)
+      Alin.column0 += gradPos * (gradPos.x * pen);
+      Alin.column1 += gradPos * (gradPos.y * pen);
+      Alin.column2 += gradPos * (gradPos.z * pen);
+
+      Aang.column0 += gradRot * (gradRot.x * pen);
+      Aang.column1 += gradRot * (gradRot.y * pen);
+      Aang.column2 += gradRot * (gradRot.z * pen);
+
+      numTouching++;
+
+      // Force: f = clamp(pen * C + lambda, -inf, 0)
+      physx::PxReal f = physx::PxMin(0.0f, pen * violation + lambda);
+
+      if (f < 0.0f) {
+        rhsLin += gradPos * f;
+        rhsAng += gradRot * f;
+      }
+
+      // Friction: 3-row AL (same as 6x6)
+      if (contacts[c].friction > 0.0f) {
+        physx::PxReal frictionBound =
+            physx::PxAbs(contacts[c].header.lambda) * contacts[c].friction;
+
+        physx::PxVec3 prevWorldPosA, prevWorldPosB;
+        if (isBodyA) {
+          prevWorldPosA = body.prevPosition +
+                          body.prevRotation.rotate(contacts[c].contactPointA);
+          prevWorldPosB = otherBody ? otherBody->prevPosition +
+                                          otherBody->prevRotation.rotate(
+                                              contacts[c].contactPointB)
+                                    : contacts[c].contactPointB;
+        } else {
+          prevWorldPosA = otherBody ? otherBody->prevPosition +
+                                          otherBody->prevRotation.rotate(
+                                              contacts[c].contactPointA)
+                                    : contacts[c].contactPointA;
+          prevWorldPosB = body.prevPosition +
+                          body.prevRotation.rotate(contacts[c].contactPointB);
+        }
+        physx::PxVec3 relDisp =
+            (worldPosA - prevWorldPosA) - (worldPosB - prevWorldPosB);
+
+        // Tangent 0
+        {
+          const physx::PxVec3 &t = contacts[c].tangent0;
+          physx::PxVec3 rCrossT = r.cross(t);
+          physx::PxVec3 tGradPos = t * sign;
+          physx::PxVec3 tGradRot = rCrossT * sign;
+          physx::PxReal tPen = contacts[c].tangentPenalty0;
+          tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
+          physx::PxReal tLambda = contacts[c].tangentLambda0;
+          physx::PxReal tC = relDisp.dot(t);
+
+          Alin.column0 += tGradPos * (tGradPos.x * tPen);
+          Alin.column1 += tGradPos * (tGradPos.y * tPen);
+          Alin.column2 += tGradPos * (tGradPos.z * tPen);
+          Aang.column0 += tGradRot * (tGradRot.x * tPen);
+          Aang.column1 += tGradRot * (tGradRot.y * tPen);
+          Aang.column2 += tGradRot * (tGradRot.z * tPen);
+
+          physx::PxReal ft = tPen * tC + tLambda;
+          ft = physx::PxClamp(ft, -frictionBound, frictionBound);
+
+          rhsLin += tGradPos * ft;
+          rhsAng += tGradRot * ft;
+        }
+
+        // Tangent 1
+        {
+          const physx::PxVec3 &t = contacts[c].tangent1;
+          physx::PxVec3 rCrossT = r.cross(t);
+          physx::PxVec3 tGradPos = t * sign;
+          physx::PxVec3 tGradRot = rCrossT * sign;
+          physx::PxReal tPen = contacts[c].tangentPenalty1;
+          tPen = physx::PxMax(tPen, 0.005f * massInvDt2); // 0.5% primal boost
+          physx::PxReal tLambda = contacts[c].tangentLambda1;
+          physx::PxReal tC = relDisp.dot(t);
+
+          Alin.column0 += tGradPos * (tGradPos.x * tPen);
+          Alin.column1 += tGradPos * (tGradPos.y * tPen);
+          Alin.column2 += tGradPos * (tGradPos.z * tPen);
+          Aang.column0 += tGradRot * (tGradRot.x * tPen);
+          Aang.column1 += tGradRot * (tGradRot.y * tPen);
+          Aang.column2 += tGradRot * (tGradRot.z * tPen);
+
+          physx::PxReal ft = tPen * tC + tLambda;
+          ft = physx::PxClamp(ft, -frictionBound, frictionBound);
+
+          rhsLin += tGradPos * ft;
+          rhsAng += tGradRot * ft;
+        }
       }
     }
-  }
   } // end contact accumulation scope
 
   // =========================================================================
@@ -1708,7 +1849,8 @@ void AvbdSolver::solveLocalSystem3x3(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numSpherical) continue;
+      if (j >= numSpherical)
+        continue;
       const AvbdSphericalJointConstraint &jnt = sphericalJoints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
@@ -1780,14 +1922,16 @@ void AvbdSolver::solveLocalSystem3x3(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numFixed) continue;
+      if (j >= numFixed)
+        continue;
       const AvbdFixedJointConstraint &jnt = fixedJoints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
 
       if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex)
         continue;
-      if (jnt.isBroken) continue;
+      if (jnt.isBroken)
+        continue;
 
       const bool isBodyA = (bodyAIdx == bodyIndex);
       const bool otherIsStatic =
@@ -1804,17 +1948,17 @@ void AvbdSolver::solveLocalSystem3x3(
         if (isBodyA) {
           r = body.rotation.rotate(jnt.anchorA);
           worldAnchorA = body.position + r;
-          worldAnchorB = otherIsStatic
-                             ? jnt.anchorB
-                             : bodies[bodyBIdx].position +
-                                   bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
+          worldAnchorB =
+              otherIsStatic ? jnt.anchorB
+                            : bodies[bodyBIdx].position +
+                                  bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
         } else {
           r = body.rotation.rotate(jnt.anchorB);
           worldAnchorB = body.position + r;
-          worldAnchorA = otherIsStatic
-                             ? jnt.anchorA
-                             : bodies[bodyAIdx].position +
-                                   bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
+          worldAnchorA =
+              otherIsStatic ? jnt.anchorA
+                            : bodies[bodyAIdx].position +
+                                  bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
         }
 
         physx::PxVec3 posError = worldAnchorA - worldAnchorB;
@@ -1888,7 +2032,8 @@ void AvbdSolver::solveLocalSystem3x3(
 
     for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
       const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numD6) continue;
+      if (j >= numD6)
+        continue;
       const AvbdD6JointConstraint &jnt = d6Joints[j];
       const physx::PxU32 bodyAIdx = jnt.header.bodyIndexA;
       const physx::PxU32 bodyBIdx = jnt.header.bodyIndexB;
@@ -1911,23 +2056,24 @@ void AvbdSolver::solveLocalSystem3x3(
         if (isBodyA) {
           r = body.rotation.rotate(jnt.anchorA);
           worldAnchorA = body.position + r;
-          worldAnchorB = otherIsStatic
-                             ? jnt.anchorB
-                             : bodies[bodyBIdx].position +
-                                   bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
+          worldAnchorB =
+              otherIsStatic ? jnt.anchorB
+                            : bodies[bodyBIdx].position +
+                                  bodies[bodyBIdx].rotation.rotate(jnt.anchorB);
         } else {
           r = body.rotation.rotate(jnt.anchorB);
           worldAnchorB = body.position + r;
-          worldAnchorA = otherIsStatic
-                             ? jnt.anchorA
-                             : bodies[bodyAIdx].position +
-                                   bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
+          worldAnchorA =
+              otherIsStatic ? jnt.anchorA
+                            : bodies[bodyAIdx].position +
+                                  bodies[bodyAIdx].rotation.rotate(jnt.anchorA);
         }
 
         physx::PxVec3 posError = worldAnchorA - worldAnchorB;
 
         for (int axis = 0; axis < 3; ++axis) {
-          if (jnt.getLinearMotion(axis) != 0) continue;
+          if (jnt.getLinearMotion(axis) != 0)
+            continue;
 
           physx::PxReal C = posError[axis];
           physx::PxVec3 n(0.0f);
@@ -1950,28 +2096,163 @@ void AvbdSolver::solveLocalSystem3x3(
         }
       }
 
-      // --- Angular velocity damping (SLERP / per-axis drives) ---
+      // --- Pure AVBD AL velocity drive constraints (3x3 path) ---
       {
-        physx::PxReal maxDamping = physx::PxMax(
-            jnt.angularDamping.x,
-            physx::PxMax(jnt.angularDamping.y, jnt.angularDamping.z));
+        // Joint frame A in world space
+        physx::PxQuat jointFrameA =
+            otherIsStatic && isBodyA
+                ? jnt.localFrameA
+                : (isBodyA ? body.rotation * jnt.localFrameA
+                           : (otherIsStatic ? jnt.localFrameA
+                                            : bodies[bodyAIdx].rotation *
+                                                  jnt.localFrameA));
 
-        if (maxDamping > 0.0f) {
-          physx::PxReal invDt = 1.0f / dt;
-          physx::PxReal dampEff = maxDamping * invDt * invDt;
+        physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+        if (qMag2 > 1e-8f && PxIsFinite(qMag2))
+          jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
 
-          physx::PxQuat dqInit =
+        physx::PxReal dt2 = dt * dt;
+
+        // Get "other body" for relative displacement
+        const AvbdSolverBody *otherBody = nullptr;
+        if (isBodyA && bodyBIdx < numBodies)
+          otherBody = &bodies[bodyBIdx];
+        else if (!isBodyA && bodyAIdx < numBodies)
+          otherBody = &bodies[bodyAIdx];
+
+        // --- Linear velocity drive ---
+        if ((jnt.driveFlags & 0x7) != 0) {
+          for (int a = 0; a < 3; ++a) {
+            if ((jnt.driveFlags & (1 << a)) == 0)
+              continue;
+            physx::PxReal damping = (&jnt.linearDamping.x)[a];
+            if (damping <= 0.0f)
+              continue;
+
+            physx::PxVec3 localAxis(0.0f);
+            (&localAxis.x)[a] = 1.0f;
+            physx::PxVec3 wAxis = jointFrameA.rotate(localAxis);
+
+            // Displacement of each body from start-of-step
+            physx::PxVec3 dxThis = body.position - body.prevPosition;
+            physx::PxVec3 dxOther =
+                otherBody ? (otherBody->position - otherBody->prevPosition)
+                          : physx::PxVec3(0.0f);
+
+            physx::PxReal dxB_proj, dxA_proj;
+            if (isBodyA) {
+              dxA_proj = dxThis.dot(wAxis);
+              dxB_proj = dxOther.dot(wAxis);
+            } else {
+              dxB_proj = dxThis.dot(wAxis);
+              dxA_proj = dxOther.dot(wAxis);
+            }
+            physx::PxReal targetVel = (&jnt.driveLinearVelocity.x)[a];
+            physx::PxReal C = (dxB_proj - dxA_proj) - targetVel * dt;
+
+            physx::PxReal rho_drive = damping / dt2;
+            physx::PxReal lam = (&jnt.lambdaDriveLinear.x)[a];
+            physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
+            physx::PxReal f = signAL * (rho_drive * C + lam);
+
+            // Hessian: ρ_drive · (wAxis ⊗ wAxis) added to Alin
+            physx::PxVec3 v = wAxis * rho_drive;
+            Alin.column0 += v * wAxis.x;
+            Alin.column1 += v * wAxis.y;
+            Alin.column2 += v * wAxis.z;
+
+            // RHS
+            rhsLin += wAxis * f;
+          }
+        }
+
+        // --- Angular velocity drive ---
+        if ((jnt.driveFlags & 0x38) != 0) {
+          physx::PxQuat dqThis =
               body.rotation * body.prevRotation.getConjugate();
-          if (dqInit.w < 0.0f) dqInit = -dqInit;
-          physx::PxVec3 deltaWInit(dqInit.x, dqInit.y, dqInit.z);
-          deltaWInit *= 2.0f;
+          if (dqThis.w < 0.0f)
+            dqThis = -dqThis;
+          physx::PxVec3 dThetaThis(dqThis.x, dqThis.y, dqThis.z);
+          dThetaThis *= 2.0f;
 
-          // Add to angular diagonal only (damping is per-body, no sign)
-          Aang.column0.x += dampEff;
-          Aang.column1.y += dampEff;
-          Aang.column2.z += dampEff;
+          physx::PxVec3 dThetaOther(0.0f);
+          if (otherBody) {
+            physx::PxQuat dqOther =
+                otherBody->rotation * otherBody->prevRotation.getConjugate();
+            if (dqOther.w < 0.0f)
+              dqOther = -dqOther;
+            dThetaOther = physx::PxVec3(dqOther.x, dqOther.y, dqOther.z) * 2.0f;
+          }
 
-          rhsAng += deltaWInit * dampEff;
+          physx::PxVec3 dThetaA(0.0f), dThetaB(0.0f);
+          if (isBodyA) {
+            dThetaA = dThetaThis;
+            dThetaB = dThetaOther;
+          } else {
+            dThetaA = dThetaOther;
+            dThetaB = dThetaThis;
+          }
+          physx::PxVec3 relDW = dThetaB - dThetaA;
+          physx::PxVec3 worldAngTarget =
+              jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
+          physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
+
+          bool slerpDrive = (jnt.driveFlags & 0x20) != 0;
+          if (slerpDrive) {
+            physx::PxReal damping =
+                jnt.angularDamping.z; // SLERP uses Z damping slot
+            if (damping > 0.0f) {
+              physx::PxReal rho_drive = damping / dt2;
+              for (int k = 0; k < 3; ++k) {
+                physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
+                physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[k];
+                physx::PxReal f = signAL * (rho_drive * C + lam);
+
+                (&Aang.column0.x)[k * 4] +=
+                    rho_drive; // Adding to diagonal only
+                (&rhsAng.x)[k] += f;
+              }
+            }
+          } else {
+            struct AxisDrive {
+              int bit;
+              int dampIdx;
+              physx::PxVec3 localAxis;
+            };
+            const AxisDrive axes[3] = {
+                {3, 0, physx::PxVec3(1.0f, 0.0f, 0.0f)},
+                {4, 1, physx::PxVec3(0.0f, 1.0f, 0.0f)},
+                {5, 2, physx::PxVec3(0.0f, 0.0f, 1.0f)},
+            };
+
+            for (int a = 0; a < 3; ++a) {
+              if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
+                continue;
+              physx::PxReal damping = (&jnt.angularDamping.x)[axes[a].dampIdx];
+              if (damping <= 0.0f)
+                continue;
+
+              physx::PxVec3 wAxis = jointFrameA.rotate(axes[a].localAxis);
+              // PhysX TGS convention: Twist/Swing target velocities are applied
+              // as (wA - wB), meaning wB - wA = -target. SLERP is applied as wB
+              // - wA = target, which is handled above.
+              physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
+              physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
+
+              physx::PxReal rho_drive = damping / dt2;
+              physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx];
+              physx::PxReal f = signAL * (rho_drive * C + lam);
+
+              // Hessian: ρ_drive · (wAxis ⊗ wAxis) added to Aang
+              physx::PxVec3 v = wAxis * rho_drive;
+              Aang.column0 += v * wAxis.x;
+              Aang.column1 += v * wAxis.y;
+              Aang.column2 += v * wAxis.z;
+
+              // RHS
+              rhsAng += wAxis * f;
+            }
+          }
         }
       }
 
@@ -2001,8 +2282,7 @@ void AvbdSolver::solveLocalSystem3x3(
 
   if (deltaTheta.magnitudeSquared() > 1e-12f) {
     physx::PxQuat dq(deltaTheta.x, deltaTheta.y, deltaTheta.z, 0.0f);
-    body.rotation =
-        (body.rotation - dq * body.rotation * 0.5f).getNormalized();
+    body.rotation = (body.rotation - dq * body.rotation * 0.5f).getNormalized();
   }
 }
 
@@ -2057,8 +2337,8 @@ void AvbdSolver::blockDescentIteration(
     } else {
       // 3x3 decoupled solve (position + rotation independently)
       solveLocalSystem3x3(bodies[i], bodies, numBodies, contacts, numContacts,
-                          nullptr, 0, nullptr, 0, nullptr, 0,
-                          dt, invDt2, contactMap);
+                          nullptr, 0, nullptr, 0, nullptr, 0, dt, invDt2,
+                          contactMap);
     }
   }
 }
@@ -2132,7 +2412,7 @@ bool AvbdSolver::computeSphericalJointCorrection(
     const physx::PxReal rho = joint.header.rho;
     const physx::PxReal alpha = 1.0f / rho;
     const physx::PxReal h2 = dt * dt;
-    const physx::PxReal alphaHat = alpha / h2;  // = 1/(rho * h^2)
+    const physx::PxReal alphaHat = alpha / h2; // = 1/(rho * h^2)
 
     physx::PxVec3 r = isBodyA ? body.rotation.rotate(joint.anchorA)
                               : body.rotation.rotate(joint.anchorB);
@@ -2166,9 +2446,9 @@ bool AvbdSolver::computeSphericalJointCorrection(
         // XPBD delta_lambda (== AVBD primal Newton step in constraint space)
         physx::PxReal deltaLambda =
             -(C + alphaHat * joint.lambda[axis]) / (w + alphaHat);
-        deltaLambda = physx::PxClamp(deltaLambda,
-                                     -mConfig.maxPositionCorrection,
-                                     mConfig.maxPositionCorrection);
+        deltaLambda =
+            physx::PxClamp(deltaLambda, -mConfig.maxPositionCorrection,
+                           mConfig.maxPositionCorrection);
 
         // Fused dual update: accumulate lambda
         joint.lambda[axis] += deltaLambda;
@@ -2330,9 +2610,9 @@ bool AvbdSolver::computeFixedJointCorrection(
       if (w > 1e-6f) {
         physx::PxReal deltaLambda =
             -(C + alphaHat * joint.lambdaPosition[axis]) / (w + alphaHat);
-        deltaLambda = physx::PxClamp(deltaLambda,
-                                     -mConfig.maxPositionCorrection,
-                                     mConfig.maxPositionCorrection);
+        deltaLambda =
+            physx::PxClamp(deltaLambda, -mConfig.maxPositionCorrection,
+                           mConfig.maxPositionCorrection);
 
         joint.lambdaPosition[axis] += deltaLambda;
 
@@ -2374,8 +2654,7 @@ bool AvbdSolver::computeFixedJointCorrection(
       if (w > 1e-6f) {
         physx::PxReal deltaLambda =
             -(C + alphaHat * joint.lambdaRotation[axis]) / (w + alphaHat);
-        deltaLambda = physx::PxClamp(deltaLambda,
-                                     -mConfig.maxAngularCorrection,
+        deltaLambda = physx::PxClamp(deltaLambda, -mConfig.maxAngularCorrection,
                                      mConfig.maxAngularCorrection);
 
         joint.lambdaRotation[axis] += deltaLambda;
@@ -2696,202 +2975,8 @@ bool AvbdSolver::computeD6JointCorrection(const AvbdD6JointConstraint &joint,
     }
   }
 
-  // Linear velocity drive
-  // PxD6Drive: eX=0, eY=1, eZ=2 -> bits 0,1,2
-  // Only apply delta when processing body B (the driven body)
-  if ((joint.driveFlags & 0x7) != 0 && body.invMass > 0.0f) {
-    // Drive target velocity is in joint frame A's space
-    // If body A is static, use localFrameA directly; otherwise transform it
-    physx::PxQuat jointFrameA =
-        bodyAIsStatic ? joint.localFrameA : (rotA * joint.localFrameA);
-
-    // Validate and normalize quaternion
-    physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
-    if (qMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(qMag2)) {
-      jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
-
-      for (int axis = 0; axis < 3; ++axis) {
-        if ((joint.driveFlags & (1 << axis)) == 0)
-          continue;
-
-        physx::PxReal targetVel = (&joint.driveLinearVelocity.x)[axis];
-        physx::PxReal damping = (&joint.linearDamping.x)[axis];
-
-        // Skip if no damping or invalid values
-        if (damping <= 0.0f || !PxIsFinite(targetVel) || !PxIsFinite(damping))
-          continue;
-
-        // Get axis direction in world space
-        physx::PxVec3 localAxis(0.0f);
-        (&localAxis.x)[axis] = 1.0f;
-        physx::PxVec3 worldAxis = jointFrameA.rotate(localAxis);
-
-        // Validate world axis
-        physx::PxReal axisMag2 = worldAxis.magnitudeSquared();
-        if (axisMag2 < 0.9f || axisMag2 > 1.1f || !PxIsFinite(axisMag2))
-          continue;
-
-        // Current relative velocity along this axis
-        // Body B should move in +axis direction for positive target velocity
-        physx::PxVec3 velA =
-            otherBody ? otherBody->linearVelocity : physx::PxVec3(0.0f);
-        physx::PxVec3 velB = body.linearVelocity;
-        physx::PxReal relVel = (velB - velA).dot(worldAxis);
-
-        if (!PxIsFinite(relVel))
-          continue;
-
-        // Velocity error: positive error means we need to speed up in target
-        // direction
-        physx::PxReal velError = targetVel - relVel;
-
-        if (physx::PxAbs(velError) > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
-          // Position-based velocity drive: deltaX = targetVel * dt
-          // Scale by damping factor and dt
-          physx::PxReal dt = 1.0f / 60.0f; // Approximate timestep
-          // Normalize damping: 1000 -> factor for reasonable speed
-          physx::PxReal dampingFactor = physx::PxMin(damping / 30000.0f, 0.05f);
-
-          // Direct position change based on target velocity
-          // Positive targetVel -> body B moves in +worldAxis direction
-          physx::PxVec3 posDelta = worldAxis * (targetVel * dt * dampingFactor);
-
-          // Only apply to body B, not body A
-          // When processing body A (isBodyA=true), skip applying the drive
-          if (!isBodyA) {
-            // Validate correction before applying
-            if (PxIsFinite(posDelta.x) && PxIsFinite(posDelta.y) &&
-                PxIsFinite(posDelta.z)) {
-              // Clamp max correction per frame
-              physx::PxReal maxCorrection = 0.005f;
-              posDelta.x =
-                  physx::PxClamp(posDelta.x, -maxCorrection, maxCorrection);
-              posDelta.y =
-                  physx::PxClamp(posDelta.y, -maxCorrection, maxCorrection);
-              posDelta.z =
-                  physx::PxClamp(posDelta.z, -maxCorrection, maxCorrection);
-              deltaPos += posDelta;
-              hasCorrection = true;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Angular velocity drive (damping + stiffness)
-  // PxD6Drive: eTWIST=4 (bit 4=0x10), eSLERP=5 (bit 5=0x20),
-  //            eSWING1=6 (bit 6=0x40), eSWING2=7 (bit 7=0x80)
-  // Combined angular mask: 0xF0 (bits 4-7)
-  //
-  // Drive model: F = stiffness*(targetOrient - currentOrient)
-  //              + damping*(targetAngVel - currentAngVel)
-  //
-  // Position-based: deltaTheta = (targetAngVel - relAngVel) * dt * factor
-  // When targetAngVel=0 and damping>0 (pure damper):
-  //   deltaTheta = -relAngVel * dt * factor   (opposes current motion)
-  if ((joint.driveFlags & 0xF0) != 0) {
-    physx::PxQuat jointFrameA =
-        bodyAIsStatic ? joint.localFrameA : (rotA * joint.localFrameA);
-
-    physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
-    if (qMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON && PxIsFinite(qMag2)) {
-      jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
-
-      bool slerpDrive = (joint.driveFlags & 0x20) != 0;
-
-      physx::PxVec3 targetAngVel = joint.driveAngularVelocity;
-      if (!PxIsFinite(targetAngVel.x) || !PxIsFinite(targetAngVel.y) ||
-          !PxIsFinite(targetAngVel.z)) {
-        targetAngVel = physx::PxVec3(0.0f);
-      }
-      physx::PxVec3 worldTargetAngVel = jointFrameA.rotate(targetAngVel);
-
-      physx::PxVec3 thetaDelta(0.0f);
-      physx::PxReal dt = 1.0f / 60.0f;
-
-      // Estimate current relative angular velocity from rotation delta
-      auto estimateAngVel = [&](const AvbdSolverBody &b) -> physx::PxVec3 {
-        physx::PxQuat dq = b.rotation * b.prevRotation.getConjugate();
-        if (dq.w < 0.0f) {
-          dq = -dq;
-        }
-        physx::PxVec3 v(dq.x, dq.y, dq.z);
-        v *= 2.0f;
-        return v * (1.0f / dt);
-      };
-
-      physx::PxVec3 angVelA =
-          otherBody ? estimateAngVel(*otherBody) : physx::PxVec3(0.0f);
-      physx::PxVec3 angVelB = estimateAngVel(body);
-      physx::PxVec3 relAngVel =
-          isBodyA ? (angVelA - angVelB) : (angVelB - angVelA);
-
-      if (slerpDrive) {
-        // SLERP applies to all angular axes uniformly
-        physx::PxReal damping = joint.angularDamping.z;
-        if (damping > 0.0f && PxIsFinite(damping)) {
-          // Velocity error: drive toward target angular velocity
-          physx::PxVec3 velError = worldTargetAngVel - relAngVel;
-          // dampingFactor scales from physical damping to position correction
-          // damping=1000 -> factor~=0.05, provides moderate viscous resistance
-          physx::PxReal dampingFactor =
-              physx::PxMin(damping / 20000.0f, 0.1f);
-          thetaDelta = velError * (dt * dampingFactor);
-        }
-      } else {
-        // Individual axis drives: TWIST(bit4), SWING1(bit6), SWING2(bit7)
-        struct AxisDrive {
-          physx::PxU32 bit;
-          int dampIdx;     // index into angularDamping
-          physx::PxVec3 localAxis;
-        };
-        const AxisDrive axes[3] = {
-            {0x10, 0, physx::PxVec3(1.0f, 0.0f, 0.0f)}, // TWIST
-            {0x40, 1, physx::PxVec3(0.0f, 1.0f, 0.0f)}, // SWING1
-            {0x80, 2, physx::PxVec3(0.0f, 0.0f, 1.0f)}, // SWING2
-        };
-
-        for (int a = 0; a < 3; ++a) {
-          if ((joint.driveFlags & axes[a].bit) == 0) continue;
-          physx::PxReal damping = (&joint.angularDamping.x)[axes[a].dampIdx];
-          if (damping <= 0.0f || !PxIsFinite(damping)) continue;
-
-          physx::PxVec3 worldAxis = jointFrameA.rotate(axes[a].localAxis);
-          physx::PxReal targetOnAxis = worldTargetAngVel.dot(worldAxis);
-          physx::PxReal currentOnAxis = relAngVel.dot(worldAxis);
-          physx::PxReal velError = targetOnAxis - currentOnAxis;
-
-          if (physx::PxAbs(velError) > AvbdConstants::AVBD_NUMERICAL_EPSILON) {
-            physx::PxReal dampingFactor =
-                physx::PxMin(damping / 20000.0f, 0.1f);
-            thetaDelta += worldAxis * (velError * dt * dampingFactor);
-          }
-        }
-      }
-
-      physx::PxReal thetaMag2 = thetaDelta.magnitudeSquared();
-      if (thetaMag2 > AvbdConstants::AVBD_NUMERICAL_EPSILON &&
-          PxIsFinite(thetaMag2)) {
-        // Apply to the current body with proper sign
-        physx::PxReal sign = isBodyA ? -1.0f : 1.0f;
-        physx::PxVec3 correction = thetaDelta * sign;
-        if (PxIsFinite(correction.x) && PxIsFinite(correction.y) &&
-            PxIsFinite(correction.z)) {
-          // Clamp max angular correction per iteration
-          physx::PxReal maxAngCorrection = 0.02f;
-          correction.x = physx::PxClamp(correction.x, -maxAngCorrection,
-                                        maxAngCorrection);
-          correction.y = physx::PxClamp(correction.y, -maxAngCorrection,
-                                        maxAngCorrection);
-          correction.z = physx::PxClamp(correction.z, -maxAngCorrection,
-                                        maxAngCorrection);
-          deltaTheta += correction;
-          hasCorrection = true;
-        }
-      }
-    }
-  }
+  // Drive constraints now handled in AVBD Hessian
+  // (solveLocalSystemWithJoints/3x3) GS fallback for drives is disabled.
 
   return hasCorrection;
 }
@@ -3091,8 +3176,8 @@ void AvbdSolver::solveWithJoints(
   if (doDebug) {
     printf("\n=== AVBD solveWithJoints FRAME %u === bodies=%u contacts=%u "
            "sph=%u fix=%u rev=%u pri=%u d6=%u gear=%u\n",
-           s_avbdJointDebugFrame, numBodies, numContacts,
-           numSpherical, numFixed, numRevolute, numPrismatic, numD6, numGear);
+           s_avbdJointDebugFrame, numBodies, numContacts, numSpherical,
+           numFixed, numRevolute, numPrismatic, numD6, numGear);
   }
 #endif
 
@@ -3166,13 +3251,17 @@ void AvbdSolver::solveWithJoints(
       }
     };
     for (physx::PxU32 j = 0; j < numSpherical; ++j)
-      addEdge(sphericalJoints[j].header.bodyIndexA, sphericalJoints[j].header.bodyIndexB);
+      addEdge(sphericalJoints[j].header.bodyIndexA,
+              sphericalJoints[j].header.bodyIndexB);
     for (physx::PxU32 j = 0; j < numFixed; ++j)
-      addEdge(fixedJoints[j].header.bodyIndexA, fixedJoints[j].header.bodyIndexB);
+      addEdge(fixedJoints[j].header.bodyIndexA,
+              fixedJoints[j].header.bodyIndexB);
     for (physx::PxU32 j = 0; j < numRevolute; ++j)
-      addEdge(revoluteJoints[j].header.bodyIndexA, revoluteJoints[j].header.bodyIndexB);
+      addEdge(revoluteJoints[j].header.bodyIndexA,
+              revoluteJoints[j].header.bodyIndexB);
     for (physx::PxU32 j = 0; j < numPrismatic; ++j)
-      addEdge(prismaticJoints[j].header.bodyIndexA, prismaticJoints[j].header.bodyIndexB);
+      addEdge(prismaticJoints[j].header.bodyIndexA,
+              prismaticJoints[j].header.bodyIndexB);
     for (physx::PxU32 j = 0; j < numD6; ++j)
       addEdge(d6Joints[j].header.bodyIndexA, d6Joints[j].header.bodyIndexB);
     for (physx::PxU32 j = 0; j < numGear; ++j)
@@ -3188,7 +3277,8 @@ void AvbdSolver::solveWithJoints(
       physx::PxArray<physx::PxReal> mNext;
       mNext.resize(numBodies);
       for (physx::PxU32 i = 0; i < numBodies; ++i) {
-        physx::PxReal baseMass = (bodies[i].invMass > 0.0f) ? (1.0f / bodies[i].invMass) : 0.0f;
+        physx::PxReal baseMass =
+            (bodies[i].invMass > 0.0f) ? (1.0f / bodies[i].invMass) : 0.0f;
         physx::PxReal neighborSum = 0.0f;
         for (physx::PxU32 k = 0; k < adj[i].size(); ++k)
           neighborSum += mEff[adj[i][k]];
@@ -3251,7 +3341,7 @@ void AvbdSolver::solveWithJoints(
                     bodies[bB].prevRotation.rotate(contacts[c].contactPointB)
               : contacts[c].contactPointB;
       contacts[c].C0 = (wA - wB).dot(contacts[c].contactNormal) +
-                        contacts[c].penetrationDepth;
+                       contacts[c].penetrationDepth;
     }
   }
 
@@ -3316,38 +3406,42 @@ void AvbdSolver::solveWithJoints(
   if (doDebug) {
     printf("  After Stage 4b (init no-contact bodies):\n");
     for (physx::PxU32 i = 0; i < numBodies && i < 20; ++i) {
-      if (bodies[i].invMass <= 0.0f) continue;
-      printf("    body[%u] pos=(%.4f,%.4f,%.4f) inertial=(%.4f,%.4f,%.4f) invM=%.3f\n",
-             i, bodies[i].position.x, bodies[i].position.y, bodies[i].position.z,
-             bodies[i].inertialPosition.x, bodies[i].inertialPosition.y,
-             bodies[i].inertialPosition.z, bodies[i].invMass);
+      if (bodies[i].invMass <= 0.0f)
+        continue;
+      printf("    body[%u] pos=(%.4f,%.4f,%.4f) inertial=(%.4f,%.4f,%.4f) "
+             "invM=%.3f\n",
+             i, bodies[i].position.x, bodies[i].position.y,
+             bodies[i].position.z, bodies[i].inertialPosition.x,
+             bodies[i].inertialPosition.y, bodies[i].inertialPosition.z,
+             bodies[i].invMass);
     }
     // Print fixed joint lambda and broken status
     for (physx::PxU32 j = 0; j < numFixed; ++j) {
-      printf("    fixed[%u] bodyA=%u bodyB=%u broken=%u lambdaPos=(%.2f,%.2f,%.2f) "
+      printf("    fixed[%u] bodyA=%u bodyB=%u broken=%u "
+             "lambdaPos=(%.2f,%.2f,%.2f) "
              "lambdaRot=(%.2f,%.2f,%.2f) rho=%.0f\n",
-             j, fixedJoints[j].header.bodyIndexA, fixedJoints[j].header.bodyIndexB,
-             (unsigned)fixedJoints[j].isBroken,
-             fixedJoints[j].lambdaPosition.x, fixedJoints[j].lambdaPosition.y,
-             fixedJoints[j].lambdaPosition.z,
+             j, fixedJoints[j].header.bodyIndexA,
+             fixedJoints[j].header.bodyIndexB,
+             (unsigned)fixedJoints[j].isBroken, fixedJoints[j].lambdaPosition.x,
+             fixedJoints[j].lambdaPosition.y, fixedJoints[j].lambdaPosition.z,
              fixedJoints[j].lambdaRotation.x, fixedJoints[j].lambdaRotation.y,
              fixedJoints[j].lambdaRotation.z, fixedJoints[j].header.rho);
     }
     for (physx::PxU32 j = 0; j < numSpherical; ++j) {
-      printf("    spherical[%u] bodyA=%u bodyB=%u lambda=(%.2f,%.2f,%.2f) rho=%.0f "
+      printf("    spherical[%u] bodyA=%u bodyB=%u lambda=(%.2f,%.2f,%.2f) "
+             "rho=%.0f "
              "coneLimit=%.3f\n",
              j, sphericalJoints[j].header.bodyIndexA,
-             sphericalJoints[j].header.bodyIndexB,
-             sphericalJoints[j].lambda.x, sphericalJoints[j].lambda.y,
-             sphericalJoints[j].lambda.z, sphericalJoints[j].header.rho,
-             sphericalJoints[j].coneAngleLimit);
+             sphericalJoints[j].header.bodyIndexB, sphericalJoints[j].lambda.x,
+             sphericalJoints[j].lambda.y, sphericalJoints[j].lambda.z,
+             sphericalJoints[j].header.rho, sphericalJoints[j].coneAngleLimit);
     }
     for (physx::PxU32 j = 0; j < numD6; ++j) {
-      printf("    d6[%u] bodyA=%u bodyB=%u driveFlags=0x%X angDamping=(%.1f,%.1f,%.1f)\n",
+      printf("    d6[%u] bodyA=%u bodyB=%u driveFlags=0x%X "
+             "angDamping=(%.1f,%.1f,%.1f)\n",
              j, d6Joints[j].header.bodyIndexA, d6Joints[j].header.bodyIndexB,
-             d6Joints[j].driveFlags,
-             d6Joints[j].angularDamping.x, d6Joints[j].angularDamping.y,
-             d6Joints[j].angularDamping.z);
+             d6Joints[j].driveFlags, d6Joints[j].angularDamping.x,
+             d6Joints[j].angularDamping.y, d6Joints[j].angularDamping.z);
     }
   }
 #endif
@@ -3415,29 +3509,20 @@ void AvbdSolver::solveWithJoints(
           // ---------------------------------------------------------------
           if (mConfig.enableLocal6x6Solve) {
             solveLocalSystemWithJoints(
-                bodies[i], bodies, numBodies,
-                contacts, numContacts,
-                sphericalJoints, numSpherical,
-                fixedJoints, numFixed,
-                revoluteJoints, numRevolute,
-                prismaticJoints, numPrismatic,
-                d6Joints, numD6,
-                gearJoints, numGear,
-                dt, invDt2,
-                contactMap, sphericalMap, fixedMap,
-                revoluteMap, prismaticMap, d6Map, gearMap);
+                bodies[i], bodies, numBodies, contacts, numContacts,
+                sphericalJoints, numSpherical, fixedJoints, numFixed,
+                revoluteJoints, numRevolute, prismaticJoints, numPrismatic,
+                d6Joints, numD6, gearJoints, numGear, dt, invDt2, contactMap,
+                sphericalMap, fixedMap, revoluteMap, prismaticMap, d6Map,
+                gearMap);
           } else {
             // 3x3 decoupled solve: same accumulation as 6x6 (contacts +
             // joints), only the solve differs (diagonal 3x3 blocks).
             // Bodies with no constraints snap to inertialPosition internally.
             solveLocalSystem3x3(
-                bodies[i], bodies, numBodies,
-                contacts, numContacts,
-                sphericalJoints, numSpherical,
-                fixedJoints, numFixed,
-                d6Joints, numD6,
-                dt, invDt2,
-                contactMap, sphericalMap, fixedMap, d6Map);
+                bodies[i], bodies, numBodies, contacts, numContacts,
+                sphericalJoints, numSpherical, fixedJoints, numFixed, d6Joints,
+                numD6, dt, invDt2, contactMap, sphericalMap, fixedMap, d6Map);
           }
 
           // ---------------------------------------------------------------
@@ -3494,11 +3579,11 @@ void AvbdSolver::solveWithJoints(
             if (revoluteMap) {
               revoluteMap->getBodyConstraints(i, jIdx, jCnt);
               for (physx::PxU32 k = 0; k < jCnt; ++k) {
-                if (jIdx[k] >= numRevolute) continue;
+                if (jIdx[k] >= numRevolute)
+                  continue;
                 physx::PxVec3 dp, dth;
-                if (computeRevoluteJointCorrection(revoluteJoints[jIdx[k]],
-                                                   bodies, numBodies, i, dp,
-                                                   dth))
+                if (computeRevoluteJointCorrection(
+                        revoluteJoints[jIdx[k]], bodies, numBodies, i, dp, dth))
                   applyJointGS(dp, dth, maxAngleRevolute);
               }
             } else {
@@ -3518,7 +3603,8 @@ void AvbdSolver::solveWithJoints(
             if (prismaticMap) {
               prismaticMap->getBodyConstraints(i, jIdx, jCnt);
               for (physx::PxU32 k = 0; k < jCnt; ++k) {
-                if (jIdx[k] >= numPrismatic) continue;
+                if (jIdx[k] >= numPrismatic)
+                  continue;
                 physx::PxVec3 dp, dth;
                 if (computePrismaticJointCorrection(prismaticJoints[jIdx[k]],
                                                     bodies, numBodies, i, dp,
@@ -3535,9 +3621,8 @@ void AvbdSolver::solveWithJoints(
             }
           }
 
-          // D6 joints -- now handled in solveLocalSystemWithJoints (AVBD Hessian)
-          // GS fallback disabled.
-          // if (d6Joints && numD6 > 0) { ... }
+          // D6 joints -- now handled in solveLocalSystemWithJoints (AVBD
+          // Hessian) GS fallback disabled. if (d6Joints && numD6 > 0) { ... }
 
           // Gear joints
           if (gearJoints && numGear > 0) {
@@ -3546,7 +3631,8 @@ void AvbdSolver::solveWithJoints(
             if (gearMap) {
               gearMap->getBodyConstraints(i, jIdx, jCnt);
               for (physx::PxU32 k = 0; k < jCnt; ++k) {
-                if (jIdx[k] >= numGear) continue;
+                if (jIdx[k] >= numGear)
+                  continue;
                 physx::PxVec3 dp, dth;
                 if (computeGearJointCorrection(gearJoints[jIdx[k]], bodies,
                                                numBodies, i, dp, dth))
@@ -3607,17 +3693,24 @@ void AvbdSolver::solveWithJoints(
 
           auto getBodyMass = [&](physx::PxU32 idx) -> physx::PxReal {
             return (idx == 0xFFFFFFFF || idx >= numBodies)
-              ? 0.0f : (bodies[idx].invMass > 1e-8f ? 1.0f / bodies[idx].invMass : 0.0f);
+                       ? 0.0f
+                       : (bodies[idx].invMass > 1e-8f
+                              ? 1.0f / bodies[idx].invMass
+                              : 0.0f);
           };
           auto computeRhoDual = [&](physx::PxU32 idxA, physx::PxU32 idxB,
                                     physx::PxReal rho) -> physx::PxReal {
             physx::PxReal mA = getBodyMass(idxA);
             physx::PxReal mB = getBodyMass(idxB);
             physx::PxReal mEff;
-            if (mA <= 0.0f) mEff = mB;
-            else if (mB <= 0.0f) mEff = mA;
-            else mEff = physx::PxMin(mA, mB);
-            if (mEff <= 0.0f) return 0.0f;
+            if (mA <= 0.0f)
+              mEff = mB;
+            else if (mB <= 0.0f)
+              mEff = mA;
+            else
+              mEff = physx::PxMin(mA, mB);
+            if (mEff <= 0.0f)
+              return 0.0f;
             physx::PxReal Mh2 = mEff * invDt2;
             physx::PxReal admm_step = rho * rho / (rho + Mh2);
             return physx::PxMin(Mh2, admm_step);
@@ -3628,17 +3721,22 @@ void AvbdSolver::solveWithJoints(
             AvbdSphericalJointConstraint &jnt = sphericalJoints[j];
             physx::PxReal rhoDual = computeRhoDual(
                 jnt.header.bodyIndexA, jnt.header.bodyIndexB, jnt.header.rho);
-            if (rhoDual <= 0.0f) continue;
+            if (rhoDual <= 0.0f)
+              continue;
             bool aStatic = (jnt.header.bodyIndexA == 0xFFFFFFFF ||
                             jnt.header.bodyIndexA >= numBodies);
             bool bStatic = (jnt.header.bodyIndexB == 0xFFFFFFFF ||
                             jnt.header.bodyIndexB >= numBodies);
-            physx::PxVec3 wA = aStatic ? jnt.anchorA
-                : bodies[jnt.header.bodyIndexA].position +
-                  bodies[jnt.header.bodyIndexA].rotation.rotate(jnt.anchorA);
-            physx::PxVec3 wB = bStatic ? jnt.anchorB
-                : bodies[jnt.header.bodyIndexB].position +
-                  bodies[jnt.header.bodyIndexB].rotation.rotate(jnt.anchorB);
+            physx::PxVec3 wA =
+                aStatic ? jnt.anchorA
+                        : bodies[jnt.header.bodyIndexA].position +
+                              bodies[jnt.header.bodyIndexA].rotation.rotate(
+                                  jnt.anchorA);
+            physx::PxVec3 wB =
+                bStatic ? jnt.anchorB
+                        : bodies[jnt.header.bodyIndexB].position +
+                              bodies[jnt.header.bodyIndexB].rotation.rotate(
+                                  jnt.anchorB);
             jnt.lambda = jnt.lambda * lambdaDecay + (wA - wB) * rhoDual;
           }
 
@@ -3647,25 +3745,33 @@ void AvbdSolver::solveWithJoints(
             AvbdFixedJointConstraint &jnt = fixedJoints[j];
             physx::PxReal rhoDual = computeRhoDual(
                 jnt.header.bodyIndexA, jnt.header.bodyIndexB, jnt.header.rho);
-            if (rhoDual <= 0.0f) continue;
+            if (rhoDual <= 0.0f)
+              continue;
             bool aStatic = (jnt.header.bodyIndexA == 0xFFFFFFFF ||
                             jnt.header.bodyIndexA >= numBodies);
             bool bStatic = (jnt.header.bodyIndexB == 0xFFFFFFFF ||
                             jnt.header.bodyIndexB >= numBodies);
-            physx::PxVec3 wA = aStatic ? jnt.anchorA
-                : bodies[jnt.header.bodyIndexA].position +
-                  bodies[jnt.header.bodyIndexA].rotation.rotate(jnt.anchorA);
-            physx::PxVec3 wB = bStatic ? jnt.anchorB
-                : bodies[jnt.header.bodyIndexB].position +
-                  bodies[jnt.header.bodyIndexB].rotation.rotate(jnt.anchorB);
-            physx::PxQuat rotA = aStatic ? physx::PxQuat(physx::PxIdentity)
-                : bodies[jnt.header.bodyIndexA].rotation;
-            physx::PxQuat rotB = bStatic ? physx::PxQuat(physx::PxIdentity)
-                : bodies[jnt.header.bodyIndexB].rotation;
-            jnt.lambdaPosition = jnt.lambdaPosition * lambdaDecay +
-                                 (wA - wB) * rhoDual;
-            jnt.lambdaRotation = jnt.lambdaRotation * lambdaDecay +
-                                 jnt.computeRotationViolation(rotA, rotB) * rhoDual;
+            physx::PxVec3 wA =
+                aStatic ? jnt.anchorA
+                        : bodies[jnt.header.bodyIndexA].position +
+                              bodies[jnt.header.bodyIndexA].rotation.rotate(
+                                  jnt.anchorA);
+            physx::PxVec3 wB =
+                bStatic ? jnt.anchorB
+                        : bodies[jnt.header.bodyIndexB].position +
+                              bodies[jnt.header.bodyIndexB].rotation.rotate(
+                                  jnt.anchorB);
+            physx::PxQuat rotA = aStatic
+                                     ? physx::PxQuat(physx::PxIdentity)
+                                     : bodies[jnt.header.bodyIndexA].rotation;
+            physx::PxQuat rotB = bStatic
+                                     ? physx::PxQuat(physx::PxIdentity)
+                                     : bodies[jnt.header.bodyIndexB].rotation;
+            jnt.lambdaPosition =
+                jnt.lambdaPosition * lambdaDecay + (wA - wB) * rhoDual;
+            jnt.lambdaRotation =
+                jnt.lambdaRotation * lambdaDecay +
+                jnt.computeRotationViolation(rotA, rotB) * rhoDual;
           }
 
           // D6 joints
@@ -3673,22 +3779,153 @@ void AvbdSolver::solveWithJoints(
             AvbdD6JointConstraint &jnt = d6Joints[j];
             physx::PxReal rhoDual = computeRhoDual(
                 jnt.header.bodyIndexA, jnt.header.bodyIndexB, jnt.header.rho);
-            if (rhoDual <= 0.0f) continue;
+            if (rhoDual <= 0.0f)
+              continue;
             bool aStatic = (jnt.header.bodyIndexA == 0xFFFFFFFF ||
                             jnt.header.bodyIndexA >= numBodies);
             bool bStatic = (jnt.header.bodyIndexB == 0xFFFFFFFF ||
                             jnt.header.bodyIndexB >= numBodies);
-            physx::PxVec3 wA = aStatic ? jnt.anchorA
-                : bodies[jnt.header.bodyIndexA].position +
-                  bodies[jnt.header.bodyIndexA].rotation.rotate(jnt.anchorA);
-            physx::PxVec3 wB = bStatic ? jnt.anchorB
-                : bodies[jnt.header.bodyIndexB].position +
-                  bodies[jnt.header.bodyIndexB].rotation.rotate(jnt.anchorB);
+            physx::PxVec3 wA =
+                aStatic ? jnt.anchorA
+                        : bodies[jnt.header.bodyIndexA].position +
+                              bodies[jnt.header.bodyIndexA].rotation.rotate(
+                                  jnt.anchorA);
+            physx::PxVec3 wB =
+                bStatic ? jnt.anchorB
+                        : bodies[jnt.header.bodyIndexB].position +
+                              bodies[jnt.header.bodyIndexB].rotation.rotate(
+                                  jnt.anchorB);
             physx::PxVec3 posViol = wA - wB;
             for (int axis = 0; axis < 3; ++axis) {
-              if (jnt.getLinearMotion(axis) != 0) continue;
+              if (jnt.getLinearMotion(axis) != 0)
+                continue;
               jnt.lambdaLinear[axis] = jnt.lambdaLinear[axis] * lambdaDecay +
                                        posViol[axis] * rhoDual;
+            }
+
+            // --- Drive AL dual update ---
+            physx::PxReal dt2 = dt * dt;
+
+            // Joint frame A in world space
+            physx::PxQuat jointFrameA =
+                aStatic
+                    ? jnt.localFrameA
+                    : bodies[jnt.header.bodyIndexA].rotation * jnt.localFrameA;
+            physx::PxReal qMag2 = jointFrameA.magnitudeSquared();
+            if (qMag2 > 1e-8f && PxIsFinite(qMag2))
+              jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
+
+            // Linear velocity drive dual
+            if ((jnt.driveFlags & 0x7) != 0) {
+              // Body displacements from start-of-step
+              physx::PxVec3 dxA =
+                  aStatic ? physx::PxVec3(0.0f)
+                          : (bodies[jnt.header.bodyIndexA].position -
+                             bodies[jnt.header.bodyIndexA].prevPosition);
+              physx::PxVec3 dxB =
+                  bStatic ? physx::PxVec3(0.0f)
+                          : (bodies[jnt.header.bodyIndexB].position -
+                             bodies[jnt.header.bodyIndexB].prevPosition);
+
+              for (int a = 0; a < 3; ++a) {
+                if ((jnt.driveFlags & (1 << a)) == 0)
+                  continue;
+                physx::PxReal damping = (&jnt.linearDamping.x)[a];
+                if (damping <= 0.0f)
+                  continue;
+
+                physx::PxVec3 localAxis(0.0f);
+                (&localAxis.x)[a] = 1.0f;
+                physx::PxVec3 wAxis = jointFrameA.rotate(localAxis);
+
+                // Drive velocity is in joint local space, rotate to world space
+                physx::PxVec3 worldTarget =
+                    jointFrameA.rotate(jnt.driveLinearVelocity) * dt;
+                physx::PxReal C =
+                    (dxB.dot(wAxis) - dxA.dot(wAxis)) - worldTarget.dot(wAxis);
+
+                physx::PxReal rhoDualDrive =
+                    physx::PxMin(damping / dt2, rhoDual);
+                (&jnt.lambdaDriveLinear.x)[a] =
+                    (&jnt.lambdaDriveLinear.x)[a] * lambdaDecay +
+                    rhoDualDrive * C;
+              }
+            }
+
+            // Angular velocity drive dual
+            if ((jnt.driveFlags & 0x38) != 0) {
+              // Angular displacements from start-of-step
+              physx::PxVec3 dThetaA(0.0f), dThetaB(0.0f);
+              if (!aStatic) {
+                physx::PxQuat dqA =
+                    bodies[jnt.header.bodyIndexA].rotation *
+                    bodies[jnt.header.bodyIndexA].prevRotation.getConjugate();
+                if (dqA.w < 0.0f)
+                  dqA = -dqA;
+                dThetaA = physx::PxVec3(dqA.x, dqA.y, dqA.z) * 2.0f;
+              }
+              if (!bStatic) {
+                physx::PxQuat dqB =
+                    bodies[jnt.header.bodyIndexB].rotation *
+                    bodies[jnt.header.bodyIndexB].prevRotation.getConjugate();
+                if (dqB.w < 0.0f)
+                  dqB = -dqB;
+                dThetaB = physx::PxVec3(dqB.x, dqB.y, dqB.z) * 2.0f;
+              }
+
+              physx::PxVec3 relDW = dThetaB - dThetaA;
+              physx::PxVec3 worldAngTarget =
+                  jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
+
+              bool slerpDrive = (jnt.driveFlags & 0x20) != 0;
+              if (slerpDrive) {
+                physx::PxReal damping =
+                    jnt.angularDamping.z; // SLERP uses Z damping slot
+                if (damping > 0.0f) {
+                  physx::PxReal rhoDualDrive =
+                      physx::PxMin(damping / dt2, rhoDual);
+                  for (int k = 0; k < 3; ++k) {
+                    physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
+                    (&jnt.lambdaDriveAngular.x)[k] =
+                        (&jnt.lambdaDriveAngular.x)[k] * lambdaDecay +
+                        rhoDualDrive * C;
+                  }
+                }
+              } else {
+                struct AxisDrive {
+                  int bit;
+                  int dampIdx;
+                  physx::PxVec3 localAxis;
+                };
+                const AxisDrive axes[3] = {
+                    {3, 0, physx::PxVec3(1.0f, 0.0f, 0.0f)},
+                    {4, 1, physx::PxVec3(0.0f, 1.0f, 0.0f)},
+                    {5, 2, physx::PxVec3(0.0f, 0.0f, 1.0f)},
+                };
+
+                for (int a = 0; a < 3; ++a) {
+                  if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
+                    continue;
+                  physx::PxReal damping =
+                      (&jnt.angularDamping.x)[axes[a].dampIdx];
+                  if (damping <= 0.0f)
+                    continue;
+
+                  physx::PxVec3 wAxis = jointFrameA.rotate(axes[a].localAxis);
+                  // PhysX TGS convention: Twist/Swing target velocities are
+                  // applied as (wA - wB), meaning wB - wA = -target. SLERP is
+                  // applied as wB - wA = target, which is handled above.
+                  physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
+                  physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
+
+                  physx::PxReal rhoDualDrive =
+                      physx::PxMin(damping / dt2, rhoDual);
+                  (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx] =
+                      (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx] *
+                          lambdaDecay +
+                      rhoDualDrive * C;
+                }
+              }
             }
           }
         }
@@ -3711,7 +3948,8 @@ void AvbdSolver::solveWithJoints(
   //
   // Motor applies torque (limited by maxForce) to accelerate toward target
   // velocity. This matches TGS behavior where motor gradually accelerates
-  // bodies. Applied AFTER constraint iterations so joint corrections are stable.
+  // bodies. Applied AFTER constraint iterations so joint corrections are
+  // stable.
   // =========================================================================
   {
     PX_PROFILE_ZONE("AVBD.motorDrives", 0);
@@ -3749,8 +3987,7 @@ void AvbdSolver::solveWithJoints(
       worldAxis.normalize();
 
       // Current angular velocity from position-level solver
-      physx::PxQuat deltaQ =
-          bodyB.rotation * bodyB.prevRotation.getConjugate();
+      physx::PxQuat deltaQ = bodyB.rotation * bodyB.prevRotation.getConjugate();
       if (deltaQ.w < 0.0f)
         deltaQ = -deltaQ;
       physx::PxVec3 currentAngVel =
@@ -3848,9 +4085,10 @@ void AvbdSolver::solveWithJoints(
   if (doDebug) {
     printf("  After Stage 7 (final positions):\n");
     for (physx::PxU32 i = 0; i < numBodies && i < 20; ++i) {
-      if (bodies[i].invMass <= 0.0f) continue;
-      printf("    body[%u] pos=(%.4f,%.4f,%.4f) vel=(%.4f,%.4f,%.4f)\n",
-             i, bodies[i].position.x, bodies[i].position.y, bodies[i].position.z,
+      if (bodies[i].invMass <= 0.0f)
+        continue;
+      printf("    body[%u] pos=(%.4f,%.4f,%.4f) vel=(%.4f,%.4f,%.4f)\n", i,
+             bodies[i].position.x, bodies[i].position.y, bodies[i].position.z,
              bodies[i].linearVelocity.x, bodies[i].linearVelocity.y,
              bodies[i].linearVelocity.z);
     }

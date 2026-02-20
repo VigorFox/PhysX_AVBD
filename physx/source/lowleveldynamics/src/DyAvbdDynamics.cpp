@@ -1658,7 +1658,22 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                     PxVec3(d6Data->drive[4].damping, // TWIST
                            d6Data->drive[3].damping, // SWING1 (uses SWING slot)
                            d6Data->drive[5].damping); // SWING2/SLERP
-                c.driveFlags = d6Data->driving;
+                // Map D6 Joint driving flags to AVBD driveFlags format
+                // PhysX D6 Joint uses PxD6Drive::Enum bit positions:
+                //   eX=0, eY=1, eZ=2 (linear drives - bit 0-2)
+                //   eTWIST=4, eSWING1=6, eSWING2=7 (angular drives - need remap to bit 3-5)
+                // AVBD expects: bit 0-2=linear X/Y/Z, bit 3-5=angular X/Y/Z
+                c.driveFlags = d6Data->driving & 0x07; // Linear drives (eX,eY,eZ) - bit 0-2
+                if (d6Data->driving & (1 << PxD6Drive::eTWIST))
+                  c.driveFlags |= 1 << 3; // TWIST -> bit 3 (angular X)
+                if (d6Data->driving & (1 << PxD6Drive::eSWING1))
+                  c.driveFlags |= 1 << 4; // SWING1 -> bit 4 (angular Y)
+                if (d6Data->driving & (1 << PxD6Drive::eSWING2))
+                  c.driveFlags |= 1 << 5; // SWING2 -> bit 5 (angular Z)
+                if (d6Data->driving & (1 << PxD6Drive::eSLERP))
+                  c.driveFlags |= 1 << 5; // SLERP -> bit 5 (angular Z, reuse SWING2)
+                if (d6Data->driving & (1 << PxD6Drive::eSWING))
+                  c.driveFlags |= 1 << 3; // SWING (deprecated) -> bit 3 (angular X, reuse TWIST)
 
                 // Set target drive velocities
                 c.driveLinearVelocity = d6Data->driveLinearVelocity;

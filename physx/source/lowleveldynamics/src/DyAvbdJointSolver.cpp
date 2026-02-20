@@ -98,8 +98,7 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
     // XPBD delta lambda (fused primal+dual)
     physx::PxReal deltaLambda =
         -(C + alphaHat * joint.lambda[axis]) / (w + alphaHat);
-    deltaLambda = physx::PxClamp(deltaLambda,
-                                 -config.maxPositionCorrection,
+    deltaLambda = physx::PxClamp(deltaLambda, -config.maxPositionCorrection,
                                  config.maxPositionCorrection);
 
     // Fused dual: accumulate lambda
@@ -112,8 +111,9 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
       physx::PxVec3 angImpulse = rA.cross(impulse);
       physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
@@ -122,8 +122,9 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
       physx::PxVec3 angImpulse = rB.cross(impulse);
       physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -162,17 +163,19 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
           if (!isAStatic) {
             physx::PxVec3 angDelta =
                 bodyA.invInertiaWorld * (corrAxis * deltaLambda);
-            physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                              angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                              angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+            physx::PxQuat dq(
+                angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
             bodyA.rotation = (dq * bodyA.rotation).getNormalized();
           }
           if (!isBStatic) {
             physx::PxVec3 angDelta =
                 bodyB.invInertiaWorld * (corrAxis * (-deltaLambda));
-            physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                              angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                              angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+            physx::PxQuat dq(
+                angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
             bodyB.rotation = (dq * bodyB.rotation).getNormalized();
           }
         }
@@ -186,8 +189,7 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
 //=============================================================================
 
 void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
-                                 AvbdSolverBody *bodies,
-                                 physx::PxU32 numBodies,
+                                 AvbdSolverBody *bodies, physx::PxU32 numBodies,
                                  const AvbdSolverConfig &config,
                                  physx::PxReal dt) {
   const physx::PxU32 idxA = joint.header.bodyIndexA;
@@ -266,8 +268,9 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
       physx::PxVec3 angDelta =
           (bodyA.invInertiaWorld * rA.cross(impulse)) * angularScaleA;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
@@ -281,8 +284,9 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
       physx::PxVec3 angDelta =
           (bodyB.invInertiaWorld * rB.cross(impulse)) * angularScaleB;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -324,8 +328,9 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
       physx::PxVec3 angDelta =
           (bodyA.invInertiaWorld * angImpulse) * angularScaleA;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
@@ -335,8 +340,9 @@ void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
       physx::PxVec3 angDelta =
           (bodyB.invInertiaWorld * angImpulse) * angularScaleB;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -402,7 +408,7 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
     physx::PxReal gradient = joint.lambdaPosition[axis] + rho * C;
     physx::PxReal stepSize = -gradient / w;
     stepSize = physx::PxClamp(stepSize, -config.maxPositionCorrection,
-                               config.maxPositionCorrection);
+                              config.maxPositionCorrection);
 
     physx::PxVec3 impulse = n * stepSize;
 
@@ -410,8 +416,9 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
       bodyA.position += impulse * bodyA.invMass;
       physx::PxVec3 angDelta = bodyA.invInertiaWorld * rA.cross(impulse);
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
@@ -419,8 +426,9 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
       bodyB.position -= impulse * bodyB.invMass;
       physx::PxVec3 angDelta = bodyB.invInertiaWorld * rB.cross(impulse);
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -435,7 +443,8 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
   // We need two perpendicular correction directions
   // Build a basis perpendicular to the joint axis
   physx::PxVec3 perp1, perp2;
-  if (physx::PxAbs(worldAxisA.x) < AvbdConstants::AVBD_AXIS_SELECTION_THRESHOLD) {
+  if (physx::PxAbs(worldAxisA.x) <
+      AvbdConstants::AVBD_AXIS_SELECTION_THRESHOLD) {
     perp1 = worldAxisA.cross(physx::PxVec3(1, 0, 0)).getNormalized();
   } else {
     perp1 = worldAxisA.cross(physx::PxVec3(0, 1, 0)).getNormalized();
@@ -468,23 +477,25 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
     physx::PxReal gradient = joint.lambdaAxisAlign[i] + rho * C;
     physx::PxReal stepSize = -gradient / w;
     stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                               config.maxAngularCorrection);
+                              config.maxAngularCorrection);
 
     physx::PxVec3 angImpulse = corrAxis * stepSize;
 
     if (!isAStatic) {
       physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
     if (!isBStatic) {
       physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -494,7 +505,8 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
     physx::PxReal angleLimitViolation =
         joint.computeAngleLimitViolation(bodyA.rotation, bodyB.rotation);
 
-    if (physx::PxAbs(angleLimitViolation) > AvbdConstants::AVBD_ANGLE_LIMIT_THRESHOLD) {
+    if (physx::PxAbs(angleLimitViolation) >
+        AvbdConstants::AVBD_ANGLE_LIMIT_THRESHOLD) {
       // Apply correction around the joint axis
       physx::PxVec3 corrAxis = worldAxisA;
 
@@ -506,26 +518,29 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
 
       if (w > AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD) {
         // AVBD: Compute gradient of augmented Lagrangian energy
-        physx::PxReal gradient = joint.lambdaAngleLimit + rho * angleLimitViolation;
+        physx::PxReal gradient =
+            joint.lambdaAngleLimit + rho * angleLimitViolation;
         physx::PxReal stepSize = -gradient / w;
         stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                                   config.maxAngularCorrection);
+                                  config.maxAngularCorrection);
 
         physx::PxVec3 angImpulse = corrAxis * stepSize;
 
         if (!isAStatic) {
           physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-          physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+          physx::PxQuat dq(
+              angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+              angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+              angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
           bodyA.rotation = (dq * bodyA.rotation).getNormalized();
         }
 
         if (!isBStatic) {
           physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-          physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                            -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+          physx::PxQuat dq(
+              -angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+              -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+              -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
           bodyB.rotation = (dq * bodyB.rotation).getNormalized();
         }
       }
@@ -544,9 +559,10 @@ void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
     physx::PxReal velocityError = joint.motorTargetVelocity - relAngVelOnAxis;
 
     // Simple velocity-level motor with max force limit
-    physx::PxReal motorImpulse = velocityError * AvbdConstants::AVBD_MOTOR_GAIN; // Simple gain
+    physx::PxReal motorImpulse =
+        velocityError * AvbdConstants::AVBD_MOTOR_GAIN; // Simple gain
     motorImpulse = physx::PxClamp(motorImpulse, -joint.motorMaxForce * dt,
-                                   joint.motorMaxForce * dt);
+                                  joint.motorMaxForce * dt);
 
     physx::PxVec3 motorAngImpulse = worldAxisA * motorImpulse;
 
@@ -577,12 +593,14 @@ void updateSphericalJointMultiplier(AvbdSphericalJointConstraint &joint,
   // Compute world anchors directly -- do NOT use computeViolation() because
   // for static bodies anchorA/B is already a world position, and
   // computeViolation() would double-count it (posA + rotate(anchorA)).
-  physx::PxVec3 worldAnchorA = isAStatic
-      ? joint.anchorA
-      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = isBStatic
-      ? joint.anchorB
-      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 worldAnchorA =
+      isAStatic
+          ? joint.anchorA
+          : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB =
+      isBStatic
+          ? joint.anchorB
+          : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxVec3 violation = worldAnchorA - worldAnchorB;
 
   // Augmented Lagrangian update: lambda += rho * C(x)
@@ -613,16 +631,20 @@ void updateFixedJointMultiplier(AvbdFixedJointConstraint &joint,
   // Compute world anchors directly -- do NOT use computePositionViolation()
   // because for static bodies anchorA/B is already a world position, and
   // computePositionViolation() would double-count it (posA + rotate(anchorA)).
-  physx::PxVec3 worldAnchorA = isAStatic
-      ? joint.anchorA
-      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = isBStatic
-      ? joint.anchorB
-      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 worldAnchorA =
+      isAStatic
+          ? joint.anchorA
+          : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB =
+      isBStatic
+          ? joint.anchorB
+          : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxVec3 posViolation = worldAnchorA - worldAnchorB;
 
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  physx::PxQuat rotA =
+      isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB =
+      isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
   physx::PxVec3 rotViolation = joint.computeRotationViolation(rotA, rotB);
 
   physx::PxReal rho = joint.header.rho;
@@ -661,16 +683,20 @@ void updateRevoluteJointMultiplier(AvbdRevoluteJointConstraint &joint,
   const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
   const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
 
-  physx::PxVec3 worldAnchorA = isAStatic
-      ? joint.anchorA
-      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = isBStatic
-      ? joint.anchorB
-      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 worldAnchorA =
+      isAStatic
+          ? joint.anchorA
+          : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB =
+      isBStatic
+          ? joint.anchorB
+          : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxVec3 posViolation = worldAnchorA - worldAnchorB;
 
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  physx::PxQuat rotA =
+      isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB =
+      isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
   physx::PxVec3 axisViolation = joint.computeAxisViolation(rotA, rotB);
 
   physx::PxReal rho = joint.header.rho;
@@ -766,7 +792,7 @@ void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
     physx::PxReal gradient = joint.lambdaPosition[i] + rho * C;
     physx::PxReal stepSize = -gradient / w;
     stepSize = physx::PxClamp(stepSize, -config.maxPositionCorrection,
-                               config.maxPositionCorrection);
+                              config.maxPositionCorrection);
 
     // Compute position corrections
     physx::PxVec3 impulse = n * stepSize;
@@ -776,8 +802,9 @@ void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
       physx::PxVec3 angImpulse = rA.cross(impulse);
       physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
@@ -786,8 +813,9 @@ void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
       physx::PxVec3 angImpulse = rB.cross(impulse);
       physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -818,23 +846,25 @@ void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
     physx::PxReal gradient = joint.lambdaRotation[axis] + rho * C;
     physx::PxReal stepSize = -gradient / w;
     stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                               config.maxAngularCorrection);
+                              config.maxAngularCorrection);
 
     physx::PxVec3 angImpulse = n * stepSize;
 
     if (!isAStatic) {
       physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
       physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyA.rotation = (dq * bodyA.rotation).getNormalized();
     }
 
     if (!isBStatic) {
       physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
       physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                        -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                       -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                       1.0f);
       bodyB.rotation = (dq * bodyB.rotation).getNormalized();
     }
   }
@@ -858,16 +888,20 @@ void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
   // Compute world anchors directly -- for static bodies anchorA/B is already
   // a world position; do NOT pass it through computePositionViolation() which
   // would add rotate(anchor) again, double-counting the offset.
-  physx::PxVec3 worldAnchorA = isAStatic
-      ? joint.anchorA
-      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = isBStatic
-      ? joint.anchorB
-      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxVec3 worldAnchorA =
+      isAStatic
+          ? joint.anchorA
+          : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB =
+      isBStatic
+          ? joint.anchorB
+          : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
   physx::PxVec3 posDiff = worldAnchorB - worldAnchorA;
 
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  physx::PxQuat rotA =
+      isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB =
+      isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
 
   physx::PxVec3 worldAxis = rotA.rotate(joint.axisA);
 
@@ -919,10 +953,10 @@ void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
 //=============================================================================
 
 void processD6JointConstraint(AvbdD6JointConstraint &joint,
-                              AvbdSolverBody *bodies,
-                              physx::PxU32 numBodies,
+                              AvbdSolverBody *bodies, physx::PxU32 numBodies,
                               const AvbdSolverConfig &config,
                               physx::PxReal dt) {
+  PX_UNUSED(dt);
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
@@ -971,7 +1005,8 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
         continue;
 
       // Compute effective inverse mass
-      physx::PxReal w = computeEffectiveInverseMass(bodyA, bodyB, rA, rB, worldAxis);
+      physx::PxReal w =
+          computeEffectiveInverseMass(bodyA, bodyB, rA, rB, worldAxis);
 
       if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
         continue;
@@ -980,7 +1015,7 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
       physx::PxReal gradient = joint.lambdaLinear[axis] + rho * error;
       physx::PxReal stepSize = -gradient / w;
       stepSize = physx::PxClamp(stepSize, -config.maxPositionCorrection,
-                                 config.maxPositionCorrection);
+                                config.maxPositionCorrection);
 
       physx::PxVec3 impulse = worldAxis * stepSize;
 
@@ -988,9 +1023,10 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
         bodyA.position += impulse * bodyA.invMass;
         physx::PxVec3 angImpulse = rA.cross(impulse);
         physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyA.rotation = (dq * bodyA.rotation).getNormalized();
       }
 
@@ -998,19 +1034,23 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
         bodyB.position -= impulse * bodyB.invMass;
         physx::PxVec3 angImpulse = rB.cross(impulse);
         physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            -angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyB.rotation = (dq * bodyB.rotation).getNormalized();
       }
     } else if (motionType == 1) { // LIMITED
-      physx::PxReal limitViolation = joint.computeLinearLimitViolation(error, axis);
+      physx::PxReal limitViolation =
+          joint.computeLinearLimitViolation(error, axis);
 
-      if (physx::PxAbs(limitViolation) < AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
+      if (physx::PxAbs(limitViolation) <
+          AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
         continue;
 
       // Compute effective inverse mass
-      physx::PxReal w = computeEffectiveInverseMass(bodyA, bodyB, rA, rB, worldAxis);
+      physx::PxReal w =
+          computeEffectiveInverseMass(bodyA, bodyB, rA, rB, worldAxis);
 
       if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
         continue;
@@ -1019,7 +1059,7 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
       physx::PxReal gradient = joint.lambdaLinear[axis] + rho * limitViolation;
       physx::PxReal stepSize = -gradient / w;
       stepSize = physx::PxClamp(stepSize, -config.maxPositionCorrection,
-                                 config.maxPositionCorrection);
+                                config.maxPositionCorrection);
 
       physx::PxVec3 impulse = worldAxis * stepSize;
 
@@ -1027,9 +1067,10 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
         bodyA.position += impulse * bodyA.invMass;
         physx::PxVec3 angImpulse = rA.cross(impulse);
         physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyA.rotation = (dq * bodyA.rotation).getNormalized();
       }
 
@@ -1037,9 +1078,10 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
         bodyB.position -= impulse * bodyB.invMass;
         physx::PxVec3 angImpulse = rB.cross(impulse);
         physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            -angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyB.rotation = (dq * bodyB.rotation).getNormalized();
       }
     }
@@ -1058,8 +1100,8 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
     physx::PxVec3 worldAxis = bodyA.rotation.rotate(localAxis);
 
     // Compute angular error
-    physx::PxReal error = joint.computeAngularError(
-        bodyA.rotation, bodyB.rotation, axis);
+    physx::PxReal error =
+        joint.computeAngularError(bodyA.rotation, bodyB.rotation, axis);
 
     if (motionType == 0) { // LOCKED
       if (physx::PxAbs(error) < AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
@@ -1079,29 +1121,33 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
       physx::PxReal gradient = joint.lambdaAngular[axis] + rho * error;
       physx::PxReal stepSize = -gradient / w;
       stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                                 config.maxAngularCorrection);
+                                config.maxAngularCorrection);
 
       physx::PxVec3 angImpulse = worldAxis * stepSize;
 
       if (!isAStatic) {
         physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyA.rotation = (dq * bodyA.rotation).getNormalized();
       }
 
       if (!isBStatic) {
         physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            -angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyB.rotation = (dq * bodyB.rotation).getNormalized();
       }
     } else if (motionType == 1) { // LIMITED
-      physx::PxReal limitViolation = joint.computeAngularLimitViolation(error, axis);
+      physx::PxReal limitViolation =
+          joint.computeAngularLimitViolation(error, axis);
 
-      if (physx::PxAbs(limitViolation) < AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
+      if (physx::PxAbs(limitViolation) <
+          AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD)
         continue;
 
       // Angular effective mass
@@ -1118,91 +1164,27 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
       physx::PxReal gradient = joint.lambdaAngular[axis] + rho * limitViolation;
       physx::PxReal stepSize = -gradient / w;
       stepSize = physx::PxClamp(stepSize, -config.maxAngularCorrection,
-                                 config.maxAngularCorrection);
+                                config.maxAngularCorrection);
 
       physx::PxVec3 angImpulse = worldAxis * stepSize;
 
       if (!isAStatic) {
         physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyA.rotation = (dq * bodyA.rotation).getNormalized();
       }
 
       if (!isBStatic) {
         physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-        physx::PxQuat dq(-angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                          -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+        physx::PxQuat dq(
+            -angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+            -angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
         bodyB.rotation = (dq * bodyB.rotation).getNormalized();
       }
-    }
-  }
-
-  // --- Process Linear Drives (Motors) ---
-  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
-    if (!joint.isLinearDriveEnabled(axis))
-      continue;
-
-    physx::PxVec3 localAxis(0.0f);
-    localAxis[axis] = 1.0f;
-    physx::PxVec3 worldAxis = bodyA.rotation.rotate(localAxis);
-
-    // Compute current linear velocity difference along axis
-    physx::PxReal relLinVelOnAxis = 0.0f;
-    if (!isAStatic)
-      relLinVelOnAxis += bodyA.linearVelocity.dot(worldAxis);
-    if (!isBStatic)
-      relLinVelOnAxis -= bodyB.linearVelocity.dot(worldAxis);
-
-    physx::PxReal velocityError = joint.driveLinearVelocity[axis] - relLinVelOnAxis;
-
-    // Simple velocity-level motor with max force limit
-    physx::PxReal motorImpulse = velocityError * AvbdConstants::AVBD_MOTOR_GAIN; // Simple gain
-    physx::PxReal maxImpulse = joint.driveLinearForce[axis] * dt;
-    motorImpulse = physx::PxClamp(motorImpulse, -maxImpulse, maxImpulse);
-
-    physx::PxVec3 motorLinImpulse = worldAxis * motorImpulse;
-
-    if (!isAStatic) {
-      bodyA.linearVelocity += motorLinImpulse * bodyA.invMass;
-    }
-    if (!isBStatic) {
-      bodyB.linearVelocity -= motorLinImpulse * bodyB.invMass;
-    }
-  }
-
-  // --- Process Angular Drives (Motors) ---
-  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
-    if (!joint.isAngularDriveEnabled(axis))
-      continue;
-
-    physx::PxVec3 localAxis(0.0f);
-    localAxis[axis] = 1.0f;
-    physx::PxVec3 worldAxis = bodyA.rotation.rotate(localAxis);
-
-    // Compute current angular velocity difference around axis
-    physx::PxReal relAngVelOnAxis = 0.0f;
-    if (!isAStatic)
-      relAngVelOnAxis += bodyA.angularVelocity.dot(worldAxis);
-    if (!isBStatic)
-      relAngVelOnAxis -= bodyB.angularVelocity.dot(worldAxis);
-
-    physx::PxReal velocityError = joint.driveAngularVelocity[axis] - relAngVelOnAxis;
-
-    // Simple velocity-level motor with max force limit
-    physx::PxReal motorImpulse = velocityError * AvbdConstants::AVBD_MOTOR_GAIN; // Simple gain
-    physx::PxReal maxImpulse = joint.driveAngularForce[axis] * dt;
-    motorImpulse = physx::PxClamp(motorImpulse, -maxImpulse, maxImpulse);
-
-    physx::PxVec3 motorAngImpulse = worldAxis * motorImpulse;
-
-    if (!isAStatic) {
-      bodyA.angularVelocity += bodyA.invInertiaWorld * motorAngImpulse;
-    }
-    if (!isBStatic) {
-      bodyB.angularVelocity -= bodyB.invInertiaWorld * motorAngImpulse;
     }
   }
 }
@@ -1225,14 +1207,18 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
   // Compute world anchors directly -- for static bodies anchorA/B is already
   // a world position; do NOT pass through computeLinearError() which
   // would add rotate(anchor) again, double-counting the offset.
-  physx::PxVec3 worldAnchorA = isAStatic
-      ? joint.anchorA
-      : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
-  physx::PxVec3 worldAnchorB = isBStatic
-      ? joint.anchorB
-      : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
-  physx::PxQuat rotA = isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
-  physx::PxQuat rotB = isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+  physx::PxVec3 worldAnchorA =
+      isAStatic
+          ? joint.anchorA
+          : bodies[idxA].position + bodies[idxA].rotation.rotate(joint.anchorA);
+  physx::PxVec3 worldAnchorB =
+      isBStatic
+          ? joint.anchorB
+          : bodies[idxB].position + bodies[idxB].rotation.rotate(joint.anchorB);
+  physx::PxQuat rotA =
+      isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+  physx::PxQuat rotB =
+      isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
 
   // Update linear multipliers for locked DOFs
   for (physx::PxU32 axis = 0; axis < 3; ++axis) {
@@ -1270,8 +1256,7 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
 //=============================================================================
 
 void processGearJointConstraint(AvbdGearJointConstraint &joint,
-                                AvbdSolverBody *bodies,
-                                physx::PxU32 numBodies,
+                                AvbdSolverBody *bodies, physx::PxU32 numBodies,
                                 const AvbdSolverConfig &config,
                                 physx::PxReal dt) {
   PX_UNUSED(dt);
@@ -1321,27 +1306,27 @@ void processGearJointConstraint(AvbdGearJointConstraint &joint,
 
   // AVBD: Process using augmented Lagrangian energy minimization
   physx::PxReal rho = joint.header.rho;
-  
+
   // Position-level constraint: use geometric error from GearJoint
   physx::PxReal C = joint.geometricError;
-  
+
   // AVBD: Compute gradient of augmented Lagrangian energy
   // dL/dx = (lambda + rho * C) * dC/dx
   physx::PxReal gradient = joint.lambdaGear + rho * C;
-  
+
   // Compute position correction
   physx::PxReal deltaLambda = -gradient / w;
-  deltaLambda = physx::PxClamp(deltaLambda, 
-                                -config.maxAngularCorrection,
-                                config.maxAngularCorrection);
+  deltaLambda = physx::PxClamp(deltaLambda, -config.maxAngularCorrection,
+                               config.maxAngularCorrection);
 
   // Apply angular corrections
   if (!isAStatic) {
     physx::PxVec3 angImpulse = J_A * deltaLambda;
     physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
     physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                      angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                      angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                     angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                     angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                     1.0f);
     bodyA.rotation = (dq * bodyA.rotation).getNormalized();
   }
 
@@ -1349,8 +1334,9 @@ void processGearJointConstraint(AvbdGearJointConstraint &joint,
     physx::PxVec3 angImpulse = J_B * deltaLambda;
     physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
     physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                      angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                      angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR, 1.0f);
+                     angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                     angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
+                     1.0f);
     bodyB.rotation = (dq * bodyB.rotation).getNormalized();
   }
 
@@ -1358,18 +1344,21 @@ void processGearJointConstraint(AvbdGearJointConstraint &joint,
   // Compute velocity error
   physx::PxReal velError = joint.computeVelocityViolation(
       bodyA.angularVelocity, bodyB.angularVelocity);
-  
+
   if (physx::PxAbs(velError) > AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD) {
     physx::PxReal velDeltaLambda = -velError / w;
-    velDeltaLambda = physx::PxClamp(velDeltaLambda, -1.0f, 1.0f);  // Limit velocity correction
+    velDeltaLambda = physx::PxClamp(velDeltaLambda, -1.0f,
+                                    1.0f); // Limit velocity correction
 
     if (!isAStatic) {
-      physx::PxVec3 angVelDelta = bodyA.invInertiaWorld * (J_A * velDeltaLambda);
+      physx::PxVec3 angVelDelta =
+          bodyA.invInertiaWorld * (J_A * velDeltaLambda);
       bodyA.angularVelocity += angVelDelta;
     }
 
     if (!isBStatic) {
-      physx::PxVec3 angVelDelta = bodyB.invInertiaWorld * (J_B * velDeltaLambda);
+      physx::PxVec3 angVelDelta =
+          bodyB.invInertiaWorld * (J_B * velDeltaLambda);
       bodyB.angularVelocity += angVelDelta;
     }
   }
@@ -1384,7 +1373,7 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
                                physx::PxU32 numBodies,
                                const AvbdSolverConfig &config) {
   PX_UNUSED(bodies);
-  
+
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
@@ -1397,9 +1386,9 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
   // Update lambda based on current constraint violation
   physx::PxReal C = joint.geometricError;
   physx::PxReal rho = joint.header.rho;
-  
+
   joint.lambdaGear += C * rho;
-  
+
   // Clamp lambda to prevent explosion
   physx::PxReal maxLambda = config.maxLambda;
   joint.lambdaGear = physx::PxClamp(joint.lambdaGear, -maxLambda, maxLambda);
