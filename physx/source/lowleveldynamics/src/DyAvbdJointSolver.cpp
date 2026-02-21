@@ -162,7 +162,7 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
 
           if (!isAStatic) {
             physx::PxVec3 angDelta =
-                bodyA.invInertiaWorld * (corrAxis * deltaLambda);
+                bodyA.invInertiaWorld * (corrAxis * (-deltaLambda));
             physx::PxQuat dq(
                 angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
                 angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
@@ -171,7 +171,7 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
           }
           if (!isBStatic) {
             physx::PxVec3 angDelta =
-                bodyB.invInertiaWorld * (corrAxis * (-deltaLambda));
+                bodyB.invInertiaWorld * (corrAxis * deltaLambda);
             physx::PxQuat dq(
                 angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
                 angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
@@ -611,6 +611,19 @@ void updateSphericalJointMultiplier(AvbdSphericalJointConstraint &joint,
   physx::PxReal maxLambda = config.maxLambda;
   for (int i = 0; i < 3; ++i) {
     joint.lambda[i] = physx::PxClamp(joint.lambda[i], -maxLambda, maxLambda);
+  }
+
+  if (joint.hasConeLimit && joint.coneAngleLimit > 0.0f) {
+    physx::PxQuat rotA =
+        isAStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxA].rotation;
+    physx::PxQuat rotB =
+        isBStatic ? physx::PxQuat(physx::PxIdentity) : bodies[idxB].rotation;
+    physx::PxReal coneViolation = joint.computeConeViolation(rotA, rotB);
+
+    // coneLambda decreases -> magnitude increases
+    joint.coneLambda -= coneViolation * rho;
+    joint.coneLambda = physx::PxMax(joint.coneLambda, -maxLambda);
+    joint.coneLambda = physx::PxMin(joint.coneLambda, 0.0f);
   }
 }
 

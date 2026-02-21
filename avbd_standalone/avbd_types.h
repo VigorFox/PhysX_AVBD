@@ -1,5 +1,6 @@
 #pragma once
 #include "avbd_math.h"
+#include <algorithm>
 #include <vector>
 
 namespace AvbdRef {
@@ -137,7 +138,23 @@ struct SphericalJoint {
   Vec3 lambda;  // AL multiplier (3 components)
   float rho;    // penalty for joint
 
-  SphericalJoint() : bodyA(UINT32_MAX), bodyB(0), rho(1e6f) {}
+  // Cone limit
+  float coneAngleLimit; // <= 0 means disabled
+  Vec3 coneAxisA;       // local cone axis
+  float coneLambda;     // AL multiplier for cone limit
+
+  SphericalJoint()
+      : bodyA(UINT32_MAX), bodyB(0), rho(1e6f), coneAngleLimit(0.0f),
+        coneLambda(0.0f) {}
+
+  float computeConeViolation(const Quat &rotA, const Quat &rotB) const {
+    if (coneAngleLimit <= 0.0f)
+      return 0.0f;
+    Vec3 worldAxisA = rotA.rotate(coneAxisA);
+    Vec3 worldAxisB = rotB.rotate(coneAxisA);
+    float dotProd = std::max(-1.0f, std::min(1.0f, worldAxisA.dot(worldAxisB)));
+    return acosf(dotProd) - coneAngleLimit;
+  }
 };
 
 struct FixedJoint {

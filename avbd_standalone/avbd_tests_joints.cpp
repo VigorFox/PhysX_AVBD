@@ -635,3 +635,33 @@ bool test42_slerp_rotBodyB() {
 bool test43_slerp_rotBoth() {
   return runDriveTest(43, gDriveModes[3], gDriveVariants[3]);
 }
+
+bool test44_sphericalConeLimit() {
+  printf("\n--- Test 44: Spherical Joint Cone Limit ---\n");
+  Solver solver;
+  solver.gravity = {0, 0, 0};
+  solver.iterations = 20;
+
+  uint32_t b0 = solver.addBody({0, 20, 0}, Quat(), {1, 1, 1}, 0.0f);
+  uint32_t b1 = solver.addBody({0, 10, 0}, Quat(), {1, 1, 1}, 10.0f);
+
+  solver.addSphericalJoint(b0, b1, {0, 0, 0}, {0, 10, 0}, 1e6f);
+  solver.setSphericalJointConeLimit(0, {0, 1, 0}, 30.0f * 3.14159265f / 180.0f);
+
+  solver.bodies[b1].angularVelocity = {0, 0, 10.0f};
+
+  float maxAngle = 0.0f;
+  for (int frame = 0; frame < 100; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+
+    Vec3 axisA = solver.bodies[b0].rotation.rotate(Vec3(0, 1, 0));
+    Vec3 axisB = solver.bodies[b1].rotation.rotate(Vec3(0, 1, 0));
+    float angle = acosf(std::max(-1.0f, std::min(1.0f, axisA.dot(axisB))));
+    maxAngle = std::max(maxAngle, angle);
+  }
+
+  float maxAngleDeg = maxAngle * 180.0f / 3.14159265f;
+  CHECK(maxAngleDeg < 32.0f, "Swung too far: %.2f degrees", maxAngleDeg);
+  PASS("Cone limit successfully enforced");
+}

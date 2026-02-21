@@ -53,6 +53,7 @@ bool test40_slerp_default();
 bool test41_slerp_rotFrameA();
 bool test42_slerp_rotBodyB();
 bool test43_slerp_rotBoth();
+bool test44_sphericalConeLimit();
 
 int gTestsPassed = 0;
 int gTestsFailed = 0;
@@ -112,6 +113,7 @@ int main() {
   test41_slerp_rotFrameA();
   test42_slerp_rotBodyB();
   test43_slerp_rotBoth();
+  test44_sphericalConeLimit();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

@@ -15,7 +15,18 @@ void Solver::addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
   j.anchorB = anchorB;
   j.lambda = Vec3();
   j.rho = rho_;
+  j.coneAngleLimit = 0.0f;
+  j.coneLambda = 0.0f;
   sphericalJoints.push_back(j);
+}
+
+void Solver::setSphericalJointConeLimit(uint32_t jointIdx, Vec3 coneAxisA,
+                                        float limitAngle) {
+  if (jointIdx < sphericalJoints.size()) {
+    sphericalJoints[jointIdx].coneAngleLimit = limitAngle;
+    sphericalJoints[jointIdx].coneAxisA = coneAxisA;
+    sphericalJoints[jointIdx].coneLambda = 0.0f;
+  }
 }
 
 void Solver::addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
@@ -185,7 +196,8 @@ void Solver::warmstart() {
   for (auto &c : contacts) {
     for (int i = 0; i < 3; i++) {
       c.lambda[i] = c.lambda[i] * alpha * gamma;
-      c.penalty[i] = std::clamp(c.penalty[i] * gamma, PENALTY_MIN, PENALTY_MAX);
+      c.penalty[i] =
+          std::max(PENALTY_MIN, std::min(PENALTY_MAX, c.penalty[i] * gamma));
     }
   }
 }
@@ -273,7 +285,8 @@ void Solver::step(float dt_) {
     float accelWeight = 0.0f;
     if (gravLen > 1e-6f) {
       Vec3 gravDir = gravity.normalized();
-      accelWeight = std::clamp(accel.dot(gravDir) / gravLen, 0.0f, 1.0f);
+      accelWeight =
+          std::max(0.0f, std::min(1.0f, accel.dot(gravDir) / gravLen));
     }
 
     body.initialPosition = body.position;
@@ -312,8 +325,8 @@ void Solver::step(float dt_) {
                        : (i == 0 ? c.JB : (i == 1 ? c.JBt1 : c.JBt2));
 
           float pen = std::max(c.penalty[i], boostFloor);
-          float f =
-              std::clamp(pen * c.C[i] + c.lambda[i], c.fmin[i], c.fmax[i]);
+          float f = std::max(c.fmin[i],
+                             std::min(c.fmax[i], pen * c.C[i] + c.lambda[i]));
 
           rhs += J * f;
           lhs += outer(J, J * pen);
@@ -360,6 +373,39 @@ void Solver::step(float dt_) {
           float f = effectiveRho * Ck + lam;
           rhs += J * f;
           lhs += outer(J, J * effectiveRho);
+        }
+
+        // Process cone limit (inequality constraint)
+        if (jnt.coneAngleLimit > 0.0f) {
+          Quat rotA =
+              isA ? body.rotation
+                  : ((jnt.bodyA == UINT32_MAX) ? Quat()
+                                               : bodies[jnt.bodyA].rotation);
+          Quat rotB =
+              isB ? body.rotation
+                  : ((jnt.bodyB == UINT32_MAX) ? Quat()
+                                               : bodies[jnt.bodyB].rotation);
+          float coneViolation = jnt.computeConeViolation(rotA, rotB);
+
+          float forceMag = effectiveRho * coneViolation - jnt.coneLambda;
+
+          if (forceMag > 0.0f) {
+            Vec3 worldAxisA = rotA.rotate(jnt.coneAxisA);
+            Vec3 worldAxisB = rotB.rotate(jnt.coneAxisA);
+            Vec3 corrAxis = worldAxisA.cross(worldAxisB);
+
+            float corrAxisMag = corrAxis.length();
+            if (corrAxisMag > 1e-6f) {
+              corrAxis = corrAxis * (1.0f / corrAxisMag);
+
+              float signJ = isA ? 1.0f : -1.0f;
+              Vec3 gradRot = corrAxis * (-signJ);
+              Vec6 J(Vec3(0, 0, 0), gradRot);
+
+              rhs += J * forceMag;
+              lhs += outer(J, J * effectiveRho);
+            }
+          }
         }
       }
 
@@ -687,7 +733,7 @@ void Solver::step(float dt_) {
       for (int i = 0; i < 3; i++) {
         float oldLambda = c.lambda[i];
         float rawLambda = c.penalty[i] * c.C[i] + oldLambda;
-        c.lambda[i] = std::clamp(rawLambda, c.fmin[i], c.fmax[i]);
+        c.lambda[i] = std::max(c.fmin[i], std::min(c.fmax[i], rawLambda));
 
         // Penalty growth
         if (c.lambda[i] < c.fmax[i] && c.lambda[i] > c.fmin[i]) {
@@ -766,6 +812,15 @@ void Solver::step(float dt_) {
                           : bodies[jnt.bodyB].position +
                                 bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
         jnt.lambda = jnt.lambda * lambdaDecay + (wA - wB) * rhoDual;
+
+        if (jnt.coneAngleLimit > 0.0f) {
+          Quat rotA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
+          Quat rotB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
+          float coneViol = jnt.computeConeViolation(rotA, rotB);
+
+          jnt.coneLambda -= coneViol * rhoDual;
+          jnt.coneLambda = std::max(-1e9f, std::min(0.0f, jnt.coneLambda));
+        }
       }
 
       for (auto &jnt : fixedJoints) {

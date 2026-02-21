@@ -30,6 +30,8 @@ struct Solver {
   // Joint creation
   void addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
                          Vec3 anchorB, float rho_ = 1e6f);
+  void setSphericalJointConeLimit(uint32_t jointIdx, Vec3 coneAxisA,
+                                  float limitAngle);
 
   void addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA, Vec3 anchorB,
                      float rho_ = 1e6f);

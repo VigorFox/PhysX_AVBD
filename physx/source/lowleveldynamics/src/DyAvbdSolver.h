@@ -1,4 +1,4 @@
-// Redistribution and use in source and binary forms, with or without
+ï»¿// Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
 // are met:
 //  * Redistributions of source code must retain the above copyright
@@ -256,7 +256,7 @@ private:
 
   /**
    * @brief Stage 4: Update Augmented Lagrangian multipliers with XPBD
-   * compliance Uses XPBD formula: ¦¤¦Ë = (-C - ¦Á?¡¤¦Ë) / (w + ¦Á?) where ¦Á? = ¦Á/dt2
+   * compliance Uses XPBD formula: Î”Î» = (-C - Î±?Â·Î») / (w + Î±?) where Î±? = Î±/dt2
    */
   void updateLagrangianMultipliers(AvbdSolverBody *bodies,
                                    physx::PxU32 numBodies,
