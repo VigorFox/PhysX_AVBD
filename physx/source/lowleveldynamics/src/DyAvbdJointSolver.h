@@ -80,8 +80,7 @@ void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
  * @param dt Time step
  */
 void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
-                                 AvbdSolverBody *bodies,
-                                 physx::PxU32 numBodies,
+                                 AvbdSolverBody *bodies, physx::PxU32 numBodies,
                                  const AvbdSolverConfig &config,
                                  physx::PxReal dt);
 
@@ -146,10 +145,8 @@ void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
  * @param dt Time step
  */
 void processD6JointConstraint(AvbdD6JointConstraint &joint,
-                              AvbdSolverBody *bodies,
-                              physx::PxU32 numBodies,
-                              const AvbdSolverConfig &config,
-                              physx::PxReal dt);
+                              AvbdSolverBody *bodies, physx::PxU32 numBodies,
+                              const AvbdSolverConfig &config, physx::PxReal dt);
 
 //=============================================================================
 // Augmented Lagrangian Multiplier Updates
@@ -183,9 +180,9 @@ void updateRevoluteJointMultiplier(AvbdRevoluteJointConstraint &joint,
  * @brief Update Lagrangian multipliers for prismatic joint
  */
 void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
-                                     const AvbdSolverBody *bodies,
-                                     physx::PxU32 numBodies,
-                                     const AvbdSolverConfig &config);
+                                    const AvbdSolverBody *bodies,
+                                    physx::PxU32 numBodies,
+                                    const AvbdSolverConfig &config);
 
 /**
  * @brief Update Lagrangian multipliers for D6 joint
@@ -198,26 +195,6 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
 /**
  * @brief Process a gear joint constraint
  *
- * The gear joint constrains the angular velocities of two revolute joints
- * such that they maintain a fixed ratio. This is used for gear mechanisms.
- *
- * Constraint: omega0 * gearRatio + omega1 = 0
- *
- * The constraint is applied as an angular impulse to both bodies.
- *
- * @param joint The gear joint constraint
- * @param bodies Array of all solver bodies
- * @param numBodies Total number of bodies
- * @param config Solver configuration
- * @param dt Time step
- */
-void processGearJointConstraint(AvbdGearJointConstraint &joint,
-                                AvbdSolverBody *bodies,
-                                physx::PxU32 numBodies,
-                                const AvbdSolverConfig &config,
-                                physx::PxReal dt);
-
-/**
  * @brief Update Lagrangian multipliers for gear joint
  */
 void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
@@ -243,11 +220,9 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
  * @param n Constraint direction (normalized)
  * @return Effective inverse mass along direction n
  */
-PX_FORCE_INLINE physx::PxReal
-computeEffectiveInverseMass(const AvbdSolverBody &bodyA,
-                            const AvbdSolverBody &bodyB,
-                            const physx::PxVec3 &rA, const physx::PxVec3 &rB,
-                            const physx::PxVec3 &n) {
+PX_FORCE_INLINE physx::PxReal computeEffectiveInverseMass(
+    const AvbdSolverBody &bodyA, const AvbdSolverBody &bodyB,
+    const physx::PxVec3 &rA, const physx::PxVec3 &rB, const physx::PxVec3 &n) {
   // Linear contribution
   physx::PxReal wLin = bodyA.invMass + bodyB.invMass;
 
@@ -287,7 +262,7 @@ applyPositionCorrection(AvbdSolverBody &body,
   // q' = q + 0.5 * dt * omega_quat * q
   // For small angles: dq ~= [0.5 * delta, 1]
   physx::PxQuat deltaQ(angularDelta.x * 0.5f, angularDelta.y * 0.5f,
-                        angularDelta.z * 0.5f, 1.0f);
+                       angularDelta.z * 0.5f, 1.0f);
   body.rotation = (deltaQ * body.rotation).getNormalized();
 }
 
@@ -297,8 +272,8 @@ applyPositionCorrection(AvbdSolverBody &body,
  */
 PX_FORCE_INLINE physx::PxMat33 skewMatrix(const physx::PxVec3 &v) {
   return physx::PxMat33(physx::PxVec3(0, v.z, -v.y),
-                         physx::PxVec3(-v.z, 0, v.x),
-                         physx::PxVec3(v.y, -v.x, 0));
+                        physx::PxVec3(-v.z, 0, v.x),
+                        physx::PxVec3(v.y, -v.x, 0));
 }
 
 } // namespace Dy

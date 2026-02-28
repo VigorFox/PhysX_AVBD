@@ -1,4 +1,4 @@
-// Redistribution and use in source and binary forms, with or without
+﻿// Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
 // are met:
 //  * Redistributions of source code must retain the above copyright
@@ -1265,119 +1265,6 @@ void updateD6JointMultiplier(AvbdD6JointConstraint &joint,
 }
 
 //=============================================================================
-// Gear Joint Solver
-//=============================================================================
-
-void processGearJointConstraint(AvbdGearJointConstraint &joint,
-                                AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                const AvbdSolverConfig &config,
-                                physx::PxReal dt) {
-  PX_UNUSED(dt);
-  const physx::PxU32 idxA = joint.header.bodyIndexA;
-  const physx::PxU32 idxB = joint.header.bodyIndexB;
-
-  // Handle world attachment (static body)
-  const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
-  const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
-
-  if (isAStatic && isBStatic)
-    return; // Both static, nothing to do
-
-  // Get body references (use dummy for static)
-  static AvbdSolverBody staticBody;
-  staticBody.invMass = 0.0f;
-  staticBody.invInertiaWorld = physx::PxMat33(physx::PxZero);
-  staticBody.angularVelocity = physx::PxVec3(0.0f);
-
-  AvbdSolverBody &bodyA = isAStatic ? staticBody : bodies[idxA];
-  AvbdSolverBody &bodyB = isBStatic ? staticBody : bodies[idxB];
-
-  // Get gear axes (already in world space from prepareAvbdConstraints)
-  physx::PxVec3 axis0 = joint.gearAxis0;
-  physx::PxVec3 axis1 = joint.gearAxis1;
-  physx::PxReal gearRatio = joint.gearRatio;
-
-  // Compute effective angular mass for the gear constraint
-  // The constraint is: omega0 * gearRatio * axis0 + omega1 * axis1 = 0
-  // Jacobian for body A: J_A = gearRatio * axis0
-  // Jacobian for body B: J_B = axis1
-  physx::PxVec3 J_A = axis0 * gearRatio;
-  physx::PxVec3 J_B = axis1;
-
-  physx::PxReal w = 0.0f;
-  if (!isAStatic) {
-    physx::PxVec3 IinvJ_A = bodyA.invInertiaWorld * J_A;
-    w += J_A.dot(IinvJ_A);
-  }
-  if (!isBStatic) {
-    physx::PxVec3 IinvJ_B = bodyB.invInertiaWorld * J_B;
-    w += J_B.dot(IinvJ_B);
-  }
-
-  if (w < AvbdConstants::AVBD_INFINITE_MASS_THRESHOLD)
-    return; // Infinite mass
-
-  // AVBD: Process using augmented Lagrangian energy minimization
-  physx::PxReal rho = joint.header.rho;
-
-  // Position-level constraint: use geometric error from GearJoint
-  physx::PxReal C = joint.geometricError;
-
-  // AVBD: Compute gradient of augmented Lagrangian energy
-  // dL/dx = (lambda + rho * C) * dC/dx
-  physx::PxReal gradient = joint.lambdaGear + rho * C;
-
-  // Compute position correction
-  physx::PxReal deltaLambda = -gradient / w;
-  deltaLambda = physx::PxClamp(deltaLambda, -config.maxAngularCorrection,
-                               config.maxAngularCorrection);
-
-  // Apply angular corrections
-  if (!isAStatic) {
-    physx::PxVec3 angImpulse = J_A * deltaLambda;
-    physx::PxVec3 angDelta = bodyA.invInertiaWorld * angImpulse;
-    physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     1.0f);
-    bodyA.rotation = (dq * bodyA.rotation).getNormalized();
-  }
-
-  if (!isBStatic) {
-    physx::PxVec3 angImpulse = J_B * deltaLambda;
-    physx::PxVec3 angDelta = bodyB.invInertiaWorld * angImpulse;
-    physx::PxQuat dq(angDelta.x * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     angDelta.y * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     angDelta.z * AvbdConstants::AVBD_QUATERNION_HALF_FACTOR,
-                     1.0f);
-    bodyB.rotation = (dq * bodyB.rotation).getNormalized();
-  }
-
-  // Also apply velocity-level constraint for smooth motion
-  // Compute velocity error
-  physx::PxReal velError = joint.computeVelocityViolation(
-      bodyA.angularVelocity, bodyB.angularVelocity);
-
-  if (physx::PxAbs(velError) > AvbdConstants::AVBD_ROTATION_ERROR_THRESHOLD) {
-    physx::PxReal velDeltaLambda = -velError / w;
-    velDeltaLambda = physx::PxClamp(velDeltaLambda, -1.0f,
-                                    1.0f); // Limit velocity correction
-
-    if (!isAStatic) {
-      physx::PxVec3 angVelDelta =
-          bodyA.invInertiaWorld * (J_A * velDeltaLambda);
-      bodyA.angularVelocity += angVelDelta;
-    }
-
-    if (!isBStatic) {
-      physx::PxVec3 angVelDelta =
-          bodyB.invInertiaWorld * (J_B * velDeltaLambda);
-      bodyB.angularVelocity += angVelDelta;
-    }
-  }
-}
-
-//=============================================================================
 // Gear Joint Multiplier Update
 //=============================================================================
 
@@ -1385,26 +1272,63 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
                                const AvbdSolverBody *bodies,
                                physx::PxU32 numBodies,
                                const AvbdSolverConfig &config) {
-  PX_UNUSED(bodies);
+  PX_UNUSED(config);
 
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
-  const bool isAStatic = (idxA == 0xFFFFFFFF || idxA >= numBodies);
-  const bool isBStatic = (idxB == 0xFFFFFFFF || idxB >= numBodies);
-
-  if (isAStatic && isBStatic)
+  // Both bodies must be present and dynamic
+  if (idxA >= numBodies || idxB >= numBodies)
     return;
 
-  // Update lambda based on current constraint violation
-  physx::PxReal C = joint.geometricError;
+  const AvbdSolverBody &bodyA = bodies[idxA];
+  const AvbdSolverBody &bodyB = bodies[idxB];
+
+  if (bodyA.invMass <= 0.f || bodyB.invMass <= 0.f)
+    return;
+
+  physx::PxVec3 worldAxis0 = bodyA.rotation.rotate(joint.gearAxis0);
+  physx::PxVec3 worldAxis1 = bodyB.rotation.rotate(joint.gearAxis1);
+
+  // Measure angular displacement from prevRotation (pre integration pose).
+  // This captures the full velocity of the bodies to enforce the gear ratio.
+  auto computeDeltaW = [](const AvbdSolverBody &b,
+                          const physx::PxVec3 &axis) -> physx::PxReal {
+    physx::PxQuat dq = b.rotation * b.prevRotation.getConjugate();
+    if (dq.w < 0.0f)
+      dq = -dq;
+    return physx::PxVec3(dq.x, dq.y, dq.z).dot(axis) * 2.0f;
+  };
+
+  physx::PxReal dwA = computeDeltaW(bodyA, worldAxis0);
+  physx::PxReal dwB = computeDeltaW(bodyB, worldAxis1);
+
+  // Velocity-level C, matching the primal. Cross-frame error must be included
+  // so the dual multiplier absorbs the static physical error to prevent drift.
+  // Using the exact same formula: J*dw + bias
+  physx::PxReal C = dwA * joint.gearRatio + dwB + joint.geometricError;
+  // --- ADMM-safe dual step using axial inertia (not mass) ---
+  // For a pure angular constraint, the correct effective stiffness is based
+  // on the axial moment of inertia: I_axial = 1 / (axis^T * invI * axis)
+  const physx::PxVec3 tmpA = bodyA.invInertiaWorld.transform(worldAxis0);
+  const physx::PxReal invIA = worldAxis0.dot(tmpA);
+  const physx::PxReal IA = (invIA > 1e-10f) ? (1.0f / invIA) : 0.0f;
+
+  const physx::PxVec3 tmpB = bodyB.invInertiaWorld.transform(worldAxis1);
+  const physx::PxReal invIB = worldAxis1.dot(tmpB);
+  const physx::PxReal IB = (invIB > 1e-10f) ? (1.0f / invIB) : 0.0f;
+
+  // Effective axial inertia (minimum -?the softer body limits the dual step)
+  const physx::PxReal Ieff =
+      (IA > 0.f && IB > 0.f) ? physx::PxMin(IA, IB) : physx::PxMax(IA, IB);
   physx::PxReal rho = joint.header.rho;
+  physx::PxReal Mh2 = Ieff * rho;
+  physx::PxReal admm_step = rho * rho / (rho + Mh2);
+  physx::PxReal rhoDual = physx::PxMin(Mh2, admm_step);
 
-  joint.lambdaGear += C * rho;
-
-  // Clamp lambda to prevent explosion
-  physx::PxReal maxLambda = config.maxLambda;
-  joint.lambdaGear = physx::PxClamp(joint.lambdaGear, -maxLambda, maxLambda);
+  // --- Leaky integrator dual update (decay = 0.99) ---
+  const physx::PxReal decay = 0.99f;
+  joint.lambdaGear = joint.lambdaGear * decay + rhoDual * C;
 }
 
 } // namespace Dy

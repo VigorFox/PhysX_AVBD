@@ -14,7 +14,7 @@ Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause Li
 | D6 Joint | ✅ AVBD Hessian | Locked linear DOFs + angular damping in local system |
 | Revolute Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
 | Prismatic Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
-| Gear Joint | ⚠️ GS Fallback | Gauss-Seidel correction, not yet in Hessian |
+| Gear Joint | ✅ AVBD Hessian | Unified AL position solver integrated in 6x6 / 3x3 Hessian |
 | Motor Drive | ✅ Working | Linear, Twist, Swing, and SLERP AL drives implemented |
 | Joint Limits | ⚠️ Partial | Limits exist, but drive/limit stability still being retuned |
 | SnippetChainmail | ✅ Added | Extreme stress scene for dense joint mesh + high-speed impact |
@@ -66,7 +66,7 @@ AVBD introduces a **unified position-level constraint solving framework** to sup
 ```
 Contact AL stability (DONE)         Joint Hessian integration (IN PROGRESS)
   Rigid body contacts stable      ->    Spherical, Fixed, D6: DONE
-  AVBD usable as whole-scene solver     Revolute, Prismatic, Gear: TODO
+  AVBD usable as whole-scene solver     Revolute, Prismatic: TODO (Gear Done)
             |                                    |
   Lambda warm-starting                 Cloth / soft body / GPU
   Reduce iterations -> performance     Unified solver architecture
@@ -113,7 +113,7 @@ For each body i:
 | **World-frame rotation error** | Fixed joint `computeRotationViolation` computes error as `(rotA * relRot) * rotB^-1` in world frame, matching the world-frame angular Jacobian `J = [0, e_k]`. |
 | **No joint sign on angular damping** | Damping is a LOCAL property of each body. Using the joint sign (bodyA=+1, bodyB=-1) would flip the gradient for bodyB, injecting energy instead of dissipating it. |
 | **3x3/6x6 accumulation parity** | Both paths now accumulate contacts + spherical/fixed/D6 identically; only local solve differs (6x6 LDLT vs decoupled 3x3 blocks). |
-| **GS immediate-apply for remaining joints** | Revolute, prismatic, gear joints still use GS immediate update while waiting for full Hessian migration. |
+| **GS immediate-apply for remaining joints** | Revolute and prismatic joints still use GS immediate update while waiting for full Hessian migration. |
 
 ### Comparison with TGS/PGS
 
@@ -123,7 +123,7 @@ For each body i:
 | Convergence | Linear | Sublinear | AL-augmented |
 | Stack Stability | Fair | Good | **Good** |
 | Mass-ratio Robustness | Poor | Fair | **Good** |
-| Joint Chain Support | N/A | Implicit | **Hessian (Sph/Fix/D6) + GS (Rev/Pris/Gear)** |
+| Joint Chain Support | N/A | Implicit | **Hessian (Sph/Fix/D6/Gear) + GS (Rev/Pris)** |
 
 ## Quick Start
 
@@ -169,7 +169,7 @@ PVD Profile Zones:
 2. **No Sleep/Wake** -- Bodies remain active
 3. **CPU only** -- No GPU acceleration
 4. **3x3 dense-mesh coupling loss** -- 3x3 decoupled local solve drops linear-angular off-diagonal coupling, so dense joint meshes under impact (e.g. small fast ball on chainmail) are significantly weaker than 6x6
-5. **Revolute/Prismatic/Gear not in Hessian** -- still GS fallback, planned for migration into unified local system
+5. **Revolute/Prismatic not in Hessian** -- still GS fallback, planned for migration into unified local system
 6. **Extreme-scene tuning still in progress** -- chainmail-style stress scenarios required algorithm updates and remain the primary tuning target
 
 ## Original PhysX Documentation

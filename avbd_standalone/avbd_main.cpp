@@ -54,13 +54,15 @@ bool test41_slerp_rotFrameA();
 bool test42_slerp_rotBodyB();
 bool test43_slerp_rotBoth();
 bool test44_sphericalConeLimit();
+bool test45_gearJoint_basicRatio();
+bool test46_gearJoint_oppositeDir();
 
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
 int main() {
   printf("=========================================\n");
-  printf("Running AVBD Refactored Tests (43 Cases)\n");
+  printf("Running AVBD Refactored Tests (45 Cases)\n");
   printf("=========================================\n");
 
   test1_singleBoxOnGround();
@@ -114,6 +116,8 @@ int main() {
   test42_slerp_rotBodyB();
   test43_slerp_rotBoth();
   test44_sphericalConeLimit();
+  test45_gearJoint_basicRatio();
+  test46_gearJoint_oppositeDir();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

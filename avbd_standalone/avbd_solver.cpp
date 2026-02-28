@@ -72,6 +72,18 @@ void Solver::addD6Joint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
   d6Joints.push_back(j);
 }
 
+void Solver::addGearJoint(uint32_t bodyA, uint32_t bodyB, Vec3 axisA,
+                          Vec3 axisB, float ratio, float rho_) {
+  GearJoint j;
+  j.bodyA = bodyA;
+  j.bodyB = bodyB;
+  j.axisA = axisA.normalized();
+  j.axisB = axisB.normalized();
+  j.gearRatio = ratio;
+  j.rho = rho_;
+  gearJoints.push_back(j);
+}
+
 uint32_t Solver::addBody(Vec3 pos, Quat rot, Vec3 halfExtent, float density,
                          float fric) {
   Body b;
@@ -223,6 +235,8 @@ void Solver::step(float dt_) {
   for (const auto &j : fixedJoints)
     addEdge(j.bodyA, j.bodyB);
   for (const auto &j : d6Joints)
+    addEdge(j.bodyA, j.bodyB);
+  for (const auto &j : gearJoints)
     addEdge(j.bodyA, j.bodyB);
 
   // Step 2: Jacobi propagation of effective mass
@@ -694,6 +708,64 @@ void Solver::step(float dt_) {
         }
       }
 
+      // ======================================================================
+      // Gear Joint contributions (angular-only velocity-level constraint)
+      //
+      // Constraint:  C = deltaW_A · axisA * ratio + deltaW_B · axisB = 0
+      // where deltaW = 2*(q * q_initial^-1).xyz  (frame-step angular
+      // displacement)
+      //
+      // For body being processed:
+      //   isA: Jacobian J_ang = worldAxisA * gearRatio  (sign +1)
+      //   isB: Jacobian J_ang = worldAxisB              (sign +1, but C has
+      //        opposite sign when seen from B's Lagrangian)
+      //
+      // Note: the gear joint only constrains angular DOFs.  No position row.
+      // ======================================================================
+      for (auto &gnt : gearJoints) {
+        bool isA = (gnt.bodyA == bi);
+        bool isB = (gnt.bodyB == bi);
+        if (!isA && !isB)
+          continue;
+        if (gnt.bodyA >= (uint32_t)bodies.size() ||
+            gnt.bodyB >= (uint32_t)bodies.size())
+          continue;
+
+        Body &bA = bodies[gnt.bodyA];
+        Body &bB = bodies[gnt.bodyB];
+        if (bA.mass <= 0.f || bB.mass <= 0.f)
+          continue; // gear needs two dynamic bodies
+
+        // World-space rotation axes
+        Vec3 worldAxisA = bA.rotation.rotate(gnt.axisA);
+        Vec3 worldAxisB = bB.rotation.rotate(gnt.axisB);
+
+        // Velocity-level constraint value: delta angular rotation this step
+        Vec3 dwA = bA.deltaWInitial(); // 2*(q*q_initial^-1).xyz
+        Vec3 dwB = bB.deltaWInitial();
+        float C = dwA.dot(worldAxisA) * gnt.gearRatio + dwB.dot(worldAxisB);
+
+        // Auto-boost penalty so it dominates body inertia
+        float effectiveRho = std::max(gnt.rho, body.mass / dt2);
+
+        // Jacobian J_ang for THIS body (angular block only, no linear part)
+        // ∂C/∂(deltaW_A) = worldAxisA * ratio
+        // ∂C/∂(deltaW_B) = worldAxisB
+        Vec3 J_ang = isA ? (worldAxisA * gnt.gearRatio) : worldAxisB;
+        float f = effectiveRho * C + gnt.lambdaGear;
+
+        // Accumulate into angular 3×3 block of the 6×6 system
+        // LHS: H_ang += pen * J_ang ⊗ J_ang
+        for (int r = 0; r < 3; r++)
+          for (int c2 = 0; c2 < 3; c2++)
+            lhs.m[3 + r][3 + c2] +=
+                effectiveRho * (&J_ang.x)[r] * (&J_ang.x)[c2];
+
+        // RHS: g_ang += J_ang * f
+        for (int r = 0; r < 3; r++)
+          rhs.v[3 + r] += f * (&J_ang.x)[r];
+      }
+
       // Solve and update
       // Solve and apply
       if (!use3x3Solve) {
@@ -944,6 +1016,43 @@ void Solver::step(float dt_) {
           }
         }
       }
+    }
+  }
+
+  // Gear joint dual update (ADMM-safe leaky integrator, same pattern as
+  // spherical)
+  {
+    auto getBodyMass = [&](uint32_t idx) -> float {
+      return (idx == UINT32_MAX || idx >= (uint32_t)bodies.size())
+                 ? 0.0f
+                 : bodies[idx].mass;
+    };
+    const float lambdaDecay = 0.99f;
+
+    for (auto &gnt : gearJoints) {
+      if (gnt.bodyA >= (uint32_t)bodies.size() ||
+          gnt.bodyB >= (uint32_t)bodies.size())
+        continue;
+      Body &bA = bodies[gnt.bodyA];
+      Body &bB = bodies[gnt.bodyB];
+      if (bA.mass <= 0.f || bB.mass <= 0.f)
+        continue;
+
+      float mA = getBodyMass(gnt.bodyA);
+      float mB = getBodyMass(gnt.bodyB);
+      float mEff = (mA > 0.f && mB > 0.f) ? std::min(mA, mB) : std::max(mA, mB);
+      float Mh2 = mEff / dt2;
+      float admm_step = gnt.rho * gnt.rho / (gnt.rho + Mh2);
+      float rhoDual = std::min(Mh2, admm_step);
+
+      // Recompute constraint violation from current body state
+      Vec3 worldAxisA = bA.rotation.rotate(gnt.axisA);
+      Vec3 worldAxisB = bB.rotation.rotate(gnt.axisB);
+      Vec3 dwA = bA.deltaWInitial();
+      Vec3 dwB = bB.deltaWInitial();
+      float C = dwA.dot(worldAxisA) * gnt.gearRatio + dwB.dot(worldAxisB);
+
+      gnt.lambdaGear = gnt.lambdaGear * lambdaDecay + rhoDual * C;
     }
   }
 

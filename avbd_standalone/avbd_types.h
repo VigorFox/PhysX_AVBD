@@ -219,4 +219,21 @@ struct D6Joint {
   }
 };
 
+// Gear Joint: constrains angular velocities of two bodies about their axes
+// Constraint: omegaA · axisA * gearRatio + omegaB · axisB = 0
+// So if gearRatio = -1: A and B spin opposite directions at equal speed (meshed
+// gears)
+//    if gearRatio = 0.5: B spins half as fast as A (reduction gear)
+struct GearJoint {
+  uint32_t bodyA, bodyB;
+  Vec3 axisA;       // Rotation axis in A's local frame (normalized)
+  Vec3 axisB;       // Rotation axis in B's local frame (normalized)
+  float gearRatio;  // Constraint: (omega_A * axisA) * gearRatio + (omega_B *
+                    // axisB) = 0
+  float lambdaGear; // AL multiplier
+  float rho;
+  GearJoint()
+      : bodyA(0), bodyB(0), gearRatio(1.f), lambdaGear(0.f), rho(1e5f) {}
+};
+
 } // namespace AvbdRef

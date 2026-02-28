@@ -765,10 +765,10 @@ void AvbdDynamicsContext::update(
   if (!mSolverInitialized && mAllocatorCallback) {
     AvbdSolverConfig config;
     config.outerIterations = 1;
-    config.innerIterations = 4;  // Ref AVBD3D uses iterations=10
+    config.innerIterations = 4; // Ref AVBD3D uses iterations=10
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
     config.maxRho = AvbdConstants::AVBD_MAX_PENALTY_RHO;
-    config.enableLocal6x6Solve = false;
+    config.enableLocal6x6Solve = true;
     config.contactCompliance = 1e-2f;
     // AVBD reference parameters
     config.avbdAlpha = 0.95f;
@@ -1081,7 +1081,8 @@ void AvbdDynamicsContext::update(
 
     // Spawn Solve Task
 #if AVBD_DEBUG_SEQUENTIAL
-    // ===== Sequential debug mode: run solver inline (no task parallelism) =====
+    // ===== Sequential debug mode: run solver inline (no task parallelism)
+    // =====
     {
       const bool hasJoints = (batch.numSpherical > 0 || batch.numFixed > 0 ||
                               batch.numRevolute > 0 || batch.numPrismatic > 0 ||
@@ -1266,7 +1267,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         constraint.header.compliance = 0.0f;
         constraint.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
         constraint.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_LOW;
-        constraint.header.penalty = AvbdConstants::AVBD_MIN_PENALTY_RHO; // PENALTY_MIN = 1000
+        constraint.header.penalty =
+            AvbdConstants::AVBD_MIN_PENALTY_RHO; // PENALTY_MIN = 1000
 
         // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
         //   lambda *= alpha * gamma
@@ -1287,15 +1289,17 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           if (cached.frameAge <= LAMBDA_MAX_AGE) {
             // Apply warmstart decay (ref Eq. 19)
             constraint.header.lambda = cached.lambda * wsAlpha * wsGamma;
-            constraint.tangentLambda0 = cached.tangentLambda0 * wsAlpha * wsGamma;
-            constraint.tangentLambda1 = cached.tangentLambda1 * wsAlpha * wsGamma;
+            constraint.tangentLambda0 =
+                cached.tangentLambda0 * wsAlpha * wsGamma;
+            constraint.tangentLambda1 =
+                cached.tangentLambda1 * wsAlpha * wsGamma;
             // Restore and decay penalty (normal + tangent)
             constraint.header.penalty =
                 PxClamp(cached.penalty * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty0 =
-                PxClamp(cached.tangentPenalty0 * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty1 =
-                PxClamp(cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
+            constraint.tangentPenalty0 = PxClamp(
+                cached.tangentPenalty0 * wsGamma, wsPenaltyMin, wsPenaltyMax);
+            constraint.tangentPenalty1 = PxClamp(
+                cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
             localHits++;
           } else {
             constraint.header.lambda = 0.0f;
@@ -1463,7 +1467,10 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           c.header.bodyIndexA = localBody0;
           c.header.bodyIndexB = localBody1;
           c.gearRatio = gearData->gearRatio;
-          c.geometricError = gearData->error;
+
+          // AVBD cleanly retrieves the unmodified geometric error from
+          // ExtGearJoint
+          c.geometricError = -gearData->error;
           c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
 
           // Store gear axes in LOCAL body space
@@ -1661,9 +1668,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 // Map D6 Joint driving flags to AVBD driveFlags format
                 // PhysX D6 Joint uses PxD6Drive::Enum bit positions:
                 //   eX=0, eY=1, eZ=2 (linear drives - bit 0-2)
-                //   eTWIST=4, eSWING1=6, eSWING2=7 (angular drives - need remap to bit 3-5)
+                //   eTWIST=4, eSWING1=6, eSWING2=7 (angular drives - need remap
+                //   to bit 3-5)
                 // AVBD expects: bit 0-2=linear X/Y/Z, bit 3-5=angular X/Y/Z
-                c.driveFlags = d6Data->driving & 0x07; // Linear drives (eX,eY,eZ) - bit 0-2
+                c.driveFlags = d6Data->driving &
+                               0x07; // Linear drives (eX,eY,eZ) - bit 0-2
                 if (d6Data->driving & (1 << PxD6Drive::eTWIST))
                   c.driveFlags |= 1 << 3; // TWIST -> bit 3 (angular X)
                 if (d6Data->driving & (1 << PxD6Drive::eSWING1))
@@ -1671,9 +1680,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 if (d6Data->driving & (1 << PxD6Drive::eSWING2))
                   c.driveFlags |= 1 << 5; // SWING2 -> bit 5 (angular Z)
                 if (d6Data->driving & (1 << PxD6Drive::eSLERP))
-                  c.driveFlags |= 1 << 5; // SLERP -> bit 5 (angular Z, reuse SWING2)
+                  c.driveFlags |=
+                      1 << 5; // SLERP -> bit 5 (angular Z, reuse SWING2)
                 if (d6Data->driving & (1 << PxD6Drive::eSWING))
-                  c.driveFlags |= 1 << 3; // SWING (deprecated) -> bit 3 (angular X, reuse TWIST)
+                  c.driveFlags |= 1 << 3; // SWING (deprecated) -> bit 3
+                                          // (angular X, reuse TWIST)
 
                 // Set target drive velocities
                 c.driveLinearVelocity = d6Data->driveLinearVelocity;

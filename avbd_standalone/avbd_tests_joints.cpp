@@ -665,3 +665,79 @@ bool test44_sphericalConeLimit() {
   CHECK(maxAngleDeg < 32.0f, "Swung too far: %.2f degrees", maxAngleDeg);
   PASS("Cone limit successfully enforced");
 }
+
+// =============================================================================
+// Gear Joint Tests (test45, test46)
+// =============================================================================
+
+// Test 45: Basic gear ratio 0.5  (2:1 reduction)
+// Constraint: omegaA_z * 0.5 + omegaB_z = 0  =>  omegaB = -0.5 * omegaA
+bool test45_gearJoint_basicRatio() {
+  printf("\n--- Test 45: Gear Joint Basic Ratio (2:1) ---\n");
+  Solver solver;
+  solver.gravity = {0, 0, 0};
+  solver.iterations = 20;
+
+  const Vec3 half{0.5f, 0.5f, 0.5f};
+  uint32_t bA = solver.addBody({-3, 0, 0}, Quat(), half, 1.0f);
+  uint32_t bB = solver.addBody({3, 0, 0}, Quat(), half, 1.0f);
+
+  // gearRatio = 0.5:  C = wA*0.5 + wB = 0  =>  wB = -0.5*wA
+  solver.addGearJoint(bA, bB, {0, 0, 1}, {0, 0, 1}, 0.5f, 1e5f);
+
+  // Kick A; B starts at rest
+  solver.bodies[bA].angularVelocity = {0, 0, 4.0f};
+
+  for (int frame = 0; frame < 180; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+  }
+
+  float wA = solver.bodies[bA].angularVelocity.z;
+  float wB = solver.bodies[bB].angularVelocity.z;
+  printf("  omegaA=%.4f  omegaB=%.4f  (target wB=-0.5*wA)\n", wA, wB);
+
+  CHECK(fabsf(wA) > 0.05f, "Body A stopped spinning - lost all energy");
+  // Check: wA*0.5 + wB ≈ 0  (constraint residual < 10% of wA)
+  float residual = wA * 0.5f + wB;
+  CHECK(fabsf(residual) < fabsf(wA) * 0.15f,
+        "Gear ratio not enforced: residual=%.4f (wA=%.4f wB=%.4f)", residual,
+        wA, wB);
+  PASS("Gear 2:1 ratio enforced");
+}
+
+// Test 46: Meshed gears  ratio = -1
+// Constraint: omegaA_z * (-1) + omegaB_z = 0  =>  omegaB = omegaA  (same dir)
+bool test46_gearJoint_oppositeDir() {
+  printf("\n--- Test 46: Gear Joint Ratio=-1 (meshed gears) ---\n");
+  Solver solver;
+  solver.gravity = {0, 0, 0};
+  solver.iterations = 20;
+
+  const Vec3 half{0.5f, 0.5f, 0.5f};
+  uint32_t bA = solver.addBody({-3, 0, 0}, Quat(), half, 1.0f);
+  uint32_t bB = solver.addBody({3, 0, 0}, Quat(), half, 1.0f);
+
+  // gearRatio = -1:  C = wA*(-1) + wB = 0  =>  wB = wA (same direction in
+  // formula)
+  solver.addGearJoint(bA, bB, {0, 0, 1}, {0, 0, 1}, -1.0f, 1e5f);
+
+  solver.bodies[bA].angularVelocity = {0, 0, 3.0f};
+
+  for (int frame = 0; frame < 180; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+  }
+
+  float wA = solver.bodies[bA].angularVelocity.z;
+  float wB = solver.bodies[bB].angularVelocity.z;
+  printf("  omegaA=%.4f  omegaB=%.4f  residual=%.4f (target ~0)\n", wA, wB,
+         -wA + wB);
+
+  CHECK(fabsf(wA) > 0.05f, "Body A stopped spinning - lost all energy");
+  float residual = -wA + wB; // C = wA*(-1) + wB
+  CHECK(fabsf(residual) < fabsf(wA) * 0.15f,
+        "Gear ratio=-1 not enforced: residual=%.4f (wA=%.4f wB=%.4f)", residual,
+        wA, wB);
+  PASS("Gear ratio=-1 enforced");
+}

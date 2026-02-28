@@ -26,19 +26,26 @@ struct Solver {
   std::vector<SphericalJoint> sphericalJoints;
   std::vector<FixedJoint> fixedJoints;
   std::vector<D6Joint> d6Joints;
+  std::vector<GearJoint> gearJoints;
 
   // Joint creation
-  void addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
-                         Vec3 anchorB, float rho_ = 1e6f);
+  void addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 localAnchorA,
+                     Vec3 localAnchorB, float rho_ = 1e6f);
+  void addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 localAnchorA,
+                         Vec3 localAnchorB, float rho_ = 1e6f);
   void setSphericalJointConeLimit(uint32_t jointIdx, Vec3 coneAxisA,
                                   float limitAngle);
-
-  void addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA, Vec3 anchorB,
-                     float rho_ = 1e6f);
 
   void addD6Joint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA, Vec3 anchorB,
                   uint32_t linearMotion_ = 0, uint32_t angularMotion_ = 0x2A,
                   float angularDamping_ = 0.0f, float rho_ = 1e6f);
+
+  // Gear joint: enforces omegaA·axisA * ratio + omegaB·axisB = 0
+  // axisA/axisB are in BODY LOCAL frame (unit vectors)
+  // ratio = -1  => opposite direction, same speed (meshing gears)
+  // ratio =  2  => B spins twice as fast as A
+  void addGearJoint(uint32_t bodyA, uint32_t bodyB, Vec3 axisA, Vec3 axisB,
+                    float ratio = -1.f, float rho = 1e5f);
 
   // Body creation
   uint32_t addBody(Vec3 pos, Quat rot, Vec3 halfExtent, float density,

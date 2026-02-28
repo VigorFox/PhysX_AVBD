@@ -203,7 +203,8 @@ private:
                         const AvbdBodyConstraintMap *contactMap = nullptr);
 
   /**
-   * @brief Solve local 6x6 system for a single body with BOTH contacts AND joints
+   * @brief Solve local 6x6 system for a single body with BOTH contacts AND
+   * joints
    *
    * True AVBD: accumulates both contact and joint Jacobians into the same
    * Hessian matrix H = M/h^2 + sum(rho_c * Jc^T * Jc) + sum(rho_j * Jj^T * Jj)
@@ -247,9 +248,8 @@ private:
       AvbdContactConstraint *contacts, physx::PxU32 numContacts,
       AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
       AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      physx::PxReal dt, physx::PxReal invDt2,
-      const AvbdBodyConstraintMap *contactMap = nullptr,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6, physx::PxReal dt,
+      physx::PxReal invDt2, const AvbdBodyConstraintMap *contactMap = nullptr,
       const AvbdBodyConstraintMap *sphericalMap = nullptr,
       const AvbdBodyConstraintMap *fixedMap = nullptr,
       const AvbdBodyConstraintMap *d6Map = nullptr);
@@ -397,8 +397,7 @@ private:
                                    physx::PxU32 numBodies,
                                    physx::PxU32 bodyIndex,
                                    physx::PxVec3 &deltaPos,
-                                   physx::PxVec3 &deltaTheta,
-                                   physx::PxReal dt);
+                                   physx::PxVec3 &deltaTheta, physx::PxReal dt);
 
   /**
    * @brief Compute position/rotation correction for a revolute joint
@@ -425,16 +424,6 @@ private:
                                 AvbdSolverBody *bodies, physx::PxU32 numBodies,
                                 physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
                                 physx::PxVec3 &deltaTheta);
-
-  /**
-   * @brief Compute angular correction for a gear joint
-   */
-  bool computeGearJointCorrection(const AvbdGearJointConstraint &joint,
-                                  AvbdSolverBody *bodies,
-                                  physx::PxU32 numBodies,
-                                  physx::PxU32 bodyIndex,
-                                  physx::PxVec3 &deltaPos,
-                                  physx::PxVec3 &deltaTheta);
 
   //-------------------------------------------------------------------------
   // Member Variables
@@ -469,8 +458,8 @@ private:
                               physx::PxU32 numContacts, physx::PxU32 numBodies);
 
   /**
-   * @brief Optimized version using pre-computed constraint map - O(constraints
-   * per body)
+   * @brief Optimized version using pre-computed constraint map -
+   * O(constraints per body)
    */
   void solveBodyLocalConstraintsFast(AvbdSolverBody *bodies,
                                      physx::PxU32 numBodies,
@@ -478,16 +467,16 @@ private:
                                      AvbdContactConstraint *contacts);
 
   /**
-   * @brief Thread-safe version using external constraint map - O(constraints
-   * per body)
+   * @brief Thread-safe version using external constraint map -
+   * O(constraints per body)
    */
   void solveBodyLocalConstraintsFastWithMap(
       AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
       AvbdContactConstraint *contacts, const AvbdBodyConstraintMap &contactMap);
 
   /**
-   * @brief Build all constraint mappings for joints (called once before solve
-   * iterations)
+   * @brief Build all constraint mappings for joints (called once before
+   * solve iterations)
    */
   void buildAllConstraintMappings(
       physx::PxU32 numBodies, AvbdContactConstraint *contacts,
@@ -497,7 +486,6 @@ private:
       physx::PxU32 numRevolute, AvbdPrismaticJointConstraint *prismaticJoints,
       physx::PxU32 numPrismatic, AvbdD6JointConstraint *d6Joints,
       physx::PxU32 numD6);
-
 };
 
 //=============================================================================
