@@ -1899,25 +1899,14 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
       if (bodyAIdx != bodyIndex && bodyBIdx != bodyIndex)
         continue;
-      // Both bodies must be dynamic
-      if (bodyAIdx >= numBodies || bodyBIdx >= numBodies)
-        continue;
-
       const bool isBodyA = (bodyAIdx == bodyIndex);
-      AvbdSolverBody &bodyA = bodies[bodyAIdx];
-      AvbdSolverBody &bodyB = bodies[bodyBIdx];
+      const bool otherIsStatic =
+          isBodyA ? (bodyBIdx == 0xFFFFFFFF || bodyBIdx >= numBodies)
+                  : (bodyAIdx == 0xFFFFFFFF || bodyAIdx >= numBodies);
 
-      if (bodyA.invMass <= 0.f || bodyB.invMass <= 0.f)
-        continue;
+      physx::PxReal dwA = 0.0f;
+      physx::PxReal dwB = 0.0f;
 
-      // Rotate LOCAL frame axes to world space using CURRENT body rotation
-      physx::PxVec3 worldAxis0 = bodyA.rotation.rotate(gnt.gearAxis0);
-      physx::PxVec3 worldAxis1 = bodyB.rotation.rotate(gnt.gearAxis1);
-
-      // --- Gear Constraint: velocity-level (angular displacement this step)
-      // Measure angular displacement from prevRotation (pre integration pose).
-      // This captures the full velocity of the bodies to enforce the gear
-      // ratio.
       auto computeDeltaW = [](const AvbdSolverBody &b,
                               const physx::PxVec3 &axis) -> physx::PxReal {
         physx::PxQuat dq = b.rotation * b.prevRotation.getConjugate();
@@ -1926,19 +1915,33 @@ void AvbdSolver::solveLocalSystemWithJoints(
         return physx::PxVec3(dq.x, dq.y, dq.z).dot(axis) * 2.0f;
       };
 
-      physx::PxReal dwA = computeDeltaW(bodyA, worldAxis0);
-      physx::PxReal dwB = computeDeltaW(bodyB, worldAxis1);
+      physx::PxVec3 worldAxis0, worldAxis1;
 
-      // Velocity-level C, matching the primal. Cross-frame error must be
-      // included so the dual multiplier absorbs the static physical error to
-      // prevent drift. Using the exact same formula: J*dw + bias
+      if (isBodyA) {
+        worldAxis0 = body.rotation.rotate(gnt.gearAxis0);
+        dwA = computeDeltaW(body, worldAxis0);
+        // For static body B, axis is fixed in world space. (Ideally we'd use
+        // the static rotation, but typically it rotates from identity)
+        worldAxis1 = gnt.gearAxis1;
+      } else {
+        worldAxis1 = body.rotation.rotate(gnt.gearAxis1);
+        dwB = computeDeltaW(body, worldAxis1);
+        worldAxis0 = gnt.gearAxis0;
+      }
+
+      // If the other body IS dynamic, rotate its axis and fetch its dw
+      if (!otherIsStatic) {
+        if (isBodyA) {
+          worldAxis1 = bodies[bodyBIdx].rotation.rotate(gnt.gearAxis1);
+          dwB = computeDeltaW(bodies[bodyBIdx], worldAxis1);
+        } else {
+          worldAxis0 = bodies[bodyAIdx].rotation.rotate(gnt.gearAxis0);
+          dwA = computeDeltaW(bodies[bodyAIdx], worldAxis0);
+        }
+      }
+
       physx::PxReal C = dwA * gnt.gearRatio + dwB + gnt.geometricError;
-      // The angular 6x6 block is seeded with I/dt^2 (inertia tensor scaled by
-      // invDt^2). For a pure-angular constraint, the penalty must use the axial
-      // moment of inertia, NOT mass, to remain well-conditioned.
-      // I_axial = J^T * I * J = 1 / (J^T * invI * J)
-      // where invI = body.invInertiaWorld and J = J_ang (the jacobian we'll
-      // compute next). We pre-compute it with the current-frame worldAxis:
+
       const physx::PxVec3 rawAxis = isBodyA ? worldAxis0 : worldAxis1;
       const physx::PxVec3 tmpInvIAxis = body.invInertiaWorld.transform(rawAxis);
       const physx::PxReal invIaxial = rawAxis.dot(tmpInvIAxis);

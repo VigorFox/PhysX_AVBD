@@ -1277,21 +1277,18 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
   const physx::PxU32 idxA = joint.header.bodyIndexA;
   const physx::PxU32 idxB = joint.header.bodyIndexB;
 
-  // Both bodies must be present and dynamic
-  if (idxA >= numBodies || idxB >= numBodies)
+  const bool isStaticA = (idxA == 0xFFFFFFFF || idxA >= numBodies);
+  const bool isStaticB = (idxB == 0xFFFFFFFF || idxB >= numBodies);
+
+  if (isStaticA && isStaticB)
     return;
 
-  const AvbdSolverBody &bodyA = bodies[idxA];
-  const AvbdSolverBody &bodyB = bodies[idxB];
+  physx::PxVec3 worldAxis0, worldAxis1;
+  physx::PxReal dwA = 0.0f;
+  physx::PxReal dwB = 0.0f;
+  physx::PxReal IA = 0.0f;
+  physx::PxReal IB = 0.0f;
 
-  if (bodyA.invMass <= 0.f || bodyB.invMass <= 0.f)
-    return;
-
-  physx::PxVec3 worldAxis0 = bodyA.rotation.rotate(joint.gearAxis0);
-  physx::PxVec3 worldAxis1 = bodyB.rotation.rotate(joint.gearAxis1);
-
-  // Measure angular displacement from prevRotation (pre integration pose).
-  // This captures the full velocity of the bodies to enforce the gear ratio.
   auto computeDeltaW = [](const AvbdSolverBody &b,
                           const physx::PxVec3 &axis) -> physx::PxReal {
     physx::PxQuat dq = b.rotation * b.prevRotation.getConjugate();
@@ -1300,23 +1297,37 @@ void updateGearJointMultiplier(AvbdGearJointConstraint &joint,
     return physx::PxVec3(dq.x, dq.y, dq.z).dot(axis) * 2.0f;
   };
 
-  physx::PxReal dwA = computeDeltaW(bodyA, worldAxis0);
-  physx::PxReal dwB = computeDeltaW(bodyB, worldAxis1);
+  if (!isStaticA) {
+    const AvbdSolverBody &bodyA = bodies[idxA];
+    if (bodyA.invMass > 1e-8f) {
+      worldAxis0 = bodyA.rotation.rotate(joint.gearAxis0);
+      dwA = computeDeltaW(bodyA, worldAxis0);
+      const physx::PxVec3 tmpA = bodyA.invInertiaWorld.transform(worldAxis0);
+      const physx::PxReal invIA = worldAxis0.dot(tmpA);
+      IA = (invIA > 1e-10f) ? (1.0f / invIA) : 0.0f;
+    } else {
+      worldAxis0 = joint.gearAxis0;
+    }
+  } else {
+    worldAxis0 = joint.gearAxis0;
+  }
 
-  // Velocity-level C, matching the primal. Cross-frame error must be included
-  // so the dual multiplier absorbs the static physical error to prevent drift.
-  // Using the exact same formula: J*dw + bias
+  if (!isStaticB) {
+    const AvbdSolverBody &bodyB = bodies[idxB];
+    if (bodyB.invMass > 1e-8f) {
+      worldAxis1 = bodyB.rotation.rotate(joint.gearAxis1);
+      dwB = computeDeltaW(bodyB, worldAxis1);
+      const physx::PxVec3 tmpB = bodyB.invInertiaWorld.transform(worldAxis1);
+      const physx::PxReal invIB = worldAxis1.dot(tmpB);
+      IB = (invIB > 1e-10f) ? (1.0f / invIB) : 0.0f;
+    } else {
+      worldAxis1 = joint.gearAxis1;
+    }
+  } else {
+    worldAxis1 = joint.gearAxis1;
+  }
+
   physx::PxReal C = dwA * joint.gearRatio + dwB + joint.geometricError;
-  // --- ADMM-safe dual step using axial inertia (not mass) ---
-  // For a pure angular constraint, the correct effective stiffness is based
-  // on the axial moment of inertia: I_axial = 1 / (axis^T * invI * axis)
-  const physx::PxVec3 tmpA = bodyA.invInertiaWorld.transform(worldAxis0);
-  const physx::PxReal invIA = worldAxis0.dot(tmpA);
-  const physx::PxReal IA = (invIA > 1e-10f) ? (1.0f / invIA) : 0.0f;
-
-  const physx::PxVec3 tmpB = bodyB.invInertiaWorld.transform(worldAxis1);
-  const physx::PxReal invIB = worldAxis1.dot(tmpB);
-  const physx::PxReal IB = (invIB > 1e-10f) ? (1.0f / invIB) : 0.0f;
 
   // Effective axial inertia (minimum -?the softer body limits the dual step)
   const physx::PxReal Ieff =
