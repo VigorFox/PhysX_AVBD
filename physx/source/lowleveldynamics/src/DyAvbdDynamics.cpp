@@ -225,12 +225,8 @@ static PhysXJointType getJointTypeFromConstraint(Dy::ConstraintJointType cjt) {
 //=============================================================================
 static void prepareArticulationInternalJoints(
     FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
-    AvbdSphericalJointConstraint *sphericalConstraints, PxU32 &numSpherical,
-    PxU32 maxSpherical, AvbdFixedJointConstraint *fixedConstraints,
-    PxU32 &numFixed, PxU32 maxFixed,
-    AvbdRevoluteJointConstraint *revoluteConstraints, PxU32 &numRevolute,
-    PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
-    PxU32 &numPrismatic, PxU32 maxPrismatic);
+    AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
+    AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear);
 
 //=============================================================================
 // Helper function to find articulation link index from rigid core
@@ -813,26 +809,6 @@ void AvbdDynamicsContext::update(
   if (totalJointCapacity == 0)
     totalJointCapacity = 1;
 
-  AvbdSphericalJointConstraint *sphericalJoints =
-      reinterpret_cast<AvbdSphericalJointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
-          sizeof(AvbdSphericalJointConstraint) * totalJointCapacity,
-          "SphericalJoints"));
-  AvbdFixedJointConstraint *fixedJoints =
-      reinterpret_cast<AvbdFixedJointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
-          sizeof(AvbdFixedJointConstraint) * totalJointCapacity,
-          "FixedJoints"));
-  AvbdRevoluteJointConstraint *revoluteJoints =
-      reinterpret_cast<AvbdRevoluteJointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
-          sizeof(AvbdRevoluteJointConstraint) * totalJointCapacity,
-          "RevoluteJoints"));
-  AvbdPrismaticJointConstraint *prismaticJoints =
-      reinterpret_cast<AvbdPrismaticJointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
-          sizeof(AvbdPrismaticJointConstraint) * totalJointCapacity,
-          "PrismaticJoints"));
   AvbdD6JointConstraint *d6Joints =
       reinterpret_cast<AvbdD6JointConstraint *>(allocWithFallback(
           mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
@@ -853,10 +829,6 @@ void AvbdDynamicsContext::update(
   coordTask->setContinuation(wbTask);
 
   PxU32 currentConstraintIdx = 0;
-  PxU32 currSphericalIdx = 0;
-  PxU32 currFixedIdx = 0;
-  PxU32 currRevoluteIdx = 0;
-  PxU32 currPrismaticIdx = 0;
   PxU32 currD6Idx = 0;
   PxU32 currGearIdx = 0;
   PxU32 tasksSpawned = 0;
@@ -878,10 +850,6 @@ void AvbdDynamicsContext::update(
                               info.cmStart, info.cmCount, info.bodyStart);
     }
 
-    PxU32 numSpherical = 0;
-    PxU32 numFixed = 0;
-    PxU32 numRevolute = 0;
-    PxU32 numPrismatic = 0;
     PxU32 numD6 = 0;
     PxU32 numGear = 0;
 
@@ -889,13 +857,7 @@ void AvbdDynamicsContext::update(
     if (info.constraintCount > 0) {
       prepareAvbdConstraints(
           islandSim, &avbdBodies[info.bodyStart], info.bodyCount,
-          info.bodyStart, sphericalJoints + currSphericalIdx, numSpherical,
-          totalJointCapacity - currSphericalIdx, fixedJoints + currFixedIdx,
-          numFixed, totalJointCapacity - currFixedIdx,
-          revoluteJoints + currRevoluteIdx, numRevolute,
-          totalJointCapacity - currRevoluteIdx,
-          prismaticJoints + currPrismaticIdx, numPrismatic,
-          totalJointCapacity - currPrismaticIdx, d6Joints + currD6Idx, numD6,
+          info.bodyStart, d6Joints + currD6Idx, numD6,
           totalJointCapacity - currD6Idx, gearJoints + currGearIdx, numGear,
           totalJointCapacity - currGearIdx, i, bodyRemapTable);
     }
@@ -925,27 +887,17 @@ void AvbdDynamicsContext::update(
                 artFirstBodyIdx < info.bodyStart + info.bodyCount) {
               PxU32 localFirstBodyIdx = artFirstBodyIdx - info.bodyStart;
 
-              // Prepare articulation internal joints - dispatch to correct
-              // joint type
-              PxU32 artSpherical = 0, artFixed = 0, artRevolute = 0,
-                    artPrismatic = 0;
+              // Prepare articulation internal joints as unified D6
+              PxU32 artD6 = 0, artGear = 0;
               prepareArticulationInternalJoints(
                   articulation, localFirstBodyIdx,
-                  sphericalJoints + currSphericalIdx + numSpherical,
-                  artSpherical,
-                  totalJointCapacity - currSphericalIdx - numSpherical,
-                  fixedJoints + currFixedIdx + numFixed, artFixed,
-                  totalJointCapacity - currFixedIdx - numFixed,
-                  revoluteJoints + currRevoluteIdx + numRevolute, artRevolute,
-                  totalJointCapacity - currRevoluteIdx - numRevolute,
-                  prismaticJoints + currPrismaticIdx + numPrismatic,
-                  artPrismatic,
-                  totalJointCapacity - currPrismaticIdx - numPrismatic);
+                  d6Joints + currD6Idx + numD6, artD6,
+                  totalJointCapacity - currD6Idx - numD6,
+                  gearJoints + currGearIdx + numGear, artGear,
+                  totalJointCapacity - currGearIdx - numGear);
 
-              numSpherical += artSpherical;
-              numFixed += artFixed;
-              numRevolute += artRevolute;
-              numPrismatic += artPrismatic;
+              numD6 += artD6;
+              numGear += artGear;
             }
           }
         }
@@ -954,8 +906,7 @@ void AvbdDynamicsContext::update(
     }
 
     // Skip empty islands
-    if (numConstraints == 0 && numSpherical == 0 && numFixed == 0 &&
-        numRevolute == 0 && numPrismatic == 0 && numD6 == 0 && numGear == 0 &&
+    if (numConstraints == 0 && numD6 == 0 && numGear == 0 &&
         info.bodyCount == 0) {
       continue;
     }
@@ -968,14 +919,6 @@ void AvbdDynamicsContext::update(
         avbdConstraints ? &avbdConstraints[currentConstraintIdx] : nullptr;
     batch.numConstraints = numConstraints;
 
-    batch.sphericalJoints = &sphericalJoints[currSphericalIdx];
-    batch.numSpherical = numSpherical;
-    batch.fixedJoints = &fixedJoints[currFixedIdx];
-    batch.numFixed = numFixed;
-    batch.revoluteJoints = &revoluteJoints[currRevoluteIdx];
-    batch.numRevolute = numRevolute;
-    batch.prismaticJoints = &prismaticJoints[currPrismaticIdx];
-    batch.numPrismatic = numPrismatic;
     batch.d6Joints = &d6Joints[currD6Idx];
     batch.numD6 = numD6;
     batch.gearJoints = &gearJoints[currGearIdx];
@@ -994,22 +937,6 @@ void AvbdDynamicsContext::update(
       if (batch.numConstraints > 0 && batch.constraints) {
         batch.contactMap.build(batch.numBodies, batch.constraints,
                                batch.numConstraints, allocator);
-      }
-      if (batch.numSpherical > 0 && batch.sphericalJoints) {
-        batch.sphericalMap.build(batch.numBodies, batch.sphericalJoints,
-                                 batch.numSpherical, allocator);
-      }
-      if (batch.numFixed > 0 && batch.fixedJoints) {
-        batch.fixedMap.build(batch.numBodies, batch.fixedJoints, batch.numFixed,
-                             allocator);
-      }
-      if (batch.numRevolute > 0 && batch.revoluteJoints) {
-        batch.revoluteMap.build(batch.numBodies, batch.revoluteJoints,
-                                batch.numRevolute, allocator);
-      }
-      if (batch.numPrismatic > 0 && batch.prismaticJoints) {
-        batch.prismaticMap.build(batch.numBodies, batch.prismaticJoints,
-                                 batch.numPrismatic, allocator);
       }
       if (batch.numD6 > 0 && batch.d6Joints) {
         batch.d6Map.build(batch.numBodies, batch.d6Joints, batch.numD6,
@@ -1072,10 +999,6 @@ void AvbdDynamicsContext::update(
     }
 
     currentConstraintIdx += numConstraints;
-    currSphericalIdx += numSpherical;
-    currFixedIdx += numFixed;
-    currRevoluteIdx += numRevolute;
-    currPrismaticIdx += numPrismatic;
     currD6Idx += numD6;
     currGearIdx += numGear;
 
@@ -1093,19 +1016,14 @@ void AvbdDynamicsContext::update(
     // ===== Sequential debug mode: run solver inline (no task parallelism)
     // =====
     {
-      const bool hasJoints = (batch.numSpherical > 0 || batch.numFixed > 0 ||
-                              batch.numRevolute > 0 || batch.numPrismatic > 0 ||
-                              batch.numD6 > 0 || batch.numGear > 0);
+      const bool hasJoints = (batch.numD6 > 0 || batch.numGear > 0);
       if (hasJoints) {
         mSolver.solveWithJoints(
             dt, batch.bodies, batch.numBodies, batch.constraints,
-            batch.numConstraints, batch.sphericalJoints, batch.numSpherical,
-            batch.fixedJoints, batch.numFixed, batch.revoluteJoints,
-            batch.numRevolute, batch.prismaticJoints, batch.numPrismatic,
-            batch.d6Joints, batch.numD6, batch.gearJoints, batch.numGear,
-            gravity, &batch.contactMap, &batch.sphericalMap, &batch.fixedMap,
-            &batch.revoluteMap, &batch.prismaticMap, &batch.d6Map,
-            &batch.gearMap, batch.colorBatches, batch.numColors);
+            batch.numConstraints, batch.d6Joints, batch.numD6,
+            batch.gearJoints, batch.numGear, gravity, &batch.contactMap,
+            &batch.d6Map, &batch.gearMap, batch.colorBatches,
+            batch.numColors);
       } else {
         mSolver.solve(dt, batch.bodies, batch.numBodies, batch.constraints,
                       batch.numConstraints, gravity, &batch.contactMap,
@@ -1116,10 +1034,6 @@ void AvbdDynamicsContext::update(
       // Release constraint maps
       PxAllocatorCallback &alloc = getAllocator();
       batch.contactMap.release(alloc);
-      batch.sphericalMap.release(alloc);
-      batch.fixedMap.release(alloc);
-      batch.revoluteMap.release(alloc);
-      batch.prismaticMap.release(alloc);
       batch.d6Map.release(alloc);
       batch.gearMap.release(alloc);
     }
@@ -1394,12 +1308,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 void AvbdDynamicsContext::prepareAvbdConstraints(
     const IG::IslandSim &islandSim, AvbdSolverBody *avbdBodies,
     PxU32 islandBodyCount, PxU32 bodyOffset,
-    AvbdSphericalJointConstraint *sphericalConstraints, PxU32 &numSpherical,
-    PxU32 maxSpherical, AvbdFixedJointConstraint *fixedConstraints,
-    PxU32 &numFixed, PxU32 maxFixed,
-    AvbdRevoluteJointConstraint *revoluteConstraints, PxU32 &numRevolute,
-    PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
-    PxU32 &numPrismatic, PxU32 maxPrismatic,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxU32 islandIndex, PxU32 *bodyRemapTable) {
@@ -1411,10 +1319,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
       islandSim.getIsland(islandSim.getActiveIslands()[islandIndex]);
   IG::EdgeIndex edgeIndex = island.mFirstEdge[IG::Edge::eCONSTRAINT];
 
-  numSpherical = 0;
-  numFixed = 0;
-  numRevolute = 0;
-  numPrismatic = 0;
   numD6 = 0;
   numGear = 0;
 
@@ -1557,67 +1461,117 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             frameB = jointFrame.q;
           }
 
+          const PxU32 d6CountBefore = numD6;
+
           switch (jointType) {
-          case eJOINT_FIXED: {
-            if (numFixed < maxFixed) {
-              AvbdFixedJointConstraint &c = fixedConstraints[numFixed++];
+          case eJOINT_SPHERICAL: {
+            // Convert Spherical joint -> D6 with linear locked, angular free
+            // Spherical = ball-and-socket: position locked, rotation free
+            // With optional cone limit on swing axes
+            if (numD6 < maxD6) {
+              AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
               c.anchorB = anchorB;
-              // Compute relative rotation between frames
-              c.relativeRotation = frameA.getConjugate() * frameB;
+              c.localFrameA = frameA;
+              c.localFrameB = frameB;
+
+              // Linear: all locked (position constraint)
+              c.linearMotion = 0;
+              c.linearLimitLower = PxVec3(0.0f);
+              c.linearLimitUpper = PxVec3(0.0f);
+
+              // Angular: default all FREE
+              // 2 bits per axis: 0=LOCKED, 1=LIMITED, 2=FREE
+              // ALL FREE = 2|(2<<2)|(2<<4) = 0x2A
+              c.angularMotion = 0x2A;
+              c.angularLimitLower = PxVec3(-PxPi);
+              c.angularLimitUpper = PxVec3(PxPi);
+
+              // Check for cone limit -- implemented as a single cone
+              // constraint (not per-axis LIMITED) to match reference
+              // spherical solver behavior and avoid 2-axis oscillation.
+              if (constraint->constantBlockSize >=
+                  sizeof(PhysXSphericalJointData)) {
+                const PhysXSphericalJointData *sphericalData =
+                    static_cast<const PhysXSphericalJointData *>(
+                        constraint->constantBlock);
+
+                // PxSphericalJointFlag::eLIMIT_ENABLED = 0x0002
+                if (sphericalData->jointFlags & 0x0002) {
+                  // Use the smaller of the two cone angles as limit
+                  c.coneAngleLimit = PxMin(sphericalData->limit.yAngle,
+                                           sphericalData->limit.zAngle);
+                }
+              }
+
+              c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
+            }
+            break;
+          }
+
+          case eJOINT_FIXED: {
+            // Convert Fixed joint -> D6 with all DOFs locked
+            if (numD6 < maxD6) {
+              AvbdD6JointConstraint &c = d6Constraints[numD6++];
+              c.initDefaults();
+              c.header.bodyIndexA = localBody0;
+              c.header.bodyIndexB = localBody1;
+              c.anchorA = anchorA;
+              c.anchorB = anchorB;
+              c.localFrameA = frameA;
+              c.localFrameB = frameB;
+              c.linearMotion = 0;   // all position locked
+              c.angularMotion = 0;  // all rotation locked
+              c.linearLimitLower = PxVec3(0.0f);
+              c.linearLimitUpper = PxVec3(0.0f);
+              c.angularLimitLower = PxVec3(0.0f);
+              c.angularLimitUpper = PxVec3(0.0f);
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
             }
             break;
           }
 
           case eJOINT_REVOLUTE: {
-            if (numRevolute < maxRevolute) {
+            // Convert Revolute joint -> D6 with twist free/limited, rest locked
+            if (numD6 < maxD6) {
               const PhysXRevoluteJointData *revoluteData =
                   static_cast<const PhysXRevoluteJointData *>(
                       constraint->constantBlock);
 
-              AvbdRevoluteJointConstraint &c =
-                  revoluteConstraints[numRevolute++];
+              AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
               c.anchorB = anchorB;
+              c.localFrameA = frameA;
+              c.localFrameB = frameB;
 
-              // Revolute joint rotates around X-axis in joint frame
-              c.axisA = frameA.getBasisVector0(); // X-axis of joint frame A
-              c.axisB = frameB.getBasisVector0(); // X-axis of joint frame B
+              c.linearMotion = 0;   // all position locked
+              // Twist axis (bit0-1): LIMITED=1 or FREE=2; swing1,swing2 = LOCKED=0
+              bool hasLimit = (revoluteData->jointFlags & 0x0001) != 0;
+              c.angularMotion = hasLimit ? 0x01 : 0x02; // twist only
 
-              // Reference axis for angle measurement (perpendicular to rotation
-              // axis)
-              c.refAxisA = frameA.getBasisVector1(); // Y-axis
-              c.refAxisB = frameB.getBasisVector1();
-
-              // Check for angle limits
-              // PxRevoluteJointFlag::eLIMIT_ENABLED = 1
-              if (revoluteData->jointFlags & 0x0001) {
-                c.hasAngleLimit = 1;
-                c.angleLimitLower = revoluteData->limit.lower;
-                c.angleLimitUpper = revoluteData->limit.upper;
+              c.linearLimitLower = PxVec3(0.0f);
+              c.linearLimitUpper = PxVec3(0.0f);
+              if (hasLimit) {
+                c.angularLimitLower = PxVec3(revoluteData->limit.lower, 0.0f, 0.0f);
+                c.angularLimitUpper = PxVec3(revoluteData->limit.upper, 0.0f, 0.0f);
               } else {
-                c.hasAngleLimit = 0;
-                c.angleLimitLower = -PxPi;
-                c.angleLimitUpper = PxPi;
+                c.angularLimitLower = PxVec3(-PxPi, 0.0f, 0.0f);
+                c.angularLimitUpper = PxVec3(PxPi, 0.0f, 0.0f);
               }
 
-              // Check for motor/drive
-              // PxRevoluteJointFlag::eDRIVE_ENABLED = 2
-              if (revoluteData->jointFlags & 0x0002) {
+              // Motor/drive support: use post-solve motor (like reference)
+              // instead of AL velocity drive (which couples with gear constraints
+              // and causes instability).
+              if (revoluteData->jointFlags & 0x0002) { // eDRIVE_ENABLED
                 c.motorEnabled = 1;
                 c.motorTargetVelocity = revoluteData->driveVelocity;
                 c.motorMaxForce = revoluteData->driveForceLimit;
-              } else {
-                c.motorEnabled = 0;
-                c.motorTargetVelocity = 0.0f;
-                c.motorMaxForce = 0.0f;
               }
 
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
@@ -1626,14 +1580,15 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           }
 
           case eJOINT_PRISMATIC: {
-            if (numPrismatic < maxPrismatic) {
+            // Convert Prismatic joint -> D6 with X-axis free/limited, rest locked
+            if (numD6 < maxD6) {
               const PhysXPrismaticJointData *prismaticData =
                   static_cast<const PhysXPrismaticJointData *>(
                       constraint->constantBlock);
 
 #if AVBD_JOINT_DEBUG
               if (getAvbdMotorFrameCounter() < AVBD_JOINT_DEBUG_FRAMES) {
-                printf("[Parse Prismatic] sizeof(PhysXPrismaticJointData)=%zu, "
+                printf("[Parse Prismatic->D6] sizeof(PhysXPrismaticJointData)=%zu, "
                        "flags=%u, limit(L=%f, U=%f)\n",
                        sizeof(PhysXPrismaticJointData),
                        (unsigned int)prismaticData->jointFlags,
@@ -1641,31 +1596,30 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               }
 #endif
 
-              AvbdPrismaticJointConstraint &c =
-                  prismaticConstraints[numPrismatic++];
+              AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
               c.anchorB = anchorB;
-
-              // Prismatic joint slides along X-axis in joint frame
-              c.axisA = frameA.getBasisVector0(); // X-axis of joint frame A
-
               c.localFrameA = frameA;
               c.localFrameB = frameB;
 
-              // Check for limits
-              // PxPrismaticJointFlag::eLIMIT_ENABLED = 2
-              if (prismaticData->jointFlags & AVBD_PRISMATIC_LIMIT_ENABLED_FLAG) {
-                c.hasLimit = 1;
-                c.limitLower = prismaticData->limit.lower;
-                c.limitUpper = prismaticData->limit.upper;
+              // X = LIMITED or FREE, Y&Z = LOCKED
+              bool hasLimit = (prismaticData->jointFlags &
+                  AVBD_PRISMATIC_LIMIT_ENABLED_FLAG) != 0;
+              c.linearMotion = hasLimit ? 0x01 : 0x02; // X only
+              c.angularMotion = 0;  // all rotation locked
+
+              if (hasLimit) {
+                c.linearLimitLower = PxVec3(prismaticData->limit.lower, 0.0f, 0.0f);
+                c.linearLimitUpper = PxVec3(prismaticData->limit.upper, 0.0f, 0.0f);
               } else {
-                c.hasLimit = 0;
-                c.limitLower = -PX_MAX_F32;
-                c.limitUpper = PX_MAX_F32;
+                c.linearLimitLower = PxVec3(-PX_MAX_F32, 0.0f, 0.0f);
+                c.linearLimitUpper = PxVec3(PX_MAX_F32, 0.0f, 0.0f);
               }
+              c.angularLimitLower = PxVec3(0.0f);
+              c.angularLimitUpper = PxVec3(0.0f);
 
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
             }
@@ -1777,42 +1731,19 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             break;
           }
 
-          case eJOINT_SPHERICAL:
-          default: {
-            // Default to spherical joint
-            if (numSpherical < maxSpherical) {
-              AvbdSphericalJointConstraint &c =
-                  sphericalConstraints[numSpherical++];
-              c.initDefaults();
-              c.header.bodyIndexA = localBody0;
-              c.header.bodyIndexB = localBody1;
-              c.anchorA = anchorA;
-              c.anchorB = anchorB;
-              c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
-
-              // Check for cone limit if it's a spherical joint
-              if (jointType == eJOINT_SPHERICAL &&
-                  constraint->constantBlockSize >=
-                      sizeof(PhysXSphericalJointData)) {
-                const PhysXSphericalJointData *sphericalData =
-                    static_cast<const PhysXSphericalJointData *>(
-                        constraint->constantBlock);
-
-                // Check if limit is enabled
-                // (PxSphericalJointFlag::eLIMIT_ENABLED = 0x0002)
-                if (sphericalData->jointFlags & 0x0002) {
-                  // Use the smaller of the two angles as the cone limit
-                  c.coneAngleLimit = PxMin(sphericalData->limit.yAngle,
-                                           sphericalData->limit.zAngle);
-                  c.coneAxisA =
-                      PxVec3(1.0f, 0.0f, 0.0f); // X-axis in local frame
-                  c.hasConeLimit = 1;
-                }
-              }
-            }
-            break;
-          }
           } // end switch (jointType)
+
+          // Fill breakable joint info for any D6 constraint created above
+          if (numD6 > d6CountBefore) {
+            AvbdD6JointConstraint &c = d6Constraints[numD6 - 1];
+            c.writeBackIndex = constraint->index;
+            // Convert break force to break impulse (force * dt)
+            // Use the same formula as TGS: impulse = force * simDt
+            // dt is not available here, so store raw force; the task will
+            // compare lambda (which is impulse) against force * dt at writeback
+            c.linBreakImpulse = constraint->linBreakForce;
+            c.angBreakImpulse = constraint->angBreakForce;
+          }
         } // end else if (jointType != eJOINT_UNKNOWN && ...)
         else if (constraint->constantBlockSize >=
                  sizeof(AvbdSnippetJointData)) {
@@ -1820,69 +1751,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               static_cast<const AvbdSnippetJointData *>(
                   constraint->constantBlock);
 
-          if (data->type == AvbdSnippetJointData::eSPHERICAL &&
-              numSpherical < maxSpherical) {
-            AvbdSphericalJointConstraint &c =
-                sphericalConstraints[numSpherical++];
-            c.initDefaults();
-            c.header.bodyIndexA = localBody0;
-            c.header.bodyIndexB = localBody1;
-            c.anchorA = data->pivot0;
-            c.anchorB = data->pivot1;
-          } else if (data->type == AvbdSnippetJointData::eFIXED &&
-                     numFixed < maxFixed) {
-            AvbdFixedJointConstraint &c = fixedConstraints[numFixed++];
-            c.initDefaults();
-            c.header.bodyIndexA = localBody0;
-            c.header.bodyIndexB = localBody1;
-            c.anchorA = data->pivot0;
-            c.anchorB = data->pivot1;
-          } else if (data->type == AvbdSnippetJointData::eREVOLUTE &&
-                     numRevolute < maxRevolute) {
-            AvbdRevoluteJointConstraint &c = revoluteConstraints[numRevolute++];
-            c.initDefaults();
-            c.header.bodyIndexA = localBody0;
-            c.header.bodyIndexB = localBody1;
-            c.anchorA = data->pivot0;
-            c.anchorB = data->pivot1;
-            c.axisA = data->axis0;
-            c.axisB = data->axis1;
-
-            c.refAxisA = (PxAbs(c.axisA.x) < 0.9f)
-                             ? c.axisA.cross(PxVec3(1, 0, 0)).getNormalized()
-                             : c.axisA.cross(PxVec3(0, 1, 0)).getNormalized();
-            c.refAxisB = (PxAbs(c.axisB.x) < 0.9f)
-                             ? c.axisB.cross(PxVec3(1, 0, 0)).getNormalized()
-                             : c.axisB.cross(PxVec3(0, 1, 0)).getNormalized();
-
-            c.angleLimitLower = data->limitLow;
-            c.angleLimitUpper = data->limitHigh;
-            c.hasAngleLimit =
-                (c.angleLimitLower >
-                     -PxPi - AvbdConstants::AVBD_NUMERICAL_EPSILON ||
-                 c.angleLimitUpper <
-                     PxPi + AvbdConstants::AVBD_NUMERICAL_EPSILON)
-                    ? 1
-                    : 0;
-          } else if (data->type == AvbdSnippetJointData::ePRISMATIC &&
-                     numPrismatic < maxPrismatic) {
-            AvbdPrismaticJointConstraint &c =
-                prismaticConstraints[numPrismatic++];
-            c.initDefaults();
-            c.header.bodyIndexA = localBody0;
-            c.header.bodyIndexB = localBody1;
-            c.anchorA = data->pivot0;
-            c.anchorB = data->pivot1;
-            c.axisA = data->axis0;
-            c.localFrameA = PxQuat(PxIdentity);
-            c.localFrameB = PxQuat(PxIdentity);
-            c.limitLower = data->limitLow;
-            c.limitUpper = data->limitHigh;
-            c.hasLimit = (c.limitLower > -PX_MAX_F32 / 2 ||
-                          c.limitUpper < PX_MAX_F32 / 2)
-                             ? 1
-                             : 0;
-          } else if (data->type == AvbdSnippetJointData::eD6 && numD6 < maxD6) {
+          if (data->type == AvbdSnippetJointData::eD6 && numD6 < maxD6) {
             AvbdD6JointConstraint &c = d6Constraints[numD6++];
             c.initDefaults();
             c.header.bodyIndexA = localBody0;
@@ -1918,81 +1787,19 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 } // end prepareAvbdConstraints
 
 //=============================================================================
-// Helper: Get joint axis in world frame
-//=============================================================================
-static PxVec3 getJointAxisWorld(const ArticulationJointCore *jointCore,
-                                PxArticulationAxis::Enum axis) {
-  // Determine the local axis based on the axis enum
-  PxVec3 localAxis;
-  switch (axis) {
-  case PxArticulationAxis::eTWIST:
-    localAxis = PxVec3(1.0f, 0.0f, 0.0f); // X-axis for twist
-    break;
-  case PxArticulationAxis::eSWING1:
-    localAxis = PxVec3(0.0f, 1.0f, 0.0f); // Y-axis for swing1
-    break;
-  case PxArticulationAxis::eSWING2:
-  default:
-    localAxis = PxVec3(0.0f, 0.0f, 1.0f); // Z-axis for swing2
-    break;
-  }
-
-  // Rotate by child pose orientation
-  return jointCore->childPose.q.rotate(localAxis);
-}
-
-//=============================================================================
-// Helper: Get first unlocked rotational axis for revolute joints
-//=============================================================================
-static PxArticulationAxis::Enum
-getFirstUnlockedRotationalAxis(const ArticulationJointCore &jointCore) {
-  // Check rotational axes first (TWIST, SWING1, SWING2)
-  if (jointCore.motion[PxArticulationAxis::eTWIST] !=
-      PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eTWIST;
-  if (jointCore.motion[PxArticulationAxis::eSWING1] !=
-      PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eSWING1;
-  if (jointCore.motion[PxArticulationAxis::eSWING2] !=
-      PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eSWING2;
-
-  return PxArticulationAxis::eTWIST; // Default
-}
-
-//=============================================================================
-// Helper: Get first unlocked translational axis for prismatic joints
-//=============================================================================
-static PxArticulationAxis::Enum
-getFirstUnlockedTranslationalAxis(const ArticulationJointCore &jointCore) {
-  // Check translational axes (eX, eY, eZ)
-  if (jointCore.motion[PxArticulationAxis::eX] != PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eX;
-  if (jointCore.motion[PxArticulationAxis::eY] != PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eY;
-  if (jointCore.motion[PxArticulationAxis::eZ] != PxArticulationMotion::eLOCKED)
-    return PxArticulationAxis::eZ;
-
-  return PxArticulationAxis::eX; // Default
-}
-
-//=============================================================================
 // Articulation Internal Joints Preparation (Multi-Type)
 //=============================================================================
 
 static void prepareArticulationInternalJoints(
     FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
-    AvbdSphericalJointConstraint *sphericalConstraints, PxU32 &numSpherical,
-    PxU32 maxSpherical, AvbdFixedJointConstraint *fixedConstraints,
-    PxU32 &numFixed, PxU32 maxFixed,
-    AvbdRevoluteJointConstraint *revoluteConstraints, PxU32 &numRevolute,
-    PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
-    PxU32 &numPrismatic, PxU32 maxPrismatic) {
+    AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
+    AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear) {
 
-  numSpherical = 0;
-  numFixed = 0;
-  numRevolute = 0;
-  numPrismatic = 0;
+  PX_UNUSED(gearConstraints);
+  PX_UNUSED(maxGear);
+
+  numD6 = 0;
+  numGear = 0;
 
   if (!articulation)
     return;
@@ -2025,159 +1832,91 @@ static void prepareArticulationInternalJoints(
     const PxU32 bodyIndexA = firstBodyIndex + parentIdx;
     const PxU32 bodyIndexB = firstBodyIndex + linkIdx;
 
-    // Dispatch based on joint type
-    switch (static_cast<PxArticulationJointType::Enum>(jointCore->jointType)) {
+    // Create a D6 constraint to represent the articulation joint
+    if (numD6 < maxD6 && d6Constraints) {
+      AvbdD6JointConstraint &c = d6Constraints[numD6];
+      c.initDefaults();
 
-    case PxArticulationJointType::eFIX: {
-      if (numFixed < maxFixed && fixedConstraints) {
-        AvbdFixedJointConstraint &c = fixedConstraints[numFixed];
-        c.initDefaults();
+      c.header.bodyIndexA = bodyIndexA;
+      c.header.bodyIndexB = bodyIndexB;
+      c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH * 2.0f;
+      c.header.compliance = 0.0f;
+      c.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
 
-        c.header.bodyIndexA = bodyIndexA;
-        c.header.bodyIndexB = bodyIndexB;
-        c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH * 2.0f;
-        c.header.compliance = 0.0f;
-        c.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
+      c.anchorA = anchorInParent;
+      c.anchorB = anchorInChild;
 
-        c.anchorA = anchorInParent;
-        c.anchorB = anchorInChild;
+      c.localFrameA = jointCore->parentPose.q;
+      c.localFrameB = jointCore->childPose.q;
 
-        // Store relative orientation (child relative to parent)
-        c.relativeRotation =
-            jointCore->parentPose.q.getConjugate() * jointCore->childPose.q;
+      // Translate articulation motion limits to D6 limit bits
+      c.linearMotion = 0;
+      if (jointCore->motion[PxArticulationAxis::eX] !=
+          PxArticulationMotion::eLOCKED)
+        c.linearMotion |= 1;
+      if (jointCore->motion[PxArticulationAxis::eY] !=
+          PxArticulationMotion::eLOCKED)
+        c.linearMotion |= 2;
+      if (jointCore->motion[PxArticulationAxis::eZ] !=
+          PxArticulationMotion::eLOCKED)
+        c.linearMotion |= 4;
 
-        numFixed++;
+      // Set limits
+      c.linearLimitLower = PxVec3(0.0f);
+      c.linearLimitUpper = PxVec3(0.0f);
+      c.angularLimitLower = PxVec3(0.0f);
+      c.angularLimitUpper = PxVec3(0.0f);
+
+      if (jointCore->motion[PxArticulationAxis::eX] ==
+          PxArticulationMotion::eLIMITED) {
+        c.linearLimitLower.x = jointCore->limits[PxArticulationAxis::eX].low;
+        c.linearLimitUpper.x = jointCore->limits[PxArticulationAxis::eX].high;
       }
-      break;
-    }
-
-    case PxArticulationJointType::eREVOLUTE:
-    case PxArticulationJointType::eREVOLUTE_UNWRAPPED: {
-      if (numRevolute < maxRevolute && revoluteConstraints) {
-        AvbdRevoluteJointConstraint &c = revoluteConstraints[numRevolute];
-        c.initDefaults();
-
-        c.header.bodyIndexA = bodyIndexA;
-        c.header.bodyIndexB = bodyIndexB;
-        c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH * 2.0f;
-        c.header.compliance = 0.0f;
-        c.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
-
-        c.anchorA = anchorInParent;
-        c.anchorB = anchorInChild;
-
-        // Get the rotation axis
-        const PxArticulationAxis::Enum primaryAxis =
-            getFirstUnlockedRotationalAxis(*jointCore);
-        c.axisA = getJointAxisWorld(jointCore, primaryAxis);
-        c.axisB = c.axisA; // Same axis for both bodies initially
-
-        // Setup limits if enabled
-        if (jointCore->motion[primaryAxis] == PxArticulationMotion::eLIMITED) {
-          c.hasAngleLimit = 1;
-          c.angleLimitLower = jointCore->limits[primaryAxis].low;
-          c.angleLimitUpper = jointCore->limits[primaryAxis].high;
-        } else {
-          c.hasAngleLimit = 0;
-          c.angleLimitLower = -PxPi;
-          c.angleLimitUpper = PxPi;
-        }
-
-        numRevolute++;
+      if (jointCore->motion[PxArticulationAxis::eY] ==
+          PxArticulationMotion::eLIMITED) {
+        c.linearLimitLower.y = jointCore->limits[PxArticulationAxis::eY].low;
+        c.linearLimitUpper.y = jointCore->limits[PxArticulationAxis::eY].high;
       }
-      break;
-    }
-
-    case PxArticulationJointType::ePRISMATIC: {
-      if (numPrismatic < maxPrismatic && prismaticConstraints) {
-        AvbdPrismaticJointConstraint &c = prismaticConstraints[numPrismatic];
-        c.initDefaults();
-
-        c.header.bodyIndexA = bodyIndexA;
-        c.header.bodyIndexB = bodyIndexB;
-        c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH * 2.0f;
-        c.header.compliance = 0.0f;
-        c.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
-
-        c.anchorA = anchorInParent;
-        c.anchorB = anchorInChild;
-
-        // Get the translation axis
-        const PxArticulationAxis::Enum primaryAxis =
-            getFirstUnlockedTranslationalAxis(*jointCore);
-        PxVec3 slideAxis;
-        switch (primaryAxis) {
-        case PxArticulationAxis::eX:
-          slideAxis = PxVec3(1.0f, 0.0f, 0.0f);
-          break;
-        case PxArticulationAxis::eY:
-          slideAxis = PxVec3(0.0f, 1.0f, 0.0f);
-          break;
-        case PxArticulationAxis::eZ:
-          slideAxis = PxVec3(0.0f, 0.0f, 1.0f);
-          break;
-        default:
-          slideAxis = PxVec3(1.0f, 0.0f, 0.0f);
-          break;
-        }
-        c.axisA = jointCore->childPose.q.rotate(slideAxis);
-
-        // Setup limits if enabled
-        if (jointCore->motion[primaryAxis] == PxArticulationMotion::eLIMITED) {
-          c.hasLimit = 1;
-          c.limitLower = jointCore->limits[primaryAxis].low;
-          c.limitUpper = jointCore->limits[primaryAxis].high;
-        } else {
-          c.hasLimit = 0;
-          c.limitLower = -PX_MAX_F32;
-          c.limitUpper = PX_MAX_F32;
-        }
-
-        // Store local frame orientations for rotation constraint
-        c.localFrameA = jointCore->parentPose.q;
-        c.localFrameB = jointCore->childPose.q;
-
-        numPrismatic++;
+      if (jointCore->motion[PxArticulationAxis::eZ] ==
+          PxArticulationMotion::eLIMITED) {
+        c.linearLimitLower.z = jointCore->limits[PxArticulationAxis::eZ].low;
+        c.linearLimitUpper.z = jointCore->limits[PxArticulationAxis::eZ].high;
       }
-      break;
-    }
 
-    case PxArticulationJointType::eSPHERICAL:
-    default: {
-      // Default to spherical joint (ball-and-socket)
-      if (numSpherical < maxSpherical && sphericalConstraints) {
-        AvbdSphericalJointConstraint &c = sphericalConstraints[numSpherical];
-        c.initDefaults();
+      c.angularMotion = 0;
+      if (jointCore->motion[PxArticulationAxis::eTWIST] !=
+          PxArticulationMotion::eLOCKED)
+        c.angularMotion |= 1;
+      if (jointCore->motion[PxArticulationAxis::eSWING1] !=
+          PxArticulationMotion::eLOCKED)
+        c.angularMotion |= 2;
+      if (jointCore->motion[PxArticulationAxis::eSWING2] !=
+          PxArticulationMotion::eLOCKED)
+        c.angularMotion |= 4;
 
-        c.header.bodyIndexA = bodyIndexA;
-        c.header.bodyIndexB = bodyIndexB;
-        c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH * 2.0f;
-        c.header.compliance = 0.0f;
-        c.header.damping = AvbdConstants::AVBD_CONSTRAINT_DAMPING;
-
-        c.anchorA = anchorInParent;
-        c.anchorB = anchorInChild;
-
-        // Setup cone limit if any rotational axis is limited
-        c.hasConeLimit = false;
-        for (PxU32 axis = PxArticulationAxis::eTWIST;
-             axis <= PxArticulationAxis::eSWING2; ++axis) {
-          if (jointCore->motion[axis] == PxArticulationMotion::eLIMITED) {
-            c.hasConeLimit = true;
-            c.coneAxisA = getJointAxisWorld(
-                jointCore, static_cast<PxArticulationAxis::Enum>(axis));
-            // Use the average of limits as cone angle
-            c.coneAngleLimit = (PxAbs(jointCore->limits[axis].high) +
-                                PxAbs(jointCore->limits[axis].low)) *
-                               0.5f;
-            break;
-          }
-        }
-
-        numSpherical++;
+      if (jointCore->motion[PxArticulationAxis::eTWIST] ==
+          PxArticulationMotion::eLIMITED) {
+        c.angularLimitLower.x =
+            jointCore->limits[PxArticulationAxis::eTWIST].low;
+        c.angularLimitUpper.x =
+            jointCore->limits[PxArticulationAxis::eTWIST].high;
       }
-      break;
-    }
+      if (jointCore->motion[PxArticulationAxis::eSWING1] ==
+          PxArticulationMotion::eLIMITED) {
+        c.angularLimitLower.y =
+            jointCore->limits[PxArticulationAxis::eSWING1].low;
+        c.angularLimitUpper.y =
+            jointCore->limits[PxArticulationAxis::eSWING1].high;
+      }
+      if (jointCore->motion[PxArticulationAxis::eSWING2] ==
+          PxArticulationMotion::eLIMITED) {
+        c.angularLimitLower.z =
+            jointCore->limits[PxArticulationAxis::eSWING2].low;
+        c.angularLimitUpper.z =
+            jointCore->limits[PxArticulationAxis::eSWING2].high;
+      }
+
+      numD6++;
     }
   }
 }

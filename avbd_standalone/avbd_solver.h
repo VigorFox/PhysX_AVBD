@@ -23,45 +23,58 @@ struct Solver {
 
   std::vector<Body> bodies;
   std::vector<Contact> contacts;
-  std::vector<SphericalJoint> sphericalJoints;
-  std::vector<FixedJoint> fixedJoints;
-  std::vector<D6Joint> d6Joints;
-  std::vector<GearJoint> gearJoints;
-  std::vector<PrismaticJoint> prismaticJoints;
+  std::vector<D6Joint> d6Joints;     // unified: all joint types
+  std::vector<GearJoint> gearJoints; // kept separate (velocity constraint)
 
-  // Joint creation
-  void addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 localAnchorA,
-                     Vec3 localAnchorB, float rho_ = 1e6f);
-  void addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 localAnchorA,
-                         Vec3 localAnchorB, float rho_ = 1e6f);
+  // Joint creation (all return index into d6Joints)
+  uint32_t addSphericalJoint(uint32_t bodyA, uint32_t bodyB,
+                             Vec3 localAnchorA, Vec3 localAnchorB,
+                             float rho_ = 1e6f);
+  uint32_t addFixedJoint(uint32_t bodyA, uint32_t bodyB,
+                         Vec3 localAnchorA, Vec3 localAnchorB,
+                         float rho_ = 1e6f);
+  uint32_t addD6Joint(uint32_t bodyA, uint32_t bodyB,
+                      Vec3 anchorA, Vec3 anchorB,
+                      uint32_t linearMotion_ = 0,
+                      uint32_t angularMotion_ = 0x2A,
+                      float angularDamping_ = 0.0f, float rho_ = 1e6f);
+  uint32_t addRevoluteJoint(uint32_t bodyA, uint32_t bodyB,
+                            Vec3 localAnchorA, Vec3 localAnchorB,
+                            Vec3 localAxisA,
+                            Vec3 localAxisB = Vec3(0, 0, 1),
+                            float rho = 1e6f);
+  uint32_t addPrismaticJoint(uint32_t bodyA, uint32_t bodyB,
+                             Vec3 localAnchorA, Vec3 localAnchorB,
+                             Vec3 localAxisA, float rho = 1e6f);
+
+  // Cone limit (spherical joints)
   void setSphericalJointConeLimit(uint32_t jointIdx, Vec3 coneAxisA,
                                   float limitAngle);
 
-  void addD6Joint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA, Vec3 anchorB,
-                  uint32_t linearMotion_ = 0, uint32_t angularMotion_ = 0x2A,
-                  float angularDamping_ = 0.0f, float rho_ = 1e6f);
+  // Revolute limit/drive (operates on d6Joints by index)
+  void setRevoluteJointLimit(uint32_t jointIdx, float lowerLimit,
+                             float upperLimit);
+  void setRevoluteJointDrive(uint32_t jointIdx, float targetVelocity,
+                             float maxForce);
 
-  // Gear joint: enforces omegaA·axisA * ratio + omegaB·axisB = 0
-  // axisA/axisB are in BODY LOCAL frame (unit vectors)
-  // ratio = -1  => opposite direction, same speed (meshing gears)
-  // ratio =  2  => B spins twice as fast as A
-  void addGearJoint(uint32_t bodyA, uint32_t bodyB, Vec3 axisA, Vec3 axisB,
-                    float ratio = -1.f, float rho = 1e5f);
-
-  void addPrismaticJoint(uint32_t bodyA, uint32_t bodyB, Vec3 localAnchorA,
-                         Vec3 localAnchorB, Vec3 localAxisA, float rho = 1e6f);
+  // Prismatic limit/drive (operates on d6Joints by index)
   void setPrismaticJointLimit(uint32_t jointIdx, float lowerLimit,
                               float upperLimit);
   void setPrismaticJointDrive(uint32_t jointIdx, float targetVelocity,
                               float damping);
+
+  // Gear joint (separate)
+  void addGearJoint(uint32_t bodyA, uint32_t bodyB,
+                    Vec3 axisA, Vec3 axisB,
+                    float ratio = -1.f, float rho = 1e5f);
 
   // Body creation
   uint32_t addBody(Vec3 pos, Quat rot, Vec3 halfExtent, float density,
                    float fric = 0.5f);
 
   // Contact creation
-  void addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA, Vec3 rB,
-                  float depth, float fric = 0.5f);
+  void addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
+                  Vec3 rB, float depth, float fric = 0.5f);
 
   // Solver core
   void computeConstraint(Contact &c);

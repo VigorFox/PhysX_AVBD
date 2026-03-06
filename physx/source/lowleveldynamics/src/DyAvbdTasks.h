@@ -58,18 +58,6 @@ struct AvbdIslandBatch {
   PxU32 numConstraints;
 
   // Joint Constraints
-  AvbdSphericalJointConstraint *sphericalJoints;
-  PxU32 numSpherical;
-
-  AvbdFixedJointConstraint *fixedJoints;
-  PxU32 numFixed;
-
-  AvbdRevoluteJointConstraint *revoluteJoints;
-  PxU32 numRevolute;
-
-  AvbdPrismaticJointConstraint *prismaticJoints;
-  PxU32 numPrismatic;
-
   AvbdD6JointConstraint *d6Joints;
   PxU32 numD6;
 
@@ -89,10 +77,6 @@ struct AvbdIslandBatch {
   // Pre-computed constraint-to-body mappings for O(1) lookup
   // These are built once per island and reused across solver iterations
   AvbdBodyConstraintMap contactMap;
-  AvbdBodyConstraintMap sphericalMap;
-  AvbdBodyConstraintMap fixedMap;
-  AvbdBodyConstraintMap revoluteMap;
-  AvbdBodyConstraintMap prismaticMap;
   AvbdBodyConstraintMap d6Map;
   AvbdBodyConstraintMap gearMap;
 };
@@ -126,22 +110,16 @@ public:
         mGravity(gravity) {}
 
   virtual void run() override {
-    // Check if we have any joint constraints
-    const bool hasJoints = (mBatch.numSpherical > 0 || mBatch.numFixed > 0 ||
-                            mBatch.numRevolute > 0 || mBatch.numPrismatic > 0 ||
-                            mBatch.numD6 > 0 || mBatch.numGear > 0);
+    const bool hasJoints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
 
     if (hasJoints) {
       // Use full joint solver
-      mSolver.solveWithJoints(
-          mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
-          mBatch.numConstraints, mBatch.sphericalJoints, mBatch.numSpherical,
-          mBatch.fixedJoints, mBatch.numFixed, mBatch.revoluteJoints,
-          mBatch.numRevolute, mBatch.prismaticJoints, mBatch.numPrismatic,
-          mBatch.d6Joints, mBatch.numD6, mBatch.gearJoints, mBatch.numGear,
-          mGravity, &mBatch.contactMap, &mBatch.sphericalMap, &mBatch.fixedMap,
-          &mBatch.revoluteMap, &mBatch.prismaticMap, &mBatch.d6Map,
-          &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors);
+      mSolver.solveWithJoints(mDt, mBatch.bodies, mBatch.numBodies,
+                              mBatch.constraints, mBatch.numConstraints,
+                              mBatch.d6Joints, mBatch.numD6, mBatch.gearJoints,
+                              mBatch.numGear, mGravity, &mBatch.contactMap,
+                              &mBatch.d6Map, &mBatch.gearMap,
+                              mBatch.colorBatches, mBatch.numColors);
     } else {
       // Optimized contact-only path using external contactMap for thread safety
       mSolver.solve(mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,

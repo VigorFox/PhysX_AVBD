@@ -61,6 +61,13 @@ bool test48_prismaticJoint_drive();
 bool test49_prismaticChain_6x6();
 bool test50_prismaticChain_3x3();
 
+// Revolute joints
+bool test51_revoluteJoint_basic();
+bool test52_revoluteJoint_limit();
+bool test53_revoluteJoint_drive();
+bool test54_revoluteJoint_axisAlign();
+bool test55_revoluteJoint_jitterRepro();
+
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
@@ -125,6 +132,13 @@ int main() {
   test47_prismaticJoint_basic();
   // Prismatic chain tests
   test49_prismaticChain_6x6();
+
+  // Revolute joint tests
+  test51_revoluteJoint_basic();
+  test52_revoluteJoint_limit();
+  test53_revoluteJoint_drive();
+  test54_revoluteJoint_axisAlign();
+  test55_revoluteJoint_jitterRepro();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

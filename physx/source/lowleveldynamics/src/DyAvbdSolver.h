@@ -92,53 +92,34 @@ public:
              physx::PxU32 numColors = 0);
 
   /**
-   * @brief Execute one simulation step with joint constraints
+   * @brief Execute one simulation step with joint constraints (unified D6 + gear)
    * @param dt Time step
    * @param bodies Array of solver bodies
    * @param numBodies Number of bodies
    * @param contacts Array of contact constraints
    * @param numContacts Number of contacts
-   * @param sphericalJoints Array of spherical joint constraints
-   * @param numSpherical Number of spherical joints
-   * @param fixedJoints Array of fixed joint constraints
-   * @param numFixed Number of fixed joints
-   * @param revoluteJoints Array of revolute joint constraints
-   * @param numRevolute Number of revolute joints
-   * @param prismaticJoints Array of prismatic joint constraints
-   * @param numPrismatic Number of prismatic joints
-   * @param d6Joints Array of D6 joint constraints
+   * @param d6Joints Array of D6 joint constraints (all joint types unified)
    * @param numD6 Number of D6 joints
    * @param gearJoints Array of gear joint constraints
    * @param numGear Number of gear joints
    * @param gravity Gravity vector
    * @param contactMap Pre-computed contact-to-body mapping (optional)
-   * @param sphericalMap Pre-computed spherical joint mapping (optional)
-   * @param fixedMap Pre-computed fixed joint mapping (optional)
-   * @param revoluteMap Pre-computed revolute joint mapping (optional)
-   * @param prismaticMap Pre-computed prismatic joint mapping (optional)
    * @param d6Map Pre-computed D6 joint mapping (optional)
    * @param gearMap Pre-computed gear joint mapping (optional)
    * @param colorBatches Pre-computed color batches (nullptr for no coloring)
    * @param numColors Number of colors in colorBatches (0 if not colored)
    */
-  void solveWithJoints(
-      physx::PxReal dt, AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
-      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-      const physx::PxVec3 &gravity,
-      const AvbdBodyConstraintMap *contactMap = nullptr,
-      const AvbdBodyConstraintMap *sphericalMap = nullptr,
-      const AvbdBodyConstraintMap *fixedMap = nullptr,
-      const AvbdBodyConstraintMap *revoluteMap = nullptr,
-      const AvbdBodyConstraintMap *prismaticMap = nullptr,
-      const AvbdBodyConstraintMap *d6Map = nullptr,
-      const AvbdBodyConstraintMap *gearMap = nullptr,
-      AvbdColorBatch *colorBatches = nullptr, physx::PxU32 numColors = 0);
+  void solveWithJoints(physx::PxReal dt, AvbdSolverBody *bodies,
+                       physx::PxU32 numBodies, AvbdContactConstraint *contacts,
+                       physx::PxU32 numContacts,
+                       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+                       AvbdGearJointConstraint *gearJoints,
+                       physx::PxU32 numGear, const physx::PxVec3 &gravity,
+                       const AvbdBodyConstraintMap *contactMap = nullptr,
+                       const AvbdBodyConstraintMap *d6Map = nullptr,
+                       const AvbdBodyConstraintMap *gearMap = nullptr,
+                       AvbdColorBatch *colorBatches = nullptr,
+                       physx::PxU32 numColors = 0);
 
   /**
    * @brief Get solver statistics from last solve
@@ -216,18 +197,10 @@ private:
   void solveLocalSystemWithJoints(
       AvbdSolverBody &body, AvbdSolverBody *bodies, physx::PxU32 numBodies,
       AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdRevoluteJointConstraint *revoluteJoints, physx::PxU32 numRevolute,
-      AvbdPrismaticJointConstraint *prismaticJoints, physx::PxU32 numPrismatic,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
       AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
       physx::PxReal dt, physx::PxReal invDt2,
       const AvbdBodyConstraintMap *contactMap = nullptr,
-      const AvbdBodyConstraintMap *sphericalMap = nullptr,
-      const AvbdBodyConstraintMap *fixedMap = nullptr,
-      const AvbdBodyConstraintMap *revoluteMap = nullptr,
-      const AvbdBodyConstraintMap *prismaticMap = nullptr,
       const AvbdBodyConstraintMap *d6Map = nullptr,
       const AvbdBodyConstraintMap *gearMap = nullptr);
 
@@ -243,16 +216,14 @@ private:
    * mesh + impact scenarios (e.g. chainmail), this makes contact
    * response ~42x weaker. Joint chains work fine.
    */
-  void solveLocalSystem3x3(
-      AvbdSolverBody &body, AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-      AvbdSphericalJointConstraint *sphericalJoints, physx::PxU32 numSpherical,
-      AvbdFixedJointConstraint *fixedJoints, physx::PxU32 numFixed,
-      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6, physx::PxReal dt,
-      physx::PxReal invDt2, const AvbdBodyConstraintMap *contactMap = nullptr,
-      const AvbdBodyConstraintMap *sphericalMap = nullptr,
-      const AvbdBodyConstraintMap *fixedMap = nullptr,
-      const AvbdBodyConstraintMap *d6Map = nullptr);
+  void solveLocalSystem3x3(AvbdSolverBody &body, AvbdSolverBody *bodies,
+                           physx::PxU32 numBodies,
+                           AvbdContactConstraint *contacts,
+                           physx::PxU32 numContacts,
+                           AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+                           physx::PxReal dt, physx::PxReal invDt2,
+                           const AvbdBodyConstraintMap *contactMap = nullptr,
+                           const AvbdBodyConstraintMap *d6Map = nullptr);
 
   /**
    * @brief Stage 4: Update Augmented Lagrangian multipliers with XPBD
@@ -374,50 +345,6 @@ private:
   //-------------------------------------------------------------------------
 
   /**
-   * @brief Compute position/rotation correction for a spherical joint
-   *
-   * Uses fused AVBD primal+dual (XPBD equivalent):
-   *   delta_lambda = -(C + alpha * lambda) / (w + alpha / h^2)
-   *   alpha = 1/rho, lambda updated in-place.
-   */
-  bool computeSphericalJointCorrection(
-      AvbdSphericalJointConstraint &joint, AvbdSolverBody *bodies,
-      physx::PxU32 numBodies, physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
-      physx::PxVec3 &deltaTheta, physx::PxReal dt);
-
-  /**
-   * @brief Compute position/rotation correction for a fixed joint
-   *
-   * Uses fused AVBD primal+dual (XPBD equivalent):
-   *   delta_lambda = -(C + alpha * lambda) / (w + alpha / h^2)
-   *   alpha = 1/rho, lambda updated in-place.
-   */
-  bool computeFixedJointCorrection(AvbdFixedJointConstraint &joint,
-                                   AvbdSolverBody *bodies,
-                                   physx::PxU32 numBodies,
-                                   physx::PxU32 bodyIndex,
-                                   physx::PxVec3 &deltaPos,
-                                   physx::PxVec3 &deltaTheta, physx::PxReal dt);
-
-  /**
-   * @brief Compute position/rotation correction for a revolute joint
-   */
-  bool computeRevoluteJointCorrection(const AvbdRevoluteJointConstraint &joint,
-                                      AvbdSolverBody *bodies,
-                                      physx::PxU32 numBodies,
-                                      physx::PxU32 bodyIndex,
-                                      physx::PxVec3 &deltaPos,
-                                      physx::PxVec3 &deltaTheta);
-
-  /**
-   * @brief Compute position/rotation correction for a prismatic joint
-   */
-  bool computePrismaticJointCorrection(
-      const AvbdPrismaticJointConstraint &joint, AvbdSolverBody *bodies,
-      physx::PxU32 numBodies, physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
-      physx::PxVec3 &deltaTheta);
-
-  /**
    * @brief Compute position/rotation correction for a D6 joint
    */
   bool computeD6JointCorrection(const AvbdD6JointConstraint &joint,
@@ -438,10 +365,6 @@ private:
       mBodyColoring; //!< Body-based parallel coloring for BCD
   AvbdBodyConstraintMap
       mContactMap; //!< Pre-computed contact-to-body mapping for O(1) lookup
-  AvbdBodyConstraintMap mSphericalMap; //!< Pre-computed spherical joint mapping
-  AvbdBodyConstraintMap mFixedMap;     //!< Pre-computed fixed joint mapping
-  AvbdBodyConstraintMap mRevoluteMap;  //!< Pre-computed revolute joint mapping
-  AvbdBodyConstraintMap mPrismaticMap; //!< Pre-computed prismatic joint mapping
   AvbdBodyConstraintMap mD6Map;        //!< Pre-computed D6 joint mapping
 
   physx::PxAllocatorCallback *mAllocator;
@@ -480,11 +403,7 @@ private:
    */
   void buildAllConstraintMappings(
       physx::PxU32 numBodies, AvbdContactConstraint *contacts,
-      physx::PxU32 numContacts, AvbdSphericalJointConstraint *sphericalJoints,
-      physx::PxU32 numSpherical, AvbdFixedJointConstraint *fixedJoints,
-      physx::PxU32 numFixed, AvbdRevoluteJointConstraint *revoluteJoints,
-      physx::PxU32 numRevolute, AvbdPrismaticJointConstraint *prismaticJoints,
-      physx::PxU32 numPrismatic, AvbdD6JointConstraint *d6Joints,
+      physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
       physx::PxU32 numD6);
 };
 
@@ -501,10 +420,6 @@ inline AvbdSolver::AvbdSolver() : mAllocator(nullptr), mInitialized(false) {
   // Explicitly initialize all constraint mappings to safe defaults
   // (redundant if default constructors work, but safer)
   mContactMap = AvbdBodyConstraintMap();
-  mSphericalMap = AvbdBodyConstraintMap();
-  mFixedMap = AvbdBodyConstraintMap();
-  mRevoluteMap = AvbdBodyConstraintMap();
-  mPrismaticMap = AvbdBodyConstraintMap();
   mD6Map = AvbdBodyConstraintMap();
 }
 
@@ -525,10 +440,6 @@ inline void AvbdSolver::release() {
     }
     // Release all constraint mappings
     mContactMap.release(*mAllocator);
-    mSphericalMap.release(*mAllocator);
-    mFixedMap.release(*mAllocator);
-    mRevoluteMap.release(*mAllocator);
-    mPrismaticMap.release(*mAllocator);
     mD6Map.release(*mAllocator);
   }
   mInitialized = false;

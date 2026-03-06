@@ -1237,7 +1237,29 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
 
   physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
                            //!< 3-5 angular)
-  physx::PxU32 padding2;
+  physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)
+
+  //-------------------------------------------------------------------------
+  // Breakable joint support
+  //-------------------------------------------------------------------------
+
+  physx::PxReal linBreakImpulse; //!< Linear break force threshold (N)
+  physx::PxReal angBreakImpulse; //!< Angular break torque threshold (N*m)
+
+  //-------------------------------------------------------------------------
+  // Cone limit (for spherical joints mapped to D6)
+  //-------------------------------------------------------------------------
+
+  physx::PxReal coneAngleLimit; //!< Cone half-angle limit (radians, 0 = disabled)
+  physx::PxReal coneLambda;     //!< Cone AL multiplier (<= 0, unilateral)
+
+  //-------------------------------------------------------------------------
+  // Revolute motor (post-solve, not AL drive)
+  //-------------------------------------------------------------------------
+
+  physx::PxU32 motorEnabled;         //!< 1 = revolute motor active (post-solve)
+  physx::PxReal motorTargetVelocity; //!< Target angular velocity (rad/s) around twist axis
+  physx::PxReal motorMaxForce;       //!< Max motor torque (N*m)
 
   //-------------------------------------------------------------------------
   // Methods
@@ -1400,7 +1422,14 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     driveFlags = 0;
     padding0 = 0.0f;
     padding1 = 0.0f;
-    padding2 = 0;
+    writeBackIndex = 0xFFFFFFFFu; // PX_MAX_U32 = no writeback
+    linBreakImpulse = PX_MAX_REAL;
+    angBreakImpulse = PX_MAX_REAL;
+    coneAngleLimit = 0.0f;
+    coneLambda = 0.0f;
+    motorEnabled = 0;
+    motorTargetVelocity = 0.0f;
+    motorMaxForce = 0.0f;
   }
 
 } PX_ALIGN_SUFFIX(16);

@@ -42,91 +42,6 @@ namespace Dy {
 //=============================================================================
 
 /**
- * @brief Process a spherical (ball) joint constraint
- *
- * The spherical joint constrains two anchor points to be coincident.
- * This is a 3-DOF position constraint.
- *
- * Algorithm:
- * 1. Compute world anchor positions
- * 2. Compute position error (violation)
- * 3. Compute effective mass (including rotational contribution)
- * 4. Apply XPBD-style position correction
- * 5. Update Lagrangian multiplier
- *
- * @param joint The spherical joint constraint
- * @param bodies Array of all solver bodies
- * @param numBodies Total number of bodies
- * @param config Solver configuration
- * @param dt Time step
- */
-void processSphericalJointConstraint(AvbdSphericalJointConstraint &joint,
-                                     AvbdSolverBody *bodies,
-                                     physx::PxU32 numBodies,
-                                     const AvbdSolverConfig &config,
-                                     physx::PxReal dt);
-
-/**
- * @brief Process a fixed joint constraint
- *
- * The fixed joint locks all 6 DOF between two bodies:
- * - 3 DOF position constraint (anchor points coincident)
- * - 3 DOF rotation constraint (orientations match)
- *
- * @param joint The fixed joint constraint
- * @param bodies Array of all solver bodies
- * @param numBodies Total number of bodies
- * @param config Solver configuration
- * @param dt Time step
- */
-void processFixedJointConstraint(AvbdFixedJointConstraint &joint,
-                                 AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                 const AvbdSolverConfig &config,
-                                 physx::PxReal dt);
-
-/**
- * @brief Process a revolute (hinge) joint constraint
- *
- * The revolute joint allows rotation around a single axis:
- * - 3 DOF position constraint (anchor points coincident)
- * - 2 DOF axis alignment constraint (axes must be parallel)
- * - Optional angle limit constraint
- * - Optional motor drive
- *
- * @param joint The revolute joint constraint
- * @param bodies Array of all solver bodies
- * @param numBodies Total number of bodies
- * @param config Solver configuration
- * @param dt Time step
- */
-void processRevoluteJointConstraint(AvbdRevoluteJointConstraint &joint,
-                                    AvbdSolverBody *bodies,
-                                    physx::PxU32 numBodies,
-                                    const AvbdSolverConfig &config,
-                                    physx::PxReal dt);
-
-/**
- * @brief Process a prismatic (slider) joint constraint
- *
- * The prismatic joint allows translation along a single axis:
- * - 2 DOF position constraint (perpendicular to slide axis)
- * - 3 DOF rotation constraint (orientations locked)
- * - Optional linear limit constraint
- * - Optional motor drive
- *
- * @param joint The prismatic joint constraint
- * @param bodies Array of all solver bodies
- * @param numBodies Total number of bodies
- * @param config Solver configuration
- * @param dt Time step
- */
-void processPrismaticJointConstraint(AvbdPrismaticJointConstraint &joint,
-                                     AvbdSolverBody *bodies,
-                                     physx::PxU32 numBodies,
-                                     const AvbdSolverConfig &config,
-                                     physx::PxReal dt);
-
-/**
  * @brief Process a D6 (configurable) joint constraint
  *
  * The D6 joint allows independent control of all 6 degrees of freedom:
@@ -151,38 +66,6 @@ void processD6JointConstraint(AvbdD6JointConstraint &joint,
 //=============================================================================
 // Augmented Lagrangian Multiplier Updates
 //=============================================================================
-
-/**
- * @brief Update Lagrangian multipliers for spherical joint
- */
-void updateSphericalJointMultiplier(AvbdSphericalJointConstraint &joint,
-                                    const AvbdSolverBody *bodies,
-                                    physx::PxU32 numBodies,
-                                    const AvbdSolverConfig &config);
-
-/**
- * @brief Update Lagrangian multipliers for fixed joint
- */
-void updateFixedJointMultiplier(AvbdFixedJointConstraint &joint,
-                                const AvbdSolverBody *bodies,
-                                physx::PxU32 numBodies,
-                                const AvbdSolverConfig &config);
-
-/**
- * @brief Update Lagrangian multipliers for revolute joint
- */
-void updateRevoluteJointMultiplier(AvbdRevoluteJointConstraint &joint,
-                                   const AvbdSolverBody *bodies,
-                                   physx::PxU32 numBodies,
-                                   const AvbdSolverConfig &config);
-
-/**
- * @brief Update Lagrangian multipliers for prismatic joint
- */
-void updatePrismaticJointMultiplier(AvbdPrismaticJointConstraint &joint,
-                                    const AvbdSolverBody *bodies,
-                                    physx::PxU32 numBodies,
-                                    const AvbdSolverConfig &config);
 
 /**
  * @brief Update Lagrangian multipliers for D6 joint

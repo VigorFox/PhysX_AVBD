@@ -66,14 +66,37 @@ void AvbdSolveIslandTask::release() {
     writeLambdaToCache(mContext, constraints, numConstraints);
   }
 
+  // Write back breakable joint status to ConstraintWriteBackPool
+  // This enables PhysX's checkConstraintBreakage() to detect broken joints
+  if (mBatch.numD6 > 0) {
+    PxPinnedArray<Dy::ConstraintWriteback> &writeBackPool =
+        mContext.getConstraintWriteBackPool();
+
+    for (PxU32 j = 0; j < mBatch.numD6; ++j) {
+      const AvbdD6JointConstraint &d6 = mBatch.d6Joints[j];
+      if (d6.writeBackIndex == 0xFFFFFFFFu)
+        continue;
+
+      // AVBD lambda has units of force (N) / torque (N*m),
+      // and linBreakImpulse/angBreakImpulse store raw break force/torque.
+      // Compare directly - no dt scaling needed.
+      const PxReal linForce = d6.lambdaLinear.magnitude();
+      const PxReal angTorque = d6.lambdaAngular.magnitude();
+
+      const bool isBroken = (linForce > d6.linBreakImpulse) ||
+                            (angTorque > d6.angBreakImpulse);
+
+      Dy::ConstraintWriteback &wb = writeBackPool[d6.writeBackIndex];
+      wb.linearImpulse = d6.lambdaLinear;
+      wb.angularImpulse = d6.lambdaAngular;
+      wb.setCombined(isBroken, 0.0f);
+    }
+  }
+
   // Release constraint maps to prevent memory leak
   // Each frame builds new maps, so we must free them when task completes
   PxAllocatorCallback &allocator = mContext.getAllocator();
   mBatch.contactMap.release(allocator);
-  mBatch.sphericalMap.release(allocator);
-  mBatch.fixedMap.release(allocator);
-  mBatch.revoluteMap.release(allocator);
-  mBatch.prismaticMap.release(allocator);
   mBatch.d6Map.release(allocator);
   mBatch.gearMap.release(allocator);
 

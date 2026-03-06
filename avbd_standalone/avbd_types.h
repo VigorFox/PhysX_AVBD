@@ -1,6 +1,7 @@
 #pragma once
 #include "avbd_math.h"
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 namespace AvbdRef {
@@ -31,9 +32,6 @@ struct Body {
   void computeDerived() {
     invMass = (mass > 0) ? 1.0f / mass : 0.0f;
     if (mass > 0) {
-      // For box: I = diag(m/12*(h^2+d^2), m/12*(w^2+d^2), m/12*(w^2+h^2))
-      // invInertiaWorld = R * I^-1 * R^T (but for axis-aligned initial, just
-      // I^-1)
       invInertiaWorld = inertiaTensor.inverse();
     }
   }
@@ -42,7 +40,6 @@ struct Body {
     if (mass <= 0)
       return;
     Mat33 invIlocal = inertiaTensor.inverse();
-    // Build rotation matrix from quaternion
     Mat33 R;
     float qw = rotation.w, qx = rotation.x, qy = rotation.y, qz = rotation.z;
     R.m[0][0] = 1 - 2 * (qy * qy + qz * qz);
@@ -74,28 +71,23 @@ struct Body {
     Mat66 M;
     for (int i = 0; i < 3; i++)
       M.m[i][i] = mass;
-    // Inertia tensor (not inverse!)
     for (int i = 0; i < 3; i++)
       for (int j = 0; j < 3; j++)
         M.m[3 + i][3 + j] = inertiaTensor.m[i][j];
     return M;
   }
 
-  // deltaW from initial: 2 * (q * q_initial^-1).xyz
   Vec3 deltaWInitial() const {
     Quat dq = rotation * initialRotation.conjugate();
-    if (dq.w < 0) {
+    if (dq.w < 0)
       dq = dq * (-1.f);
-    }
     return Vec3(dq.x, dq.y, dq.z) * 2.0f;
   }
 
-  // deltaW from inertial: 2 * (q * q_inertial^-1).xyz
   Vec3 deltaWInertial() const {
     Quat dq = rotation * inertialRotation.conjugate();
-    if (dq.w < 0) {
+    if (dq.w < 0)
       dq = dq * (-1.f);
-    }
     return Vec3(dq.x, dq.y, dq.z) * 2.0f;
   }
 };
@@ -103,113 +95,118 @@ struct Body {
 // ====================== Contact Constraint ==================================
 
 struct Contact {
-  uint32_t bodyA; // index into bodies[]
+  uint32_t bodyA;
   uint32_t bodyB; // UINT32_MAX = static ground
 
-  Vec3 normal; // from B to A (points away from B surface)
-  Vec3 rA;     // contact point relative to bodyA center (local frame)
-  Vec3 rB;     // contact point relative to bodyB center (local frame)
-  float depth; // penetration depth (>=0 means overlapping)
+  Vec3 normal;
+  Vec3 rA;
+  Vec3 rB;
+  float depth;
   float friction;
 
-  // Jacobians (computed per step by computeConstraint)
-  Vec6 JA;         // Jacobian for bodyA (normal row)
-  Vec6 JB;         // Jacobian for bodyB (normal row)
-  Vec6 JAt1, JBt1; // tangent 1
-  Vec6 JAt2, JBt2; // tangent 2
-  float C[3];      // constraint error: [normal, tangent1, tangent2]
-  float C0[3]; // constraint error at initial configuration (for alpha blending)
+  Vec6 JA;
+  Vec6 JB;
+  Vec6 JAt1, JBt1;
+  Vec6 JAt2, JBt2;
+  float C[3];
+  float C0[3];
 
-  // Force limits
   float fmin[3], fmax[3];
 
-  // Dual variables (persistent across iterations, warmstarted across frames)
   float lambda[3];
   float penalty[3];
 };
 
-// ====================== Joint Constraints ====================================
+// ====================== Unified D6 Joint ====================================
+//
+// All joint types (spherical, fixed, revolute, prismatic, generic D6) are
+// represented as a single D6Joint struct. Factory methods configure the
+// per-axis motion modes appropriately.
+//
+// Axis convention (in joint frame, defined by localFrameA):
+//   Linear  axes 0,1,2 = X,Y,Z
+//   Angular axes 0,1,2 = X(twist), Y(swing1), Z(swing2)
+//
+// Motion modes (packed 2 bits per axis):
+//   0 = LOCKED  (equality constraint, lambda accumulates freely)
+//   1 = LIMITED  (inequality constraint with lower/upper bounds)
+//   2 = FREE     (no constraint)
+//
+// Axis selection for Hessian construction:
+//   When all 3 linear (or angular) DOFs are LOCKED, world axes {1,0,0},
+//   {0,1,0}, {0,0,1} are used for numerical stability. When any DOF is
+//   FREE or LIMITED, joint-local axes (from localFrameA) are used so that
+//   the correct axis is freed/limited.
+// ============================================================================
 
-struct SphericalJoint {
+struct D6Joint {
   uint32_t bodyA; // UINT32_MAX = static (anchorA is world pos)
   uint32_t bodyB;
   Vec3 anchorA; // local frame (or world if static)
-  Vec3 anchorB; // local frame (or world if static)
-  Vec3 lambda;  // AL multiplier (3 components)
-  float rho;    // penalty for joint
-
-  // Cone limit
-  float coneAngleLimit; // <= 0 means disabled
-  Vec3 coneAxisA;       // local cone axis
-  float coneLambda;     // AL multiplier for cone limit
-
-  SphericalJoint()
-      : bodyA(UINT32_MAX), bodyB(0), rho(1e6f), coneAngleLimit(0.0f),
-        coneLambda(0.0f) {}
-
-  float computeConeViolation(const Quat &rotA, const Quat &rotB) const {
-    if (coneAngleLimit <= 0.0f)
-      return 0.0f;
-    Vec3 worldAxisA = rotA.rotate(coneAxisA);
-    Vec3 worldAxisB = rotB.rotate(coneAxisA);
-    float dotProd = std::max(-1.0f, std::min(1.0f, worldAxisA.dot(worldAxisB)));
-    return acosf(dotProd) - coneAngleLimit;
-  }
-};
-
-struct FixedJoint {
-  uint32_t bodyA;
-  uint32_t bodyB;
-  Vec3 anchorA;
   Vec3 anchorB;
-  Quat relativeRotation; // target: rotA^-1 * rotB
-  Vec3 lambdaPos;
-  Vec3 lambdaRot;
-  float rho;
+  Quat localFrameA;      // joint frame orientation relative to body A
+  Quat localFrameB;      // joint frame orientation relative to body B
+  Quat relativeRotation; // rotA_init^-1 * rotB_init (reference)
 
-  FixedJoint() : bodyA(UINT32_MAX), bodyB(0), rho(1e6f) {}
-
-  Vec3 computeRotationViolation(const Quat &rotA, const Quat &rotB) const {
-    // error = rotA * relativeRotation * rotB^-1
-    Quat target = rotA * relativeRotation;
-    Quat err = target * rotB.conjugate();
-    if (err.w < 0)
-      err = err * (-1.f);
-    return Vec3(err.x, err.y, err.z) * 2.0f;
-  }
-};
-
-// D6 Joint: configurable per-axis lock/free + linear/angular drive
-struct D6Joint {
-  uint32_t bodyA;
-  uint32_t bodyB;
-  Vec3 anchorA; // local frame (or world if static)
-  Vec3 anchorB;
   uint32_t linearMotion;  // packed 2 bits per axis: 0=LOCKED, 1=LIMITED, 2=FREE
-  uint32_t angularMotion; // same encoding
-  Vec3 lambdaLinear;      // AL multiplier for locked linear DOFs
-  Vec3 lambdaAngular;     // AL multiplier for locked angular DOFs
-  float rho;
+  uint32_t angularMotion; // packed 2 bits per axis
+
+  // Lambda (dual) multipliers for LOCKED axes
+  Vec3 lambdaLinear;
+  Vec3 lambdaAngular;
+
+  // Per-axis limits (for LIMITED axes)
+  float linearLimitLower[3];
+  float linearLimitUpper[3];
+  float angularLimitLower[3];
+  float angularLimitUpper[3];
+  float lambdaLimitLinear[3];
+  float lambdaLimitAngular[3];
+
+  // Cone limit (spherical-joint-style cone constraint)
+  float coneAngleLimit; // <= 0 means disabled
+  Vec3 coneAxisA;       // local cone axis on body A
+  float coneLambda;
 
   // Drive configuration
   // driveFlags bit mask:
-  //   0x01=X, 0x02=Y, 0x04=Z (linear drives)
-  //   0x10=TWIST, 0x20=SLERP, 0x40=SWING1, 0x80=SWING2 (angular drives)
+  //   0x01=linearX, 0x02=linearY, 0x04=linearZ
+  //   0x10=TWIST, 0x20=SLERP, 0x40=SWING1, 0x80=SWING2
   uint32_t driveFlags;
-  Vec3 driveLinearVelocity;  // target linear velocity (joint frame A space)
-  Vec3 driveAngularVelocity; // target angular velocity (joint frame A space)
-  Vec3 linearDriveDamping;   // per-axis linear drive damping
-  Vec3 angularDriveDamping;  // per-axis angular drive damping
-                             // (twist/swing1/swing2)
-  Quat localFrameA;          // joint frame orientation relative to body A
+  Vec3 driveLinearVelocity;  // target velocity in joint frame A space
+  Vec3 driveAngularVelocity; // target angular velocity in joint frame A space
+  Vec3 linearDriveDamping;   // per-axis
+  Vec3 angularDriveDamping;  // (twist / swing1 / swing2)
+  Vec3 lambdaDriveLinear;
+  Vec3 lambdaDriveAngular;
 
-  // AL multipliers for velocity-level drive constraints
-  Vec3 lambdaDriveLinear;  // λ for linear velocity drive (per-axis)
-  Vec3 lambdaDriveAngular; // λ for angular velocity drive (twist/swing1/swing2)
+  float rho; // penalty parameter
 
-  D6Joint()
-      : bodyA(UINT32_MAX), bodyB(0), linearMotion(0), angularMotion(0x2A),
-        rho(1e6f), driveFlags(0) {}
+  // Post-solve revolute motor (matches PhysX post-solve motor approach).
+  // Used instead of AL velocity drive to avoid ADMM oscillation when
+  // coupled with gear constraints.
+  bool motorEnabled;
+  float motorTargetVelocity;
+  float motorMaxForce;
+
+  // Revolute-specific: hinge angle measurement helpers
+  // (set by addRevoluteJoint, unused by other joint types)
+  Vec3 hingeAxisB; // hinge axis in B's local frame (normalized)
+  Vec3 refAxisA;   // reference axis in A's local frame (perp to hinge)
+  Vec3 refAxisB;   // reference axis in B's local frame
+
+  D6Joint() {
+    memset(this, 0, sizeof(D6Joint));
+    bodyA = UINT32_MAX;
+    bodyB = 0;
+    localFrameA = Quat();      // identity
+    localFrameB = Quat();      // identity
+    relativeRotation = Quat(); // identity
+    rho = 1e6f;
+    motorEnabled = false;
+    motorTargetVelocity = 0.0f;
+    motorMaxForce = 0.0f;
+  }
 
   uint32_t getLinearMotion(int axis) const {
     return (linearMotion >> (axis * 2)) & 0x3;
@@ -217,58 +214,42 @@ struct D6Joint {
   uint32_t getAngularMotion(int axis) const {
     return (angularMotion >> (axis * 2)) & 0x3;
   }
+
+  // Compute hinge angle using reference axes (revolute joints only).
+  float computeHingeAngle(const Quat &rotA, const Quat &rotB) const {
+    // World-space joint frame A
+    Quat frameA = (bodyA == UINT32_MAX) ? localFrameA : rotA * localFrameA;
+    Vec3 worldAxisA = frameA.rotate(Vec3(1, 0, 0)); // hinge axis
+
+    Vec3 worldRefA = rotA.rotate(refAxisA);
+    Vec3 worldRefB = rotB.rotate(refAxisB);
+
+    // Project refB onto plane perpendicular to hinge axis
+    Vec3 projB = worldRefB - worldAxisA * worldRefB.dot(worldAxisA);
+    float projLen = projB.length();
+    if (projLen < 1e-8f)
+      return 0.0f;
+    projB = projB * (1.0f / projLen);
+
+    float cosAngle = worldRefA.dot(projB);
+    cosAngle = std::max(-1.0f, std::min(1.0f, cosAngle));
+    float sinAngle = worldAxisA.dot(worldRefA.cross(projB));
+    return atan2f(sinAngle, cosAngle);
+  }
 };
 
-// Gear Joint: constrains angular velocities of two bodies about their axes
-// Constraint: omegaA · axisA * gearRatio + omegaB · axisB = 0
-// So if gearRatio = -1: A and B spin opposite directions at equal speed (meshed
-// gears)
-//    if gearRatio = 0.5: B spins half as fast as A (reduction gear)
+// Gear Joint: constrains angular velocities of two bodies about their axes.
+// Constraint: omegaA . axisA * gearRatio + omegaB . axisB = 0
+// Separate from D6 because it constrains velocities, not positions.
 struct GearJoint {
   uint32_t bodyA, bodyB;
-  Vec3 axisA;       // Rotation axis in A's local frame (normalized)
-  Vec3 axisB;       // Rotation axis in B's local frame (normalized)
-  float gearRatio;  // Constraint: (omega_A * axisA) * gearRatio + (omega_B *
-                    // axisB) = 0
-  float lambdaGear; // AL multiplier
+  Vec3 axisA;
+  Vec3 axisB;
+  float gearRatio;
+  float lambdaGear;
   float rho;
   GearJoint()
       : bodyA(0), bodyB(0), gearRatio(1.f), lambdaGear(0.f), rho(1e5f) {}
-};
-
-// Prismatic Joint: locks 3 rotational DOFs and 2 linear DOFs. Allows 1 linear
-// DOF along axis.
-struct PrismaticJoint {
-  uint32_t bodyA;
-  uint32_t bodyB;
-  Vec3 anchorA; // local frame (or world if static)
-  Vec3 anchorB;
-  Vec3 axisA; // Slider axis in A's local frame (normalized)
-
-  Quat relativeRotation; // Target: rotA^-1 * rotB
-
-  Vec3 lambdaRot; // 3 rotational DOFs
-  Vec3 lambdaPos; // 3 world-axis DOFs (slide-axis projected out)
-
-  // Limits
-  bool limitEnabled;
-  float limitLower;
-  float limitUpper;
-  float limitLambda;
-
-  // Drive (velocity-level)
-  bool driveEnabled;
-  float driveTargetVelocity;
-  float driveDamping;
-  float driveLambda;
-
-  float rho;
-
-  PrismaticJoint()
-      : bodyA(UINT32_MAX), bodyB(0), lambdaRot(Vec3()), lambdaPos(Vec3()),
-        limitEnabled(false), limitLower(0.f), limitUpper(0.f), limitLambda(0.f),
-        driveEnabled(false), driveTargetVelocity(0.f), driveDamping(0.f),
-        driveLambda(0.f), rho(1e6f) {}
 };
 
 } // namespace AvbdRef

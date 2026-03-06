@@ -1,4 +1,5 @@
 #include "avbd_solver.h"
+#include "avbd_d6_core.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -6,50 +7,78 @@
 
 namespace AvbdRef {
 
-void Solver::addSphericalJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
-                               Vec3 anchorB, float rho_) {
-  SphericalJoint j;
+// =============================================================================
+// Factory methods  all create D6Joint entries in the unified d6Joints vector
+// =============================================================================
+
+uint32_t Solver::addSphericalJoint(uint32_t bodyA, uint32_t bodyB,
+                                   Vec3 anchorA, Vec3 anchorB, float rho_) {
+  D6Joint j;
   j.bodyA = bodyA;
   j.bodyB = bodyB;
   j.anchorA = anchorA;
   j.anchorB = anchorB;
-  j.lambda = Vec3();
+  j.linearMotion = 0;     // all 3 linear LOCKED
+  j.angularMotion = 0x2A; // all 3 angular FREE (2|(2<<2)|(2<<4))
   j.rho = rho_;
-  j.coneAngleLimit = 0.0f;
-  j.coneLambda = 0.0f;
-  sphericalJoints.push_back(j);
+
+  // Compute localFrameB from initial relative rotation (matches PhysX)
+  Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
+  Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
+  j.relativeRotation = rotA.conjugate() * rotB;
+  j.localFrameB = j.relativeRotation.conjugate() * j.localFrameA;
+
+  uint32_t idx = (uint32_t)d6Joints.size();
+  d6Joints.push_back(j);
+  return idx;
 }
 
 void Solver::setSphericalJointConeLimit(uint32_t jointIdx, Vec3 coneAxisA,
                                         float limitAngle) {
-  if (jointIdx < sphericalJoints.size()) {
-    sphericalJoints[jointIdx].coneAngleLimit = limitAngle;
-    sphericalJoints[jointIdx].coneAxisA = coneAxisA;
-    sphericalJoints[jointIdx].coneLambda = 0.0f;
+  if (jointIdx < d6Joints.size()) {
+    d6Joints[jointIdx].coneAngleLimit = limitAngle;
+    d6Joints[jointIdx].coneAxisA = coneAxisA;
+    d6Joints[jointIdx].coneLambda = 0.0f;
+
+    // Build localFrameA so X-axis = cone axis (matches PhysX joint frame)
+    Vec3 axisNorm = coneAxisA.normalized();
+    Vec3 perp;
+    if (std::fabs(axisNorm.x) < 0.9f)
+      perp = axisNorm.cross(Vec3(1, 0, 0)).normalized();
+    else
+      perp = axisNorm.cross(Vec3(0, 1, 0)).normalized();
+    Vec3 perp2 = axisNorm.cross(perp);
+    d6Joints[jointIdx].localFrameA = quatFromColumns(axisNorm, perp, perp2);
+    d6Joints[jointIdx].localFrameB =
+        d6Joints[jointIdx].relativeRotation.conjugate() *
+        d6Joints[jointIdx].localFrameA;
   }
 }
 
-void Solver::addFixedJoint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
-                           Vec3 anchorB, float rho_) {
-  FixedJoint j;
+uint32_t Solver::addFixedJoint(uint32_t bodyA, uint32_t bodyB,
+                               Vec3 anchorA, Vec3 anchorB, float rho_) {
+  D6Joint j;
   j.bodyA = bodyA;
   j.bodyB = bodyB;
   j.anchorA = anchorA;
   j.anchorB = anchorB;
-  j.lambdaPos = Vec3();
-  j.lambdaRot = Vec3();
+  j.linearMotion = 0;  // all 3 linear LOCKED
+  j.angularMotion = 0; // all 3 angular LOCKED
   j.rho = rho_;
-  // Compute initial relative rotation
+  // Compute initial relative rotation and localFrameB
   Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
   Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
   j.relativeRotation = rotA.conjugate() * rotB;
-  fixedJoints.push_back(j);
+  j.localFrameB = j.relativeRotation.conjugate() * j.localFrameA;
+  uint32_t idx = (uint32_t)d6Joints.size();
+  d6Joints.push_back(j);
+  return idx;
 }
 
-void Solver::addD6Joint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
-                        Vec3 anchorB, uint32_t linearMotion_,
-                        uint32_t angularMotion_, float angularDamping_,
-                        float rho_) {
+uint32_t Solver::addD6Joint(uint32_t bodyA, uint32_t bodyB,
+                            Vec3 anchorA, Vec3 anchorB,
+                            uint32_t linearMotion_, uint32_t angularMotion_,
+                            float angularDamping_, float rho_) {
   D6Joint j;
   j.bodyA = bodyA;
   j.bodyB = bodyB;
@@ -57,23 +86,166 @@ void Solver::addD6Joint(uint32_t bodyA, uint32_t bodyB, Vec3 anchorA,
   j.anchorB = anchorB;
   j.linearMotion = linearMotion_;
   j.angularMotion = angularMotion_;
-  j.lambdaLinear = Vec3();
-  j.lambdaAngular = Vec3();
   j.rho = rho_;
-  j.driveFlags = 0;
-  j.driveLinearVelocity = Vec3();
-  j.driveAngularVelocity = Vec3();
-  j.linearDriveDamping = Vec3();
   j.angularDriveDamping =
       Vec3(angularDamping_, angularDamping_, angularDamping_);
-  j.localFrameA = Quat(); // identity
-  j.lambdaDriveLinear = Vec3();
-  j.lambdaDriveAngular = Vec3();
+
+  // Compute relativeRotation and localFrameB (matches PhysX)
+  Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
+  Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
+  j.relativeRotation = rotA.conjugate() * rotB;
+  j.localFrameB = j.relativeRotation.conjugate() * j.localFrameA;
+
+  uint32_t idx = (uint32_t)d6Joints.size();
   d6Joints.push_back(j);
+  return idx;
 }
 
-void Solver::addGearJoint(uint32_t bodyA, uint32_t bodyB, Vec3 axisA,
-                          Vec3 axisB, float ratio, float rho_) {
+uint32_t Solver::addRevoluteJoint(uint32_t bodyA, uint32_t bodyB,
+                                  Vec3 localAnchorA, Vec3 localAnchorB,
+                                  Vec3 localAxisA, Vec3 localAxisB,
+                                  float rho_) {
+  D6Joint j;
+  j.bodyA = bodyA;
+  j.bodyB = bodyB;
+  j.anchorA = localAnchorA;
+  j.anchorB = localAnchorB;
+  j.linearMotion = 0; // all 3 linear LOCKED
+
+  // Angular: X(twist) = FREE, Y(swing1) = LOCKED, Z(swing2) = LOCKED
+  // Hinge axis maps to joint-frame X
+  j.angularMotion = 2; // 2|(0<<2)|(0<<4) = axis0=FREE, axis1=LOCKED, axis2=LOCKED
+
+  j.rho = rho_;
+
+  // Build reference axes perpendicular to hinge axis
+  Vec3 axisA = localAxisA.normalized();
+  Vec3 axisB = localAxisB.normalized();
+
+  auto buildRefAxis = [](Vec3 axis) -> Vec3 {
+    Vec3 perp;
+    if (fabsf(axis.x) < 0.9f)
+      perp = axis.cross(Vec3(1, 0, 0)).normalized();
+    else
+      perp = axis.cross(Vec3(0, 1, 0)).normalized();
+    return perp;
+  };
+
+  Vec3 refA = buildRefAxis(axisA);
+  Vec3 z_axisA = axisA.cross(refA);
+
+  // localFrameA: X=hingeAxis, Y=refAxisA, Z=cross
+  j.localFrameA = quatFromColumns(axisA, refA, z_axisA);
+
+  // Store relative rotation for angular error computation
+  Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
+  Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
+  j.relativeRotation = rotA.conjugate() * rotB;
+
+  // Store revolute-specific fields for hinge angle measurement
+  j.hingeAxisB = axisB;
+  j.refAxisA = refA;
+
+  // Compute refAxisB: project worldRefA onto B hinge plane, transform to B local
+  Vec3 worldRefA = rotA.rotate(refA);
+  Vec3 worldAxisB = rotB.rotate(axisB);
+  Vec3 proj = worldRefA - worldAxisB * worldRefA.dot(worldAxisB);
+  float projLen = proj.length();
+  if (projLen > 1e-8f) {
+    j.refAxisB = rotB.conjugate().rotate(proj * (1.0f / projLen));
+  } else {
+    j.refAxisB = buildRefAxis(axisB);
+  }
+
+  // Compute localFrameB from relativeRotation (matches PhysX convention)
+  j.localFrameB = j.relativeRotation.conjugate() * j.localFrameA;
+
+  uint32_t idx = (uint32_t)d6Joints.size();
+  d6Joints.push_back(j);
+  return idx;
+}
+
+void Solver::setRevoluteJointLimit(uint32_t jointIdx, float lowerLimit,
+                                   float upperLimit) {
+  if (jointIdx < d6Joints.size()) {
+    // Change angular axis 0 from FREE to LIMITED
+    d6Joints[jointIdx].angularMotion =
+        (d6Joints[jointIdx].angularMotion & ~0x3) | 1; // axis 0 = LIMITED
+    d6Joints[jointIdx].angularLimitLower[0] = lowerLimit;
+    d6Joints[jointIdx].angularLimitUpper[0] = upperLimit;
+    d6Joints[jointIdx].lambdaLimitAngular[0] = 0.0f;
+  }
+}
+
+void Solver::setRevoluteJointDrive(uint32_t jointIdx, float targetVelocity,
+                                   float maxForce) {
+  if (jointIdx < d6Joints.size()) {
+    // Use post-solve motor (matches PhysX) instead of AL velocity drive.
+    // This avoids ADMM oscillation when coupled with gear constraints.
+    d6Joints[jointIdx].motorEnabled = true;
+    d6Joints[jointIdx].motorTargetVelocity = targetVelocity;
+    d6Joints[jointIdx].motorMaxForce = maxForce;
+  }
+}
+
+uint32_t Solver::addPrismaticJoint(uint32_t bodyA, uint32_t bodyB,
+                                   Vec3 localAnchorA, Vec3 localAnchorB,
+                                   Vec3 localAxisA, float rho_) {
+  D6Joint j;
+  j.bodyA = bodyA;
+  j.bodyB = bodyB;
+  j.anchorA = localAnchorA;
+  j.anchorB = localAnchorB;
+  j.angularMotion = 0; // all 3 angular LOCKED
+
+  // Linear: X(slide) = FREE, Y = LOCKED, Z = LOCKED
+  j.linearMotion = 2; // axis0=FREE, axis1=LOCKED, axis2=LOCKED
+
+  j.rho = rho_;
+
+  Vec3 axisA = localAxisA.normalized();
+  Vec3 helper =
+      (std::abs(axisA.x) > 0.9f) ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
+  Vec3 t1 = axisA.cross(helper).normalized();
+  Vec3 t2 = axisA.cross(t1);
+  j.localFrameA = quatFromColumns(axisA, t1, t2);
+
+  // Store relative rotation and compute localFrameB
+  Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
+  Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
+  j.relativeRotation = rotA.conjugate() * rotB;
+  j.localFrameB = j.relativeRotation.conjugate() * j.localFrameA;
+
+  uint32_t idx = (uint32_t)d6Joints.size();
+  d6Joints.push_back(j);
+  return idx;
+}
+
+void Solver::setPrismaticJointLimit(uint32_t jointIdx, float lowerLimit,
+                                    float upperLimit) {
+  if (jointIdx < d6Joints.size()) {
+    // Change linear axis 0 from FREE to LIMITED
+    d6Joints[jointIdx].linearMotion =
+        (d6Joints[jointIdx].linearMotion & ~0x3) | 1; // axis 0 = LIMITED
+    d6Joints[jointIdx].linearLimitLower[0] = lowerLimit;
+    d6Joints[jointIdx].linearLimitUpper[0] = upperLimit;
+    d6Joints[jointIdx].lambdaLimitLinear[0] = 0.0f;
+  }
+}
+
+void Solver::setPrismaticJointDrive(uint32_t jointIdx, float targetVelocity,
+                                    float damping) {
+  if (jointIdx < d6Joints.size()) {
+    d6Joints[jointIdx].driveFlags |= 0x01; // linear X drive
+    d6Joints[jointIdx].driveLinearVelocity = Vec3(targetVelocity, 0, 0);
+    d6Joints[jointIdx].linearDriveDamping.x = damping;
+    d6Joints[jointIdx].lambdaDriveLinear = Vec3();
+  }
+}
+
+void Solver::addGearJoint(uint32_t bodyA, uint32_t bodyB,
+                          Vec3 axisA, Vec3 axisB,
+                          float ratio, float rho_) {
   GearJoint j;
   j.bodyA = bodyA;
   j.bodyB = bodyB;
@@ -84,43 +256,9 @@ void Solver::addGearJoint(uint32_t bodyA, uint32_t bodyB, Vec3 axisA,
   gearJoints.push_back(j);
 }
 
-void Solver::addPrismaticJoint(uint32_t bodyA, uint32_t bodyB,
-                               Vec3 localAnchorA, Vec3 localAnchorB,
-                               Vec3 localAxisA, float rho_) {
-  PrismaticJoint j;
-  j.bodyA = bodyA;
-  j.bodyB = bodyB;
-  j.anchorA = localAnchorA;
-  j.anchorB = localAnchorB;
-  j.axisA = localAxisA.normalized();
-  j.rho = rho_;
-
-  Quat rotA = (bodyA == UINT32_MAX) ? Quat() : bodies[bodyA].rotation;
-  Quat rotB = (bodyB == UINT32_MAX) ? Quat() : bodies[bodyB].rotation;
-  j.relativeRotation = rotA.conjugate() * rotB;
-
-  prismaticJoints.push_back(j);
-}
-
-void Solver::setPrismaticJointLimit(uint32_t jointIdx, float lowerLimit,
-                                    float upperLimit) {
-  if (jointIdx < prismaticJoints.size()) {
-    prismaticJoints[jointIdx].limitEnabled = true;
-    prismaticJoints[jointIdx].limitLower = lowerLimit;
-    prismaticJoints[jointIdx].limitUpper = upperLimit;
-    prismaticJoints[jointIdx].limitLambda = 0.0f;
-  }
-}
-
-void Solver::setPrismaticJointDrive(uint32_t jointIdx, float targetVelocity,
-                                    float damping) {
-  if (jointIdx < prismaticJoints.size()) {
-    prismaticJoints[jointIdx].driveEnabled = true;
-    prismaticJoints[jointIdx].driveTargetVelocity = targetVelocity;
-    prismaticJoints[jointIdx].driveDamping = damping;
-    prismaticJoints[jointIdx].driveLambda = 0.0f;
-  }
-}
+// =============================================================================
+// Body / Contact creation
+// =============================================================================
 
 uint32_t Solver::addBody(Vec3 pos, Quat rot, Vec3 halfExtent, float density,
                          float fric) {
@@ -168,43 +306,31 @@ void Solver::addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
     c.fmin[i] = 0;
     c.fmax[i] = 0;
   }
-  // Normal: fmin=-inf, fmax=0 (can push, not pull)
   c.fmin[0] = -1e30f;
   c.fmax[0] = 0.0f;
-  // Friction: bounds set dynamically
-  c.fmin[1] = 0;
-  c.fmax[1] = 0;
-  c.fmin[2] = 0;
-  c.fmax[2] = 0;
   contacts.push_back(c);
 }
+
+// =============================================================================
+// Contact constraint computation
+// =============================================================================
 
 void Solver::computeConstraint(Contact &c) {
   Body &bA = bodies[c.bodyA];
   bool bStatic = (c.bodyB == UINT32_MAX);
   Body *pB = bStatic ? nullptr : &bodies[c.bodyB];
 
-  Vec3 wA = bA.position + bA.rotation.rotate(c.rA);
-  Vec3 wB = bStatic ? c.rB : (pB->position + pB->rotation.rotate(c.rB));
-
-  Vec3 diff = wA - wB;
-  // float Cn = diff.dot(c.normal) - c.depth; // unused direct calc
-
   Vec3 rAw = bA.rotation.rotate(c.rA);
   Vec3 rBw = bStatic ? Vec3() : pB->rotation.rotate(c.rB);
 
   c.JA = Vec6(c.normal, rAw.cross(c.normal));
-  c.JB = bStatic ? Vec6() : Vec6(-c.normal, (-rBw).cross(c.normal));
-  if (!bStatic) {
-    c.JB = Vec6(Vec3() - c.normal, Vec3() - rBw.cross(c.normal));
-  }
+  c.JB = bStatic ? Vec6() : Vec6(Vec3() - c.normal, Vec3() - rBw.cross(c.normal));
 
   Vec3 t1, t2;
-  if (fabsf(c.normal.y) > 0.9f) {
+  if (fabsf(c.normal.y) > 0.9f)
     t1 = c.normal.cross(Vec3(1, 0, 0)).normalized();
-  } else {
+  else
     t1 = c.normal.cross(Vec3(0, 1, 0)).normalized();
-  }
   t2 = c.normal.cross(t1);
 
   c.JAt1 = Vec6(t1, rAw.cross(t1));
@@ -214,9 +340,8 @@ void Solver::computeConstraint(Contact &c) {
 
   Vec6 dpA(bA.position - bA.initialPosition, bA.deltaWInitial());
   Vec6 dpB;
-  if (!bStatic) {
+  if (!bStatic)
     dpB = Vec6(pB->position - pB->initialPosition, pB->deltaWInitial());
-  }
 
   c.C[0] = c.C0[0] * (1.0f - alpha) + dot(c.JA, dpA) + dot(c.JB, dpB);
   c.C[1] = c.C0[1] * (1.0f - alpha) + dot(c.JAt1, dpA) + dot(c.JBt1, dpB);
@@ -252,6 +377,10 @@ void Solver::warmstart() {
   }
 }
 
+// =============================================================================
+// Main solver step
+// =============================================================================
+
 void Solver::step(float dt_) {
   dt = dt_;
   float invDt = 1.0f / dt;
@@ -268,10 +397,6 @@ void Solver::step(float dt_) {
       adj[b].push_back(a);
     }
   };
-  for (const auto &j : sphericalJoints)
-    addEdge(j.bodyA, j.bodyB);
-  for (const auto &j : fixedJoints)
-    addEdge(j.bodyA, j.bodyB);
   for (const auto &j : d6Joints)
     addEdge(j.bodyA, j.bodyB);
   for (const auto &j : gearJoints)
@@ -301,11 +426,11 @@ void Solver::step(float dt_) {
 
     float effectiveMass, scale;
     if (c.bodyB != UINT32_MAX && massB > 0.0f) {
-      effectiveMass = std::max(augA, augB); // heavier body determines floor
-      scale = penaltyScaleDynDyn;           // softer for deformation
+      effectiveMass = std::max(augA, augB);
+      scale = penaltyScaleDynDyn;
     } else {
-      effectiveMass = augA; // body-ground (propagated)
-      scale = penaltyScale; // full stiffness
+      effectiveMass = augA;
+      scale = penaltyScale;
     }
     float penFloor = std::max(PENALTY_MIN, scale * effectiveMass / dt2);
     for (int i = 0; i < 3; i++)
@@ -313,9 +438,8 @@ void Solver::step(float dt_) {
   }
 
   // Compute C0 for alpha blending
-  for (auto &c : contacts) {
+  for (auto &c : contacts)
     computeC0(c);
-  }
 
   // Warmstart bodies
   for (auto &body : bodies) {
@@ -349,20 +473,28 @@ void Solver::step(float dt_) {
     body.rotation = body.inertialRotation;
   }
 
+  // =========================================================================
   // Main solver loop
+  // =========================================================================
   for (int it = 0; it < iterations; it++) {
-    // Primal update (per body)
+    // ---- Primal update (per body) ----
     for (uint32_t bi = 0; bi < (uint32_t)bodies.size(); bi++) {
       Body &body = bodies[bi];
       if (body.mass <= 0)
         continue;
 
-      bool bodyTouchesPrismatic = false;
+      // Check if this body needs full 6x6 solve
+      bool bodyNeedsFull6x6 = false;
       if (use3x3Solve) {
-        for (const auto &jnt : prismaticJoints) {
+        for (const auto &jnt : d6Joints) {
           if (jnt.bodyA == bi || jnt.bodyB == bi) {
-            bodyTouchesPrismatic = true;
-            break;
+            // Any joint with non-trivial coupling needs 6x6
+            if (jnt.linearMotion != 0 || jnt.angularMotion != 0x2A) {
+              // Not purely spherical -> needs 6x6 for coupled solve
+              // Actually, prismatic/revolute have lin-ang coupling
+              bodyNeedsFull6x6 = true;
+              break;
+            }
           }
         }
       }
@@ -374,6 +506,7 @@ void Solver::step(float dt_) {
       const float contactBoostFraction = 0.005f;
       float boostFloor = contactBoostFraction * body.mass / dt2;
 
+      // ---- Contact contributions ----
       for (auto &c : contacts) {
         bool isA = (c.bodyA == bi);
         bool isB = (c.bodyB == bi);
@@ -385,520 +518,20 @@ void Solver::step(float dt_) {
         for (int i = 0; i < 3; i++) {
           Vec6 J = isA ? (i == 0 ? c.JA : (i == 1 ? c.JAt1 : c.JAt2))
                        : (i == 0 ? c.JB : (i == 1 ? c.JBt1 : c.JBt2));
-
           float pen = std::max(c.penalty[i], boostFloor);
           float f = std::max(c.fmin[i],
                              std::min(c.fmax[i], pen * c.C[i] + c.lambda[i]));
-
           rhs += J * f;
           lhs += outer(J, J * pen);
         }
       }
 
-      // Spherical Joint contributions
-      for (auto &jnt : sphericalJoints) {
-        bool isA = (jnt.bodyA == bi);
-        bool isB = (jnt.bodyB == bi);
-        if (!isA && !isB)
-          continue;
-
-        bool otherStatic =
-            isA ? (jnt.bodyB == UINT32_MAX) : (jnt.bodyA == UINT32_MAX);
-        Vec3 r = isA ? body.rotation.rotate(jnt.anchorA)
-                     : body.rotation.rotate(jnt.anchorB);
-        Vec3 worldAnchorA =
-            isA ? (body.position + r)
-                : (otherStatic
-                       ? jnt.anchorA
-                       : (bodies[jnt.bodyA].position +
-                          bodies[jnt.bodyA].rotation.rotate(jnt.anchorA)));
-        Vec3 worldAnchorB =
-            isA ? (otherStatic
-                       ? jnt.anchorB
-                       : (bodies[jnt.bodyB].position +
-                          bodies[jnt.bodyB].rotation.rotate(jnt.anchorB)))
-                : (body.position + r);
-
-        Vec3 C = worldAnchorA - worldAnchorB;
-        Vec3 axes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-
-        // Auto-boost penalty: ensure rho >= M/h^2 for good primal convergence
-        float effectiveRho = std::max(jnt.rho, body.mass / dt2);
-
-        for (int k = 0; k < 3; k++) {
-          Vec3 axis = axes[k];
-          float Ck = C.dot(axis);
-          float sign = isA ? 1.0f : -1.0f;
-          Vec6 J(axis * sign, r.cross(axis) * sign);
-          float lam = (k == 0) ? jnt.lambda.x
-                               : ((k == 1) ? jnt.lambda.y : jnt.lambda.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // Process cone limit (inequality constraint)
-        if (jnt.coneAngleLimit > 0.0f) {
-          Quat rotA =
-              isA ? body.rotation
-                  : ((jnt.bodyA == UINT32_MAX) ? Quat()
-                                               : bodies[jnt.bodyA].rotation);
-          Quat rotB =
-              isB ? body.rotation
-                  : ((jnt.bodyB == UINT32_MAX) ? Quat()
-                                               : bodies[jnt.bodyB].rotation);
-          float coneViolation = jnt.computeConeViolation(rotA, rotB);
-
-          float forceMag = effectiveRho * coneViolation - jnt.coneLambda;
-
-          if (forceMag > 0.0f) {
-            Vec3 worldAxisA = rotA.rotate(jnt.coneAxisA);
-            Vec3 worldAxisB = rotB.rotate(jnt.coneAxisA);
-            Vec3 corrAxis = worldAxisA.cross(worldAxisB);
-
-            float corrAxisMag = corrAxis.length();
-            if (corrAxisMag > 1e-6f) {
-              corrAxis = corrAxis * (1.0f / corrAxisMag);
-
-              float signJ = isA ? 1.0f : -1.0f;
-              Vec3 gradRot = corrAxis * (-signJ);
-              Vec6 J(Vec3(0, 0, 0), gradRot);
-
-              rhs += J * forceMag;
-              lhs += outer(J, J * effectiveRho);
-            }
-          }
-        }
+      // ---- D6 Joint contributions (unified) ----
+      for (const auto &jnt : d6Joints) {
+        addD6Contribution(jnt, bi, bodies, dt, lhs, rhs);
       }
 
-      // Fixed Joint contributions
-      for (auto &jnt : fixedJoints) {
-        bool isA = (jnt.bodyA == bi);
-        bool isB = (jnt.bodyB == bi);
-        if (!isA && !isB)
-          continue;
-
-        bool otherStatic =
-            isA ? (jnt.bodyB == UINT32_MAX) : (jnt.bodyA == UINT32_MAX);
-        Vec3 r = isA ? body.rotation.rotate(jnt.anchorA)
-                     : body.rotation.rotate(jnt.anchorB);
-
-        float sign = isA ? 1.0f : -1.0f;
-
-        // Linear part
-        Vec3 worldAnchorA =
-            isA ? (body.position + r)
-                : (otherStatic
-                       ? jnt.anchorA
-                       : (bodies[jnt.bodyA].position +
-                          bodies[jnt.bodyA].rotation.rotate(jnt.anchorA)));
-        Vec3 worldAnchorB =
-            isA ? (otherStatic
-                       ? jnt.anchorB
-                       : (bodies[jnt.bodyB].position +
-                          bodies[jnt.bodyB].rotation.rotate(jnt.anchorB)))
-                : (body.position + r);
-
-        Vec3 C_lin = worldAnchorA - worldAnchorB;
-        Vec3 axes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-
-        // Auto-boost penalty for primal convergence
-        float effectiveRho = std::max(jnt.rho, body.mass / dt2);
-
-        for (int k = 0; k < 3; k++) {
-          Vec3 axis = axes[k];
-          float Ck = C_lin.dot(axis);
-          Vec6 J(axis * sign, r.cross(axis) * sign);
-          float lam = (k == 0) ? jnt.lambdaPos.x
-                               : ((k == 1) ? jnt.lambdaPos.y : jnt.lambdaPos.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // Angular part
-        Quat rotA =
-            isA ? body.rotation
-                : ((jnt.bodyA == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyA].rotation);
-        Quat rotB =
-            isA ? ((jnt.bodyB == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyB].rotation)
-                : body.rotation;
-        Vec3 C_ang = jnt.computeRotationViolation(rotA, rotB);
-        if (!isA) // Only need sign flip if B-relative? No, verify with logic.
-                  // computeRotViol returns world-space axis-angle diff.
-                  // If we represent err = rotA * rel * rotB^-1, a rotation of A
-                  // increases err. A rotation of B decreases err.
-          C_ang = -C_ang; // Wait, let's verify logic below.
-
-        // Actually, let's stick to original logic:
-        // J_ang_A = axis, J_ang_B = -axis.
-        // Wait, C_ang computed is global rotation vector needed to align.
-        // If isA, J is +axis. If isB, J is -axis.
-        // But C_ang sign must match J sign convention.
-        // Let's trust the original code's `if (!isA) C_ang = -C_ang;` which
-        // implies C_ang is error FROM A perspective.
-
-        for (int k = 0; k < 3; k++) {
-          Vec3 axis = axes[k]; // global axis
-          float Ck = C_ang.dot(axis);
-          Vec3 jAng = isA ? axis : -axis;
-          Vec6 J(Vec3(), jAng);
-          float lam = (k == 0) ? jnt.lambdaRot.x
-                               : ((k == 1) ? jnt.lambdaRot.y : jnt.lambdaRot.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-      }
-
-      // Prismatic Joint contributions
-      for (auto &jnt : prismaticJoints) {
-        bool isA = (jnt.bodyA == bi);
-        bool isB = (jnt.bodyB == bi);
-        if (!isA && !isB)
-          continue;
-
-        bool otherStatic =
-            isA ? (jnt.bodyB == UINT32_MAX) : (jnt.bodyA == UINT32_MAX);
-        Vec3 r = isA ? body.rotation.rotate(jnt.anchorA)
-                     : body.rotation.rotate(jnt.anchorB);
-
-        float sign = isA ? 1.0f : -1.0f;
-
-        // Linear part
-        Vec3 worldAnchorA =
-            isA ? (body.position + r)
-                : (otherStatic
-                       ? jnt.anchorA
-                       : (bodies[jnt.bodyA].position +
-                          bodies[jnt.bodyA].rotation.rotate(jnt.anchorA)));
-        Vec3 worldAnchorB =
-            isA ? (otherStatic
-                       ? jnt.anchorB
-                       : (bodies[jnt.bodyB].position +
-                          bodies[jnt.bodyB].rotation.rotate(jnt.anchorB)))
-                : (body.position + r);
-
-        Vec3 C_lin = worldAnchorA - worldAnchorB;
-
-        Quat rotA =
-            isA ? body.rotation
-                : ((jnt.bodyA == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyA].rotation);
-        Quat rotB =
-            isB ? body.rotation
-                : ((jnt.bodyB == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyB].rotation);
-
-        Vec3 worldAxisA = rotA.rotate(jnt.axisA);
-
-        float effectiveRho = std::max(jnt.rho, body.mass / dt2);
-
-        // Position: 3 world-axis DOFs with slide-axis projected out
-        // (matches PhysX Fixed-joint-like pattern)
-        C_lin -= worldAxisA * C_lin.dot(worldAxisA);
-
-        Vec3 worldAxes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-        for (int k = 0; k < 3; k++) {
-          Vec3 axis = worldAxes[k];
-          float Ck = C_lin.dot(axis);
-          Vec6 J(axis * sign, r.cross(axis) * sign);
-          float lam = (&jnt.lambdaPos.x)[k];
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // Angular part
-        Vec3 C_ang;
-        Quat target = rotA * jnt.relativeRotation;
-        Quat err = target * rotB.conjugate();
-        if (err.w < 0)
-          err = err * (-1.f);
-        C_ang = Vec3(err.x, err.y, err.z) * 2.0f;
-
-        if (!isA)
-          C_ang = -C_ang;
-
-        Vec3 axesRot[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-        for (int k = 0; k < 3; k++) {
-          Vec3 axis = axesRot[k];
-          float Ck = C_ang.dot(axis);
-          Vec3 jAng = isA ? axis : -axis;
-          Vec6 J(Vec3(), jAng);
-          float lam = (k == 0) ? jnt.lambdaRot.x
-                               : ((k == 1) ? jnt.lambdaRot.y : jnt.lambdaRot.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // Limits
-        if (jnt.limitEnabled) {
-          float dist = (worldAnchorB - worldAnchorA).dot(worldAxisA);
-          float limitViol = 0.0f;
-          if (dist < jnt.limitLower)
-            limitViol = dist - jnt.limitLower;
-          else if (dist > jnt.limitUpper)
-            limitViol = dist - jnt.limitUpper;
-
-          if (limitViol != 0.0f) {
-            Vec3 n = -worldAxisA;
-            Vec3 J_xyz = n * sign;
-            Vec6 J(J_xyz, r.cross(n) * sign);
-            float f = effectiveRho * limitViol + jnt.limitLambda;
-            rhs += J * f;
-            lhs += outer(J, J * effectiveRho);
-          }
-        }
-
-        // Drive Setup
-        if (jnt.driveEnabled && jnt.driveDamping > 0.0f) {
-          Vec3 dxThis = body.position - body.initialPosition;
-          Vec3 dxOther(0, 0, 0);
-          if (!otherStatic) {
-            uint32_t otherIdx = isA ? jnt.bodyB : jnt.bodyA;
-            dxOther =
-                bodies[otherIdx].position - bodies[otherIdx].initialPosition;
-          }
-          Vec3 relDisp = isA ? (dxOther - dxThis) : (dxThis - dxOther);
-          float C_drive =
-              relDisp.dot(worldAxisA) - jnt.driveTargetVelocity * dt;
-
-          float rho_drive = jnt.driveDamping / dt2;
-          float sign_drive = isA ? -1.0f : 1.0f;
-          float f = sign_drive * (rho_drive * C_drive + jnt.driveLambda);
-
-          Vec6 J(worldAxisA, r.cross(worldAxisA));
-
-          for (int k = 0; k < 6; k++) {
-            rhs.v[k] += f * J[k];
-            for (int l = 0; l < 6; l++) {
-              lhs.m[k][l] += rho_drive * J[k] * J[l];
-            }
-          }
-        }
-      }
-
-      // D6 Joint contributions
-      for (auto &jnt : d6Joints) {
-        bool isA = (jnt.bodyA == bi);
-        bool isB = (jnt.bodyB == bi);
-        if (!isA && !isB)
-          continue;
-
-        bool otherStatic =
-            isA ? (jnt.bodyB == UINT32_MAX) : (jnt.bodyA == UINT32_MAX);
-        Vec3 r = isA ? body.rotation.rotate(jnt.anchorA)
-                     : body.rotation.rotate(jnt.anchorB);
-
-        float sign = isA ? 1.0f : -1.0f;
-
-        // Linear part
-        Vec3 worldAnchorA =
-            isA ? (body.position + r)
-                : (otherStatic
-                       ? jnt.anchorA
-                       : (bodies[jnt.bodyA].position +
-                          bodies[jnt.bodyA].rotation.rotate(jnt.anchorA)));
-        Vec3 worldAnchorB =
-            isA ? (otherStatic
-                       ? jnt.anchorB
-                       : (bodies[jnt.bodyB].position +
-                          bodies[jnt.bodyB].rotation.rotate(jnt.anchorB)))
-                : (body.position + r);
-
-        Vec3 C_lin = worldAnchorA - worldAnchorB;
-        Vec3 axes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-
-        // Auto-boost penalty for primal convergence
-        float effectiveRho = std::max(jnt.rho, body.mass / dt2);
-
-        for (int k = 0; k < 3; k++) {
-          uint32_t motion = jnt.getLinearMotion(k);
-          if (motion != 0) // ONLY LOCKED (0)
-            continue;
-
-          Vec3 axis = axes[k];
-          float Ck = C_lin.dot(axis);
-          Vec6 J(axis * sign, r.cross(axis) * sign);
-          float lam =
-              (k == 0) ? jnt.lambdaLinear.x
-                       : ((k == 1) ? jnt.lambdaLinear.y : jnt.lambdaLinear.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // Angular part
-        Quat rotA =
-            isA ? body.rotation
-                : ((jnt.bodyA == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyA].rotation);
-        Quat rotB =
-            isA ? ((jnt.bodyB == UINT32_MAX) ? Quat()
-                                             : bodies[jnt.bodyB].rotation)
-                : body.rotation;
-
-        Quat relRot(1, 0, 0, 0); // Implicit identity target generic D6?
-                                 // Actually for general D6, target is identity
-                                 // usually unless driven.
-        Quat target = rotA * relRot;
-        Quat err = target * rotB.conjugate();
-        if (err.w < 0)
-          err = -err;
-        Vec3 C_ang = Vec3(err.x, err.y, err.z) * 2.0f;
-        if (!isA)
-          C_ang = -C_ang;
-
-        for (int k = 0; k < 3; k++) {
-          uint32_t motion = jnt.getAngularMotion(k);
-          if (motion != 0) // ONLY LOCKED (0)
-            continue;
-
-          Vec3 axis = axes[k];
-          float Ck = C_ang.dot(axis);
-          Vec3 jAng = isA ? axis : -axis;
-          Vec6 J(Vec3(), jAng);
-          float lam =
-              (k == 0) ? jnt.lambdaAngular.x
-                       : ((k == 1) ? jnt.lambdaAngular.y : jnt.lambdaAngular.z);
-          float f = effectiveRho * Ck + lam;
-          rhs += J * f;
-          lhs += outer(J, J * effectiveRho);
-        }
-
-        // ====== AVBD AL velocity-drive constraints ======
-        // Joint frame A in world space
-        Quat jointFrameA = (jnt.bodyA == UINT32_MAX)
-                               ? jnt.localFrameA
-                               : bodies[jnt.bodyA].rotation * jnt.localFrameA;
-        jointFrameA = jointFrameA.normalized();
-
-        // --- Linear velocity drive (AL constraint) ---
-        // C_lin[a] = (Δx_B - Δx_A) · axis - v_target · dt
-        if (jnt.driveFlags & 0x07) {
-          // Compute displacements
-          Vec3 dxThis = body.position - body.initialPosition;
-          Vec3 dxOther(0, 0, 0);
-          if (!otherStatic) {
-            uint32_t otherIdx = isA ? jnt.bodyB : jnt.bodyA;
-            dxOther =
-                bodies[otherIdx].position - bodies[otherIdx].initialPosition;
-          }
-          // Relative displacement: B - A
-          Vec3 relDisp = isA ? (dxOther - dxThis) : (dxThis - dxOther);
-          Vec3 worldTarget = jointFrameA.rotate(jnt.driveLinearVelocity) * dt;
-
-          Vec3 localAxes[3] = {Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1)};
-          for (int a = 0; a < 3; a++) {
-            if ((jnt.driveFlags & (1 << a)) == 0)
-              continue;
-            float damping = (&jnt.linearDriveDamping.x)[a];
-            if (damping <= 0.0f)
-              continue;
-
-            float rho_drive = damping / dt2;
-            Vec3 wAxis = jointFrameA.rotate(localAxes[a]);
-            float C = relDisp.dot(wAxis) - worldTarget.dot(wAxis);
-            float lam = (&jnt.lambdaDriveLinear.x)[a];
-            float sign = isA ? -1.0f : 1.0f;
-            float f = sign * (rho_drive * C + lam);
-
-            // Hessian: ρ · (axis ⊗ axis), RHS: f · axis
-            for (int k = 0; k < 3; k++) {
-              (&rhs.v[0])[k] += f * (&wAxis.x)[k];
-              for (int l = 0; l < 3; l++) {
-                lhs.m[k][l] += rho_drive * (&wAxis.x)[k] * (&wAxis.x)[l];
-              }
-            }
-          }
-        }
-
-        // --- Angular velocity drive (AL constraint) ---
-        // C_ang[a] = (δω_B - δω_A) · axis - ω_target · dt
-        if (jnt.driveFlags & 0xF0) {
-          Vec3 dwThis = body.deltaWInitial();
-          Vec3 dwOther(0, 0, 0);
-          if (!otherStatic) {
-            uint32_t otherIdx = isA ? jnt.bodyB : jnt.bodyA;
-            dwOther = bodies[otherIdx].deltaWInitial();
-          }
-          // Relative angular displacement: B - A
-          Vec3 relDW = isA ? (dwOther - dwThis) : (dwThis - dwOther);
-          Vec3 worldAngTarget =
-              jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
-
-          bool slerpDrive = (jnt.driveFlags & 0x20) != 0;
-          if (slerpDrive) {
-            // SLERP: same constraint on all 3 axes
-            float damping = jnt.angularDriveDamping.z;
-            if (damping > 0.0f) {
-              float rho_drive = damping / dt2;
-              for (int k = 0; k < 3; k++) {
-                float C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
-                float lam = (&jnt.lambdaDriveAngular.x)[k];
-                float sign = isA ? -1.0f : 1.0f;
-                float f = sign * (rho_drive * C + lam);
-                (&rhs.v[3])[k] += f;
-                lhs.m[3 + k][3 + k] += rho_drive;
-              }
-            }
-          } else {
-            // Per-axis: TWIST(0x10)->X, SWING1(0x40)->Y, SWING2(0x80)->Z
-            struct AxisInfo {
-              uint32_t bit;
-              int dampIdx;
-              Vec3 localAxis;
-            };
-            AxisInfo axisInfos[3] = {
-                {0x10, 0, Vec3(1, 0, 0)},
-                {0x40, 1, Vec3(0, 1, 0)},
-                {0x80, 2, Vec3(0, 0, 1)},
-            };
-            for (int a = 0; a < 3; a++) {
-              if ((jnt.driveFlags & axisInfos[a].bit) == 0)
-                continue;
-              float damping =
-                  (&jnt.angularDriveDamping.x)[axisInfos[a].dampIdx];
-              if (damping <= 0.0f)
-                continue;
-
-              float rho_drive = damping / dt2;
-              Vec3 wAxis = jointFrameA.rotate(axisInfos[a].localAxis);
-              float C = relDW.dot(wAxis) - worldAngTarget.dot(wAxis);
-              float lam = (&jnt.lambdaDriveAngular.x)[axisInfos[a].dampIdx];
-              float sign = isA ? -1.0f : 1.0f;
-              float f = sign * (rho_drive * C + lam);
-
-              for (int k = 0; k < 3; k++) {
-                (&rhs.v[3])[k] += f * (&wAxis.x)[k];
-                for (int l = 0; l < 3; l++) {
-                  lhs.m[3 + k][3 + l] +=
-                      rho_drive * (&wAxis.x)[k] * (&wAxis.x)[l];
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // ======================================================================
-      // Gear Joint contributions (angular-only velocity-level constraint)
-      //
-      // Constraint:  C = deltaW_A · axisA * ratio + deltaW_B · axisB = 0
-      // where deltaW = 2*(q * q_initial^-1).xyz  (frame-step angular
-      // displacement)
-      //
-      // For body being processed:
-      //   isA: Jacobian J_ang = worldAxisA * gearRatio  (sign +1)
-      //   isB: Jacobian J_ang = worldAxisB              (sign +1, but C has
-      //        opposite sign when seen from B's Lagrangian)
-      //
-      // Note: the gear joint only constrains angular DOFs.  No position row.
-      // ======================================================================
+      // ---- Gear Joint contributions ----
       for (auto &gnt : gearJoints) {
         bool isA = (gnt.bodyA == bi);
         bool isB = (gnt.bodyB == bi);
@@ -911,63 +544,43 @@ void Solver::step(float dt_) {
         Body &bA = bodies[gnt.bodyA];
         Body &bB = bodies[gnt.bodyB];
         if (bA.mass <= 0.f || bB.mass <= 0.f)
-          continue; // gear needs two dynamic bodies
+          continue;
 
-        // World-space rotation axes
         Vec3 worldAxisA = bA.rotation.rotate(gnt.axisA);
         Vec3 worldAxisB = bB.rotation.rotate(gnt.axisB);
-
-        // Velocity-level constraint value: delta angular rotation this step
-        Vec3 dwA = bA.deltaWInitial(); // 2*(q*q_initial^-1).xyz
+        Vec3 dwA = bA.deltaWInitial();
         Vec3 dwB = bB.deltaWInitial();
         float C = dwA.dot(worldAxisA) * gnt.gearRatio + dwB.dot(worldAxisB);
 
-        // Auto-boost penalty so it dominates body inertia
         float effectiveRho = std::max(gnt.rho, body.mass / dt2);
-
-        // Jacobian J_ang for THIS body (angular block only, no linear part)
-        // ∂C/∂(deltaW_A) = worldAxisA * ratio
-        // ∂C/∂(deltaW_B) = worldAxisB
         Vec3 J_ang = isA ? (worldAxisA * gnt.gearRatio) : worldAxisB;
         float f = effectiveRho * C + gnt.lambdaGear;
 
-        // Accumulate into angular 3×3 block of the 6×6 system
-        // LHS: H_ang += pen * J_ang ⊗ J_ang
         for (int r = 0; r < 3; r++)
           for (int c2 = 0; c2 < 3; c2++)
             lhs.m[3 + r][3 + c2] +=
                 effectiveRho * (&J_ang.x)[r] * (&J_ang.x)[c2];
-
-        // RHS: g_ang += J_ang * f
         for (int r = 0; r < 3; r++)
           rhs.v[3 + r] += f * (&J_ang.x)[r];
       }
 
-      // Solve and update
-      // Solve and apply
-      bool solve3x3ForBody = use3x3Solve && !bodyTouchesPrismatic;
+      // ---- Solve and apply ----
+      bool solve3x3ForBody = use3x3Solve && !bodyNeedsFull6x6;
       if (!solve3x3ForBody) {
-        // ---- 6x6 fully-coupled LDLT ----
         Vec6 delta = solveLDLT(lhs, rhs);
-
         body.position -= delta.linear();
         Quat dq(0, delta[3], delta[4], delta[5]);
         body.rotation =
             (body.rotation - dq * body.rotation * 0.5f).normalized();
       } else {
-        // ---- Decoupled 3x3 (same accumulation as 6x6, simpler solve) ----
-        //
-        // Same contacts + joints are accumulated into the 6x6 LHS/RHS.
-        // We extract the diagonal 3x3 blocks and solve independently.
         Mat33 Alin, Aang;
         Vec3 rhsLin(rhs[0], rhs[1], rhs[2]);
         Vec3 rhsAng(rhs[3], rhs[4], rhs[5]);
-        for (int r = 0; r < 3; r++) {
+        for (int r = 0; r < 3; r++)
           for (int c = 0; c < 3; c++) {
             Alin.m[r][c] = lhs.m[r][c];
             Aang.m[r][c] = lhs.m[3 + r][3 + c];
           }
-        }
         Vec3 deltaPos = Alin.inverse() * rhsLin;
         Vec3 deltaTheta = Aang.inverse() * rhsAng;
         body.position -= deltaPos;
@@ -977,331 +590,136 @@ void Solver::step(float dt_) {
       }
     }
 
-    // Dual update (all constraints)
+    // ---- Dual update ----
+    // Contact dual
     for (auto &c : contacts) {
       computeConstraint(c);
       for (int i = 0; i < 3; i++) {
         float oldLambda = c.lambda[i];
         float rawLambda = c.penalty[i] * c.C[i] + oldLambda;
         c.lambda[i] = std::max(c.fmin[i], std::min(c.fmax[i], rawLambda));
-
-        // Penalty growth
-        if (c.lambda[i] < c.fmax[i] && c.lambda[i] > c.fmin[i]) {
+        if (c.lambda[i] < c.fmax[i] && c.lambda[i] > c.fmin[i])
           c.penalty[i] =
               std::min(c.penalty[i] + beta * fabsf(c.C[i]), PENALTY_MAX);
-        }
       }
     }
 
-    // 3b. Joint dual update (ONCE per frame, OUTSIDE iteration loop)
-    //
-    // Three mechanisms ensure stable AL convergence for joints:
-    //
-    // (A) Auto-boosted primal penalty (effectiveRho):
-    //     In the body loop, rho_primal = max(jnt.rho, body.mass/h^2).
-    //     Ensures penalty is always >= body inertia for good primal
-    //     convergence. Without this, heavy bodies (M/h^2 >> rho) barely
-    //     respond to penalty, leaving large C that destabilizes the dual.
-    //
-    // (B) ADMM-safe dual step (rhoDual):
-    //     rhoDual = min(M/h^2, rho^2/(rho+M/h^2))
-    //     - Light bodies (M/h^2 << rho): rhoDual = M/h^2 (conservative)
-    //     - Heavy bodies (M/h^2 >> rho): rhoDual = rho^2/(rho+M/h^2)
-    //     This prevents dual overshoot for both regimes.
-    //
-    // (C) Lambda decay (leaky integrator):
-    //     lambda_new = decay * lambda + rhoDual * C
-    //     With decay=0.99, oscillation modes are exponentially damped.
-    //     Steady-state residual: C_ss ~ (1-decay)/(1-decay+rhoDual/rho_eff)
-    //     ~1-3% for typical configurations.
-    // =====================================================================
+    // Joint dual (unified D6)
     {
-      auto getBodyMass = [&](uint32_t idx) -> float {
-        return (idx == UINT32_MAX || idx >= (uint32_t)bodies.size())
-                   ? 0.0f
-                   : bodies[idx].mass;
-      };
-      auto computeRhoDual = [&](uint32_t idxA, uint32_t idxB,
-                                float rho) -> float {
-        float mA = getBodyMass(idxA);
-        float mB = getBodyMass(idxB);
-        // Use smaller dynamic mass (bottleneck for convergence)
-        float mEff;
-        if (mA <= 0.0f)
-          mEff = mB;
-        else if (mB <= 0.0f)
-          mEff = mA;
-        else
-          mEff = std::min(mA, mB);
-        float Mh2 = mEff / dt2;
-        // Two regimes:
-        //   Light bodies (Mh2 << rho): penalty dominates, primal converges
-        //     well, use rhoDual = Mh2 (conservative, avoids mesh instability)
-        //   Heavy bodies (Mh2 >> rho): penalty weak, need dual to compensate
-        //     use rhoDual = rho^2/(rho+Mh2) (ADMM-safe inexact step)
-        // Taking min covers both:
-        float admm_step = rho * rho / (rho + Mh2);
-        return std::min(Mh2, admm_step);
-      };
-
-      // Leaky integrator: lambda = decay * lambda + rhoDual * C
-      // decay < 1 prevents lambda overshoot/oscillation while still
-      // allowing lambda to converge to ~correct steady-state force.
-      // Residual: C_ss = F_ss * (1-decay) / (rho*(1-decay) + rhoDual*decay)
-      // With decay=0.99, residual is ~1-3% of joint length.
       const float lambdaDecay = 0.99f;
-
-      for (auto &jnt : sphericalJoints) {
-        float rhoDual = computeRhoDual(jnt.bodyA, jnt.bodyB, jnt.rho);
-        bool aStatic = (jnt.bodyA == UINT32_MAX);
-        bool bStatic = (jnt.bodyB == UINT32_MAX);
-        Vec3 wA = aStatic ? jnt.anchorA
-                          : bodies[jnt.bodyA].position +
-                                bodies[jnt.bodyA].rotation.rotate(jnt.anchorA);
-        Vec3 wB = bStatic ? jnt.anchorB
-                          : bodies[jnt.bodyB].position +
-                                bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
-        jnt.lambda = jnt.lambda * lambdaDecay + (wA - wB) * rhoDual;
-
-        if (jnt.coneAngleLimit > 0.0f) {
-          Quat rotA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
-          Quat rotB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
-          float coneViol = jnt.computeConeViolation(rotA, rotB);
-
-          jnt.coneLambda -= coneViol * rhoDual;
-          jnt.coneLambda = std::max(-1e9f, std::min(0.0f, jnt.coneLambda));
-        }
-      }
-
-      for (auto &jnt : fixedJoints) {
-        float rhoDual = computeRhoDual(jnt.bodyA, jnt.bodyB, jnt.rho);
-        bool aStatic = (jnt.bodyA == UINT32_MAX);
-        bool bStatic = (jnt.bodyB == UINT32_MAX);
-        Vec3 wA = aStatic ? jnt.anchorA
-                          : bodies[jnt.bodyA].position +
-                                bodies[jnt.bodyA].rotation.rotate(jnt.anchorA);
-        Vec3 wB = bStatic ? jnt.anchorB
-                          : bodies[jnt.bodyB].position +
-                                bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
-        Quat rotA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
-        Quat rotB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
-        jnt.lambdaPos = jnt.lambdaPos * lambdaDecay + (wA - wB) * rhoDual;
-        jnt.lambdaRot = jnt.lambdaRot * lambdaDecay +
-                        jnt.computeRotationViolation(rotA, rotB) * rhoDual;
-      }
-
-      for (auto &jnt : prismaticJoints) {
-        float rhoDual = computeRhoDual(jnt.bodyA, jnt.bodyB, jnt.rho);
-        bool aStatic = (jnt.bodyA == UINT32_MAX);
-        bool bStatic = (jnt.bodyB == UINT32_MAX);
-
-        Vec3 wA = aStatic ? jnt.anchorA
-                          : bodies[jnt.bodyA].position +
-                                bodies[jnt.bodyA].rotation.rotate(jnt.anchorA);
-        Vec3 wB = bStatic ? jnt.anchorB
-                          : bodies[jnt.bodyB].position +
-                                bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
-        Vec3 C_lin = wA - wB;
-
-        Quat rotA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
-        Quat rotB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
-
-        Vec3 worldAxisA = rotA.rotate(jnt.axisA);
-        // Remove slide-axis component for position lambda
-        C_lin -= worldAxisA * C_lin.dot(worldAxisA);
-        jnt.lambdaPos = jnt.lambdaPos * lambdaDecay + C_lin * rhoDual;
-
-        Quat target = rotA * jnt.relativeRotation;
-        Quat err = target * rotB.conjugate();
-        if (err.w < 0)
-          err = err * (-1.f);
-        Vec3 C_ang = Vec3(err.x, err.y, err.z) * 2.0f;
-
-        jnt.lambdaRot = jnt.lambdaRot * lambdaDecay + C_ang * rhoDual;
-
-        if (jnt.limitEnabled) {
-          float oldLimitLambda = jnt.limitLambda;
-          float dist = (wB - wA).dot(worldAxisA);
-          float limitViol = 0.0f;
-          if (dist < jnt.limitLower)
-            limitViol = dist - jnt.limitLower;
-          else if (dist > jnt.limitUpper)
-            limitViol = dist - jnt.limitUpper;
-
-          float newLimitLambda = oldLimitLambda * lambdaDecay + limitViol * rhoDual;
-          if (jnt.limitLower < jnt.limitUpper) {
-            float signRef =
-                (std::fabs(limitViol) > 1e-6f)
-                    ? limitViol
-                    : ((std::fabs(oldLimitLambda) > 1e-6f) ? oldLimitLambda : 0.0f);
-            if (signRef > 0.0f)
-              newLimitLambda = std::max(0.0f, newLimitLambda);
-            else if (signRef < 0.0f)
-              newLimitLambda = std::min(0.0f, newLimitLambda);
-            else
-              newLimitLambda = 0.0f;
-          }
-          jnt.limitLambda = newLimitLambda;
-        }
-
-        if (jnt.driveEnabled && jnt.driveDamping > 0.0f) {
-          Vec3 dxA = aStatic ? Vec3()
-                             : bodies[jnt.bodyA].position -
-                                   bodies[jnt.bodyA].initialPosition;
-          Vec3 dxB = bStatic ? Vec3()
-                             : bodies[jnt.bodyB].position -
-                                   bodies[jnt.bodyB].initialPosition;
-          Vec3 relDisp = dxB - dxA;
-          float C_drive =
-              relDisp.dot(worldAxisA) - jnt.driveTargetVelocity * dt;
-
-          float rhoDualDrive = std::min(jnt.driveDamping / dt2, rhoDual);
-          jnt.driveLambda =
-              jnt.driveLambda * lambdaDecay + rhoDualDrive * C_drive;
-        }
-      }
-
       for (auto &jnt : d6Joints) {
-        float rhoDual = computeRhoDual(jnt.bodyA, jnt.bodyB, jnt.rho);
-        bool aStatic = (jnt.bodyA == UINT32_MAX);
-        bool bStatic = (jnt.bodyB == UINT32_MAX);
-        Vec3 wA = aStatic ? jnt.anchorA
-                          : bodies[jnt.bodyA].position +
-                                bodies[jnt.bodyA].rotation.rotate(jnt.anchorA);
-        Vec3 wB = bStatic ? jnt.anchorB
-                          : bodies[jnt.bodyB].position +
-                                bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
-        Vec3 posViol = wA - wB;
-        for (int axis = 0; axis < 3; axis++) {
-          if (jnt.getLinearMotion(axis) != 0)
-            continue;
-          (&jnt.lambdaLinear.x)[axis] =
-              (&jnt.lambdaLinear.x)[axis] * lambdaDecay +
-              (&posViol.x)[axis] * rhoDual;
-        }
-
-        // --- Drive dual update ---
-        // Joint frame A in world space
-        Quat jointFrameA = aStatic
-                               ? jnt.localFrameA
-                               : bodies[jnt.bodyA].rotation * jnt.localFrameA;
-        jointFrameA = jointFrameA.normalized();
-
-        // Linear velocity drive dual
-        if (jnt.driveFlags & 0x07) {
-          Vec3 dxA = aStatic ? Vec3()
-                             : bodies[jnt.bodyA].position -
-                                   bodies[jnt.bodyA].initialPosition;
-          Vec3 dxB = bStatic ? Vec3()
-                             : bodies[jnt.bodyB].position -
-                                   bodies[jnt.bodyB].initialPosition;
-          Vec3 relDisp = dxB - dxA;
-          Vec3 worldTarget = jointFrameA.rotate(jnt.driveLinearVelocity) * dt;
-
-          Vec3 localAxes[3] = {Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1)};
-          for (int a = 0; a < 3; a++) {
-            if ((jnt.driveFlags & (1 << a)) == 0)
-              continue;
-            float damping = (&jnt.linearDriveDamping.x)[a];
-            if (damping <= 0.0f)
-              continue;
-            Vec3 wAxis = jointFrameA.rotate(localAxes[a]);
-            float C = relDisp.dot(wAxis) - worldTarget.dot(wAxis);
-            float rhoDualDrive = std::min(damping / dt2, rhoDual);
-            (&jnt.lambdaDriveLinear.x)[a] =
-                (&jnt.lambdaDriveLinear.x)[a] * lambdaDecay + rhoDualDrive * C;
-          }
-        }
-
-        // Angular velocity drive dual
-        if (jnt.driveFlags & 0xF0) {
-          auto getDeltaW = [&](uint32_t idx) -> Vec3 {
-            if (idx == UINT32_MAX || idx >= (uint32_t)bodies.size())
-              return Vec3();
-            return bodies[idx].deltaWInitial();
-          };
-          Vec3 dwA = getDeltaW(jnt.bodyA);
-          Vec3 dwB = getDeltaW(jnt.bodyB);
-          Vec3 relDW = dwB - dwA;
-          Vec3 worldAngTarget =
-              jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
-
-          bool slerpDrive = (jnt.driveFlags & 0x20) != 0;
-          if (slerpDrive) {
-            float damping = jnt.angularDriveDamping.z;
-            if (damping > 0.0f) {
-              float rhoDualDrive = std::min(damping / dt2, rhoDual);
-              for (int k = 0; k < 3; k++) {
-                float C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
-                (&jnt.lambdaDriveAngular.x)[k] =
-                    (&jnt.lambdaDriveAngular.x)[k] * lambdaDecay +
-                    rhoDualDrive * C;
-              }
-            }
-          } else {
-            struct AxisInfo {
-              uint32_t bit;
-              int idx;
-              Vec3 localAxis;
-            };
-            AxisInfo axes[3] = {
-                {0x10, 0, Vec3(1, 0, 0)},
-                {0x40, 1, Vec3(0, 1, 0)},
-                {0x80, 2, Vec3(0, 0, 1)},
-            };
-            for (int a = 0; a < 3; a++) {
-              if ((jnt.driveFlags & axes[a].bit) == 0)
-                continue;
-              float damping = (&jnt.angularDriveDamping.x)[axes[a].idx];
-              if (damping <= 0.0f)
-                continue;
-              Vec3 wAxis = jointFrameA.rotate(axes[a].localAxis);
-              float C = relDW.dot(wAxis) - worldAngTarget.dot(wAxis);
-              float rhoDualDrive = std::min(damping / dt2, rhoDual);
-              (&jnt.lambdaDriveAngular.x)[axes[a].idx] =
-                  (&jnt.lambdaDriveAngular.x)[axes[a].idx] * lambdaDecay +
-                  rhoDualDrive * C;
-            }
-          }
-        }
+        updateD6Dual(jnt, bodies, dt, lambdaDecay);
       }
     }
-  }
 
-  // Gear joint dual update (ADMM-safe leaky integrator, same pattern as
-  // spherical)
-  {
-    auto getBodyMass = [&](uint32_t idx) -> float {
-      return (idx == UINT32_MAX || idx >= (uint32_t)bodies.size())
-                 ? 0.0f
-                 : bodies[idx].mass;
-    };
-    const float lambdaDecay = 0.99f;
+    // Gear joint dual (inside iteration loop, matching PhysX)
+    {
+      const float lambdaDecay = 0.99f;
+      for (auto &gnt : gearJoints) {
+        if (gnt.bodyA >= (uint32_t)bodies.size() ||
+            gnt.bodyB >= (uint32_t)bodies.size())
+          continue;
+        Body &bA = bodies[gnt.bodyA];
+        Body &bB = bodies[gnt.bodyB];
+        if (bA.mass <= 0.f || bB.mass <= 0.f)
+          continue;
 
-    for (auto &gnt : gearJoints) {
-      if (gnt.bodyA >= (uint32_t)bodies.size() ||
-          gnt.bodyB >= (uint32_t)bodies.size())
+        float mA = bA.mass, mB = bB.mass;
+        float mEff2 = (mA > 0.f && mB > 0.f) ? std::min(mA, mB) : std::max(mA, mB);
+        float Mh2 = mEff2 / dt2;
+        float admm_step = gnt.rho * gnt.rho / (gnt.rho + Mh2);
+        float rhoDual = std::min(Mh2, admm_step);
+
+        Vec3 worldAxisA = bA.rotation.rotate(gnt.axisA);
+        Vec3 worldAxisB = bB.rotation.rotate(gnt.axisB);
+        Vec3 dwA = bA.deltaWInitial();
+        Vec3 dwB = bB.deltaWInitial();
+        float C = dwA.dot(worldAxisA) * gnt.gearRatio + dwB.dot(worldAxisB);
+
+        gnt.lambdaGear = gnt.lambdaGear * lambdaDecay + rhoDual * C;
+      }
+    }
+  } // end iteration loop
+
+  // =========================================================================
+  // Post-solve motor drives (matches PhysX Stage 5b)
+  //
+  // After all constraint iterations converge, directly apply clamped torque
+  // to bodies. This avoids coupling the motor with position/gear constraints
+  // in the Hessian which causes ADMM oscillation.
+  // =========================================================================
+  for (auto &jnt : d6Joints) {
+    if (!jnt.motorEnabled || jnt.motorMaxForce <= 0.0f)
+      continue;
+
+    bool isAStatic = (jnt.bodyA == UINT32_MAX || jnt.bodyA >= (uint32_t)bodies.size());
+    bool isBStatic = (jnt.bodyB == UINT32_MAX || jnt.bodyB >= (uint32_t)bodies.size());
+    if (isAStatic && isBStatic)
+      continue;
+
+    // Twist axis = X-axis of localFrameA in world space
+    Quat rotA_m = isAStatic ? Quat() : bodies[jnt.bodyA].rotation;
+    Vec3 worldAxis = (rotA_m * jnt.localFrameA).rotate(Vec3(1, 0, 0));
+    float axLen = worldAxis.length();
+    if (axLen > 1e-6f) worldAxis = worldAxis * (1.0f / axLen);
+
+    // Apply motor to body B
+    if (!isBStatic) {
+      Body &bodyB = bodies[jnt.bodyB];
+
+      // Current angular velocity from position-level solver
+      Quat deltaQB = bodyB.rotation * bodyB.initialRotation.conjugate();
+      if (deltaQB.w < 0.0f) deltaQB = deltaQB * (-1.0f);
+      Vec3 currentAngVel = Vec3(deltaQB.x, deltaQB.y, deltaQB.z) * (2.0f * invDt);
+      float currentAxisVel = currentAngVel.dot(worldAxis);
+
+      float velocityError = jnt.motorTargetVelocity - currentAxisVel;
+
+      // Effective inertia along twist axis
+      Vec3 invITimesAxis = bodyB.invInertiaWorld * worldAxis;
+      float effectiveInvInertia = worldAxis.dot(invITimesAxis);
+      if (effectiveInvInertia < 1e-10f)
         continue;
-      Body &bA = bodies[gnt.bodyA];
-      Body &bB = bodies[gnt.bodyB];
-      if (bA.mass <= 0.f || bB.mass <= 0.f)
-        continue;
 
-      float mA = getBodyMass(gnt.bodyA);
-      float mB = getBodyMass(gnt.bodyB);
-      float mEff = (mA > 0.f && mB > 0.f) ? std::min(mA, mB) : std::max(mA, mB);
-      float Mh2 = mEff / dt2;
-      float admm_step = gnt.rho * gnt.rho / (gnt.rho + Mh2);
-      float rhoDual = std::min(Mh2, admm_step);
+      float effectiveInertia = 1.0f / effectiveInvInertia;
+      float requiredTorque = effectiveInertia * velocityError * invDt;
+      float clampedTorque = std::max(-jnt.motorMaxForce,
+                                     std::min(jnt.motorMaxForce, requiredTorque));
+      float angularAccel = clampedTorque * effectiveInvInertia;
+      float deltaAngle = angularAccel * dt2;
 
-      // Recompute constraint violation from current body state
-      Vec3 worldAxisA = bA.rotation.rotate(gnt.axisA);
-      Vec3 worldAxisB = bB.rotation.rotate(gnt.axisB);
-      Vec3 dwA = bA.deltaWInitial();
-      Vec3 dwB = bB.deltaWInitial();
-      float C = dwA.dot(worldAxisA) * gnt.gearRatio + dwB.dot(worldAxisB);
+      // Apply rotation to body B (axis-angle -> quaternion)
+      float ha = deltaAngle * 0.5f;
+      float sinHa = sinf(ha), cosHa = cosf(ha);
+      Quat dRot(cosHa, worldAxis.x * sinHa, worldAxis.y * sinHa,
+                worldAxis.z * sinHa);
+      bodyB.rotation = (dRot * bodyB.rotation).normalized();
+    }
 
-      gnt.lambdaGear = gnt.lambdaGear * lambdaDecay + rhoDual * C;
+    // Apply opposite rotation to body A if dynamic
+    if (!isAStatic) {
+      Body &bodyA = bodies[jnt.bodyA];
+
+      Quat deltaQA = bodyA.rotation * bodyA.initialRotation.conjugate();
+      if (deltaQA.w < 0.0f) deltaQA = deltaQA * (-1.0f);
+      Vec3 currentAngVelA = Vec3(deltaQA.x, deltaQA.y, deltaQA.z) * (2.0f * invDt);
+      float currentAxisVelA = currentAngVelA.dot(worldAxis);
+      float velocityErrorA = -jnt.motorTargetVelocity - currentAxisVelA;
+
+      Vec3 invITimesAxisA = bodyA.invInertiaWorld * worldAxis;
+      float effectiveInvInertiaA = worldAxis.dot(invITimesAxisA);
+      if (effectiveInvInertiaA > 1e-10f) {
+        float effectiveInertiaA = 1.0f / effectiveInvInertiaA;
+        float requiredTorqueA = effectiveInertiaA * velocityErrorA * invDt;
+        float clampedTorqueA = std::max(-jnt.motorMaxForce,
+                                        std::min(jnt.motorMaxForce, requiredTorqueA));
+        float deltaAngleA = clampedTorqueA * effectiveInvInertiaA * dt2;
+        float haA = deltaAngleA * 0.5f;
+        float sinHaA = sinf(haA), cosHaA = cosf(haA);
+        Quat dRotA(cosHaA, worldAxis.x * sinHaA, worldAxis.y * sinHaA,
+                   worldAxis.z * sinHaA);
+        bodyA.rotation = (dRotA * bodyA.rotation).normalized();
+      }
     }
   }
 
@@ -1316,8 +734,6 @@ void Solver::step(float dt_) {
       dq = -dq;
     body.angularVelocity = Vec3(dq.x, dq.y, dq.z) * (2.0f * invDt);
   }
-
-  // (GS velocity motor removed — drives are now pure AVBD AL constraints)
 }
 
 } // namespace AvbdRef

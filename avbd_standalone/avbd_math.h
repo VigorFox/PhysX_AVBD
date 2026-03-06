@@ -74,6 +74,38 @@ struct Quat {
   }
 };
 
+/// Convert a rotation matrix given by 3 column vectors to a quaternion (Shepperd method).
+inline Quat quatFromColumns(const Vec3 &c0, const Vec3 &c1, const Vec3 &c2) {
+  float trace = c0.x + c1.y + c2.z;
+  Quat q;
+  if (trace > 0.0f) {
+    float s = sqrtf(trace + 1.0f) * 2.0f;
+    q.w = 0.25f * s;
+    q.x = (c1.z - c2.y) / s;
+    q.y = (c2.x - c0.z) / s;
+    q.z = (c0.y - c1.x) / s;
+  } else if (c0.x > c1.y && c0.x > c2.z) {
+    float s = sqrtf(1.0f + c0.x - c1.y - c2.z) * 2.0f;
+    q.w = (c1.z - c2.y) / s;
+    q.x = 0.25f * s;
+    q.y = (c0.y + c1.x) / s;
+    q.z = (c2.x + c0.z) / s;
+  } else if (c1.y > c2.z) {
+    float s = sqrtf(1.0f + c1.y - c0.x - c2.z) * 2.0f;
+    q.w = (c2.x - c0.z) / s;
+    q.x = (c0.y + c1.x) / s;
+    q.y = 0.25f * s;
+    q.z = (c1.z + c2.y) / s;
+  } else {
+    float s = sqrtf(1.0f + c2.z - c0.x - c1.y) * 2.0f;
+    q.w = (c0.y - c1.x) / s;
+    q.x = (c2.x + c0.z) / s;
+    q.y = (c1.z + c2.y) / s;
+    q.z = 0.25f * s;
+  }
+  return q;
+}
+
 struct Mat33 {
   float m[3][3]; // m[row][col]
   Mat33() {

@@ -922,3 +922,317 @@ bool test50_prismaticChain_3x3() {
         "Chain fell too far (3x3): y=%.2f", solver.bodies[ids[0]].position.y);
   PASS("Prismatic chain 3x3 stable");
 }
+
+// ============================================================================
+// Revolute (Hinge) Joint Tests
+// ============================================================================
+
+// Test 51: Basic revolute chain — bodies connected by hinges hanging from ceiling
+bool test51_revoluteJoint_basic() {
+  printf("\n--- Test 51: Revolute Joint Basic Chain ---\n");
+  Solver solver;
+  solver.gravity = {0, -9.8f, 0};
+  solver.iterations = 10;
+
+  const int N = 5;
+  Vec3 halfExt(2.0f, 0.5f, 0.5f);
+  float separation = 4.0f;
+  uint32_t ids[N];
+  for (int i = 0; i < N; i++)
+    ids[i] = solver.addBody({separation / 2.0f + i * separation, 20.0f, 0.0f},
+                            Quat(), halfExt, 1.0f);
+
+  Vec3 offset(separation / 2.0f, 0, 0);
+  // Hinge axis = Z axis (bodies swing in X-Y plane)
+  Vec3 hingeAxis(0, 0, 1);
+  solver.addRevoluteJoint(UINT32_MAX, ids[0], {0, 20, 0}, {-offset.x, 0, 0},
+                          hingeAxis, hingeAxis);
+  for (int i = 0; i < N - 1; i++)
+    solver.addRevoluteJoint(ids[i], ids[i + 1], {offset.x, 0, 0},
+                            {-offset.x, 0, 0}, hingeAxis, hingeAxis);
+
+  bool exploded = false;
+  for (int frame = 0; frame < 600; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+    for (int i = 0; i < N; i++) {
+      if (fabsf(solver.bodies[ids[i]].position.y) > 100.0f)
+        exploded = true;
+    }
+  }
+
+  printf("  body[0] y=%.2f, body[4] y=%.2f\n",
+         solver.bodies[ids[0]].position.y,
+         solver.bodies[ids[N - 1]].position.y);
+  CHECK(!exploded, "Revolute basic chain exploded!");
+  // Chain should hang — first body higher than last
+  CHECK(solver.bodies[ids[0]].position.y > solver.bodies[ids[N - 1]].position.y,
+        "Chain should hang downward");
+  PASS("Revolute basic chain stable");
+}
+
+// Test 52: Revolute joint with angle limits
+bool test52_revoluteJoint_limit() {
+  printf("\n--- Test 52: Revolute Joint with Angle Limits ---\n");
+  Solver solver;
+  solver.gravity = {0, -9.8f, 0};
+  solver.iterations = 10;
+
+  // Two bodies connected by a hinge with ±45° limit
+  uint32_t bodyA = solver.addBody({0, 10, 0}, Quat(), {1, 1, 1}, 10.0f);
+  uint32_t bodyB = solver.addBody({3, 10, 0}, Quat(), {1, 1, 1}, 10.0f);
+
+  Vec3 hingeAxis(1, 0, 0);
+  solver.addRevoluteJoint(UINT32_MAX, bodyA, {0, 12, 0}, {0, 1, 0},
+                          hingeAxis, hingeAxis);
+  solver.addRevoluteJoint(bodyA, bodyB, {1.5f, 0, 0}, {-1.5f, 0, 0},
+                          hingeAxis, hingeAxis);
+  float limitAngle = 3.14159f / 4.0f; // 45 degrees
+  solver.setRevoluteJointLimit(1, -limitAngle, limitAngle);
+
+  bool exploded = false;
+  for (int frame = 0; frame < 600; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+    if (fabsf(solver.bodies[bodyA].position.y) > 100.0f ||
+        fabsf(solver.bodies[bodyB].position.y) > 100.0f)
+      exploded = true;
+  }
+
+  // Compute final angle between the bodies
+  Quat rotA = solver.bodies[bodyA].rotation;
+  Quat rotB = solver.bodies[bodyB].rotation;
+  float finalAngle = solver.d6Joints[1].computeHingeAngle(rotA, rotB);
+
+  printf("  bodyA y=%.2f, bodyB y=%.2f, angle=%.2f deg\n",
+         solver.bodies[bodyA].position.y, solver.bodies[bodyB].position.y,
+         finalAngle * 180.0f / 3.14159f);
+  CHECK(!exploded, "Revolute limit chain exploded!");
+  // Angle should be within limit (with some tolerance)
+  CHECK(finalAngle >= -limitAngle - 0.15f && finalAngle <= limitAngle + 0.15f,
+        "Angle %.2f deg outside limit +/-45 deg", finalAngle * 180.0f / 3.14159f);
+  PASS("Revolute joint with limits stable");
+}
+
+// Test 53: Revolute joint with motor drive
+bool test53_revoluteJoint_drive() {
+  printf("\n--- Test 53: Revolute Joint Motor Drive ---\n");
+  Solver solver;
+  solver.gravity = {0, -9.8f, 0};
+  solver.iterations = 10;
+
+  // Single body on a hinge axis with a motor
+  uint32_t body = solver.addBody({2, 15, 0}, Quat(), {2, 0.5f, 0.5f}, 1.0f);
+
+  Vec3 hingeAxis(0, 0, 1);
+  solver.addRevoluteJoint(UINT32_MAX, body, {0, 15, 0}, {-2, 0, 0},
+                          hingeAxis, hingeAxis);
+  // Drive at 1 rad/s
+  solver.setRevoluteJointDrive(0, 1.0f, 500.0f);
+
+  float prevAngle = 0.0f;
+  bool isRotating = false;
+  for (int frame = 0; frame < 300; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+
+    Quat rotB = solver.bodies[body].rotation;
+    float angle = solver.d6Joints[0].computeHingeAngle(Quat(), rotB);
+    if (frame > 60 && fabsf(angle - prevAngle) > 0.001f)
+      isRotating = true;
+    prevAngle = angle;
+  }
+
+  printf("  final angle=%.2f deg, rotating=%s\n",
+         prevAngle * 180.0f / 3.14159f, isRotating ? "yes" : "no");
+  CHECK(isRotating, "Motor should cause rotation");
+  PASS("Revolute motor drive working");
+}
+
+// Test 54: Axis alignment — verify hinge constrains to 1 rotation DOF
+bool test54_revoluteJoint_axisAlign() {
+  printf("\n--- Test 54: Revolute Joint Axis Alignment ---\n");
+  Solver solver;
+  solver.gravity = {0, -9.8f, 0};
+  solver.iterations = 15;
+
+  // Arm hanging from a Z-axis hinge. After settling, the arm should only
+  // rotate around Z (i.e., angular velocity around X and Y should be ~zero).
+  uint32_t arm =
+      solver.addBody({3, 15, 0}, Quat(), {3.0f, 0.3f, 0.3f}, 1.0f);
+  Vec3 hingeAxis(0, 0, 1);
+  solver.addRevoluteJoint(UINT32_MAX, arm, {0, 15, 0}, {-3, 0, 0}, hingeAxis,
+                          hingeAxis);
+
+  for (int frame = 0; frame < 600; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+  }
+
+  Vec3 worldAxisA = Quat().rotate(hingeAxis); // static body => identity
+  Vec3 worldAxisB = solver.bodies[arm].rotation.rotate(hingeAxis);
+  float axisDot = worldAxisA.dot(worldAxisB);
+
+  printf("  axis alignment dot = %.6f (should be ~1.0)\n", axisDot);
+  CHECK(axisDot > 0.95f, "Axes not aligned: dot=%.4f", axisDot);
+  PASS("Revolute axis alignment correct");
+}
+
+// Test 55: Reproduce/diagnose revolute tail jitter in near-rest hanging chain
+bool test55_revoluteJoint_jitterRepro() {
+  printf("\n--- Test 55: Revolute Tail Jitter Reproduction ---\n");
+  Solver solver;
+  solver.gravity = {0, -9.8f, 0};
+  solver.iterations = 10;
+
+  const int N = 5;
+  Vec3 halfExt(2.0f, 0.5f, 0.5f);
+  float separation = 4.0f;
+  uint32_t ids[N];
+  for (int i = 0; i < N; i++)
+    ids[i] = solver.addBody({separation / 2.0f + i * separation, 20.0f, 0.0f},
+                            Quat(), halfExt, 1.0f);
+
+  Vec3 hingeAxis(0, 0, 1);
+  Vec3 offset(separation / 2.0f, 0, 0);
+
+  solver.addRevoluteJoint(UINT32_MAX, ids[0], {0, 20, 0}, {-offset.x, 0, 0},
+                          hingeAxis, hingeAxis);
+  for (int i = 0; i < N - 1; i++)
+    solver.addRevoluteJoint(ids[i], ids[i + 1], {offset.x, 0, 0},
+                            {-offset.x, 0, 0}, hingeAxis, hingeAxis);
+
+  const float limit = 3.14159f / 4.0f;
+  for (uint32_t j = 0; j < solver.d6Joints.size(); j++)
+    solver.setRevoluteJointLimit(j, -limit, limit);
+
+  float maxTailLateral = 0.0f;
+  float sumW4Early = 0.0f, sumW5Early = 0.0f;
+  float sumW4Late = 0.0f, sumW5Late = 0.0f;
+  int cntEarly = 0, cntLate = 0;
+
+  float prevAngle3 = 0.0f;
+  float prevAngle4 = 0.0f;
+  float prevD3 = 0.0f;
+  float prevD4 = 0.0f;
+  int flip3 = 0;
+  int flip4 = 0;
+
+  bool exploded = false;
+  const int totalFrames = 1400;
+  const int settleFrames = 200;
+  const int earlyBegin = 250, earlyEnd = 550;
+  const int lateBegin = 1000, lateEnd = 1300;
+
+  auto shouldDumpState = [&](int frame) {
+    if (frame <= 180)
+      return (frame % 30) == 0;
+    if (frame >= 200 && frame <= 420)
+      return (frame % 10) == 0;
+    if (frame >= 900 && frame <= 1300)
+      return (frame % 10) == 0;
+    return (frame % 120) == 0;
+  };
+
+  for (int frame = 0; frame < totalFrames; frame++) {
+    solver.contacts.clear();
+    solver.step(solver.dt);
+
+    if (shouldDumpState(frame)) {
+      printf("  [StandaloneRevoluteNodes] frame=%d\n", frame);
+      for (int i = 0; i < N; i++) {
+        const Body &b = solver.bodies[ids[i]];
+        printf("    node%d p=(%.3f,%.3f,%.3f) q=(%.4f,%.4f,%.4f,%.4f) "
+               "w=(%.3f,%.3f,%.3f)\n",
+               i, b.position.x, b.position.y, b.position.z, b.rotation.x,
+               b.rotation.y, b.rotation.z, b.rotation.w, b.angularVelocity.x,
+               b.angularVelocity.y, b.angularVelocity.z);
+      }
+
+      for (uint32_t j = 0; j < solver.d6Joints.size(); j++) {
+        const D6Joint &rj = solver.d6Joints[j];
+        const bool aStatic = (rj.bodyA == UINT32_MAX);
+        const Quat rotA = aStatic ? Quat() : solver.bodies[rj.bodyA].rotation;
+        const Quat rotB = solver.bodies[rj.bodyB].rotation;
+        Vec3 localAxisA = rj.localFrameA.rotate(Vec3(1, 0, 0));
+        const Vec3 axisA = rotA.rotate(localAxisA).normalized();
+        const Vec3 axisB = rotB.rotate(rj.hingeAxisB).normalized();
+        const float dot = std::max(-1.0f, std::min(1.0f, axisA.dot(axisB)));
+        const float misDeg = acosf(dot) * 180.0f / 3.1415926535f;
+        const float angle = rj.computeHingeAngle(rotA, rotB);
+        float vel = 0.0f;
+        if (!aStatic)
+          vel += solver.bodies[rj.bodyA].angularVelocity.dot(axisA);
+        vel -= solver.bodies[rj.bodyB].angularVelocity.dot(axisA);
+        printf("    joint%u angle=%.4f vel=%.4f axisMisalignDeg=%.3f\n", j,
+               angle, vel, misDeg);
+      }
+    }
+
+    for (int i = 0; i < N; i++) {
+      if (fabsf(solver.bodies[ids[i]].position.y) > 200.0f)
+        exploded = true;
+    }
+
+    if (frame >= settleFrames) {
+      Vec3 pTail = solver.bodies[ids[N - 1]].position;
+      float lateral = sqrtf(pTail.x * pTail.x + pTail.z * pTail.z);
+      maxTailLateral = std::max(maxTailLateral, lateral);
+
+      Vec3 w3 = solver.bodies[ids[N - 2]].angularVelocity;
+      Vec3 w4 = solver.bodies[ids[N - 1]].angularVelocity;
+      float w3m = w3.length();
+      float w4m = w4.length();
+      if (frame >= earlyBegin && frame < earlyEnd) {
+        sumW4Early += w3m;
+        sumW5Early += w4m;
+        cntEarly++;
+      }
+      if (frame >= lateBegin && frame < lateEnd) {
+        sumW4Late += w3m;
+        sumW5Late += w4m;
+        cntLate++;
+      }
+
+      if (solver.d6Joints.size() >= 5) {
+        float a3 = solver.d6Joints[3].computeHingeAngle(
+            solver.bodies[ids[2]].rotation, solver.bodies[ids[3]].rotation);
+        float a4 = solver.d6Joints[4].computeHingeAngle(
+            solver.bodies[ids[3]].rotation, solver.bodies[ids[4]].rotation);
+        float d3 = a3 - prevAngle3;
+        float d4 = a4 - prevAngle4;
+
+        if (fabsf(d3) > 1e-5f && fabsf(prevD3) > 1e-5f && d3 * prevD3 < 0.0f)
+          flip3++;
+        if (fabsf(d4) > 1e-5f && fabsf(prevD4) > 1e-5f && d4 * prevD4 < 0.0f)
+          flip4++;
+
+        prevD3 = d3;
+        prevD4 = d4;
+        prevAngle3 = a3;
+        prevAngle4 = a4;
+      }
+    }
+  }
+
+    float avgW4Early = cntEarly > 0 ? sumW4Early / cntEarly : 0.0f;
+    float avgW5Early = cntEarly > 0 ? sumW5Early / cntEarly : 0.0f;
+    float avgW4Late = cntLate > 0 ? sumW4Late / cntLate : 0.0f;
+    float avgW5Late = cntLate > 0 ? sumW5Late / cntLate : 0.0f;
+    float growth4 = (avgW4Early > 1e-6f) ? (avgW4Late / avgW4Early) : 0.0f;
+    float growth5 = (avgW5Early > 1e-6f) ? (avgW5Late / avgW5Early) : 0.0f;
+
+    printf("  tail lateral max=%.5f, avgW early=(%.5f,%.5f), avgW late=(%.5f,%.5f), growth=(%.3f,%.3f), flips=(%d,%d)\n",
+      maxTailLateral, avgW4Early, avgW5Early, avgW4Late, avgW5Late,
+      growth4, growth5, flip3, flip4);
+
+  CHECK(!exploded, "Revolute jitter repro exploded");
+
+    // This case is diagnostic: report whether problematic jitter is reproduced.
+    // Reproduction signal: long-horizon tail angular activity does not decay, or
+    // even grows in late frames.
+    bool reproduced = (growth4 > 1.10f) || (growth5 > 1.10f) || (flip4 > 140);
+    printf("  jitter_reproduced=%s\n", reproduced ? "true" : "false");
+
+    PASS("Revolute jitter diagnostics completed");
+}

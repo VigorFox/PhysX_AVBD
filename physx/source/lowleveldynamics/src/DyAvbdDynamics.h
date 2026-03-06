@@ -114,12 +114,12 @@ public:
    * - contactIdx: contact index within patch (0-3, max 4 contacts per CM)
    */
   struct CachedLambda {
-    PxReal lambda;          //!< Normal constraint lambda
-    PxReal tangentLambda0;  //!< Friction lambda 1
-    PxReal tangentLambda1;  //!< Friction lambda 2
-    PxReal penalty;         //!< Adaptive penalty for normal (persists across frames)
-    PxReal tangentPenalty0;  //!< Adaptive penalty for tangent 0
-    PxReal tangentPenalty1;  //!< Adaptive penalty for tangent 1
+    PxReal lambda;         //!< Normal constraint lambda
+    PxReal tangentLambda0; //!< Friction lambda 1
+    PxReal tangentLambda1; //!< Friction lambda 2
+    PxReal penalty; //!< Adaptive penalty for normal (persists across frames)
+    PxReal tangentPenalty0; //!< Adaptive penalty for tangent 0
+    PxReal tangentPenalty1; //!< Adaptive penalty for tangent 1
     PxU8 frameAge;          //!< Frames since last update (0 = current frame)
     PxU8 padding[3];
   };
@@ -181,18 +181,14 @@ private:
   /**
    * @brief Convert PhysX constraints (joints) to AVBD joint constraints
    */
-  void prepareAvbdConstraints(
-      const IG::IslandSim &islandSim, AvbdSolverBody *avbdBodies,
-      PxU32 islandBodyCount, PxU32 bodyOffset,
-      AvbdSphericalJointConstraint *sphericalConstraints, PxU32 &numSpherical,
-      PxU32 maxSpherical, AvbdFixedJointConstraint *fixedConstraints,
-      PxU32 &numFixed, PxU32 maxFixed,
-      AvbdRevoluteJointConstraint *revoluteConstraints, PxU32 &numRevolute,
-      PxU32 maxRevolute, AvbdPrismaticJointConstraint *prismaticConstraints,
-      PxU32 &numPrismatic, PxU32 maxPrismatic,
-      AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
-      AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
-      PxU32 islandIndex, PxU32 *bodyRemapTable);
+  void prepareAvbdConstraints(const IG::IslandSim &islandSim,
+                              AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
+                              PxU32 bodyOffset,
+                              AvbdD6JointConstraint *d6Constraints,
+                              PxU32 &numD6, PxU32 maxD6,
+                              AvbdGearJointConstraint *gearConstraints,
+                              PxU32 &numGear, PxU32 maxGear, PxU32 islandIndex,
+                              PxU32 *bodyRemapTable);
 
   //-------------------------------------------------------------------------
   // Member Variables
