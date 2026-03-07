@@ -16,10 +16,10 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Motor Drive | ✅ Accepted | Post-solve torque motor for revolute; SLERP drive for D6 |
 | Gear Joint | ✅ Accepted | Velocity-ratio constraint with post-solve motor |
 | Standalone Alignment | ✅ Accepted | PhysX and avbd_standalone share identical algorithm |
-| Regression Baseline | ✅ Accepted | Default standalone suite runs 53 aligned cases |
+| Regression Baseline | ✅ Accepted | Default standalone suite runs 71 aligned cases (53 core + 18 friction) |
 | O(M) Constraint Lookup | ✅ Accepted | Eliminates O(N²) complexity |
 | Multi-threaded Islands | ✅ Accepted | Per-island constraint mappings |
-| Friction Model | ⚠️ Integrated | Coulomb approximation |
+| Friction Model | ✅ Accepted | Coulomb cone, per-material coefficients from PxContactPatch |
 | Custom Joint | ⏳ Pending | Custom constraint callbacks unsupported |
 | Rack & Pinion | ⏳ Pending | RackAndPinionJoint unsupported |
 | Mimic Joint | ⏳ Pending | MimicJoint unsupported |
@@ -44,13 +44,23 @@ Key changes:
 - **Joint frames**: `localFrameB` derived from initial relative rotation at joint creation. All factory methods updated.
 - **Standalone sync**: `avbd_standalone` algorithm fully aligned with PhysX AVBD implementation.
 
+### Friction Integration
+
+Friction was already fully implemented in the AVBD solver (3-DOF contact model: 1 normal + 2 tangent), but PhysX contact preparation hardcoded `friction = 0.5f` and `restitution = 0.0f` instead of reading from materials.
+
+Key changes:
+- **Material read-through**: `constraint.friction` and `constraint.restitution` now read from `PxContactPatch::dynamicFriction` / `restitution` (combined by narrowphase).
+- **Tangent basis**: Aligned with standalone — `PxAbs(normal.y) > 0.9f` branch for robustness.
+- **Standalone tests**: 18 friction-specific tests (slope sliding, anisotropy, Coulomb cone, geometric mean combining, warmstart, penalty growth, etc.).
+
 ### Current Validation Snapshot
 
-- ✅ Standalone regression baseline passes (53/53 suite).
+- ✅ Standalone regression baseline passes (71/71 suite: 53 core + 18 friction).
 - ✅ PhysX debug build succeeds with all Snippets.
 - ✅ `SnippetChainmail` remains integrated for extreme impact and dense-joint stress regression.
 - ✅ All joint types validated: Spherical chain, breakable Fixed, damped D6, limited Prismatic, limited Revolute.
 - ✅ Gear joint stable (no NaN, no oscillation, no twist amplification).
+- ✅ Friction reads per-material coefficients; Coulomb cone + augmented Lagrangian validated in standalone.
 
 ## SnippetChainmail Demo
 

@@ -68,6 +68,26 @@ bool test53_revoluteJoint_drive();
 bool test54_revoluteJoint_axisAlign();
 bool test55_revoluteJoint_jitterRepro();
 
+// Friction
+bool test56_tiltedPlane_zeroFriction();
+bool test57_tiltedPlane_highFriction();
+bool test58_frictionComparison_lowVsHigh();
+bool test59_zeroFriction_noDeceleration();
+bool test60_highFriction_stopsQuickly();
+bool test61_pyramidFrictionStability();
+bool test62_stackedBoxOffset_frictionHolds();
+bool test63_lateralPush_frictionResists();
+bool test64_frictionIsotropy();
+bool test65_dynamicDynamicFriction();
+bool test66_massRatioFriction();
+bool test67_frictionSweep_monotonic();
+bool test68_rotationalFriction();
+bool test69_restingContactNoDrift();
+bool test70_tangentDirection_negativeX();
+bool test71_coulombCone_noExplosion();
+bool test72_geometricMeanFriction();
+bool test73_longTermFrictionStability();
+
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
@@ -139,7 +159,25 @@ int main() {
   test53_revoluteJoint_drive();
   test54_revoluteJoint_axisAlign();
   test55_revoluteJoint_jitterRepro();
-
+  // Friction tests
+  test56_tiltedPlane_zeroFriction();
+  test57_tiltedPlane_highFriction();
+  test58_frictionComparison_lowVsHigh();
+  test59_zeroFriction_noDeceleration();
+  test60_highFriction_stopsQuickly();
+  test61_pyramidFrictionStability();
+  test62_stackedBoxOffset_frictionHolds();
+  test63_lateralPush_frictionResists();
+  test64_frictionIsotropy();
+  test65_dynamicDynamicFriction();
+  test66_massRatioFriction();
+  test67_frictionSweep_monotonic();
+  test68_rotationalFriction();
+  test69_restingContactNoDrift();
+  test70_tangentDirection_negativeX();
+  test71_coulombCone_noExplosion();
+  test72_geometricMeanFriction();
+  test73_longTermFrictionStability();
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);
   printf("Tests Failed: %d\n", gTestsFailed);

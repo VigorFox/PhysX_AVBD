@@ -1265,11 +1265,11 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 
         constraint.contactNormal = normal;
         constraint.penetrationDepth = contact->separation;
-        constraint.restitution = 0.0f;
-        constraint.friction = 0.5f;
+        constraint.restitution = patch->restitution;
+        constraint.friction = patch->dynamicFriction;
 
         PxVec3 t0, t1;
-        if (PxAbs(normal.x) < 0.9f) {
+        if (PxAbs(normal.y) > 0.9f) {
           t0 = normal.cross(PxVec3(1, 0, 0)).getNormalized();
         } else {
           t0 = normal.cross(PxVec3(0, 1, 0)).getNormalized();
