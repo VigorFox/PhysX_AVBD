@@ -389,6 +389,115 @@ void Solver::warmstart() {
           std::max(PENALTY_MIN, std::min(PENALTY_MAX, c.penalty[i] * gamma));
     }
   }
+  // Soft body constraint warmstart
+  for (auto &sb : softBodies) {
+    for (auto &dc : sb.distConstraints) {
+      dc.lambda *= alpha * gamma;
+      dc.rho = std::max(1.0f, dc.rho * gamma);
+    }
+    for (auto &vc : sb.volConstraints) {
+      vc.lambda *= alpha * gamma;
+      vc.rho = std::max(1e4f, vc.rho * gamma);
+    }
+    for (auto &bc : sb.bendConstraints) {
+      bc.lambda *= alpha * gamma;
+      bc.rho = std::max(1.0f, bc.rho * gamma);
+    }
+    for (auto &ac : sb.attachments) {
+      ac.lambda = ac.lambda * (alpha * gamma);
+    }
+    for (auto &kp : sb.pins) {
+      kp.lambda = kp.lambda * (alpha * gamma);
+    }
+  }
+  for (auto &sc : softContacts) {
+    sc.lambda *= alpha * gamma;
+    sc.lambdaT1 *= alpha * gamma;
+    sc.lambdaT2 *= alpha * gamma;
+    sc.rho = std::max(1e3f, sc.rho * gamma);
+  }
+}
+
+// =============================================================================
+// Soft body creation
+// =============================================================================
+
+uint32_t Solver::addSoftBody(const std::vector<Vec3>& vertices,
+                             const std::vector<uint32_t>& tets,
+                             const std::vector<uint32_t>& tris,
+                             float youngsModulus_,
+                             float poissonsRatio_,
+                             float density_,
+                             float damping_,
+                             float bendingStiffness_,
+                             float thickness_) {
+  uint32_t particleStart = (uint32_t)softParticles.size();
+
+  // Compute per-vertex mass from tet volumes (or uniform if no tets)
+  std::vector<float> vertexMass(vertices.size(), 0.0f);
+  if (!tets.empty()) {
+    for (size_t i = 0; i + 3 < tets.size(); i += 4) {
+      Vec3 e1 = vertices[tets[i+1]] - vertices[tets[i]];
+      Vec3 e2 = vertices[tets[i+2]] - vertices[tets[i]];
+      Vec3 e3 = vertices[tets[i+3]] - vertices[tets[i]];
+      float vol = fabsf(e1.dot(e2.cross(e3)) / 6.0f);
+      float tetMass = vol * density_;
+      float perVertex = tetMass / 4.0f;
+      vertexMass[tets[i]]   += perVertex;
+      vertexMass[tets[i+1]] += perVertex;
+      vertexMass[tets[i+2]] += perVertex;
+      vertexMass[tets[i+3]] += perVertex;
+    }
+  } else if (!tris.empty()) {
+    // Surface mesh: estimate mass from triangle area × thickness × density
+    for (size_t i = 0; i + 2 < tris.size(); i += 3) {
+      Vec3 e1 = vertices[tris[i+1]] - vertices[tris[i]];
+      Vec3 e2 = vertices[tris[i+2]] - vertices[tris[i]];
+      float area = e1.cross(e2).length() * 0.5f;
+      float triMass = area * thickness_ * density_;
+      float perVertex = triMass / 3.0f;
+      vertexMass[tris[i]]   += perVertex;
+      vertexMass[tris[i+1]] += perVertex;
+      vertexMass[tris[i+2]] += perVertex;
+    }
+  }
+
+  // Ensure minimum mass
+  float minMass = 1e-4f;
+  for (auto& m : vertexMass)
+    m = std::max(m, minMass);
+
+  // Create particles
+  for (size_t i = 0; i < vertices.size(); i++) {
+    SoftParticle sp;
+    sp.position = vertices[i];
+    sp.velocity = Vec3(0, 0, 0);
+    sp.prevVelocity = Vec3(0, 0, 0);
+    sp.initialPosition = vertices[i];
+    sp.predictedPosition = vertices[i];
+    sp.mass = vertexMass[i];
+    sp.invMass = 1.0f / sp.mass;
+    sp.damping = damping_;
+    softParticles.push_back(sp);
+  }
+
+  // Create SoftBody
+  SoftBody sb;
+  sb.particleStart = particleStart;
+  sb.particleCount = (uint32_t)vertices.size();
+  sb.tetrahedra = tets;
+  sb.triangles = tris;
+  sb.youngsModulus = youngsModulus_;
+  sb.poissonsRatio = poissonsRatio_;
+  sb.density = density_;
+  sb.damping = damping_;
+  sb.bendingStiffness = bendingStiffness_;
+  sb.thickness = thickness_;
+
+  sb.buildConstraints(softParticles);
+
+  softBodies.push_back(sb);
+  return particleStart;
 }
 
 // =============================================================================
@@ -492,6 +601,24 @@ void Solver::step(float dt_) {
     body.position = body.position + body.linearVelocity * dt +
                     gravity * (accelWeight * dt2);
     body.rotation = body.inertialRotation;
+  }
+
+  // Predict soft particles
+  uint32_t nSoftParticles = (uint32_t)softParticles.size();
+  for (uint32_t i = 0; i < nSoftParticles; i++) {
+    SoftParticle &sp = softParticles[i];
+    if (sp.invMass <= 0.0f) continue;
+    sp.predictedPosition = sp.position + sp.velocity * dt + gravity * dt2;
+    sp.initialPosition = sp.position;
+    // Adaptive warmstart (same as rigid bodies)
+    Vec3 accel = (sp.velocity - sp.prevVelocity) * invDt;
+    float gravLen = gravity.length();
+    float accelWeight = 0.0f;
+    if (gravLen > 1e-6f) {
+      Vec3 gravDir = gravity.normalized();
+      accelWeight = std::max(0.0f, std::min(1.0f, accel.dot(gravDir) / gravLen));
+    }
+    sp.position = sp.position + sp.velocity * dt + gravity * (accelWeight * dt2);
   }
 
   // =========================================================================
@@ -670,6 +797,13 @@ void Solver::step(float dt_) {
         }
       }
 
+      // ---- Soft body attachment contributions to rigid body ----
+      for (const auto &sb : softBodies) {
+        for (const auto &ac : sb.attachments) {
+          addAttachmentContribution_rigid(ac, bi, softParticles, bodies, dt, lhs, rhs);
+        }
+      }
+
       // ---- Gear Joint contributions ----
       for (auto &gnt : gearJoints) {
         bool isA = (gnt.bodyA == bi);
@@ -727,6 +861,61 @@ void Solver::step(float dt_) {
         body.rotation =
             (body.rotation - dq * body.rotation * 0.5f).normalized();
       }
+    }
+
+    // ---- Soft particle primal update ----
+    for (uint32_t spi = 0; spi < nSoftParticles; spi++) {
+      SoftParticle &sp = softParticles[spi];
+      if (sp.invMass <= 0.0f) continue;
+
+      // 3×3 system
+      Mat33 lhs3;
+      for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+          lhs3.m[r][c] = (r == c) ? (sp.mass / dt2) : 0.0f;
+
+      Vec3 disp = sp.position - sp.predictedPosition;
+      Vec3 rhs3 = lhs3 * disp;
+
+      // Distance constraints
+      for (const auto &sb : softBodies) {
+        for (const auto &dc : sb.distConstraints) {
+          if (dc.p0 == spi || dc.p1 == spi)
+            addDistanceContribution(dc, spi, softParticles, lhs3, rhs3);
+        }
+        // Volume constraints
+        for (const auto &vc : sb.volConstraints) {
+          if (vc.p0 == spi || vc.p1 == spi || vc.p2 == spi || vc.p3 == spi)
+            addVolumeContribution(vc, spi, softParticles, lhs3, rhs3);
+        }
+        // Bending constraints
+        for (const auto &bc : sb.bendConstraints) {
+          if (bc.p0 == spi || bc.p1 == spi || bc.p2 == spi || bc.p3 == spi)
+            addBendingContribution(bc, spi, softParticles, lhs3, rhs3);
+        }
+        // Attachment
+        for (const auto &ac : sb.attachments) {
+          addAttachmentContribution_particle(ac, spi, softParticles, bodies, lhs3, rhs3);
+        }
+        // Kinematic pins
+        for (const auto &kp : sb.pins) {
+          addPinContribution(kp, spi, softParticles, lhs3, rhs3);
+        }
+      }
+
+      // Soft contacts (ground / rigid)
+      for (const auto &sc : softContacts) {
+        addSoftContactContribution(sc, spi, softParticles, lhs3, rhs3);
+      }
+
+      // Solve 3×3
+      Vec3 delta = lhs3.inverse() * rhs3;
+      // NaN/inf guard
+      float deltaMag = delta.length();
+      if (std::isnan(deltaMag) || std::isinf(deltaMag)) {
+        delta = Vec3(0, 0, 0);
+      }
+      sp.position = sp.position - delta;
     }
 
     // ---- Dual update ----
@@ -793,6 +982,25 @@ void Solver::step(float dt_) {
           updateIKTargetDual(artic, ti, bodies, dt, lambdaDecay);
         }
       }
+    }
+
+    // Soft body dual update
+    {
+      const float lambdaDecay = 0.99f;
+      for (auto &sb : softBodies) {
+        for (auto &dc : sb.distConstraints)
+          updateDistanceDual(dc, softParticles, beta, lambdaDecay);
+        for (auto &vc : sb.volConstraints)
+          updateVolumeDual(vc, softParticles, beta, lambdaDecay);
+        for (auto &bc : sb.bendConstraints)
+          updateBendingDual(bc, softParticles, beta, lambdaDecay);
+        for (auto &ac : sb.attachments)
+          updateAttachmentDual(ac, softParticles, bodies, lambdaDecay);
+        for (auto &kp : sb.pins)
+          updatePinDual(kp, softParticles, lambdaDecay);
+      }
+      for (auto &sc : softContacts)
+        updateSoftContactDual(sc, softParticles, beta);
     }
 
     // ===================================================================
@@ -1060,6 +1268,17 @@ void Solver::step(float dt_) {
     float angSpeed = body.angularVelocity.length();
     if (angSpeed > body.maxAngularVelocity) {
       body.angularVelocity = body.angularVelocity * (body.maxAngularVelocity / angSpeed);
+    }
+  }
+
+  // Update soft particle velocities
+  for (auto &sp : softParticles) {
+    if (sp.invMass <= 0.0f) continue;
+    sp.prevVelocity = sp.velocity;
+    sp.velocity = (sp.position - sp.initialPosition) * invDt;
+    if (sp.damping > 0.0f) {
+      float decay = std::max(0.0f, 1.0f - sp.damping * dt);
+      sp.velocity = sp.velocity * decay;
     }
   }
 }

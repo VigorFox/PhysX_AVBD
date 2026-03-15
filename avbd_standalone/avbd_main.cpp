@@ -120,6 +120,25 @@ bool test101_chebyshevSemiIterative();
 bool test102_articulationD6LoopClosure();
 bool test103_scissorLiftValidation();
 
+// Soft body / Cloth
+bool test104_softBodySingleTet();
+bool test105_softBodyCubeDrop();
+bool test106_softBodyDistanceOnly();
+bool test107_softBodyVolumePreserve();
+bool test108_softBodyStackOnGround();
+bool test109_softBodyMultiple();
+bool test110_clothDrape();
+bool test111_clothBendingStiffness();
+bool test112_clothPinnedCorners();
+bool test113_softRigidAttach();
+bool test114_softOnRigidBox();
+bool test115_kinematicPinOscillate();
+bool test116_rigidFallOnSoft();
+bool test117_materialStiffness();
+bool test118_materialPoisson();
+bool test119_convergenceSoftBench();
+bool test120_unifiedScene();
+
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
@@ -245,6 +264,26 @@ int main() {
   // Phase 4: Scissor Lift Validation
   test102_articulationD6LoopClosure();
   test103_scissorLiftValidation();
+
+  // Soft body / Cloth tests
+  test104_softBodySingleTet();
+  test105_softBodyCubeDrop();
+  test106_softBodyDistanceOnly();
+  test107_softBodyVolumePreserve();
+  test108_softBodyStackOnGround();
+  test109_softBodyMultiple();
+  test110_clothDrape();
+  test111_clothBendingStiffness();
+  test112_clothPinnedCorners();
+  test113_softRigidAttach();
+  test114_softOnRigidBox();
+  test115_kinematicPinOscillate();
+  test116_rigidFallOnSoft();
+  test117_materialStiffness();
+  test118_materialPoisson();
+  test119_convergenceSoftBench();
+  test120_unifiedScene();
+
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);
   printf("Tests Failed: %d\n", gTestsFailed);

@@ -1,5 +1,6 @@
 #pragma once
 #include "avbd_articulation.h"
+#include "avbd_softbody.h"
 #include "avbd_types.h"
 #include <vector>
 
@@ -37,6 +38,11 @@ struct Solver {
   std::vector<D6Joint> d6Joints;     // unified: all joint types
   std::vector<GearJoint> gearJoints; // kept separate (velocity constraint)
   std::vector<Articulation> articulations; // pure AVBD articulations (AL constraints)
+
+  // Soft body system
+  std::vector<SoftParticle> softParticles;
+  std::vector<SoftBody> softBodies;
+  std::vector<SoftContact> softContacts;
 
   // Joint creation (all return index into d6Joints)
   uint32_t addSphericalJoint(uint32_t bodyA, uint32_t bodyB,
@@ -87,6 +93,18 @@ struct Solver {
   // Contact creation
   void addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
                   Vec3 rB, float depth, float fric = 0.5f);
+
+  // Soft body creation
+  // Returns index of first particle added
+  uint32_t addSoftBody(const std::vector<Vec3>& vertices,
+                       const std::vector<uint32_t>& tets,
+                       const std::vector<uint32_t>& tris,
+                       float youngsModulus = 1e5f,
+                       float poissonsRatio = 0.3f,
+                       float density = 100.0f,
+                       float damping = 0.01f,
+                       float bendingStiffness = 0.0f,
+                       float thickness = 0.01f);
 
   // Solver core
   void computeConstraint(Contact &c);
