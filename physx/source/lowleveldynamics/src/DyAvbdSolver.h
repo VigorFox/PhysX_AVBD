@@ -29,6 +29,7 @@
 
 #include "DyAvbdConstraint.h"
 #include "DyAvbdParallel.h"
+#include "DyAvbdSoftBody.h"
 #include "DyAvbdSolverBody.h"
 #include "DyAvbdTypes.h"
 
@@ -121,7 +122,14 @@ public:
                        const AvbdBodyConstraintMap *gearMap = nullptr,
                        AvbdColorBatch *colorBatches = nullptr,
                        physx::PxU32 numColors = 0,
-                       physx::PxU32 iterationOverride = 0);
+                       physx::PxU32 iterationOverride = 0,
+                       // Soft body VBD parameters
+                       AvbdSoftParticle *softParticles = nullptr,
+                       physx::PxU32 numSoftParticles = 0,
+                       AvbdSoftBody *softBodies = nullptr,
+                       physx::PxU32 numSoftBodies = 0,
+                       AvbdSoftContact *softContacts = nullptr,
+                       physx::PxU32 numSoftContacts = 0);
 
   /**
    * @brief Get solver statistics from last solve
@@ -229,7 +237,7 @@ private:
 
   /**
    * @brief Stage 4: Update Augmented Lagrangian multipliers with XPBD
-   * compliance Uses XPBD formula: Δλ = (-C - α?·λ) / (w + α?) where α? = α/dt2
+   * compliance Uses XPBD formula: dLambda = (-C - alphaTilde*lambda) / (w + alphaTilde) where alphaTilde = alpha/dt2
    */
   void updateLagrangianMultipliers(AvbdSolverBody *bodies,
                                    physx::PxU32 numBodies,
@@ -353,6 +361,34 @@ private:
                                 AvbdSolverBody *bodies, physx::PxU32 numBodies,
                                 physx::PxU32 bodyIndex, physx::PxVec3 &deltaPos,
                                 physx::PxVec3 &deltaTheta);
+
+  //-------------------------------------------------------------------------
+  // Soft Body VBD Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Solve local 3x3 VBD system for a single soft particle
+   * Accumulates VBD elastic forces (StVK, Neo-Hookean, bending) and
+   * AVBD penalty forces (contacts, attachments, pins) into a 3x3 system,
+   * then applies displacement = H^{-1} * f.
+   */
+  void solveSoftParticle(
+      PxU32 particleGlobalIdx,
+      AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+      AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
+      AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+      AvbdSoftContact *softContacts, PxU32 numSoftContacts,
+      PxReal dt, PxReal invDt2);
+
+  /**
+   * @brief Dual update for soft body AVBD constraints (penalty growth)
+   */
+  void updateSoftDual(
+      AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+      AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
+      AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+      AvbdSoftContact *softContacts, PxU32 numSoftContacts,
+      PxReal beta);
 
   //-------------------------------------------------------------------------
   // Member Variables

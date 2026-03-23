@@ -320,4 +320,42 @@ inline Vec6 solveLDLT(const Mat66 &lhs, const Vec6 &rhs) {
   return x;
 }
 
+// ====================== 2x2 matrix (for triangle DmInv) ====================
+
+struct Mat22 {
+  float m[2][2]; // m[row][col]
+  Mat22() { m[0][0] = m[0][1] = m[1][0] = m[1][1] = 0; }
+  Mat22(float a00, float a01, float a10, float a11) {
+    m[0][0] = a00; m[0][1] = a01;
+    m[1][0] = a10; m[1][1] = a11;
+  }
+  Mat22 inverse() const {
+    float det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+    if (fabsf(det) < 1e-20f) return Mat22();
+    float invDet = 1.f / det;
+    return Mat22(m[1][1] * invDet, -m[0][1] * invDet,
+                 -m[1][0] * invDet, m[0][0] * invDet);
+  }
+};
+
+// ====================== Vec3 / Mat33 utilities ==============================
+
+// outer(a, b) = a * b^T (3x3 rank-1)
+inline Mat33 outer(const Vec3 &a, const Vec3 &b) {
+  Mat33 r;
+  r.m[0][0] = a.x * b.x; r.m[0][1] = a.x * b.y; r.m[0][2] = a.x * b.z;
+  r.m[1][0] = a.y * b.x; r.m[1][1] = a.y * b.y; r.m[1][2] = a.y * b.z;
+  r.m[2][0] = a.z * b.x; r.m[2][1] = a.z * b.y; r.m[2][2] = a.z * b.z;
+  return r;
+}
+
+// skew-symmetric matrix [v]× such that [v]× * u = v × u
+inline Mat33 skew(const Vec3 &v) {
+  Mat33 r;
+  r.m[0][0] = 0;     r.m[0][1] = -v.z;  r.m[0][2] = v.y;
+  r.m[1][0] = v.z;   r.m[1][1] = 0;      r.m[1][2] = -v.x;
+  r.m[2][0] = -v.y;  r.m[2][1] = v.x;    r.m[2][2] = 0;
+  return r;
+}
+
 } // namespace AvbdRef

@@ -29,6 +29,7 @@
 #include "common/PxProfileZone.h"
 #include "foundation/PxArray.h"
 #include "foundation/PxAssert.h"
+#include "PxAvbdParallelFor.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1169,7 +1170,10 @@ void AvbdSolver::solveWithJoints(
     const physx::PxVec3 &gravity, const AvbdBodyConstraintMap *contactMap,
     const AvbdBodyConstraintMap *d6Map, const AvbdBodyConstraintMap *gearMap,
     AvbdColorBatch *colorBatches, physx::PxU32 numColors,
-    physx::PxU32 iterationOverride) {
+    physx::PxU32 iterationOverride,
+    AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+    AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts) {
 
   PX_PROFILE_ZONE("AVBD.solveWithJoints", 0);
 
@@ -1203,6 +1207,10 @@ void AvbdSolver::solveWithJoints(
   {
     PX_PROFILE_ZONE("AVBD.prediction", 0);
     computePrediction(bodies, numBodies, dt, gravity);
+
+    // Soft particle prediction
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+      softParticles[i].computePrediction(dt, gravity);
   }
 
   // =========================================================================
@@ -1233,6 +1241,28 @@ void AvbdSolver::solveWithJoints(
         bodies[i].rotation = bodies[i].inertialRotation;
       }
     }
+
+    // Soft particle adaptive warmstarting
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i) {
+      AvbdSoftParticle &sp = softParticles[i];
+      if (sp.invMass <= 0.0f) continue;
+      physx::PxVec3 accel = (sp.velocity - sp.prevVelocity) * invDt;
+      physx::PxReal accelWeight = 0.0f;
+      if (gravMag > 1e-6f)
+        accelWeight = physx::PxClamp(accel.dot(gravDir) / gravMag, 0.0f, 1.0f);
+      sp.position = sp.position + sp.velocity * dt + gravity * (accelWeight * dt * dt);
+    }
+
+    // Soft body AVBD warmstart (penalty only)
+    for (physx::PxU32 sbi = 0; sbi < numSoftBodies; ++sbi) {
+      AvbdSoftBody &sb = softBodies[sbi];
+      for (physx::PxU32 ai = 0; ai < sb.attachments.size(); ++ai)
+        sb.attachments[ai].k = physx::PxMax(1e3f, physx::PxMin(sb.attachments[ai].kMax, sb.attachments[ai].k * mConfig.avbdGamma));
+      for (physx::PxU32 pi = 0; pi < sb.pins.size(); ++pi)
+        sb.pins[pi].k = physx::PxMax(1e3f, physx::PxMin(sb.pins[pi].kMax, sb.pins[pi].k * mConfig.avbdGamma));
+    }
+    for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci)
+      softContacts[sci].k = physx::PxMin(1e4f, softContacts[sci].ke);
   }
 
   // =========================================================================
@@ -1459,6 +1489,87 @@ void AvbdSolver::solveWithJoints(
   {
     PX_PROFILE_ZONE("AVBD.solveIterations", 0);
 
+    // Chebyshev semi-iterative state
+    const bool useChebyshev = (mConfig.chebyshevRho > 0.0f && mConfig.chebyshevRho < 1.0f);
+    physx::PxReal chebyOmega = 1.0f;
+    physx::PxArray<physx::PxVec3> chebyPrevPos, chebyPrevPrevPos;
+    physx::PxArray<physx::PxQuat> chebyPrevRot, chebyPrevPrevRot;
+    if (useChebyshev) {
+      chebyPrevPos.resize(numBodies);
+      chebyPrevPrevPos.resize(numBodies);
+      chebyPrevRot.resize(numBodies);
+      chebyPrevPrevRot.resize(numBodies);
+      for (physx::PxU32 i = 0; i < numBodies; ++i) {
+        chebyPrevPos[i] = bodies[i].position;
+        chebyPrevPrevPos[i] = bodies[i].position;
+        chebyPrevRot[i] = bodies[i].rotation;
+        chebyPrevPrevRot[i] = bodies[i].rotation;
+      }
+    }
+
+    // =====================================================================
+    // Pre-compute body-level inertial targets for Newton-style body solve
+    // (mirrors avbd_solver.cpp bodyComPred / bodyThetaPred / bodyAccumTheta)
+    // =====================================================================
+    physx::PxArray<physx::PxVec3> bodyComPred(numSoftBodies);
+    physx::PxArray<physx::PxVec3> bodyThetaPred(numSoftBodies);
+    physx::PxArray<physx::PxVec3> bodyAccumTheta(numSoftBodies);
+
+    // Build per-particle soft contact index for O(1) lookup
+    physx::PxArray<physx::PxU32> scStart(numSoftParticles + 1);
+    physx::PxArray<physx::PxU32> scIdxBuf(numSoftContacts);
+    if (numSoftBodies > 0) {
+      physx::PxArray<physx::PxU32> scCount(numSoftParticles);
+      for (physx::PxU32 i = 0; i <= numSoftParticles; ++i)
+        scStart[i] = 0;
+      for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+        scCount[i] = 0;
+      for (physx::PxU32 ci = 0; ci < numSoftContacts; ++ci)
+        scCount[softContacts[ci].particleIdx]++;
+      for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+        scStart[i + 1] = scStart[i] + scCount[i];
+      for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+        scCount[i] = 0;
+      for (physx::PxU32 ci = 0; ci < numSoftContacts; ++ci) {
+        physx::PxU32 pi = softContacts[ci].particleIdx;
+        scIdxBuf[scStart[pi] + scCount[pi]++] = ci;
+      }
+
+      for (physx::PxU32 si = 0; si < numSoftBodies; ++si) {
+        const AvbdSoftBody& sb = softBodies[si];
+        physx::PxVec3 com(0.0f), comPred(0.0f), angMom(0.0f);
+        physx::PxReal totalMass = 0.0f;
+        for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+          physx::PxU32 pi = sb.particleStart + li;
+          if (softParticles[pi].invMass <= 0.0f) continue;
+          physx::PxReal m = 1.0f / softParticles[pi].invMass;
+          com += softParticles[pi].position * m;
+          comPred += softParticles[pi].predictedPosition * m;
+          totalMass += m;
+        }
+        if (totalMass > 0.0f) {
+          physx::PxReal invM = 1.0f / totalMass;
+          com *= invM;
+          comPred *= invM;
+        }
+        bodyComPred[si] = comPred;
+        PxMat33 bodyI(PxZero);
+        for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+          physx::PxU32 pi = sb.particleStart + li;
+          if (softParticles[pi].invMass <= 0.0f) continue;
+          physx::PxReal m = 1.0f / softParticles[pi].invMass;
+          physx::PxVec3 r = softParticles[pi].position - com;
+          physx::PxReal r2 = r.dot(r);
+          bodyI += (PxMat33::createDiagonal(PxVec3(r2)) - avbdOuter(r, r)) * m;
+          angMom += r.cross(softParticles[pi].velocity) * m;
+        }
+        physx::PxVec3 omega = bodyI.getInverse() * angMom;
+        if (omega.x != omega.x) omega = PxVec3(0.0f);
+        bodyThetaPred[si] = omega * dt;
+        bodyAccumTheta[si] = PxVec3(0.0f);
+      }
+    }
+
     const physx::PxU32 baseIters = (iterationOverride > 0)
         ? iterationOverride : mConfig.innerIterations;
     const physx::PxU32 jointIterations =
@@ -1467,6 +1578,16 @@ void AvbdSolver::solveWithJoints(
             : baseIters;
 
     for (physx::PxU32 iter = 0; iter < jointIterations; ++iter) {
+      // Save pre-iteration state for Chebyshev
+      if (useChebyshev) {
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          chebyPrevPrevPos[i] = chebyPrevPos[i];
+          chebyPrevPrevRot[i] = chebyPrevRot[i];
+          chebyPrevPos[i] = bodies[i].position;
+          chebyPrevRot[i] = bodies[i].rotation;
+        }
+      }
+
       // --- Primal step: block descent over bodies ---
       {
         PX_PROFILE_ZONE("AVBD.blockDescentWithJoints", 0);
@@ -1489,24 +1610,135 @@ void AvbdSolver::solveWithJoints(
         const physx::PxU32 *orderPtr =
             useDeterministicOrder ? bodyOrder.begin() : nullptr;
 
-        for (physx::PxU32 idx = 0; idx < numBodies; ++idx) {
+        const bool useParallel = mConfig.enableParallelization
+            && !useDeterministicOrder
+            && numBodies >= AVBD_PARALLEL_MIN_ITEMS;
+
+        auto solveBody = [&](physx::PxU32 idx) {
           const physx::PxU32 i = orderPtr ? orderPtr[idx] : idx;
           if (bodies[i].invMass <= 0.0f)
-            continue;
-
-          // ---------------------------------------------------------------
-          // (A) Unified AVBD: contacts + D6 + gear joints
-          //     All constraints touching this body are accumulated into
-          //     ONE per-body system and solved simultaneously.
-          //     6x6: full LDLT.  3x3: decoupled diagonal blocks.
-          //     Bodies with no constraints snap to inertialPosition.
-          // ---------------------------------------------------------------
+            return;
           solveLocalSystemWithJoints(bodies[i], bodies, numBodies, contacts,
                                      numContacts, d6Joints, numD6, gearJoints,
                                      numGear, dt, invDt2, contactMap, d6Map,
                                      gearMap);
+        };
 
-        } // end body loop
+        if (useParallel) {
+          avbdParallelFor(0u, numBodies, solveBody);
+        } else {
+          for (physx::PxU32 idx = 0; idx < numBodies; ++idx)
+            solveBody(idx);
+        }
+
+        // --- Body-level 6x6 solve for soft bodies (Newton-style) ---
+        if (numSoftBodies > 0 && numSoftContacts > 0) {
+          PX_PROFILE_ZONE("AVBD.softBodyLevel6x6", 0);
+          for (physx::PxU32 si = 0; si < numSoftBodies; ++si) {
+            const AvbdSoftBody& sb = softBodies[si];
+            physx::PxVec3 com(0.0f);
+            physx::PxReal bodyMass = 0.0f;
+            for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+              physx::PxU32 pi = sb.particleStart + li;
+              if (softParticles[pi].invMass <= 0.0f) continue;
+              physx::PxReal m = 1.0f / softParticles[pi].invMass;
+              com += softParticles[pi].position * m;
+              bodyMass += m;
+            }
+            if (bodyMass <= 0.0f) continue;
+            com *= (1.0f / bodyMass);
+
+            physx::PxU32 bodyContactCount = 0;
+            for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+              physx::PxU32 pi = sb.particleStart + li;
+              bodyContactCount += scStart[pi + 1] - scStart[pi];
+            }
+            if (bodyContactCount == 0) continue;
+
+            PxMat33 bodyInertia(PxZero);
+            for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+              physx::PxU32 pi = sb.particleStart + li;
+              if (softParticles[pi].invMass <= 0.0f) continue;
+              physx::PxReal m = 1.0f / softParticles[pi].invMass;
+              physx::PxVec3 r = softParticles[pi].position - com;
+              physx::PxReal r2 = r.dot(r);
+              bodyInertia += (PxMat33::createDiagonal(PxVec3(r2)) - avbdOuter(r, r)) * m;
+            }
+
+            physx::PxReal bodyMassDtSq = bodyMass * invDt2;
+            PxMat33 A_ll = PxMat33::createDiagonal(PxVec3(bodyMassDtSq));
+            PxMat33 A_la(PxZero), A_al(PxZero);
+            physx::PxReal reg = 1e-4f * bodyMassDtSq;
+            PxMat33 A_aa = bodyInertia * invDt2 + PxMat33::createDiagonal(PxVec3(reg));
+
+            physx::PxVec3 g_l = (com - bodyComPred[si]) * bodyMassDtSq;
+            physx::PxVec3 g_a = (bodyInertia * invDt2) * (bodyAccumTheta[si] - bodyThetaPred[si]);
+
+            for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+              physx::PxU32 pi = sb.particleStart + li;
+              physx::PxVec3 r = softParticles[pi].position - com;
+              for (physx::PxU32 k = scStart[pi]; k < scStart[pi + 1]; ++k) {
+                const AvbdSoftContact& sc = softContacts[scIdxBuf[k]];
+                physx::PxVec3 n = sc.normal;
+                physx::PxReal violation;
+                if (sc.rigidBodyIdx == PX_MAX_U32)
+                  violation = softParticles[pi].position.dot(n);
+                else
+                  violation = (softParticles[pi].position - sc.surfacePoint).dot(n) - sc.margin;
+
+                physx::PxReal pen = sc.k;
+                physx::PxVec3 rCrossN = r.cross(n);
+                A_ll += avbdOuter(n, n) * pen;
+                A_la += avbdOuter(n, rCrossN) * pen;
+                A_al += avbdOuter(rCrossN, n) * pen;
+                A_aa += avbdOuter(rCrossN, rCrossN) * pen;
+
+                physx::PxReal f = physx::PxMin(0.0f, pen * violation);
+                if (f < 0.0f) {
+                  g_l += n * f;
+                  g_a += rCrossN * f;
+                }
+              }
+            }
+
+            PxMat33 A_ll_inv = A_ll.getInverse();
+            PxMat33 S = A_aa - A_al * A_ll_inv * A_la;
+            physx::PxVec3 deltaTheta = S.getInverse() * (g_a - A_al * A_ll_inv * g_l);
+            physx::PxVec3 deltaPos = A_ll_inv * (g_l - A_la * deltaTheta);
+
+            if (deltaPos.x != deltaPos.x || deltaTheta.x != deltaTheta.x) continue;
+
+            physx::PxReal thetaMag = deltaTheta.magnitude();
+            if (thetaMag > 0.5f) deltaTheta *= (0.5f / thetaMag);
+
+            for (physx::PxU32 li = 0; li < sb.particleCount; ++li) {
+              physx::PxU32 pi = sb.particleStart + li;
+              if (softParticles[pi].invMass <= 0.0f) continue;
+              physx::PxVec3 r = softParticles[pi].position - com;
+              softParticles[pi].position -= deltaPos + deltaTheta.cross(r);
+            }
+            bodyAccumTheta[si] -= deltaTheta;
+          }
+        }
+
+        // --- VBD soft particle primal (3x3 block coordinate descent) ---
+        if (numSoftParticles > 0 && numSoftBodies > 0) {
+          PX_PROFILE_ZONE("AVBD.softParticlePrimal", 0);
+
+          auto solveSP = [&](physx::PxU32 spi) {
+            if (softParticles[spi].invMass <= 0.0f) return;
+            solveSoftParticle(spi, softParticles, numSoftParticles,
+                              bodies, numBodies, softBodies, numSoftBodies,
+                              softContacts, numSoftContacts, dt, invDt2);
+          };
+
+          if (useParallel) {
+            avbdParallelFor(0u, numSoftParticles, solveSP);
+          } else {
+            for (physx::PxU32 spi = 0; spi < numSoftParticles; ++spi)
+              solveSP(spi);
+          }
+        }
 
         mStats.totalIterations++;
       }
@@ -1900,6 +2132,41 @@ void AvbdSolver::solveWithJoints(
         // Gear joints: AL dual
         for (physx::PxU32 j = 0; j < numGear; ++j)
           updateGearJointMultiplier(gearJoints[j], bodies, numBodies, mConfig);
+
+        // Soft body AVBD dual update (penalty growth only)
+        if (numSoftParticles > 0 && numSoftBodies > 0) {
+          PX_PROFILE_ZONE("AVBD.softDual", 0);
+          updateSoftDual(softParticles, numSoftParticles, bodies, numBodies,
+                         softBodies, numSoftBodies, softContacts, numSoftContacts,
+                         mConfig.avbdBeta);
+        }
+      }
+
+      // Chebyshev semi-iterative position/rotation relaxation
+      if (useChebyshev && iter >= 2) {
+        const physx::PxReal rhoSq = mConfig.chebyshevRho * mConfig.chebyshevRho;
+        if (iter == 2)
+          chebyOmega = 2.0f / (2.0f - rhoSq);
+        else
+          chebyOmega = 1.0f / (1.0f - rhoSq * chebyOmega / 4.0f);
+        chebyOmega = physx::PxClamp(chebyOmega, 1.0f, 2.0f);
+
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          if (bodies[i].invMass <= 0.0f) continue;
+          // Position relaxation
+          bodies[i].position = chebyPrevPrevPos[i] +
+              (bodies[i].position - chebyPrevPrevPos[i]) * chebyOmega;
+          // Rotation: quaternion linear blend + normalize
+          physx::PxQuat qPrev = chebyPrevPrevRot[i];
+          physx::PxQuat qCur = bodies[i].rotation;
+          if (qPrev.dot(qCur) < 0.0f) qCur = -qCur;
+          physx::PxQuat qBlend(
+              qPrev.x + chebyOmega * (qCur.x - qPrev.x),
+              qPrev.y + chebyOmega * (qCur.y - qPrev.y),
+              qPrev.z + chebyOmega * (qCur.z - qPrev.z),
+              qPrev.w + chebyOmega * (qCur.w - qPrev.w));
+          bodies[i].rotation = qBlend.getNormalized();
+        }
       }
     } // end iteration loop
   }
@@ -2065,6 +2332,10 @@ void AvbdSolver::solveWithJoints(
     // D6 joint angular drive damping is now handled entirely by the AVBD
     // AL constraint in solveLocalSystemWithJoints. No extra velocity
     // attenuation is needed here.
+
+    // Soft particle velocity update
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+      softParticles[i].updateVelocityFromPosition(invDt);
   }
 
 #if AVBD_JOINT_DEBUG
@@ -2081,6 +2352,134 @@ void AvbdSolver::solveWithJoints(
   }
   s_avbdJointDebugFrame++;
 #endif
+}
+
+//=============================================================================
+// Soft body VBD: per-particle 3x3 block coordinate descent
+//=============================================================================
+
+void AvbdSolver::solveSoftParticle(
+    PxU32 spi,
+    AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+    AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
+    AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+    AvbdSoftContact *softContacts, PxU32 numSoftContacts,
+    PxReal dt, PxReal invDt2)
+{
+  PX_UNUSED(numSoftParticles);
+  PX_UNUSED(numRigidBodies);
+  PX_UNUSED(dt);
+
+  AvbdSoftParticle &sp = softParticles[spi];
+  if (sp.invMass <= 0.0f) return;
+
+  PxReal mOverDt2 = sp.mass * invDt2;
+
+  // Inertial force and Hessian
+  PxVec3 f3 = (sp.predictedPosition - sp.position) * mOverDt2;
+  PxMat33 H3 = PxMat33::createDiagonal(PxVec3(mOverDt2));
+
+  // Accumulate VBD element contributions using per-particle adjacency
+  for (PxU32 sbi = 0; sbi < numSoftBodies; ++sbi)
+  {
+    const AvbdSoftBody &sb = softBodies[sbi];
+    PxU32 localIdx = spi - sb.particleStart;
+    if (localIdx >= sb.particleCount) continue;
+
+    const AvbdParticleAdjacency &adj = sb.adjacency[localIdx];
+
+    // StVK triangle contributions
+    for (PxU32 ri = 0; ri < adj.triRefs.size(); ++ri)
+    {
+      const AvbdParticleElementRef &ref = adj.triRefs[ri];
+      PxVec3 ft; PxMat33 Ht;
+      avbdEvaluateStVKForceHessian(sb.triElements[ref.index], ref.vOrder,
+                                    sb.mu, sb.lambda, softParticles, ft, Ht);
+      f3 += ft; H3 += Ht;
+    }
+
+    // Neo-Hookean tet contributions
+    for (PxU32 ri = 0; ri < adj.tetRefs.size(); ++ri)
+    {
+      const AvbdParticleElementRef &ref = adj.tetRefs[ri];
+      PxVec3 ft; PxMat33 Ht;
+      avbdEvaluateNeoHookeanForceHessian(sb.tetElements[ref.index], ref.vOrder,
+                                          sb.mu, sb.lambda, softParticles, ft, Ht);
+      f3 += ft; H3 += Ht;
+    }
+
+    // Bending contributions
+    for (PxU32 ri = 0; ri < adj.bendRefs.size(); ++ri)
+    {
+      const AvbdParticleElementRef &ref = adj.bendRefs[ri];
+      PxVec3 fb; PxMat33 Hb;
+      avbdEvaluateBendingForceHessian(sb.bendElements[ref.index], ref.vOrder,
+                                       sb.bendingStiffness, softParticles, fb, Hb);
+      f3 += fb; H3 += Hb;
+    }
+
+    // Attachment (AVBD penalty)
+    for (PxU32 ai = 0; ai < adj.attachmentIndices.size(); ++ai)
+    {
+      PxVec3 fa; PxMat33 Ha;
+      avbdEvaluateAttachmentForceHessian_particle(
+          sb.attachments[adj.attachmentIndices[ai]],
+          softParticles, rigidBodies, fa, Ha);
+      f3 += fa; H3 += Ha;
+    }
+
+    // Kinematic pin (AVBD penalty)
+    for (PxU32 pi = 0; pi < adj.pinIndices.size(); ++pi)
+    {
+      PxVec3 fp; PxMat33 Hp;
+      avbdEvaluatePinForceHessian(sb.pins[adj.pinIndices[pi]],
+                                   softParticles, fp, Hp);
+      f3 += fp; H3 += Hp;
+    }
+  }
+
+  // Soft contacts (ground / rigid, AVBD penalty)
+  for (PxU32 sci = 0; sci < numSoftContacts; ++sci)
+  {
+    if (softContacts[sci].particleIdx != spi) continue;
+    PxVec3 fc; PxMat33 Hc;
+    avbdEvaluateContactForceHessian(softContacts[sci], softParticles, fc, Hc);
+    f3 += fc; H3 += Hc;
+  }
+
+  // Solve 3x3: displacement = inv(H) * f
+  PxVec3 displacement = H3.getInverse() * f3;
+  PxReal dispMag = displacement.magnitude();
+  if (!PxIsFinite(dispMag))
+    displacement = PxVec3(0.0f);
+
+  sp.position += displacement;
+}
+
+//=============================================================================
+// Soft body AVBD dual update (penalty growth only)
+//=============================================================================
+
+void AvbdSolver::updateSoftDual(
+    AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+    AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
+    AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+    AvbdSoftContact *softContacts, PxU32 numSoftContacts,
+    PxReal beta)
+{
+  PX_UNUSED(numSoftParticles);
+  PX_UNUSED(numRigidBodies);
+
+  for (PxU32 sbi = 0; sbi < numSoftBodies; ++sbi)
+  {
+    AvbdSoftBody &sb = softBodies[sbi];
+    for (PxU32 ai = 0; ai < sb.attachments.size(); ++ai)
+      avbdUpdateAttachmentDual(sb.attachments[ai], softParticles, rigidBodies, beta);
+    for (PxU32 pi = 0; pi < sb.pins.size(); ++pi)
+      avbdUpdatePinDual(sb.pins[pi], softParticles, beta);
+  }
+  for (PxU32 sci = 0; sci < numSoftContacts; ++sci)
+    avbdUpdateSoftContactDual(softContacts[sci], softParticles, beta);
 }
 
 

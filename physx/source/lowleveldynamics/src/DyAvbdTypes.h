@@ -179,8 +179,9 @@ struct AvbdSolverConfig {
   physx::PxReal
       baumgarte; //!< Baumgarte position correction factor (0-1, default 0.2)
   physx::PxReal
-      omega; //!< SOR over-relaxation factor (1.0-2.0, default 1.3)
-             //!< Values > 1 accelerate convergence but may cause instability
+      chebyshevRho; //!< Chebyshev semi-iterative spectral radius (0-1, default 0.92)
+                    //!< Set to 0 to disable Chebyshev acceleration.
+                    //!< Higher values give faster convergence but risk instability.
 
   //-------------------------------------------------------------------------
   // Convergence
@@ -256,7 +257,7 @@ struct AvbdSolverConfig {
         contactCompliance(1e-4f), jointCompliance(1e-8f), contactDamping(0.5f),
         damping(0.5f), angularDamping(0.95f), rotationThreshold(0.001f),
         angularScale(400.0f), angularContactScale(0.2f), baumgarte(0.3f),
-        omega(1.3f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        chebyshevRho(0.92f), positionTolerance(1e-4f), velocityDamping(0.99f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
         maxLambda(1e6f), enableParallelization(true),
         enableLocal6x6Solve(false), enableMassWeightedWeld(false),

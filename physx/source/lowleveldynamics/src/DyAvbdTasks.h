@@ -64,6 +64,16 @@ struct AvbdIslandBatch {
   AvbdGearJointConstraint *gearJoints;
   PxU32 numGear;
 
+  // Soft body VBD data
+  AvbdSoftParticle *softParticles;
+  PxU32 numSoftParticles;
+
+  AvbdSoftBody *softBodies;
+  PxU32 numSoftBodies;
+
+  AvbdSoftContact *softContacts;
+  PxU32 numSoftContacts;
+
   PxU32 islandStart;
   PxU32 islandEnd;
 
@@ -117,16 +127,20 @@ public:
 
   virtual void run() override {
     const bool hasJoints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
+    const bool hasSoftBodies = (mBatch.numSoftParticles > 0 && mBatch.numSoftBodies > 0);
 
-    if (hasJoints) {
-      // Use full joint solver
+    if (hasJoints || hasSoftBodies) {
+      // Use full joint + soft body solver
       mSolver.solveWithJoints(mDt, mBatch.bodies, mBatch.numBodies,
                               mBatch.constraints, mBatch.numConstraints,
                               mBatch.d6Joints, mBatch.numD6, mBatch.gearJoints,
                               mBatch.numGear, mGravity, &mBatch.contactMap,
                               &mBatch.d6Map, &mBatch.gearMap,
                               mBatch.colorBatches, mBatch.numColors,
-                              mBatch.iterationOverride);
+                              mBatch.iterationOverride,
+                              mBatch.softParticles, mBatch.numSoftParticles,
+                              mBatch.softBodies, mBatch.numSoftBodies,
+                              mBatch.softContacts, mBatch.numSoftContacts);
     } else {
       // Optimized contact-only path using external contactMap for thread safety
       mSolver.solve(mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,

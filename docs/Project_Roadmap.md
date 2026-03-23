@@ -2,12 +2,13 @@
 
 - **Repository**: `VigorFox/PhysX_AVBD`
 - **Author**: Vulpes (@VigorFox)
-- **Version**: 0.5 (Articulation Solver)
+- **Version**: 0.6 (Soft Body / Cloth)
 - **Last Updated**: March 15, 2026
 
 **Overview**: This roadmap serves as a formal guide for AI Agents (e.g., Claude, Gemini, ChatGPT) to assist in the iterative development of PhysX_AVBD. The project forks NVIDIA's PhysX SDK and integrates an experimental position-level Augmented Vertex Block Descent (AVBD) solver, with 99.9% AI-generated code. 
 **Status Legend**: `Integrated` = merged into main code path; `Accepted` = integrated and validated by acceptance checks; `Pending` = not complete or acceptance gate not closed.
-**Current status**: **Articulation solver is `Accepted`** — pure AVBD penalty-based articulation (no Featherstone) passes 29/29 PhysX tests including scissor lift with closed kinematic loops and loaded stability. Per-island adaptive iteration override implemented. All joint types unified into D6 path ("万物皆D6"). Standalone regression: 99/99 tests. PhysX and avbd_standalone share identical algorithm.
+**Current status**: **Soft body standalone is `Accepted`** — VBD energy-based elasticity (StVK + Neo-Hookean + analytic bending) + AVBD adaptive penalty contacts. Standalone: 118/118 tests (101 rigid/artic + 17 soft body). PhysX port in progress: enabling GPU-only deformable snippets on CPU AVBD path.
+**Prior milestones**: Articulation solver `Accepted` (29/29 PhysX tests). D6 unification ("万物皆D6"). Standalone regression: 99→118 tests.
 
 The roadmap is phased, with checklists for each stage. Prioritize CPU paths, unified rigid/soft-body solving, and alignment with PhysX architecture. Use AI prompts for code generation, testing, and optimization. Track progress via GitHub issues/PRs and update X thread (ID: `2021997979444687179`) after each milestone for visibility.
 
@@ -31,11 +32,15 @@ The roadmap is phased, with checklists for each stage. Prioritize CPU paths, uni
 - [ ] Distance joint into Hessian (full limits and drives).
 - [x] Standalone alignment with PhysX: identical algorithm for all D6 joints, 53/53 tests pass.
 - [x] Regression baseline: 53 aligned cases covering all joint types, limits, drives, gear, and stability.
-- [ ] CPU Soft-Body Support:
-  - Implement tetrahedral/triangular constraints (distance, volume, bending).
-  - Create `PxAVBDSoftBody` actor (CPU host memory path).
-  - Enable rigid-soft bidirectional coupling (attachments, collisions).
-  - Minimal demo: 1000-tetrahedron sphere drop + ground collision.
+- [x] CPU Soft-Body Support (✅ Standalone `Accepted`, PhysX port `Pending`):
+  - [x] **Standalone VBD+AVBD soft body**: StVK membrane (triangles), Neo-Hookean volume (tets), analytic dihedral bending — all as VBD energy evaluators with per-vertex 3×3 block solve. AVBD adaptive k for contacts/attachments/pins (no λ). 17 tests (test104–test120), 118/118 total.
+  - [ ] **PhysX port**: Integrate VBD soft body into `AvbdDynamicsContext` CPU path.
+    - Add `AvbdSoftBody` / `AvbdSoftParticle` to AVBD solver (mirror standalone `avbd_softbody.h`).
+    - Create CPU-side `PxDeformableVolume` / `PxDeformableSurface` creation path (no `CudaContextManager` required).
+    - Enable existing GPU-only snippets (DeformableVolume, DeformableSurface, DeformableVolumeAttachment, DeformableVolumeKinematic) to run on CPU when `PxSolverType::eAVBD`.
+    - Mesh cooking: reuse `PxDeformableVolumeExt::createDeformableVolumeMesh` (already CPU).
+  - [x] Rigid-soft bidirectional coupling: `addAttachmentContribution_rigid()` (particle→rigid 6×6 LHS).
+  - **Architecture note**: Standalone uses VBD (energy gradient + Hessian) for elasticity, NOT AL constraints. See `docs/AVBD_SOFTBODY_ROADMAP.md` for full details.
 - [x] Contact lambda warm-starting (cache + aging + decay) integrated.
 - [ ] Adaptive substepping for faster convergence.
   - **AI Prompt Example**: `"Generate C++ code to integrate Prismatic Joint into AVBD Hessian, with O(1) lookups and multi-thread compatibility."`
@@ -55,21 +60,44 @@ The roadmap is phased, with checklists for each stage. Prioritize CPU paths, uni
   - **Result**: 29/29 PhysX tests pass (15 consecutive deterministic runs). Exceeds Featherstone hybrid ceiling (28/1).
 - [x] Scissor lift with loaded boxes stable through full 10s simulation.
 - [x] Standalone: 99/99 tests including convergence acceleration (AA 47%, Chebyshev 29%).
-- [ ] Coexistence with Native GPU FEM Soft-Bodies (Flag-based switching).
+- [ ] Coexistence with Native GPU FEM Soft-Bodies (Flag-based switching: GPU path uses XPBD FEM, CPU AVBD path uses VBD energy).
 - [ ] PhysX↔Standalone behavior parity harness.
   - **Milestone**: ✅ Articulation solver accepted. Scissor lift exceeds TGS+Featherstone stability.
 
 ---
 
-## Phase 3: Collision System Upgrade (2 Weeks)
-**Goal**: Replace conservative CCD with modern, penetration-free handling.
+## Phase 3: Collision System Upgrade — OGC (2 Weeks)
+**Goal**: Replace conservative CCD with OGC (Offset Geometric Contact), a penetration-free collision algorithm proposed by NVIDIA & University of Utah at SIGGRAPH 2025.
 
-- [ ] Integrate OGC (Offset Geometric Contact) Algorithm:
-  - Embed within AVBD framework as CCD replacement.
-  - Support high-speed objects, soft-body contacts, and zero penetration.
+### OGC Algorithm Overview
+
+**Background**: Prior art IPC (Incremental Potential Contact) guarantees penetration-free simulation but relies on global line search for collision time computation, forcing frequent global synchronization that cripples GPU parallel efficiency — especially for complex self-collision (e.g., multi-layer cloth stacking).
+
+**Core Innovations**:
+
+1. **Volumetric Surface Offsetting** — Instead of treating each primitive (vertex/edge/face) as an independent collider, OGC offsets the entire mesh surface along its normals, constructing a continuous volumetric shell with finite thickness around thin shells and line segments.
+
+2. **Orthogonal Contact Forces** — Because contacts are computed on the smoothly offset surface, the algorithm mathematically guarantees that contact forces are always strictly orthogonal to the contact surface. This eliminates the non-orthogonal parasitic stretch forces that plague traditional penalty-based solvers when collision nodes slide across polygon surfaces, removing unnatural "rubber-band" artifacts at their root.
+
+3. **Local Displacement Bounds (Safety Bubble)** — To guarantee absolute penetration-free behavior without global line search, OGC dynamically computes a local conservative displacement bound ("safety bubble") per vertex each iteration. As long as every vertex stays within its safe radius, the entire system is guaranteed penetration-free.
+
+4. **Massively Parallel Local Operations** — By reducing penetration prevention to local-bound constraints, collision handling no longer requires global synchronization. The large coupled global solve is decomposed into purely local computations, perfectly suited for modern GPU architectures — thousands of collision constraints solved independently and simultaneously.
+
+**Performance**: 300× speedup over IPC while maintaining penetration-free guarantees. Enables real-time simulation of 50-layer cloth stacking and complex yarn knotting.
+
+**Known Limitation**: Under certain parameters, conservative displacement bounds may cause simulated objects to exhibit slightly excessive "bounciness."
+
+### Integration Plan
+
+- [ ] Integrate OGC within AVBD framework:
+  - Replace current penalty + projection hybrid with OGC offset-surface contact.
+  - Implement per-vertex safety bubble for penetration-free guarantee.
+  - Ensure orthogonal contact forces for soft-soft collision (eliminates normal-flip problem).
   - Pre-reserve GPU-friendly paths.
-  - **AI Prompt Example**: `"Implement OGC in C++ for PhysX_AVBD, integrating with position-level projections and contacts."`
-  - **Milestone**: High-velocity impacts without tunneling. Update SnippetChainmail to include fast-moving projectiles.
+  - **AI Prompt Example**: `"Implement OGC in C++ for PhysX_AVBD, integrating volumetric surface offsetting, orthogonal contact forces, and local displacement bounds."`
+  - **Milestone**: High-velocity impacts without tunneling. Soft-soft collision without penetration. Update SnippetDeformableVolumeAVBD to demonstrate zero overlap.
+  - **Reference**: See [OGC_ALGORITHM_FORMULAS.md](OGC_ALGORITHM_FORMULAS.md) for complete formula extraction from the paper.
+  - **Paper PDF**: [Offset_Geometric_Contact-SIGGRAPH2025.pdf](Offset_Geometric_Contact-SIGGRAPH2025.pdf)
 
 ---
 

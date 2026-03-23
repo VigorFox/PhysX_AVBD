@@ -86,6 +86,7 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdParallel.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSoftBody.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverJointPath.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.h

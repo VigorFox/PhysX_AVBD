@@ -795,6 +795,13 @@ void AvbdDynamicsContext::update(
     batch.gearJoints = &gearJoints[currGearIdx];
     batch.numGear = numGear;
 
+    batch.softParticles = nullptr;
+    batch.numSoftParticles = 0;
+    batch.softBodies = nullptr;
+    batch.numSoftBodies = 0;
+    batch.softContacts = nullptr;
+    batch.numSoftContacts = 0;
+
     batch.islandStart = i;
     batch.islandEnd = i + 1;
     batch.iterationOverride = islandArticIterations;

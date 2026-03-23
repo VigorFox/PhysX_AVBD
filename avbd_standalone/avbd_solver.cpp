@@ -389,32 +389,15 @@ void Solver::warmstart() {
           std::max(PENALTY_MIN, std::min(PENALTY_MAX, c.penalty[i] * gamma));
     }
   }
-  // Soft body constraint warmstart
+  // Soft body AVBD warmstart (penalty only, no elastic dual)
   for (auto &sb : softBodies) {
-    for (auto &dc : sb.distConstraints) {
-      dc.lambda *= alpha * gamma;
-      dc.rho = std::max(1.0f, dc.rho * gamma);
-    }
-    for (auto &vc : sb.volConstraints) {
-      vc.lambda *= alpha * gamma;
-      vc.rho = std::max(1e4f, vc.rho * gamma);
-    }
-    for (auto &bc : sb.bendConstraints) {
-      bc.lambda *= alpha * gamma;
-      bc.rho = std::max(1.0f, bc.rho * gamma);
-    }
-    for (auto &ac : sb.attachments) {
-      ac.lambda = ac.lambda * (alpha * gamma);
-    }
-    for (auto &kp : sb.pins) {
-      kp.lambda = kp.lambda * (alpha * gamma);
-    }
+    for (auto &ac : sb.attachments)
+      ac.k = std::max(1e3f, std::min(ac.kMax, ac.k * gamma));
+    for (auto &kp : sb.pins)
+      kp.k = std::max(1e3f, std::min(kp.kMax, kp.k * gamma));
   }
   for (auto &sc : softContacts) {
-    sc.lambda *= alpha * gamma;
-    sc.lambdaT1 *= alpha * gamma;
-    sc.lambdaT2 *= alpha * gamma;
-    sc.rho = std::max(1e3f, sc.rho * gamma);
+    sc.k = std::min(1e4f, sc.ke);
   }
 }
 
@@ -494,7 +477,7 @@ uint32_t Solver::addSoftBody(const std::vector<Vec3>& vertices,
   sb.bendingStiffness = bendingStiffness_;
   sb.thickness = thickness_;
 
-  sb.buildConstraints(softParticles);
+  sb.buildElements(softParticles);
 
   softBodies.push_back(sb);
   return particleStart;
@@ -610,6 +593,8 @@ void Solver::step(float dt_) {
     if (sp.invMass <= 0.0f) continue;
     sp.predictedPosition = sp.position + sp.velocity * dt + gravity * dt2;
     sp.initialPosition = sp.position;
+    // AVBD elastic proximal warmstart (mirrors PhysX: retain fraction from prior timestep)
+    sp.elasticK = sp.elasticK * 0.5f;
     // Adaptive warmstart (same as rigid bodies)
     Vec3 accel = (sp.velocity - sp.prevVelocity) * invDt;
     float gravLen = gravity.length();
@@ -706,6 +691,93 @@ void Solver::step(float dt_) {
 
   // Convergence history
   convergenceHistory.clear();
+
+  // =========================================================================
+  // Rebuild per-particle adjacency (picks up any pins/attachments added
+  // after addSoftBody, mirrors PhysX buildAdjacency before solve)
+  // =========================================================================
+  for (auto &sb : softBodies)
+    sb.buildAdjacency();
+
+  // =========================================================================
+  // Per-particle contact index (prefix-sum, mirrors PhysX)
+  // Avoids O(particles * contacts) scan inside the VBD loop.
+  // =========================================================================
+  std::vector<uint32_t> scIdxBuf(softContacts.size());
+  std::vector<uint32_t> scStart(nSoftParticles + 1, 0);
+  std::vector<uint32_t> scCount(nSoftParticles, 0);
+  auto buildSoftContactIndex = [&]() {
+    for (uint32_t i = 0; i < nSoftParticles; i++) scCount[i] = 0;
+    for (uint32_t ci = 0; ci < (uint32_t)softContacts.size(); ci++)
+      scCount[softContacts[ci].particleIdx]++;
+    scStart[0] = 0;
+    for (uint32_t i = 0; i < nSoftParticles; i++)
+      scStart[i + 1] = scStart[i] + scCount[i];
+    for (uint32_t i = 0; i < nSoftParticles; i++) scCount[i] = 0;
+    for (uint32_t ci = 0; ci < (uint32_t)softContacts.size(); ci++) {
+      uint32_t pi = softContacts[ci].particleIdx;
+      scIdxBuf[scStart[pi] + scCount[pi]] = ci;
+      scCount[pi]++;
+    }
+  };
+  buildSoftContactIndex();
+
+  // Pre-compute body-level inertial targets for Newton-style body solve
+  float invDtSq = 1.0f / dt2;
+  std::vector<Vec3> bodyComPred(softBodies.size());
+  std::vector<Vec3> bodyThetaPred(softBodies.size());
+  std::vector<Vec3> bodyAccumTheta(softBodies.size());
+  for (uint32_t si = 0; si < (uint32_t)softBodies.size(); si++)
+  {
+    const SoftBody& sb = softBodies[si];
+    Vec3 com, comPred;
+    float totalMass = 0.0f;
+    Vec3 angMom;
+    for (uint32_t li = 0; li < sb.particleCount; li++)
+    {
+      uint32_t pi = sb.particleStart + li;
+      if (softParticles[pi].invMass <= 0.0f) continue;
+      float m = softParticles[pi].mass;
+      com = com + softParticles[pi].position * m;
+      comPred = comPred + softParticles[pi].predictedPosition * m;
+      totalMass += m;
+    }
+    if (totalMass > 0.0f)
+    {
+      float invM = 1.0f / totalMass;
+      com = com * invM;
+      comPred = comPred * invM;
+    }
+    bodyComPred[si] = comPred;
+    Mat33 bodyI;
+    for (uint32_t li = 0; li < sb.particleCount; li++)
+    {
+      uint32_t pi = sb.particleStart + li;
+      if (softParticles[pi].invMass <= 0.0f) continue;
+      float m = softParticles[pi].mass;
+      Vec3 r = softParticles[pi].position - com;
+      float r2 = r.dot(r);
+      bodyI = bodyI + (Mat33::diag(r2, r2, r2) - outer(r, r)) * m;
+      angMom = angMom + r.cross(softParticles[pi].velocity) * m;
+    }
+    Vec3 omega = bodyI.inverse() * angMom;
+    if (omega.x != omega.x) omega = Vec3();
+    bodyThetaPred[si] = omega * dt;
+    bodyAccumTheta[si] = Vec3();
+  }
+
+  // =========================================================================
+  // Chebyshev semi-iterative state for soft particles (mirrors PhysX)
+  // =========================================================================
+  float softChebyOmega = 1.0f;
+  std::vector<Vec3> softChebyPrevPos(nSoftParticles);
+  std::vector<Vec3> softChebyPrevPrevPos(nSoftParticles);
+  if (useChebyshev) {
+    for (uint32_t i = 0; i < nSoftParticles; i++) {
+      softChebyPrevPos[i] = softParticles[i].position;
+      softChebyPrevPrevPos[i] = softParticles[i].position;
+    }
+  }
 
   // =========================================================================
   // Main solver loop
@@ -863,59 +935,299 @@ void Solver::step(float dt_) {
       }
     }
 
-    // ---- Soft particle primal update ----
-    for (uint32_t spi = 0; spi < nSoftParticles; spi++) {
-      SoftParticle &sp = softParticles[spi];
+    // ---- Body-level 6x6 solve for soft bodies (mirrors PhysX) ----
+    for (uint32_t si = 0; si < (uint32_t)softBodies.size(); si++)
+    {
+      const SoftBody& sb = softBodies[si];
+      Vec3 com;
+      float bodyMass = 0.0f;
+      for (uint32_t li = 0; li < sb.particleCount; li++)
+      {
+        uint32_t pi = sb.particleStart + li;
+        if (softParticles[pi].invMass <= 0.0f) continue;
+        com = com + softParticles[pi].position * softParticles[pi].mass;
+        bodyMass += softParticles[pi].mass;
+      }
+      if (bodyMass <= 0.0f) continue;
+      com = com * (1.0f / bodyMass);
+
+      uint32_t bodyContactCount = 0;
+      for (uint32_t li = 0; li < sb.particleCount; li++)
+      {
+        uint32_t pi = sb.particleStart + li;
+        bodyContactCount += scStart[pi + 1] - scStart[pi];
+      }
+      if (bodyContactCount == 0) continue;
+
+      Mat33 bodyInertia;
+      for (uint32_t li = 0; li < sb.particleCount; li++)
+      {
+        uint32_t pi = sb.particleStart + li;
+        if (softParticles[pi].invMass <= 0.0f) continue;
+        Vec3 r = softParticles[pi].position - com;
+        float r2 = r.dot(r);
+        bodyInertia = bodyInertia +
+          (Mat33::diag(r2, r2, r2) - outer(r, r)) * softParticles[pi].mass;
+      }
+
+      float bodyMassDtSq = bodyMass * invDtSq;
+      Mat33 A_ll = Mat33::diag(bodyMassDtSq, bodyMassDtSq, bodyMassDtSq);
+      Mat33 A_la, A_al;
+      Mat33 A_aa = bodyInertia * invDtSq;
+      float reg = 1e-4f * bodyMassDtSq;
+      A_aa = A_aa + Mat33::diag(reg, reg, reg);
+
+      Vec3 g_l = (com - bodyComPred[si]) * bodyMassDtSq;
+      Vec3 g_a = (bodyInertia * invDtSq) * (bodyAccumTheta[si] - bodyThetaPred[si]);
+
+      for (uint32_t li = 0; li < sb.particleCount; li++)
+      {
+        uint32_t pi = sb.particleStart + li;
+        Vec3 r = softParticles[pi].position - com;
+        for (uint32_t k = scStart[pi]; k < scStart[pi + 1]; k++)
+        {
+          const SoftContact& sc = softContacts[scIdxBuf[k]];
+          Vec3 n = sc.normal;
+          float violation;
+          if (sc.rigidBodyIdx == UINT32_MAX)
+            violation = softParticles[pi].position.dot(n);
+          else
+            violation = (softParticles[pi].position - sc.surfacePoint).dot(n) - sc.margin;
+
+          float pen = sc.k;
+          Vec3 rCrossN = r.cross(n);
+          A_ll = A_ll + outer(n, n) * pen;
+          A_la = A_la + outer(n, rCrossN) * pen;
+          A_al = A_al + outer(rCrossN, n) * pen;
+          A_aa = A_aa + outer(rCrossN, rCrossN) * pen;
+
+          float f = std::min(0.0f, pen * violation);
+          if (f < 0.0f)
+          {
+            g_l = g_l + n * f;
+            g_a = g_a + rCrossN * f;
+          }
+        }
+      }
+
+      Mat33 A_ll_inv = A_ll.inverse();
+      Mat33 S = A_aa - A_al.mul(A_ll_inv).mul(A_la);
+      Vec3 deltaTheta = S.inverse() * (g_a - A_al.mul(A_ll_inv) * g_l);
+      Vec3 deltaPos = A_ll_inv * (g_l - A_la * deltaTheta);
+
+      if (deltaPos.x != deltaPos.x || deltaTheta.x != deltaTheta.x) continue;
+
+      float thetaMag = deltaTheta.length();
+      if (thetaMag > 0.5f) deltaTheta = deltaTheta * (0.5f / thetaMag);
+
+      for (uint32_t li = 0; li < sb.particleCount; li++)
+      {
+        uint32_t pi = sb.particleStart + li;
+        if (softParticles[pi].invMass <= 0.0f) continue;
+        Vec3 r = softParticles[pi].position - com;
+        softParticles[pi].position = softParticles[pi].position - deltaPos - deltaTheta.cross(r);
+      }
+      bodyAccumTheta[si] = bodyAccumTheta[si] - deltaTheta;
+    }
+
+    // ---- AVBD Soft particle primal update (outer/inner loop, mirrors PhysX) ----
+    // Snapshot positions as proximal anchor for AVBD elastic term
+    for (uint32_t i = 0; i < nSoftParticles; i++)
+      softParticles[i].outerPosition = softParticles[i].position;
+
+    // Reset Chebyshev state for each outer iteration when innerIterations > 1
+    float softAdaptiveRho = chebyshevSpectralRadius;
+    if (innerIterations > 1) {
+      softChebyOmega = 1.0f;
+      for (uint32_t i = 0; i < nSoftParticles; i++) {
+        softChebyPrevPos[i] = softParticles[i].position;
+        softChebyPrevPrevPos[i] = softParticles[i].position;
+      }
+    }
+
+    float softPrevMaxDxSq = 0.0f;
+
+    for (int innerIt = 0; innerIt < innerIterations; innerIt++) {
+    float softMaxDxSq = 0.0f;
+    for (uint32_t si = 0; si < (uint32_t)softBodies.size(); si++) {
+      const SoftBody &sb = softBodies[si];
+      for (uint32_t li = 0; li < sb.particleCount; li++) {
+        uint32_t spi = sb.particleStart + li;
+        SoftParticle &sp = softParticles[spi];
+        if (sp.invMass <= 0.0f) continue;
+
+        float mOverDt2 = sp.mass / dt2;
+        Vec3 f3 = (sp.predictedPosition - sp.position) * mOverDt2;
+        Mat33 H3 = Mat33::diag(mOverDt2, mOverDt2, mOverDt2);
+
+        const SoftBody::ParticleAdjacency& adj = sb.adjacency[li];
+
+        // StVK triangle contributions (adjacency lookup)
+        for (const auto &ref : adj.triRefs) {
+          Vec3 ft; Mat33 Ht;
+          evaluateStVKForceHessian(sb.triElements[ref.index], (int)ref.vOrder,
+                                   sb.mu, sb.lambda, softParticles, ft, Ht);
+          f3 = f3 + ft; H3 = H3 + Ht;
+        }
+        // Neo-Hookean tet contributions (adjacency lookup)
+        for (const auto &ref : adj.tetRefs) {
+          Vec3 ft; Mat33 Ht;
+          evaluateNeoHookeanForceHessian(sb.tetElements[ref.index], (int)ref.vOrder,
+                                         sb.mu, sb.lambda, softParticles, ft, Ht);
+          f3 = f3 + ft; H3 = H3 + Ht;
+        }
+        // Bending contributions (adjacency lookup)
+        for (const auto &ref : adj.bendRefs) {
+          Vec3 fb; Mat33 Hb;
+          evaluateBendingForceHessian(sb.bendElements[ref.index], (int)ref.vOrder,
+                                      sb.bendingStiffness, softParticles, fb, Hb);
+          f3 = f3 + fb; H3 = H3 + Hb;
+        }
+        // Attachment (adjacency lookup)
+        for (uint32_t ai : adj.attachmentIndices) {
+          Vec3 fa; Mat33 Ha;
+          evaluateAttachmentForceHessian_particle(sb.attachments[ai], softParticles, bodies, fa, Ha);
+          f3 = f3 + fa; H3 = H3 + Ha;
+        }
+        // Kinematic pin (adjacency lookup)
+        for (uint32_t pi : adj.pinIndices) {
+          Vec3 fp; Mat33 Hp;
+          evaluatePinForceHessian(sb.pins[pi], softParticles, fp, Hp);
+          f3 = f3 + fp; H3 = H3 + Hp;
+        }
+
+        // Soft contacts (indexed lookup, mirrors PhysX)
+        for (uint32_t k = scStart[spi]; k < scStart[spi + 1]; k++) {
+          Vec3 fc; Mat33 Hc;
+          evaluateContactForceHessian(softContacts[scIdxBuf[k]], softParticles, fc, Hc);
+          f3 = f3 + fc; H3 = H3 + Hc;
+        }
+
+        // Stiffness-proportional Rayleigh damping (Newton VBD style):
+        // Per-axis damping proportional to elastic stiffness, clamped so no
+        // axis gets less damping than mass-proportional (baseline stability).
+        if (sp.damping > 0.0f) {
+          float dampCoeff = sp.damping * sp.mass * invDt;
+          Mat33 H_elastic = H3 - Mat33::diag(mOverDt2, mOverDt2, mOverDt2);
+          float he_xx = fmaxf(H_elastic.m[0][0], 0.0f);
+          float he_yy = fmaxf(H_elastic.m[1][1], 0.0f);
+          float he_zz = fmaxf(H_elastic.m[2][2], 0.0f);
+          float trHe = he_xx + he_yy + he_zz;
+          float dx, dy, dz;
+          if (trHe > 1e-10f) {
+            float s = dampCoeff * 3.0f / trHe;
+            dx = fmaxf(he_xx * s, dampCoeff);
+            dy = fmaxf(he_yy * s, dampCoeff);
+            dz = fmaxf(he_zz * s, dampCoeff);
+          } else {
+            dx = dy = dz = dampCoeff;
+          }
+          Mat33 H_damp = Mat33::diag(dx, dy, dz);
+          f3 = f3 - H_damp * (sp.position - sp.initialPosition);
+          H3 = H3 + H_damp;
+        }
+
+        // AVBD elastic proximal term: pulls toward outer-iteration anchor
+        // to ensure convergence independent of update order (Jacobi-safe)
+        if (sp.elasticK > 0.0f) {
+          H3 = H3 + Mat33::diag(sp.elasticK, sp.elasticK, sp.elasticK);
+          f3 = f3 + (sp.outerPosition - sp.position) * sp.elasticK;
+        }
+
+        // Solve 3x3: displacement = H^-1 * f (with clamping, mirrors PhysX)
+        Vec3 displacement = H3.inverse() * f3;
+        float dxLenSq = displacement.dot(displacement);
+        const float maxDx = 1.0f;
+        if (dxLenSq > maxDx * maxDx)
+          displacement = displacement * (maxDx / sqrtf(dxLenSq));
+        if (displacement.x == displacement.x) { // NaN guard
+          sp.position = sp.position + displacement;
+          if (dxLenSq > softMaxDxSq) softMaxDxSq = dxLenSq;
+        }
+      }
+    }
+
+    // Early termination for soft particles (mirrors PhysX)
+    bool softConverged = (softMaxDxSq < 1e-12f);
+    if (softConverged) break;
+
+    // Adaptive spectral-radius estimation (mirrors PhysX).
+    // Measure GS convergence ratio from iterations 0-1, then use
+    // min(measured, user-provided) as the Chebyshev parameter.
+    if (innerIt == 0) {
+      softPrevMaxDxSq = softMaxDxSq;
+    } else if (innerIt == 1 && useChebyshev) {
+      if (softPrevMaxDxSq > 1e-20f) {
+        float measuredRho = sqrtf(softMaxDxSq / softPrevMaxDxSq);
+        softAdaptiveRho = std::min(measuredRho, chebyshevSpectralRadius);
+        softAdaptiveRho = std::min(softAdaptiveRho, 0.95f);
+      }
+      softPrevMaxDxSq = softMaxDxSq;
+    }
+
+    // Chebyshev semi-iterative for soft particles (matches PhysX)
+    // Use innerIt for iteration index when innerIterations > 1
+    int chebyIt = (innerIterations > 1) ? innerIt : it;
+    if (useChebyshev && chebyIt >= 2) {
+      float rhoSq = softAdaptiveRho * softAdaptiveRho;
+      // Use uniform recurrence
+      softChebyOmega = 4.0f / (4.0f - rhoSq * softChebyOmega);
+      softChebyOmega = std::max(1.0f, std::min(softChebyOmega, 2.0f));
+
+      // Divergence guard: if displacement grew, disable Chebyshev
+      if (softPrevMaxDxSq > 1e-20f && softMaxDxSq > softPrevMaxDxSq * 1.1f) {
+        softChebyOmega = 1.0f;
+        softAdaptiveRho = 0.0f;
+      }
+
+      if (softChebyOmega > 1.0f) {
+      for (uint32_t i = 0; i < nSoftParticles; i++) {
+        if (softParticles[i].invMass <= 0.0f) continue;
+        // Skip Chebyshev for particles with active contacts
+        // (over-relaxation can push them through surfaces)
+        if (scStart[i + 1] > scStart[i]) continue;
+        // Also skip for particles with pins or attachments
+        bool hasConstraint = false;
+        for (const auto &sb : softBodies) {
+          uint32_t li = i - sb.particleStart;
+          if (li < sb.particleCount) {
+            const auto &adj = sb.adjacency[li];
+            if (!adj.pinIndices.empty() || !adj.attachmentIndices.empty())
+              hasConstraint = true;
+            break;
+          }
+        }
+        if (hasConstraint) continue;
+        softParticles[i].position = softChebyPrevPrevPos[i] +
+            (softParticles[i].position - softChebyPrevPrevPos[i]) * softChebyOmega;
+      }
+      }
+      softPrevMaxDxSq = softMaxDxSq;
+    }
+    if (useChebyshev) {
+      for (uint32_t i = 0; i < nSoftParticles; i++) {
+        softChebyPrevPrevPos[i] = softChebyPrevPos[i];
+        softChebyPrevPos[i] = softParticles[i].position;
+      }
+    }
+    } // end innerIterations loop
+
+    // Collision projection (Jolt-style hard constraint, mirrors PhysX)
+    for (uint32_t ci = 0; ci < (uint32_t)softContacts.size(); ci++) {
+      SoftParticle &sp = softParticles[softContacts[ci].particleIdx];
       if (sp.invMass <= 0.0f) continue;
-
-      // 3×3 system
-      Mat33 lhs3;
-      for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++)
-          lhs3.m[r][c] = (r == c) ? (sp.mass / dt2) : 0.0f;
-
-      Vec3 disp = sp.position - sp.predictedPosition;
-      Vec3 rhs3 = lhs3 * disp;
-
-      // Distance constraints
-      for (const auto &sb : softBodies) {
-        for (const auto &dc : sb.distConstraints) {
-          if (dc.p0 == spi || dc.p1 == spi)
-            addDistanceContribution(dc, spi, softParticles, lhs3, rhs3);
-        }
-        // Volume constraints
-        for (const auto &vc : sb.volConstraints) {
-          if (vc.p0 == spi || vc.p1 == spi || vc.p2 == spi || vc.p3 == spi)
-            addVolumeContribution(vc, spi, softParticles, lhs3, rhs3);
-        }
-        // Bending constraints
-        for (const auto &bc : sb.bendConstraints) {
-          if (bc.p0 == spi || bc.p1 == spi || bc.p2 == spi || bc.p3 == spi)
-            addBendingContribution(bc, spi, softParticles, lhs3, rhs3);
-        }
-        // Attachment
-        for (const auto &ac : sb.attachments) {
-          addAttachmentContribution_particle(ac, spi, softParticles, bodies, lhs3, rhs3);
-        }
-        // Kinematic pins
-        for (const auto &kp : sb.pins) {
-          addPinContribution(kp, spi, softParticles, lhs3, rhs3);
-        }
+      const SoftContact &sc = softContacts[ci];
+      Vec3 n = sc.normal;
+      float projPen;
+      if (sc.rigidBodyIdx == UINT32_MAX)
+        projPen = -(sp.position.dot(n));          // ground plane
+      else
+        projPen = -(sp.position - sc.surfacePoint).dot(n);  // body surface
+      if (projPen > 0.0f) {
+        if (sc.rigidBodyIdx != UINT32_MAX && sc.rigidBodyIdx < softBodies.size())
+          projPen = std::min(projPen, 0.05f);
+        sp.position = sp.position + n * projPen;
       }
-
-      // Soft contacts (ground / rigid)
-      for (const auto &sc : softContacts) {
-        addSoftContactContribution(sc, spi, softParticles, lhs3, rhs3);
-      }
-
-      // Solve 3×3
-      Vec3 delta = lhs3.inverse() * rhs3;
-      // NaN/inf guard
-      float deltaMag = delta.length();
-      if (std::isnan(deltaMag) || std::isinf(deltaMag)) {
-        delta = Vec3(0, 0, 0);
-      }
-      sp.position = sp.position - delta;
     }
 
     // ---- Dual update ----
@@ -984,23 +1296,25 @@ void Solver::step(float dt_) {
       }
     }
 
-    // Soft body dual update
+    // Soft body AVBD dual update (penalty growth + elastic proximal)
     {
-      const float lambdaDecay = 0.99f;
       for (auto &sb : softBodies) {
-        for (auto &dc : sb.distConstraints)
-          updateDistanceDual(dc, softParticles, beta, lambdaDecay);
-        for (auto &vc : sb.volConstraints)
-          updateVolumeDual(vc, softParticles, beta, lambdaDecay);
-        for (auto &bc : sb.bendConstraints)
-          updateBendingDual(bc, softParticles, beta, lambdaDecay);
         for (auto &ac : sb.attachments)
-          updateAttachmentDual(ac, softParticles, bodies, lambdaDecay);
+          updateAttachmentDual(ac, softParticles, bodies, beta);
         for (auto &kp : sb.pins)
-          updatePinDual(kp, softParticles, lambdaDecay);
+          updatePinDual(kp, softParticles, beta);
       }
       for (auto &sc : softContacts)
         updateSoftContactDual(sc, softParticles, beta);
+
+      // AVBD elastic proximal dual update: increase proximal weight
+      // proportional to displacement from the outer-iteration anchor
+      for (uint32_t i = 0; i < nSoftParticles; i++) {
+        SoftParticle &sp = softParticles[i];
+        if (sp.invMass <= 0.0f) continue;
+        float disp = (sp.position - sp.outerPosition).length();
+        sp.elasticK = std::min(sp.elasticK + beta * disp, sp.elasticKMax);
+      }
     }
 
     // ===================================================================
@@ -1281,6 +1595,7 @@ void Solver::step(float dt_) {
       sp.velocity = sp.velocity * decay;
     }
   }
+
 }
 
 } // namespace AvbdRef

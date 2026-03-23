@@ -12,6 +12,8 @@ static constexpr float PENALTY_MAX = 1e9f;
 struct Solver {
   Vec3 gravity = {0, -9.8f, 0};
   int iterations = 10;
+  int outerIterations = 1;    // AVBD outer iterations (proximal anchor updates)
+  int innerIterations = 10;   // AVBD inner iterations (VBD sweeps per outer)
   float alpha = 0.95f;              // stabilization
   float beta = 1000.0f;             // penalty growth rate
   float gamma = 0.99f;              // warmstart decay

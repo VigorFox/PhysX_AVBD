@@ -2063,34 +2063,37 @@ void physx::Ext::generateVoxelTetmesh(const PxBoundedData& inputPointsOrig, cons
 			pointUsed[tet[j]] = true;
 	}
 #endif
-	Tetrahedron* voxelTetPtr = reinterpret_cast<Tetrahedron*>(voxelTets.begin());
-	for (PxU32 i = 0; i < embeddingError.size(); ++i)
+	if (intputPointToOutputTetIndex)
 	{
-		if (embeddingError[i] == 1000)
+		Tetrahedron* voxelTetPtr = reinterpret_cast<Tetrahedron*>(voxelTets.begin());
+		for (PxU32 i = 0; i < embeddingError.size(); ++i)
 		{
-			const PxVec3& p = inputPoints.at<PxVec3>(i);
-				
-			PxI32 voxelId = getVoxelId(voxelIds, p, voxelBlockMin, voxelSize, numVoxelsX, numVoxelsY, numVoxelsZ);
-			PX_ASSERT(voxelId >= 0);
-
-			Vox& vox = voxels[voxelId];
-
-			if (anchorNodeIndices && anchorNodeIndices[i] < inputPoints.count)
+			if (embeddingError[i] == 1000)
 			{
-				if (!vox.embed(anchorNodeIndices[i], inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex))
+				const PxVec3& p = inputPoints.at<PxVec3>(i);
+
+				PxI32 voxelId = getVoxelId(voxelIds, p, voxelBlockMin, voxelSize, numVoxelsX, numVoxelsY, numVoxelsZ);
+				PX_ASSERT(voxelId >= 0);
+
+				Vox& vox = voxels[voxelId];
+
+				if (anchorNodeIndices && anchorNodeIndices[i] < inputPoints.count)
 				{
-					PxVec3 pt = inputPoints.at<PxVec3>(anchorNodeIndices[i]);
+					if (!vox.embed(anchorNodeIndices[i], inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex))
+					{
+						PxVec3 pt = inputPoints.at<PxVec3>(anchorNodeIndices[i]);
 
-					voxelId = getVoxelId(voxelIds, pt, voxelBlockMin, voxelSize, numVoxelsX, numVoxelsY, numVoxelsZ);
-					PX_ASSERT(voxelId >= 0);
+						voxelId = getVoxelId(voxelIds, pt, voxelBlockMin, voxelSize, numVoxelsX, numVoxelsY, numVoxelsZ);
+						PX_ASSERT(voxelId >= 0);
 
-					Vox& v = voxels[voxelId];
-					if (!v.embed(anchorNodeIndices[i], inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex))
-						v.embed(inputPoints, inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex);
+						Vox& v = voxels[voxelId];
+						if (!v.embed(anchorNodeIndices[i], inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex))
+							v.embed(inputPoints, inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex);
+					}
 				}
+				else
+					vox.embed(inputPoints, inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex);
 			}
-			else
-				vox.embed(inputPoints, inputTets, numTetsPerVoxel, embeddingError, i, p, voxelTetPtr, voxelPoints, intputPointToOutputTetIndex);
 		}
 	}
 
