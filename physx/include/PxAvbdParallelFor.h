@@ -41,12 +41,12 @@
 // ~128 particles before parallel dispatch outweighs the overhead.
 //=============================================================================
 
-#include <atomic>
-#include <condition_variable>
-#include <functional>
-#include <mutex>
-#include <thread>
-#include <vector>
+#include "foundation/PxAllocator.h"
+#include "foundation/PxArray.h"
+#include "foundation/PxAtomic.h"
+#include "foundation/PxMutex.h"
+#include "foundation/PxSync.h"
+#include "foundation/PxThread.h"
 
 namespace physx {
 namespace Dy {
@@ -60,6 +60,61 @@ static constexpr unsigned AVBD_PARALLEL_MIN_ITEMS = 128;
 // Simple thread pool with chunked dispatch
 //-----------------------------------------------------------------------------
 class AvbdThreadPool {
+  struct SharedState {
+    volatile PxI32 generation;
+    volatile PxI32 workersFinished;
+    volatile PxI32 nextChunk;
+    volatile PxI32 shutdown;
+    volatile PxI32 activeWorkers;
+    unsigned workBegin;
+    unsigned workEnd;
+    unsigned chunkSize;
+    void (*func)(void *, unsigned);
+    void *funcData;
+
+    SharedState()
+        : generation(0), workersFinished(0), nextChunk(0), shutdown(0),
+          activeWorkers(0), workBegin(0), workEnd(0), chunkSize(1),
+          func(NULL), funcData(NULL) {}
+  };
+
+  class WorkerThread : public PxThread {
+  public:
+    WorkerThread(SharedState &state, PxSync &startEvent)
+        : PxThread(), mState(state), mStartEvent(startEvent) {}
+
+    virtual void execute() {
+      PxI32 localGeneration = 0;
+      for (;;) {
+        for (;;) {
+          if (PxAtomicCompareExchange(&mState.shutdown, 0, 0) != 0) {
+            return;
+          }
+
+          const PxI32 generation = PxAtomicCompareExchange(&mState.generation, 0, 0);
+          if (generation != localGeneration) {
+            localGeneration = generation;
+            break;
+          }
+
+          mStartEvent.wait(1);
+        }
+
+        processChunks(mState);
+        PxAtomicIncrement(&mState.workersFinished);
+      }
+    }
+
+  private:
+    SharedState &mState;
+    PxSync &mStartEvent;
+  };
+
+  struct ParallelForData {
+    const void *func;
+    void (*invoke)(const void *, unsigned);
+  };
+
 public:
   static AvbdThreadPool &instance() {
     static AvbdThreadPool pool;
@@ -68,12 +123,11 @@ public:
 
   unsigned numWorkers() const { return mNumWorkers; }
 
-  // Execute func(i) for i in [begin, end) across worker threads.
-  // Blocks until all work is done.
   template <typename Func>
   void parallelFor(unsigned begin, unsigned end, const Func &func) {
     if (begin >= end)
       return;
+
     const unsigned count = end - begin;
     if (count == 1 || mNumWorkers == 0) {
       for (unsigned i = begin; i < end; ++i)
@@ -81,120 +135,116 @@ public:
       return;
     }
 
-    // Determine how many workers to actually use (don't wake more than needed)
     const unsigned minChunkSize = 32;
     unsigned maxWorkers = (count + minChunkSize - 1) / minChunkSize;
     if (maxWorkers > mNumWorkers)
       maxWorkers = mNumWorkers;
-    const unsigned activeWorkers = maxWorkers;
-    const unsigned totalThreads = activeWorkers + 1; // workers + caller
-    const unsigned chunkSize =
-        (count + totalThreads - 1) / totalThreads;
 
-    mFunc = [&func](unsigned i) { func(i); };
-    mWorkBegin = begin;
-    mWorkEnd = end;
-    mChunkSize = chunkSize;
-    mNextChunk.store(0, std::memory_order_relaxed);
-    mActiveWorkers = activeWorkers;
-    mWorkersFinished.store(0, std::memory_order_relaxed);
+    const unsigned activeWorkers = maxWorkers;
+    const unsigned totalThreads = activeWorkers + 1;
+    const unsigned chunkSize = (count + totalThreads - 1) / totalThreads;
+
+    ParallelForData data;
+    data.func = &func;
+    data.invoke = &invokeFunc<Func>;
+
+    mState.func = &invokeThunk;
+    mState.funcData = &data;
+    mState.workBegin = begin;
+    mState.workEnd = end;
+    mState.chunkSize = chunkSize;
+    PxAtomicExchange(&mState.nextChunk, 0);
+    PxAtomicExchange(&mState.workersFinished, 0);
+    PxAtomicExchange(&mState.activeWorkers, static_cast<PxI32>(activeWorkers));
 
     {
-      std::lock_guard<std::mutex> lock(mMutex);
-      mGeneration++;
-    }
-    // Wake only the needed workers
-    if (activeWorkers >= mNumWorkers)
-      mCondVar.notify_all();
-    else
-      for (unsigned w = 0; w < activeWorkers; ++w)
-        mCondVar.notify_one();
-
-    processChunks();
-
-    // Spin-wait for active workers only
-    while (mWorkersFinished.load(std::memory_order_acquire) < activeWorkers) {
-      std::this_thread::yield();
+      PxMutex::ScopedLock lock(mMutex);
+      PxAtomicIncrement(&mState.generation);
+      mStartEvent.set();
     }
 
-    mFunc = nullptr;
+    processChunks(mState);
+
+    while (static_cast<unsigned>(PxAtomicCompareExchange(&mState.workersFinished, 0, 0)) < activeWorkers) {
+      PxThread::yield();
+    }
+
+    {
+      PxMutex::ScopedLock lock(mMutex);
+      mStartEvent.reset();
+    }
+
+    mState.func = NULL;
+    mState.funcData = NULL;
   }
 
 private:
-  AvbdThreadPool() {
-    unsigned hwThreads = std::thread::hardware_concurrency();
+  AvbdThreadPool() : mWorkers(), mNumWorkers(0), mMutex(), mStartEvent() {
+    unsigned hwThreads = PxThread::getNbPhysicalCores();
+    if (hwThreads == 0)
+      hwThreads = 1;
+
     mNumWorkers = (hwThreads > 1) ? (hwThreads - 1) : 0;
     if (mNumWorkers > 15)
       mNumWorkers = 15;
 
-    mShutdown = false;
-    mGeneration = 0;
-    mActiveWorkers = 0;
-
+    mWorkers.reserve(mNumWorkers);
     for (unsigned i = 0; i < mNumWorkers; ++i) {
-      mWorkers.emplace_back([this] { workerLoop(); });
+      WorkerThread *worker = PX_NEW(WorkerThread)(mState, mStartEvent);
+      mWorkers.pushBack(worker);
+      worker->start();
     }
   }
 
   ~AvbdThreadPool() {
+    PxAtomicExchange(&mState.shutdown, 1);
     {
-      std::lock_guard<std::mutex> lock(mMutex);
-      mShutdown = true;
-      mGeneration++;
+      PxMutex::ScopedLock lock(mMutex);
+      PxAtomicIncrement(&mState.generation);
+      mStartEvent.set();
     }
-    mCondVar.notify_all();
-    for (auto &t : mWorkers)
-      t.join();
+
+    for (PxU32 i = 0; i < mWorkers.size(); ++i) {
+      mWorkers[i]->waitForQuit();
+      PX_DELETE(mWorkers[i]);
+    }
   }
 
   AvbdThreadPool(const AvbdThreadPool &) = delete;
   AvbdThreadPool &operator=(const AvbdThreadPool &) = delete;
 
-  void processChunks() {
+  static PX_FORCE_INLINE void processChunks(SharedState &state) {
     for (;;) {
-      unsigned chunkIdx =
-          mNextChunk.fetch_add(1, std::memory_order_relaxed);
-      unsigned chunkBegin = mWorkBegin + chunkIdx * mChunkSize;
-      if (chunkBegin >= mWorkEnd)
+      const PxI32 chunkIdx = PxAtomicIncrement(&state.nextChunk) - 1;
+      const unsigned chunkBegin = state.workBegin + static_cast<unsigned>(chunkIdx) * state.chunkSize;
+      if (chunkBegin >= state.workEnd)
         break;
-      unsigned chunkEnd = chunkBegin + mChunkSize;
-      if (chunkEnd > mWorkEnd)
-        chunkEnd = mWorkEnd;
-      for (unsigned i = chunkBegin; i < chunkEnd; ++i)
-        mFunc(i);
-    }
-  }
 
-  void workerLoop() {
-    unsigned localGen = 0;
-    for (;;) {
-      {
-        std::unique_lock<std::mutex> lock(mMutex);
-        mCondVar.wait(lock,
-                      [&] { return mGeneration != localGen || mShutdown; });
-        if (mShutdown)
-          return;
-        localGen = mGeneration;
+      unsigned chunkEnd = chunkBegin + state.chunkSize;
+      if (chunkEnd > state.workEnd)
+        chunkEnd = state.workEnd;
+
+      for (unsigned i = chunkBegin; i < chunkEnd; ++i) {
+        state.func(state.funcData, i);
       }
-      processChunks();
-      mWorkersFinished.fetch_add(1, std::memory_order_release);
     }
   }
 
-  unsigned mNumWorkers;
-  std::vector<std::thread> mWorkers;
-  std::mutex mMutex;
-  std::condition_variable mCondVar;
-  bool mShutdown;
-  unsigned mGeneration;
+  static void invokeThunk(void *funcData, unsigned i) {
+    ParallelForData *data = reinterpret_cast<ParallelForData *>(funcData);
+    data->invoke(data->func, i);
+  }
 
-  std::function<void(unsigned)> mFunc;
-  unsigned mWorkBegin;
-  unsigned mWorkEnd;
-  unsigned mChunkSize;
-  unsigned mActiveWorkers;
-  std::atomic<unsigned> mNextChunk;
-  std::atomic<unsigned> mWorkersFinished;
+  template <typename Func>
+  static void invokeFunc(const void *func, unsigned i) {
+    (*reinterpret_cast<const Func *>(func))(i);
+  }
+
+  SharedState mState;
+  PxArray<WorkerThread *> mWorkers;
+  unsigned mNumWorkers;
+  PxMutex mMutex;
+  PxSync mStartEvent;
 };
 
 //-----------------------------------------------------------------------------
@@ -218,11 +268,22 @@ inline void avbdParallelFor(unsigned begin, unsigned end, const Func &func) {
 //-----------------------------------------------------------------------------
 // Atomic float max helper for parallel reductions
 //-----------------------------------------------------------------------------
-inline void avbdAtomicMaxFloat(std::atomic<float> &target, float value) {
-  float expected = target.load(std::memory_order_relaxed);
-  while (value > expected &&
-         !target.compare_exchange_weak(expected, value,
-                                       std::memory_order_relaxed)) {
+inline void avbdAtomicMaxFloat(volatile PxI32 &targetBits, float value) {
+  union FloatBits {
+    float f;
+    PxI32 i;
+  } valueBits, expectedBits, desiredBits;
+
+  valueBits.f = value;
+  expectedBits.i = PxAtomicCompareExchange(&targetBits, 0, 0);
+
+  while (value > expectedBits.f) {
+    desiredBits.i = valueBits.i;
+    const PxI32 original = PxAtomicCompareExchange(&targetBits, desiredBits.i, expectedBits.i);
+    if (original == expectedBits.i) {
+      break;
+    }
+    expectedBits.i = original;
   }
 }
 
