@@ -84,7 +84,7 @@ static void createScissorLift()
 
 	//Now create the slider and fixed joints...
 
-	gArticulation->setSolverIterationCounts(32);
+	gArticulation->setSolverIterationCounts(10);
 
 	PxArticulationLink* leftRoot = gArticulation->createLink(base, PxTransform(PxVec3(0.f, 0.55f, -0.9f)));
 	PxRigidActorExt::createExclusiveShape(*leftRoot, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);

@@ -296,33 +296,6 @@ private:
                                         AvbdSolverBody *bodies,
                                         physx::PxU32 numBodies);
 
-  /**
-   * @brief Compute energy gradient for a single body
-   * Returns the 6D gradient vector [dE/dp, dE/dtheta]
-   */
-  void computeEnergyGradient(physx::PxU32 bodyIndex, AvbdSolverBody *bodies,
-                             physx::PxU32 numBodies,
-                             AvbdContactConstraint *contacts,
-                             physx::PxU32 numContacts, physx::PxReal invDt2,
-                             AvbdVec6 &gradient);
-
-  /**
-   * @brief Check convergence based on energy change
-   * Returns true if |E_new - E_old| < tolerance
-   */
-  bool checkEnergyConvergence(physx::PxReal oldEnergy, physx::PxReal newEnergy,
-                              physx::PxReal tolerance) const;
-
-  /**
-   * @brief Perform line search for optimal step size
-   * Uses Armijo backtracking to ensure sufficient energy decrease
-   */
-  physx::PxReal performLineSearch(AvbdSolverBody &body,
-                                  const AvbdVec6 &direction,
-                                  physx::PxReal initialStep,
-                                  physx::PxReal energy, physx::PxReal c1,
-                                  physx::PxReal rho);
-
   //-------------------------------------------------------------------------
   // Helper Methods
   //-------------------------------------------------------------------------

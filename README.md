@@ -39,10 +39,20 @@ Note: AVBD articulation/joint solving is maximal-coordinate oriented on the solv
 
 Key achievements:
 - **29/29 PhysX tests pass** including scissor lift with closed kinematic loops, loaded boxes, and 10s stability.
+- **Iteration-efficiency pass completed**: the full PhysX articulation regression now also passes at **10 solver iterations**. This reduction came from D6/articulation lambda warm-starting, conservative early-stop, targeted articulation iteration diagnostics, and a solver-side fix for `eACCELERATION` drive semantics.
 - **12 bugs fixed** during integration: motion encoding (2-bit-per-axis), position drive error computation, eFIX penalty boost, iteration count byte order, and more.
 - **Per-island adaptive iterations**: Articulations use `setSolverIterationCounts(N)` for higher iteration budgets; contact-only islands default to 8 iterations.
 - **Exceeds Featherstone hybrid ceiling**: The alternating-solve lag in Featherstone coupling was the dominant error source for strongly coupled systems. Unified penalty solving eliminates this boundary.
 - **Standalone**: full suite now passes at 118/118 (101 rigid/artic + 17 soft body). The rigid/artic lineage still includes convergence acceleration (Anderson Acceleration 47%, Chebyshev 29%), ID extraction via λ*, solver-is-IK, and mimic joints.
+
+### Articulation Iteration Efficiency (2026-04)
+
+Recent work focused on lowering the articulation iteration budget globally instead of only tuning a single snippet scene.
+
+- **Warm-start extension**: D6/articulation joints now reuse cached AL multipliers across frames, not just contacts.
+- **Measurement-first diagnostics**: `PHYSX_AVBD_ITER_DIAG`, `PHYSX_AVBD_ITER_DIAG_EVERY`, and `PHYSX_AVBD_ITER_DIAG_SEQUENTIAL` expose requested vs executed iterations, joint-row composition, and dominant lambda sources so bottlenecks can be localized before retuning.
+- **Drive semantic fix**: articulation-internal `PxArticulationDriveType::eACCELERATION` is now handled in the solver using response-scaled implicit coefficients instead of being approximated only in constraint prep.
+- **Current verified floor**: `SnippetAvbdArticulation` passes as a full suite at **10** iterations. **8** iterations still fails in the loaded Scissor Lift case, so 10 is the current repository-wide verified articulation floor.
 
 ### D6 Unification
 
@@ -81,6 +91,7 @@ The AVBD soft body / deformable path is still in an early prototype stage.
 
 - ✅ Standalone full suite passes (118/118: 101 rigid/artic + 17 soft body).
 - ✅ PhysX articulation regression passes (29/29 tests, 15 consecutive deterministic runs).
+- ✅ PhysX articulation regression also passes at `PHYSX_AVBD_SOLVER_ITERS=10`; this is the current verified global floor.
 - ✅ PhysX debug build succeeds with all Snippets.
 - ✅ `SnippetChainmail` remains integrated for extreme impact and dense-joint stress regression.
 - ✅ All joint types validated: Spherical chain, breakable Fixed, damped D6, limited Prismatic, limited Revolute.
@@ -88,6 +99,7 @@ The AVBD soft body / deformable path is still in an early prototype stage.
 - ✅ Friction reads per-material coefficients; Coulomb cone + augmented Lagrangian validated.
 - ✅ Scissor lift with closed kinematic loops and loaded boxes: stable 10s.
 - ✅ Per-island adaptive iteration override: articulations get high iterations, contacts get low.
+- ⚠️ Full articulation regression still fails at 8 iterations in the loaded Scissor Lift path; further down-pressure is still pending.
 - ⚠️ Soft body / deformable AVBD is still early-stage and currently has major performance issues; it is not included in the accepted baseline above.
 
 ## SnippetChainmail Demo
@@ -220,7 +232,7 @@ PVD Profile Zones available:
 
 1. **No Sleep/Wake** - Bodies remain active
 2. **CPU only** - No GPU acceleration
-3. **Articulation cold-start** - Long open chains (N>20) need higher iteration counts for cold-start convergence
+3. **Articulation low-budget edge cases** - The current verified full-suite floor is 10 iterations; the loaded Scissor Lift case still fails at 8
 4. **Soft body performance** - The current AVBD soft body / deformable path remains early-stage and has major performance problems
 
 ## Original PhysX Documentation

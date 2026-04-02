@@ -51,6 +51,65 @@ static physx::PxU32 s_avbdJointDebugFrame = 0;
 namespace physx {
 namespace Dy {
 
+namespace {
+static physx::PxReal computeRotationDeltaMagnitude(const physx::PxQuat& current,
+                                                   const physx::PxQuat& previous) {
+  physx::PxQuat deltaQ = current * previous.getConjugate();
+  if (deltaQ.w < 0.0f)
+    deltaQ = -deltaQ;
+  return 2.0f * physx::PxSqrt(deltaQ.x * deltaQ.x + deltaQ.y * deltaQ.y +
+                              deltaQ.z * deltaQ.z);
+}
+
+static void computeMaxPoseDeltas(const AvbdSolverBody* bodies,
+                                 physx::PxU32 numBodies,
+                                 const physx::PxArray<physx::PxVec3>& prevPos,
+                                 const physx::PxArray<physx::PxQuat>& prevRot,
+                                 physx::PxReal& maxPositionDelta,
+                                 physx::PxReal& maxRotationDelta) {
+  maxPositionDelta = 0.0f;
+  maxRotationDelta = 0.0f;
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (bodies[i].invMass <= 0.0f)
+      continue;
+
+    maxPositionDelta = physx::PxMax(maxPositionDelta,
+      (bodies[i].position - prevPos[i]).magnitude());
+    maxRotationDelta = physx::PxMax(maxRotationDelta,
+      computeRotationDeltaMagnitude(bodies[i].rotation, prevRot[i]));
+  }
+}
+
+static physx::PxReal computeLinearDriveRecipResponse(
+    const AvbdSolverBody *bodyA, const AvbdSolverBody *bodyB,
+    const physx::PxVec3 &rA, const physx::PxVec3 &rB,
+    const physx::PxVec3 &worldAxis) {
+  physx::PxReal unitResponse = 0.0f;
+  if (bodyA) {
+    unitResponse += bodyA->invMass;
+    const physx::PxVec3 angA = rA.cross(worldAxis);
+    unitResponse += (bodyA->invInertiaWorld * angA).dot(angA);
+  }
+  if (bodyB) {
+    unitResponse += bodyB->invMass;
+    const physx::PxVec3 angB = rB.cross(worldAxis);
+    unitResponse += (bodyB->invInertiaWorld * angB).dot(angB);
+  }
+  return unitResponse > 1e-8f ? (1.0f / unitResponse) : 0.0f;
+}
+
+static physx::PxReal computeAngularDriveRecipResponse(
+    const AvbdSolverBody *bodyA, const AvbdSolverBody *bodyB,
+    const physx::PxVec3 &worldAxis) {
+  physx::PxReal unitResponse = 0.0f;
+  if (bodyA)
+    unitResponse += (bodyA->invInertiaWorld * worldAxis).dot(worldAxis);
+  if (bodyB)
+    unitResponse += (bodyB->invInertiaWorld * worldAxis).dot(worldAxis);
+  return unitResponse > 1e-8f ? (1.0f / unitResponse) : 0.0f;
+}
+} // namespace
+
 
 //=============================================================================
 // Unified 6x6 System Solver with Joints -- True AVBD
@@ -624,10 +683,14 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
         // Get "other body" for relative displacement
         const AvbdSolverBody *otherBody = nullptr;
+        const AvbdSolverBody *bodyARef = nullptr;
+        const AvbdSolverBody *bodyBRef = nullptr;
         if (isBodyA && bodyBIdx < numBodies)
           otherBody = &bodies[bodyBIdx];
         else if (!isBodyA && bodyAIdx < numBodies)
           otherBody = &bodies[bodyAIdx];
+        bodyARef = (bodyAIdx < numBodies) ? &bodies[bodyAIdx] : nullptr;
+        bodyBRef = (bodyBIdx < numBodies) ? &bodies[bodyBIdx] : nullptr;
 
         // --- Linear velocity drive (AL constraint) ---
         if ((jnt.driveFlags & 0x7) != 0) {
@@ -661,7 +724,23 @@ void AvbdSolver::solveLocalSystemWithJoints(
             physx::PxReal targetVel = (&jnt.driveLinearVelocity.x)[a];
             physx::PxReal C = (dxB_proj - dxA_proj) - targetVel * dt;
 
+            const physx::PxVec3 rAWorld = bodyARef
+              ? bodyARef->rotation.rotate(jnt.anchorA)
+              : physx::PxVec3(0.0f);
+            const physx::PxVec3 rBWorld = bodyBRef
+              ? bodyBRef->rotation.rotate(jnt.anchorB)
+              : physx::PxVec3(0.0f);
             physx::PxReal rho_drive = damping / dt2;
+            if (jnt.isLinearAccelerationDrive(a)) {
+              const physx::PxReal driveScale =
+                computeLinearDriveRecipResponse(bodyARef, bodyBRef,
+                               rAWorld, rBWorld, wAxis);
+              const physx::PxReal stiffness = (&jnt.linearStiffness.x)[a];
+              const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+              const physx::PxReal implicitScale =
+                1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+              rho_drive *= driveScale * implicitScale;
+            }
             physx::PxReal lam = (&jnt.lambdaDriveLinear.x)[a];
             physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
             physx::PxReal f = signAL * (rho_drive * C + lam);
@@ -728,6 +807,16 @@ void AvbdSolver::solveLocalSystemWithJoints(
                 jnt.angularDamping.z; // SLERP uses Z damping slot
             if (damping > 0.0f) {
               physx::PxReal rho_drive = damping / dt2;
+              if (jnt.isAngularAccelerationDrive(2)) {
+                const physx::PxReal driveScale =
+                    computeAngularDriveRecipResponse(bodyARef, bodyBRef,
+                                                     physx::PxVec3(1.0f, 0.0f, 0.0f));
+                const physx::PxReal stiffness = jnt.angularStiffness.z;
+                const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+                const physx::PxReal implicitScale =
+                    1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+                rho_drive *= driveScale * implicitScale;
+              }
               for (int k = 0; k < 3; ++k) {
                 physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
                 physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[k];
@@ -765,7 +854,17 @@ void AvbdSolver::solveLocalSystemWithJoints(
               physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
               physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
 
-              physx::PxReal rho_drive = damping / dt2;
+                physx::PxReal rho_drive = damping / dt2;
+                if (jnt.isAngularAccelerationDrive(axes[a].dampIdx)) {
+                const physx::PxReal driveScale =
+                  computeAngularDriveRecipResponse(bodyARef, bodyBRef, wAxis);
+                const physx::PxReal stiffness =
+                  (&jnt.angularStiffness.x)[axes[a].dampIdx];
+                const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+                const physx::PxReal implicitScale =
+                  1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+                rho_drive *= driveScale * implicitScale;
+                }
               physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx];
               physx::PxReal f = signAL * (rho_drive * C + lam);
 
@@ -1576,6 +1675,19 @@ void AvbdSolver::solveWithJoints(
         (mStats.numJoints > 0)
             ? physx::PxMax(baseIters, physx::PxU32(8))
             : baseIters;
+    const bool enableEarlyStop =
+      (mConfig.positionTolerance > 0.0f && jointIterations > 1);
+    const physx::PxU32 minIterations =
+      physx::PxMin(jointIterations, physx::PxU32(mStats.numJoints > 0 ? 8 : 4));
+    const physx::PxReal rotationTolerance =
+      physx::PxMax(4.0f * mConfig.positionTolerance, 1e-4f);
+    physx::PxU32 consecutiveConvergedIterations = 0;
+    physx::PxArray<physx::PxVec3> earlyStopPrevPos;
+    physx::PxArray<physx::PxQuat> earlyStopPrevRot;
+    if (enableEarlyStop) {
+      earlyStopPrevPos.resize(numBodies);
+      earlyStopPrevRot.resize(numBodies);
+    }
 
     for (physx::PxU32 iter = 0; iter < jointIterations; ++iter) {
       // Save pre-iteration state for Chebyshev
@@ -1585,6 +1697,12 @@ void AvbdSolver::solveWithJoints(
           chebyPrevPrevRot[i] = chebyPrevRot[i];
           chebyPrevPos[i] = bodies[i].position;
           chebyPrevRot[i] = bodies[i].rotation;
+        }
+      }
+      if (enableEarlyStop) {
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          earlyStopPrevPos[i] = bodies[i].position;
+          earlyStopPrevRot[i] = bodies[i].rotation;
         }
       }
 
@@ -2043,8 +2161,30 @@ void AvbdSolver::solveWithJoints(
                 physx::PxReal C =
                     (dxB.dot(wAxis) - dxA.dot(wAxis)) - worldTarget.dot(wAxis);
 
-                physx::PxReal rhoDualDrive =
-                    physx::PxMin(damping / dt2, rhoDual);
+                const physx::PxVec3 rAWorld =
+                  aStatic ? physx::PxVec3(0.0f)
+                      : bodies[jnt.header.bodyIndexA].rotation.rotate(
+                          jnt.anchorA);
+                const physx::PxVec3 rBWorld =
+                  bStatic ? physx::PxVec3(0.0f)
+                      : bodies[jnt.header.bodyIndexB].rotation.rotate(
+                          jnt.anchorB);
+                const AvbdSolverBody *bodyARef =
+                  aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
+                const AvbdSolverBody *bodyBRef =
+                  bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
+                physx::PxReal rhoDualDrive = physx::PxMin(damping / dt2, rhoDual);
+                if (jnt.isLinearAccelerationDrive(a)) {
+                  const physx::PxReal driveScale =
+                    computeLinearDriveRecipResponse(bodyARef, bodyBRef,
+                                   rAWorld, rBWorld, wAxis);
+                  const physx::PxReal stiffness = (&jnt.linearStiffness.x)[a];
+                  const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+                  const physx::PxReal implicitScale =
+                    1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+                  rhoDualDrive = physx::PxMin((damping * driveScale * implicitScale) / dt2,
+                                rhoDual);
+                }
                 (&jnt.lambdaDriveLinear.x)[a] =
                     (&jnt.lambdaDriveLinear.x)[a] * lambdaDecay +
                     rhoDualDrive * C;
@@ -2081,8 +2221,22 @@ void AvbdSolver::solveWithJoints(
                 physx::PxReal damping =
                     jnt.angularDamping.z; // SLERP uses Z damping slot
                 if (damping > 0.0f) {
-                  physx::PxReal rhoDualDrive =
-                      physx::PxMin(damping / dt2, rhoDual);
+                  const AvbdSolverBody *bodyARef =
+                    aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
+                  const AvbdSolverBody *bodyBRef =
+                    bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
+                    physx::PxReal rhoDualDrive = physx::PxMin(damping / dt2, rhoDual);
+                    if (jnt.isAngularAccelerationDrive(2)) {
+                    const physx::PxReal driveScale =
+                      computeAngularDriveRecipResponse(bodyARef, bodyBRef,
+                                       physx::PxVec3(1.0f, 0.0f, 0.0f));
+                    const physx::PxReal stiffness = jnt.angularStiffness.z;
+                    const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+                    const physx::PxReal implicitScale =
+                      1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+                    rhoDualDrive = physx::PxMin((damping * driveScale * implicitScale) / dt2,
+                                  rhoDual);
+                    }
                   for (int k = 0; k < 3; ++k) {
                     physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
                     (&jnt.lambdaDriveAngular.x)[k] =
@@ -2111,14 +2265,28 @@ void AvbdSolver::solveWithJoints(
                     continue;
 
                   physx::PxVec3 wAxis = jointFrameA.rotate(axes[a].localAxis);
+          const AvbdSolverBody *bodyARef =
+            aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
+          const AvbdSolverBody *bodyBRef =
+            bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
                   // PhysX TGS convention: Twist/Swing target velocities are
                   // applied as (wA - wB), meaning wB - wA = -target. SLERP is
                   // applied as wB - wA = target, which is handled above.
                   physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
                   physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
 
-                  physx::PxReal rhoDualDrive =
-                      physx::PxMin(damping / dt2, rhoDual);
+            physx::PxReal rhoDualDrive = physx::PxMin(damping / dt2, rhoDual);
+            if (jnt.isAngularAccelerationDrive(axes[a].dampIdx)) {
+            const physx::PxReal driveScale =
+              computeAngularDriveRecipResponse(bodyARef, bodyBRef, wAxis);
+            const physx::PxReal stiffness =
+              (&jnt.angularStiffness.x)[axes[a].dampIdx];
+            const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+            const physx::PxReal implicitScale =
+              1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+            rhoDualDrive = physx::PxMin((damping * driveScale * implicitScale) / dt2,
+                          rhoDual);
+            }
                   (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx] =
                       (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx] *
                           lambdaDecay +
@@ -2166,6 +2334,24 @@ void AvbdSolver::solveWithJoints(
               qPrev.z + chebyOmega * (qCur.z - qPrev.z),
               qPrev.w + chebyOmega * (qCur.w - qPrev.w));
           bodies[i].rotation = qBlend.getNormalized();
+        }
+      }
+
+      if (enableEarlyStop) {
+        physx::PxReal maxPositionDelta = 0.0f;
+        physx::PxReal maxRotationDelta = 0.0f;
+        computeMaxPoseDeltas(bodies, numBodies, earlyStopPrevPos,
+                             earlyStopPrevRot, maxPositionDelta,
+                             maxRotationDelta);
+
+        if ((iter + 1) >= minIterations &&
+            maxPositionDelta <= mConfig.positionTolerance &&
+            maxRotationDelta <= rotationTolerance) {
+          consecutiveConvergedIterations++;
+          if (consecutiveConvergedIterations >= 2)
+            break;
+        } else {
+          consecutiveConvergedIterations = 0;
         }
       }
     } // end iteration loop

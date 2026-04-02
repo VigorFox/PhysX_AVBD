@@ -29,6 +29,8 @@
 #include "foundation/PxArray.h"
 #include "foundation/PxAssert.h"
 
+#include "DyAvbdParallelFor.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -48,6 +50,34 @@ struct KahanSum {
     sum = t;
   }
 };
+
+static physx::PxReal computeRotationDeltaMagnitude(const physx::PxQuat& current,
+                                                   const physx::PxQuat& previous) {
+  physx::PxQuat deltaQ = current * previous.getConjugate();
+  if (deltaQ.w < 0.0f)
+    deltaQ = -deltaQ;
+  return 2.0f * physx::PxSqrt(deltaQ.x * deltaQ.x + deltaQ.y * deltaQ.y +
+                              deltaQ.z * deltaQ.z);
+}
+
+static void computeMaxPoseDeltas(const AvbdSolverBody* bodies,
+                                 physx::PxU32 numBodies,
+                                 const physx::PxArray<physx::PxVec3>& prevPos,
+                                 const physx::PxArray<physx::PxQuat>& prevRot,
+                                 physx::PxReal& maxPositionDelta,
+                                 physx::PxReal& maxRotationDelta) {
+  maxPositionDelta = 0.0f;
+  maxRotationDelta = 0.0f;
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (bodies[i].invMass <= 0.0f)
+      continue;
+
+    maxPositionDelta = physx::PxMax(maxPositionDelta,
+      (bodies[i].position - prevPos[i]).magnitude());
+    maxRotationDelta = physx::PxMax(maxRotationDelta,
+      computeRotationDeltaMagnitude(bodies[i].rotation, prevRot[i]));
+  }
+}
 } // namespace
 
 //=============================================================================
@@ -273,10 +303,56 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
   {
     PX_PROFILE_ZONE("AVBD.solveIterations", 0);
 
+    // Chebyshev semi-iterative state
+    const bool useChebyshev = (mConfig.chebyshevRho > 0.0f && mConfig.chebyshevRho < 1.0f);
+    physx::PxReal chebyOmega = 1.0f;
+    physx::PxArray<physx::PxVec3> chebyPrevPos, chebyPrevPrevPos;
+    physx::PxArray<physx::PxQuat> chebyPrevRot, chebyPrevPrevRot;
+    if (useChebyshev) {
+      chebyPrevPos.resize(numBodies);
+      chebyPrevPrevPos.resize(numBodies);
+      chebyPrevRot.resize(numBodies);
+      chebyPrevPrevRot.resize(numBodies);
+      for (physx::PxU32 i = 0; i < numBodies; ++i) {
+        chebyPrevPos[i] = bodies[i].position;
+        chebyPrevPrevPos[i] = bodies[i].position;
+        chebyPrevRot[i] = bodies[i].rotation;
+        chebyPrevPrevRot[i] = bodies[i].rotation;
+      }
+    }
+
     // Both 6x6 and 3x3 paths use AL dual update => primal+dual each iteration
     const physx::PxU32 iters = (iterationOverride > 0)
         ? iterationOverride : mConfig.innerIterations;
+    const bool enableEarlyStop = (mConfig.positionTolerance > 0.0f && iters > 1);
+    const physx::PxU32 minIterations = physx::PxMin(iters, physx::PxU32(4));
+    const physx::PxReal rotationTolerance =
+        physx::PxMax(4.0f * mConfig.positionTolerance, 1e-4f);
+    physx::PxU32 consecutiveConvergedIterations = 0;
+    physx::PxArray<physx::PxVec3> earlyStopPrevPos;
+    physx::PxArray<physx::PxQuat> earlyStopPrevRot;
+    if (enableEarlyStop) {
+      earlyStopPrevPos.resize(numBodies);
+      earlyStopPrevRot.resize(numBodies);
+    }
+
     for (physx::PxU32 iter = 0; iter < iters; ++iter) {
+      // Save pre-iteration state for Chebyshev
+      if (useChebyshev) {
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          chebyPrevPrevPos[i] = chebyPrevPos[i];
+          chebyPrevPrevRot[i] = chebyPrevRot[i];
+          chebyPrevPos[i] = bodies[i].position;
+          chebyPrevRot[i] = bodies[i].rotation;
+        }
+      }
+      if (enableEarlyStop) {
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          earlyStopPrevPos[i] = bodies[i].position;
+          earlyStopPrevRot[i] = bodies[i].rotation;
+        }
+      }
+
       {
         PX_PROFILE_ZONE("AVBD.blockDescent", 0);
         blockDescentIteration(bodies, numBodies, contacts, numContacts, dt,
@@ -287,6 +363,51 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
         PX_PROFILE_ZONE("AVBD.updateLambda", 0);
         updateLagrangianMultipliers(bodies, numBodies, contacts, numContacts,
                                     dt);
+      }
+
+      // Chebyshev semi-iterative position/rotation relaxation
+      if (useChebyshev && iter >= 2) {
+        const physx::PxReal rhoSq = mConfig.chebyshevRho * mConfig.chebyshevRho;
+        if (iter == 2)
+          chebyOmega = 2.0f / (2.0f - rhoSq);
+        else
+          chebyOmega = 1.0f / (1.0f - rhoSq * chebyOmega / 4.0f);
+        chebyOmega = physx::PxClamp(chebyOmega, 1.0f, 2.0f);
+
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          if (bodies[i].invMass <= 0.0f) continue;
+          // Position relaxation
+          bodies[i].position = chebyPrevPrevPos[i] +
+              (bodies[i].position - chebyPrevPrevPos[i]) * chebyOmega;
+          // Rotation: quaternion linear blend + normalize
+          physx::PxQuat qPrev = chebyPrevPrevRot[i];
+          physx::PxQuat qCur = bodies[i].rotation;
+          if (qPrev.dot(qCur) < 0.0f) qCur = -qCur;
+          physx::PxQuat qBlend(
+              qPrev.x + chebyOmega * (qCur.x - qPrev.x),
+              qPrev.y + chebyOmega * (qCur.y - qPrev.y),
+              qPrev.z + chebyOmega * (qCur.z - qPrev.z),
+              qPrev.w + chebyOmega * (qCur.w - qPrev.w));
+          bodies[i].rotation = qBlend.getNormalized();
+        }
+      }
+
+      if (enableEarlyStop) {
+        physx::PxReal maxPositionDelta = 0.0f;
+        physx::PxReal maxRotationDelta = 0.0f;
+        computeMaxPoseDeltas(bodies, numBodies, earlyStopPrevPos,
+                             earlyStopPrevRot, maxPositionDelta,
+                             maxRotationDelta);
+
+        if ((iter + 1) >= minIterations &&
+            maxPositionDelta <= mConfig.positionTolerance &&
+            maxRotationDelta <= rotationTolerance) {
+          consecutiveConvergedIterations++;
+          if (consecutiveConvergedIterations >= 2)
+            break;
+        } else {
+          consecutiveConvergedIterations = 0;
+        }
       }
     }
   }
@@ -901,6 +1022,10 @@ void AvbdSolver::blockDescentIteration(
   // True Block Coordinate Descent: iterate over bodies, not constraints
   // For each body, solve a local optimization problem considering all
   // constraints that affect this body.
+  //
+  // Parallelization: each body's local solve reads only its own position
+  // (mutated) and neighbor positions (read-only). The AVBD proximal term
+  // ensures convergence under Jacobi (parallel) updates.
 
   const bool useDeterministicOrder =
       mConfig.isDeterministic() &&
@@ -923,22 +1048,28 @@ void AvbdSolver::blockDescentIteration(
   const physx::PxU32 *orderPtr =
       useDeterministicOrder ? bodyOrder.begin() : nullptr;
 
-  for (physx::PxU32 idx = 0; idx < numBodies; ++idx) {
-    const physx::PxU32 i = orderPtr ? orderPtr[idx] : idx;
-    if (bodies[i].invMass <= 0.0f) {
-      continue;
-    }
+  const bool useParallel = mConfig.enableParallelization && !useDeterministicOrder
+      && numBodies >= AVBD_PARALLEL_MIN_ITEMS;
 
+  auto solveBody = [&](physx::PxU32 idx) {
+    const physx::PxU32 i = orderPtr ? orderPtr[idx] : idx;
+    if (bodies[i].invMass <= 0.0f)
+      return;
     if (mConfig.enableLocal6x6Solve) {
-      // 6x6 fully-coupled solve via LDLT
       solveLocalSystem(bodies[i], bodies, numBodies, contacts, numContacts, dt,
                        invDt2, contactMap);
     } else {
-      // 3x3 decoupled solve (position + rotation independently)
       solveLocalSystemWithJoints(bodies[i], bodies, numBodies, contacts,
                                  numContacts, nullptr, 0, nullptr, 0, dt,
                                  invDt2, contactMap, nullptr, nullptr);
     }
+  };
+
+  if (useParallel) {
+    avbdParallelFor(0u, numBodies, solveBody);
+  } else {
+    for (physx::PxU32 idx = 0; idx < numBodies; ++idx)
+      solveBody(idx);
   }
 }
 

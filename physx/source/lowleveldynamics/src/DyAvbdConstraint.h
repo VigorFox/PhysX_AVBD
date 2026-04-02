@@ -1237,6 +1237,9 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
 
   physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
                            //!< 3-5 angular)
+  physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
+  physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
+  physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
   physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)
 
   //-------------------------------------------------------------------------
@@ -1292,6 +1295,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     return (driveFlags & (1 << axis)) != 0;
   }
 
+  PX_FORCE_INLINE bool isLinearAccelerationDrive(physx::PxU32 axis) const {
+    return (driveAccelerationFlags & (1 << axis)) != 0;
+  }
+
   /**
    * @brief Check if angular drive is enabled for an axis
    * @param axis Axis index (0=X, 1=Y, 2=Z)
@@ -1299,6 +1306,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
    */
   PX_FORCE_INLINE bool isAngularDriveEnabled(physx::PxU32 axis) const {
     return (driveFlags & (1 << (axis + 3))) != 0;
+  }
+
+  PX_FORCE_INLINE bool isAngularAccelerationDrive(physx::PxU32 axis) const {
+    return (driveAccelerationFlags & (1 << (axis + 3))) != 0;
   }
 
   /**
@@ -1420,6 +1431,9 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     linearMotion = 0;  // All locked by default
     angularMotion = 0; // All locked by default
     driveFlags = 0;
+    driveAccelerationFlags = 0;
+    cacheIndex = 0xFFFFFFFFu; // PX_MAX_U32 = not cached
+    cacheKey = 0;
     padding0 = 0.0f;
     padding1 = 0.0f;
     writeBackIndex = 0xFFFFFFFFu; // PX_MAX_U32 = no writeback

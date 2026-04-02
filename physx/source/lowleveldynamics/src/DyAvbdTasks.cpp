@@ -56,6 +56,22 @@ void AvbdTask::release() {
 }
 
 void AvbdSolveIslandTask::release() {
+  const bool hasJointConstraints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
+  const bool usesJointPath = hasJointConstraints ||
+                             (mBatch.numSoftParticles > 0 &&
+                              mBatch.numSoftBodies > 0);
+  const PxU32 baseIterations =
+      (mBatch.iterationOverride > 0)
+          ? mBatch.iterationOverride
+          : mSolver.getConfig().innerIterations;
+  const PxU32 requestedIterations =
+      (usesJointPath && hasJointConstraints)
+          ? PxMax(baseIterations, PxU32(8))
+          : baseIterations;
+  mContext.recordIterationDiagnostics(requestedIterations, mSolver.getStats(),
+                      hasJointConstraints, mBatch.d6Joints,
+                      mBatch.numD6);
+
   // Write back lambda values to the cache for warm-starting next frame
   // This is thread-safe because each island writes to disjoint cache indices
   {
@@ -64,6 +80,7 @@ void AvbdSolveIslandTask::release() {
 
     // Function declared as friend in AvbdDynamicsContext class
     writeLambdaToCache(mContext, constraints, numConstraints);
+    writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 
   // Write back breakable joint status to ConstraintWriteBackPool
@@ -138,6 +155,8 @@ void AvbdWriteBackTask::run() {
       }
     }
   }
+
+  mContext.flushIterationDiagnosticsFrame();
 
   AVBD_LOG("AvbdWriteBackTask::run() END");
 }

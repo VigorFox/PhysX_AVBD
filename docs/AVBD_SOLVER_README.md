@@ -1,5 +1,7 @@
 # AVBD Solver - Development Notes
 
+> **Update (2026-04-02)**: Articulation iteration-efficiency pass completed. Full `SnippetAvbdArticulation` regression now passes at 10 solver iterations; 8 still fails in the loaded Scissor Lift case.
+>
 > **Update (2026-03-07)**: D6 Unification complete ("万物皆D6"). All joint types (Spherical, Fixed, Revolute, Prismatic) unified into single D6 constraint path. Standalone algorithm fully synced with PhysX. 53/53 tests pass.
 
 Status Legend: `Integrated` = merged into main code path; `Accepted` = integrated and validated by acceptance checks; `Pending` = not complete or acceptance gate not closed.
@@ -28,6 +30,50 @@ Contact AL stability (DONE)           D6 Unified Joint System (DONE)
             ↓                                      ↓
                 Multiplayer determinism across all the above
 ```
+
+      ## Articulation Iteration-Efficiency Update (2026-04-02)
+
+      ### Goal
+
+      Lower the articulation iteration budget globally, not just for a single scene, while preserving the accepted 29/29 PhysX articulation baseline.
+
+      ### What changed
+
+      1. **D6/articulation warm-starting**
+        - Added cached AL multiplier reuse for D6 joints and articulation-internal joints, mirroring the existing contact warm-start path.
+        - Cache entries now preserve linear, angular, drive, and cone lambdas across frames.
+
+      2. **Iteration diagnostics**
+        - Added env-driven diagnostics in the AVBD dynamics path:
+          - `PHYSX_AVBD_ITER_DIAG`
+          - `PHYSX_AVBD_ITER_DIAG_EVERY`
+          - `PHYSX_AVBD_ITER_DIAG_SEQUENTIAL`
+        - These report requested vs executed iterations, joint-island counts, row composition, lambda peaks, and dominant joint sources.
+        - Sequential mode is the trustworthy mode for per-island articulation analysis.
+
+      3. **Conservative early-stop**
+        - Added pose-delta-based early-stop in both the contact path and the joint path.
+        - The maximum requested budget is still preserved, but already-stable islands can stop early instead of always burning the full iteration count.
+
+      4. **Acceleration-drive semantics fixed in the solver**
+        - The global lowering blocker was the articulation `eACCELERATION` drive case rather than only the Scissor Lift scene.
+        - Internal articulation D6 translation now preserves acceleration-drive flags and per-axis stiffness data.
+        - The solver applies response-scaled implicit coefficients in both primal and dual drive updates for acceleration drives.
+        - A prep-only approximation was tested first and rejected; the final fix had to live in the solver path.
+
+      ### Validation result
+
+      - Full `SnippetAvbdArticulation` regression passes at **12** iterations.
+      - Full `SnippetAvbdArticulation` regression passes at **10** iterations.
+      - Full `SnippetAvbdArticulation` regression fails at **8** iterations.
+      - Remaining 8-iteration failure is the **loaded Scissor Lift** stability path, not the earlier acceleration-drive test.
+
+      ### Current conclusion
+
+      This optimization is a successful stage result, not the final endpoint:
+
+      - **Repository-wide verified articulation floor**: 10 iterations
+      - **Still pending**: lowering the loaded Scissor Lift path from 10 to 8 without regressing the accepted baseline
 
 ## Current Configuration (Defaults)
 

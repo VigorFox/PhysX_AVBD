@@ -908,6 +908,8 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           // Fill breakable joint info for any D6 constraint created above
           if (numD6 > d6CountBefore) {
             AvbdD6JointConstraint &c = d6Constraints[numD6 - 1];
+            restoreJointLambdaFromCache(*this, c,
+                                        reinterpret_cast<PxU64>(constraint));
             c.writeBackIndex = constraint->index;
             // Convert break force to break impulse (force * dt)
             // Use the same formula as TGS: impulse = force * simDt
@@ -950,6 +952,9 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 data->limitHigh < PX_MAX_F32 / 2) {
               c.linearMotion = 0b010101;
             }
+
+            restoreJointLambdaFromCache(*this, c,
+                                        reinterpret_cast<PxU64>(constraint));
           }
         }
       } // end else if (AvbdSnippetJointData)

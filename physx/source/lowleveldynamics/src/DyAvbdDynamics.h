@@ -32,6 +32,8 @@
 #include "DyAvbdTasks.h"
 #include "DyDynamicsBase.h"
 
+#include <atomic>
+
 namespace physx {
 
 namespace Dy {
@@ -51,6 +53,9 @@ class AvbdDynamicsContext : public DynamicsContextBase {
   friend void writeLambdaToCache(AvbdDynamicsContext &ctx,
                                  AvbdContactConstraint *constraints,
                                  PxU32 numConstraints);
+  friend void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
+                                      AvbdD6JointConstraint *constraints,
+                                      PxU32 numConstraints);
 
 public:
   AvbdDynamicsContext(PxcNpMemBlockPool *memBlockPool,
@@ -84,6 +89,14 @@ public:
   PxAllocatorCallback &getAllocator() {
     return *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback);
   }
+
+  void beginIterationDiagnosticsFrame();
+  void recordIterationDiagnostics(PxU32 requestedIterations,
+                                  const AvbdSolverStats &stats,
+                                  bool hasJointConstraints,
+                                  const AvbdD6JointConstraint *d6Joints = nullptr,
+                                  PxU32 numD6 = 0);
+  void flushIterationDiagnosticsFrame();
 
   virtual void update(Cm::FlushPool &flushPool, PxBaseTask *continuation,
                       PxBaseTask *postPartitioningTask,
@@ -127,8 +140,23 @@ public:
   PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
   bool mEnableLambdaWarmStart; //!< Enable lambda warm-starting (default: true)
 
+  struct CachedJointLambda {
+    PxU64 key; //!< Stable joint identity used to validate hashed cache slots
+    PxVec3 lambdaLinear;
+    PxVec3 lambdaAngular;
+    PxVec3 lambdaDriveLinear;
+    PxVec3 lambdaDriveAngular;
+    PxReal coneLambda;
+    PxU8 frameAge;
+    PxU8 padding[3];
+  };
+
+  PxArray<CachedJointLambda> mJointLambdaCache; //!< Per-D6 warm-start storage
+
   static const PxU32 MAX_CONTACTS_PER_CM =
       4; //!< Max contact points per ContactManager
+  static const PxU32 JOINT_LAMBDA_CACHE_SIZE =
+      8192; //!< Fixed-size hashed cache for D6 joints
   static const PxU8 LAMBDA_MAX_AGE = 3; //!< Max frames to keep cached lambda
   static constexpr PxReal LAMBDA_WARMSTART_SCALE =
       0.9f; //!< Damping for warm-started lambda
@@ -216,6 +244,41 @@ private:
   PxVirtualAllocatorCallback *mAllocatorCallback; //!< Memory allocator
   bool mFrictionEveryIteration; //!< Apply friction every iteration
   bool mSolverInitialized;      //!< Whether solver has been initialized
+  bool mIterationDiagnosticsEnabled; //!< Print AVBD iteration summaries when enabled via env
+  bool mIterationDiagnosticsSequential; //!< Force sequential island solve for trustworthy diagnostics
+  PxU32 mIterationDiagnosticsEvery; //!< Diagnostic print cadence in frames
+  std::atomic<PxU64> mDiagIslandCount;
+  std::atomic<PxU64> mDiagJointIslandCount;
+  std::atomic<PxU64> mDiagRequestedIterations;
+  std::atomic<PxU64> mDiagExecutedIterations;
+  std::atomic<PxU64> mDiagEarlyStopIslands;
+  std::atomic<PxU64> mDiagJointRequestedIterations;
+  std::atomic<PxU64> mDiagJointExecutedIterations;
+  std::atomic<PxU64> mDiagJointBudgetHitIslands;
+  std::atomic<PxU64> mDiagJointEarlyStopIslands;
+  std::atomic<PxU64> mDiagJointContactCount;
+  std::atomic<PxU64> mDiagJointConstraintCount;
+  std::atomic<PxU64> mDiagJointLockedLinearRows;
+  std::atomic<PxU64> mDiagJointLimitedLinearRows;
+  std::atomic<PxU64> mDiagJointLockedAngularRows;
+  std::atomic<PxU64> mDiagJointLimitedAngularRows;
+  std::atomic<PxU64> mDiagJointLinearDriveRows;
+  std::atomic<PxU64> mDiagJointAngularDriveRows;
+  std::atomic<PxU64> mDiagJointConeRows;
+  std::atomic<PxU32> mDiagMaxRequestedIterations;
+  std::atomic<PxU32> mDiagMaxExecutedIterations;
+  std::atomic<PxU32> mDiagJointMaxExecutedIterations;
+  std::atomic<PxU32> mDiagJointMaxLinearLambdaMilli;
+  std::atomic<PxU32> mDiagJointMaxAngularLambdaMilli;
+  std::atomic<PxU32> mDiagJointMaxLinearDriveLambdaMilli;
+  std::atomic<PxU32> mDiagJointMaxAngularDriveLambdaMilli;
+  std::atomic<PxU32> mDiagJointMaxConeLambdaMilli;
+  PxU32 mDiagSeqMaxLinearJointIndex;
+  PxU32 mDiagSeqMaxLinearJointBodyA;
+  PxU32 mDiagSeqMaxLinearJointBodyB;
+  PxU32 mDiagSeqMaxLinearDriveJointIndex;
+  PxU32 mDiagSeqMaxLinearDriveJointBodyA;
+  PxU32 mDiagSeqMaxLinearDriveJointBodyB;
 
   //!< Track heap fallback allocations for cleanup at frame end
   //!< No mutex needed since update() and mergeResults() are called from
@@ -227,6 +290,14 @@ private:
 void writeLambdaToCache(AvbdDynamicsContext &ctx,
                         AvbdContactConstraint *constraints,
                         PxU32 numConstraints);
+
+void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
+                                 AvbdD6JointConstraint &constraint,
+                                 PxU64 cacheKey);
+
+void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
+                             AvbdD6JointConstraint *constraints,
+                             PxU32 numConstraints);
 
 /**
  * @brief Factory function to create AVBD dynamics context

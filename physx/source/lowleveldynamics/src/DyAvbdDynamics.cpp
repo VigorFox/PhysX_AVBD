@@ -43,12 +43,53 @@
 #include "common/PxProfileZone.h"
 #include "foundation/PxMath.h"
 
+#include <cstdlib>
+
 using namespace physx;
 using namespace physx::Dy;
 
 // Global frame counter for motor deduplication
 // This is incremented at the start of each update() call
 static physx::PxU64 gAvbdMotorFrameCounter = 0;
+
+static PX_FORCE_INLINE PxU32 getJointLambdaCacheIndex(PxU64 key,
+                                                      PxU32 cacheSize) {
+  const PxU64 mixed = key ^ (key >> 33) ^ (key >> 17);
+  return cacheSize ? static_cast<PxU32>(mixed % cacheSize) : 0;
+}
+
+static bool isEnvFlagEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] && value[0] != '0';
+}
+
+static PxU32 getEnvUInt(const char *name, PxU32 defaultValue) {
+  const char *value = std::getenv(name);
+  if (!value || !value[0])
+    return defaultValue;
+
+  const int parsed = std::atoi(value);
+  return parsed > 0 ? PxU32(parsed) : defaultValue;
+}
+
+static void atomicMax(std::atomic<PxU32> &target, PxU32 value) {
+  PxU32 current = target.load(std::memory_order_relaxed);
+  while (current < value &&
+         !target.compare_exchange_weak(current, value,
+                                       std::memory_order_relaxed,
+                                       std::memory_order_relaxed)) {
+  }
+}
+
+static PxU32 toMilliUnits(PxReal value) {
+  const PxReal scaled = PxAbs(value) * 1000.0f;
+  return scaled >= PxReal(PX_MAX_U32) ? PX_MAX_U32 : PxU32(scaled);
+}
+
+static PxU32 maxAbsComponentMilli(const PxVec3 &value) {
+  return PxMax(toMilliUnits(value.x),
+               PxMax(toMilliUnits(value.y), toMilliUnits(value.z)));
+}
 
 // Debug: set to 1 to process all islands sequentially (no task parallelism)
 // This makes output deterministic and easier to debug.
@@ -70,7 +111,8 @@ physx::PxU64 getAvbdMotorFrameCounter() { return gAvbdMotorFrameCounter; }
 // Articulation Internal Joints Helper (forward declaration)
 //=============================================================================
 static void prepareArticulationInternalJoints(
-    FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
+  AvbdDynamicsContext &context, FeatherstoneArticulation *articulation,
+  PxU32 firstBodyIndex,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxReal dt = 1.0f / 60.0f);
@@ -168,7 +210,32 @@ AvbdDynamicsContext::AvbdDynamicsContext(
       mScratchAllocator(scratchAllocator), mTaskManager(taskManager),
       mScratchAdapter(scratchAllocator),
       mFrictionEveryIteration(frictionEveryIteration),
-      mAllocatorCallback(allocatorCallback) {
+      mAllocatorCallback(allocatorCallback),
+      mIterationDiagnosticsEnabled(isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG")),
+        mIterationDiagnosticsSequential(
+          isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG_SEQUENTIAL")),
+      mIterationDiagnosticsEvery(getEnvUInt("PHYSX_AVBD_ITER_DIAG_EVERY", 60)),
+      mDiagIslandCount(0), mDiagJointIslandCount(0),
+      mDiagRequestedIterations(0), mDiagExecutedIterations(0),
+      mDiagEarlyStopIslands(0), mDiagJointRequestedIterations(0),
+      mDiagJointExecutedIterations(0), mDiagJointBudgetHitIslands(0),
+      mDiagJointEarlyStopIslands(0), mDiagJointContactCount(0),
+      mDiagJointConstraintCount(0), mDiagMaxRequestedIterations(0),
+      mDiagJointLockedLinearRows(0), mDiagJointLimitedLinearRows(0),
+      mDiagJointLockedAngularRows(0), mDiagJointLimitedAngularRows(0),
+      mDiagJointLinearDriveRows(0), mDiagJointAngularDriveRows(0),
+      mDiagJointConeRows(0),
+      mDiagMaxExecutedIterations(0), mDiagJointMaxExecutedIterations(0),
+      mDiagJointMaxLinearLambdaMilli(0),
+      mDiagJointMaxAngularLambdaMilli(0),
+      mDiagJointMaxLinearDriveLambdaMilli(0),
+      mDiagJointMaxAngularDriveLambdaMilli(0),
+      mDiagJointMaxConeLambdaMilli(0), mDiagSeqMaxLinearJointIndex(PX_MAX_U32),
+      mDiagSeqMaxLinearJointBodyA(PX_MAX_U32),
+      mDiagSeqMaxLinearJointBodyB(PX_MAX_U32),
+      mDiagSeqMaxLinearDriveJointIndex(PX_MAX_U32),
+      mDiagSeqMaxLinearDriveJointBodyA(PX_MAX_U32),
+      mDiagSeqMaxLinearDriveJointBodyB(PX_MAX_U32) {
   PX_UNUSED(frictionEveryIteration);
   mSolverInitialized = false;
 
@@ -192,6 +259,294 @@ AvbdDynamicsContext::AvbdDynamicsContext(
   // Pre-allocate for ~1000 contact managers x 4 contacts each
   mLambdaCache.resize(4096);
   memset(mLambdaCache.begin(), 0, sizeof(CachedLambda) * mLambdaCache.size());
+  mJointLambdaCache.resize(JOINT_LAMBDA_CACHE_SIZE);
+  memset(mJointLambdaCache.begin(), 0,
+         sizeof(CachedJointLambda) * mJointLambdaCache.size());
+}
+
+void AvbdDynamicsContext::beginIterationDiagnosticsFrame() {
+  if (!mIterationDiagnosticsEnabled)
+    return;
+
+  mDiagIslandCount.store(0, std::memory_order_relaxed);
+  mDiagJointIslandCount.store(0, std::memory_order_relaxed);
+  mDiagRequestedIterations.store(0, std::memory_order_relaxed);
+  mDiagExecutedIterations.store(0, std::memory_order_relaxed);
+  mDiagEarlyStopIslands.store(0, std::memory_order_relaxed);
+  mDiagJointRequestedIterations.store(0, std::memory_order_relaxed);
+  mDiagJointExecutedIterations.store(0, std::memory_order_relaxed);
+  mDiagJointBudgetHitIslands.store(0, std::memory_order_relaxed);
+  mDiagJointEarlyStopIslands.store(0, std::memory_order_relaxed);
+  mDiagJointContactCount.store(0, std::memory_order_relaxed);
+  mDiagJointConstraintCount.store(0, std::memory_order_relaxed);
+  mDiagJointLockedLinearRows.store(0, std::memory_order_relaxed);
+  mDiagJointLimitedLinearRows.store(0, std::memory_order_relaxed);
+  mDiagJointLockedAngularRows.store(0, std::memory_order_relaxed);
+  mDiagJointLimitedAngularRows.store(0, std::memory_order_relaxed);
+  mDiagJointLinearDriveRows.store(0, std::memory_order_relaxed);
+  mDiagJointAngularDriveRows.store(0, std::memory_order_relaxed);
+  mDiagJointConeRows.store(0, std::memory_order_relaxed);
+  mDiagMaxRequestedIterations.store(0, std::memory_order_relaxed);
+  mDiagMaxExecutedIterations.store(0, std::memory_order_relaxed);
+  mDiagJointMaxExecutedIterations.store(0, std::memory_order_relaxed);
+  mDiagJointMaxLinearLambdaMilli.store(0, std::memory_order_relaxed);
+  mDiagJointMaxAngularLambdaMilli.store(0, std::memory_order_relaxed);
+  mDiagJointMaxLinearDriveLambdaMilli.store(0, std::memory_order_relaxed);
+  mDiagJointMaxAngularDriveLambdaMilli.store(0, std::memory_order_relaxed);
+  mDiagJointMaxConeLambdaMilli.store(0, std::memory_order_relaxed);
+  mDiagSeqMaxLinearJointIndex = PX_MAX_U32;
+  mDiagSeqMaxLinearJointBodyA = PX_MAX_U32;
+  mDiagSeqMaxLinearJointBodyB = PX_MAX_U32;
+  mDiagSeqMaxLinearDriveJointIndex = PX_MAX_U32;
+  mDiagSeqMaxLinearDriveJointBodyA = PX_MAX_U32;
+  mDiagSeqMaxLinearDriveJointBodyB = PX_MAX_U32;
+}
+
+void AvbdDynamicsContext::recordIterationDiagnostics(
+    PxU32 requestedIterations, const AvbdSolverStats &stats,
+    bool hasJointConstraints, const AvbdD6JointConstraint *d6Joints,
+    PxU32 numD6) {
+  if (!mIterationDiagnosticsEnabled)
+    return;
+
+  mDiagIslandCount.fetch_add(1, std::memory_order_relaxed);
+  if (hasJointConstraints)
+    mDiagJointIslandCount.fetch_add(1, std::memory_order_relaxed);
+
+  mDiagRequestedIterations.fetch_add(requestedIterations,
+                                     std::memory_order_relaxed);
+  mDiagExecutedIterations.fetch_add(stats.totalIterations,
+                                    std::memory_order_relaxed);
+  if (stats.totalIterations < requestedIterations)
+    mDiagEarlyStopIslands.fetch_add(1, std::memory_order_relaxed);
+
+  atomicMax(mDiagMaxRequestedIterations, requestedIterations);
+  atomicMax(mDiagMaxExecutedIterations, stats.totalIterations);
+
+  if (hasJointConstraints) {
+    mDiagJointRequestedIterations.fetch_add(requestedIterations,
+                                            std::memory_order_relaxed);
+    mDiagJointExecutedIterations.fetch_add(stats.totalIterations,
+                                           std::memory_order_relaxed);
+    mDiagJointContactCount.fetch_add(stats.numContacts,
+                                     std::memory_order_relaxed);
+    mDiagJointConstraintCount.fetch_add(stats.numJoints,
+                                        std::memory_order_relaxed);
+    if (stats.totalIterations >= requestedIterations)
+      mDiagJointBudgetHitIslands.fetch_add(1, std::memory_order_relaxed);
+    else
+      mDiagJointEarlyStopIslands.fetch_add(1, std::memory_order_relaxed);
+
+    atomicMax(mDiagJointMaxExecutedIterations, stats.totalIterations);
+
+    PxU64 lockedLinearRows = 0;
+    PxU64 limitedLinearRows = 0;
+    PxU64 lockedAngularRows = 0;
+    PxU64 limitedAngularRows = 0;
+    PxU64 linearDriveRows = 0;
+    PxU64 angularDriveRows = 0;
+    PxU64 coneRows = 0;
+    PxU32 maxLinearLambdaMilli = 0;
+    PxU32 maxAngularLambdaMilli = 0;
+    PxU32 maxLinearDriveLambdaMilli = 0;
+    PxU32 maxAngularDriveLambdaMilli = 0;
+    PxU32 maxConeLambdaMilli = 0;
+    PxU32 maxLinearLambdaJointIndex = PX_MAX_U32;
+    PxU32 maxLinearLambdaJointBodyA = PX_MAX_U32;
+    PxU32 maxLinearLambdaJointBodyB = PX_MAX_U32;
+    PxU32 maxLinearDriveJointIndex = PX_MAX_U32;
+    PxU32 maxLinearDriveJointBodyA = PX_MAX_U32;
+    PxU32 maxLinearDriveJointBodyB = PX_MAX_U32;
+
+    for (PxU32 i = 0; i < numD6; ++i) {
+      const AvbdD6JointConstraint &joint = d6Joints[i];
+      for (PxU32 axis = 0; axis < 3; ++axis) {
+        const PxU32 linearMotion = joint.getLinearMotion(axis);
+        if (linearMotion == 0)
+          lockedLinearRows++;
+        else if (linearMotion == 1)
+          limitedLinearRows++;
+
+        const PxU32 angularMotion = joint.getAngularMotion(axis);
+        if (angularMotion == 0)
+          lockedAngularRows++;
+        else if (angularMotion == 1)
+          limitedAngularRows++;
+
+        if (joint.isLinearDriveEnabled(axis))
+          linearDriveRows++;
+        if (joint.isAngularDriveEnabled(axis))
+          angularDriveRows++;
+      }
+
+      if (joint.coneAngleLimit > 0.0f)
+        coneRows++;
+
+      maxLinearLambdaMilli = PxMax(maxLinearLambdaMilli,
+          maxAbsComponentMilli(joint.lambdaLinear));
+      maxAngularLambdaMilli = PxMax(maxAngularLambdaMilli,
+          maxAbsComponentMilli(joint.lambdaAngular));
+      maxLinearDriveLambdaMilli = PxMax(maxLinearDriveLambdaMilli,
+          maxAbsComponentMilli(joint.lambdaDriveLinear));
+      maxAngularDriveLambdaMilli = PxMax(maxAngularDriveLambdaMilli,
+          maxAbsComponentMilli(joint.lambdaDriveAngular));
+      maxConeLambdaMilli = PxMax(maxConeLambdaMilli,
+          toMilliUnits(joint.coneLambda));
+
+      if (mIterationDiagnosticsSequential) {
+        const PxU32 linearLambdaMilli = maxAbsComponentMilli(joint.lambdaLinear);
+        if (linearLambdaMilli >= maxLinearLambdaMilli) {
+          maxLinearLambdaJointIndex = i;
+          maxLinearLambdaJointBodyA = joint.header.bodyIndexA;
+          maxLinearLambdaJointBodyB = joint.header.bodyIndexB;
+        }
+
+        const PxU32 linearDriveLambdaMilli =
+            maxAbsComponentMilli(joint.lambdaDriveLinear);
+        if (linearDriveLambdaMilli >= maxLinearDriveLambdaMilli) {
+          maxLinearDriveJointIndex = i;
+          maxLinearDriveJointBodyA = joint.header.bodyIndexA;
+          maxLinearDriveJointBodyB = joint.header.bodyIndexB;
+        }
+      }
+    }
+
+    mDiagJointLockedLinearRows.fetch_add(lockedLinearRows,
+                                         std::memory_order_relaxed);
+    mDiagJointLimitedLinearRows.fetch_add(limitedLinearRows,
+                                          std::memory_order_relaxed);
+    mDiagJointLockedAngularRows.fetch_add(lockedAngularRows,
+                                          std::memory_order_relaxed);
+    mDiagJointLimitedAngularRows.fetch_add(limitedAngularRows,
+                                           std::memory_order_relaxed);
+    mDiagJointLinearDriveRows.fetch_add(linearDriveRows,
+                                        std::memory_order_relaxed);
+    mDiagJointAngularDriveRows.fetch_add(angularDriveRows,
+                                         std::memory_order_relaxed);
+    mDiagJointConeRows.fetch_add(coneRows, std::memory_order_relaxed);
+    atomicMax(mDiagJointMaxLinearLambdaMilli, maxLinearLambdaMilli);
+    atomicMax(mDiagJointMaxAngularLambdaMilli, maxAngularLambdaMilli);
+    atomicMax(mDiagJointMaxLinearDriveLambdaMilli, maxLinearDriveLambdaMilli);
+    atomicMax(mDiagJointMaxAngularDriveLambdaMilli, maxAngularDriveLambdaMilli);
+    atomicMax(mDiagJointMaxConeLambdaMilli, maxConeLambdaMilli);
+    if (mIterationDiagnosticsSequential) {
+      mDiagSeqMaxLinearJointIndex = maxLinearLambdaJointIndex;
+      mDiagSeqMaxLinearJointBodyA = maxLinearLambdaJointBodyA;
+      mDiagSeqMaxLinearJointBodyB = maxLinearLambdaJointBodyB;
+      mDiagSeqMaxLinearDriveJointIndex = maxLinearDriveJointIndex;
+      mDiagSeqMaxLinearDriveJointBodyA = maxLinearDriveJointBodyA;
+      mDiagSeqMaxLinearDriveJointBodyB = maxLinearDriveJointBodyB;
+    }
+  }
+}
+
+void AvbdDynamicsContext::flushIterationDiagnosticsFrame() {
+  if (!mIterationDiagnosticsEnabled)
+    return;
+
+  const PxU64 frame = gAvbdMotorFrameCounter;
+  if (frame != 1 && mIterationDiagnosticsEvery > 1 &&
+      (frame % mIterationDiagnosticsEvery) != 0)
+    return;
+
+  const PxU64 islandCount = mDiagIslandCount.load(std::memory_order_relaxed);
+  if (islandCount == 0)
+    return;
+
+  const PxU64 jointIslands =
+      mDiagJointIslandCount.load(std::memory_order_relaxed);
+  const PxU64 requested =
+      mDiagRequestedIterations.load(std::memory_order_relaxed);
+  const PxU64 executed =
+      mDiagExecutedIterations.load(std::memory_order_relaxed);
+  const PxU64 earlyStopIslands =
+      mDiagEarlyStopIslands.load(std::memory_order_relaxed);
+    const PxU64 jointRequested =
+      mDiagJointRequestedIterations.load(std::memory_order_relaxed);
+    const PxU64 jointExecuted =
+      mDiagJointExecutedIterations.load(std::memory_order_relaxed);
+    const PxU64 jointBudgetHits =
+      mDiagJointBudgetHitIslands.load(std::memory_order_relaxed);
+    const PxU64 jointEarlyStops =
+      mDiagJointEarlyStopIslands.load(std::memory_order_relaxed);
+    const PxU64 jointContacts =
+      mDiagJointContactCount.load(std::memory_order_relaxed);
+    const PxU64 jointConstraints =
+      mDiagJointConstraintCount.load(std::memory_order_relaxed);
+      const PxU64 jointLockedLinearRows =
+        mDiagJointLockedLinearRows.load(std::memory_order_relaxed);
+      const PxU64 jointLimitedLinearRows =
+        mDiagJointLimitedLinearRows.load(std::memory_order_relaxed);
+      const PxU64 jointLockedAngularRows =
+        mDiagJointLockedAngularRows.load(std::memory_order_relaxed);
+      const PxU64 jointLimitedAngularRows =
+        mDiagJointLimitedAngularRows.load(std::memory_order_relaxed);
+      const PxU64 jointLinearDriveRows =
+        mDiagJointLinearDriveRows.load(std::memory_order_relaxed);
+      const PxU64 jointAngularDriveRows =
+        mDiagJointAngularDriveRows.load(std::memory_order_relaxed);
+      const PxU64 jointConeRows =
+        mDiagJointConeRows.load(std::memory_order_relaxed);
+  const PxU32 maxRequested =
+      mDiagMaxRequestedIterations.load(std::memory_order_relaxed);
+  const PxU32 maxExecuted =
+      mDiagMaxExecutedIterations.load(std::memory_order_relaxed);
+    const PxU32 jointMaxExecuted =
+      mDiagJointMaxExecutedIterations.load(std::memory_order_relaxed);
+      const PxU32 jointMaxLinearLambdaMilli =
+        mDiagJointMaxLinearLambdaMilli.load(std::memory_order_relaxed);
+      const PxU32 jointMaxAngularLambdaMilli =
+        mDiagJointMaxAngularLambdaMilli.load(std::memory_order_relaxed);
+      const PxU32 jointMaxLinearDriveLambdaMilli =
+        mDiagJointMaxLinearDriveLambdaMilli.load(std::memory_order_relaxed);
+      const PxU32 jointMaxAngularDriveLambdaMilli =
+        mDiagJointMaxAngularDriveLambdaMilli.load(std::memory_order_relaxed);
+      const PxU32 jointMaxConeLambdaMilli =
+        mDiagJointMaxConeLambdaMilli.load(std::memory_order_relaxed);
+
+  const double avgRequested = double(requested) / double(islandCount);
+  const double avgExecuted = double(executed) / double(islandCount);
+  const PxI64 savedIterations = PxI64(requested) - PxI64(executed);
+
+    double jointAvgRequested = 0.0;
+    double jointAvgExecuted = 0.0;
+    double jointAvgContacts = 0.0;
+    double jointAvgConstraints = 0.0;
+    if (jointIslands > 0) {
+    jointAvgRequested = double(jointRequested) / double(jointIslands);
+    jointAvgExecuted = double(jointExecuted) / double(jointIslands);
+    jointAvgContacts = double(jointContacts) / double(jointIslands);
+    jointAvgConstraints = double(jointConstraints) / double(jointIslands);
+    }
+
+    printf("[avbd:iters] frame=%llu islands=%llu jointIslands=%llu avgExec=%.2f avgReq=%.2f maxExec=%u maxReq=%u saved=%lld earlyStopIslands=%llu jointAvgExec=%.2f jointAvgReq=%.2f jointMaxExec=%u jointBudgetHits=%llu jointEarlyStops=%llu jointAvgContacts=%.2f jointAvgConstraints=%.2f jointRows(lockLin=%llu limLin=%llu lockAng=%llu limAng=%llu linDrv=%llu angDrv=%llu cone=%llu) jointLambdaMax(lin=%.3f ang=%.3f linDrv=%.3f angDrv=%.3f cone=%.3f) jointMaxSource(lin=d6[%u]:%u-%u linDrv=d6[%u]:%u-%u)\n",
+         static_cast<unsigned long long>(frame),
+         static_cast<unsigned long long>(islandCount),
+         static_cast<unsigned long long>(jointIslands), avgExecuted,
+         avgRequested, maxExecuted, maxRequested,
+         static_cast<long long>(savedIterations),
+       static_cast<unsigned long long>(earlyStopIslands),
+       jointAvgExecuted, jointAvgRequested, jointMaxExecuted,
+       static_cast<unsigned long long>(jointBudgetHits),
+       static_cast<unsigned long long>(jointEarlyStops),
+         jointAvgContacts, jointAvgConstraints,
+         static_cast<unsigned long long>(jointLockedLinearRows),
+         static_cast<unsigned long long>(jointLimitedLinearRows),
+         static_cast<unsigned long long>(jointLockedAngularRows),
+         static_cast<unsigned long long>(jointLimitedAngularRows),
+         static_cast<unsigned long long>(jointLinearDriveRows),
+         static_cast<unsigned long long>(jointAngularDriveRows),
+         static_cast<unsigned long long>(jointConeRows),
+         double(jointMaxLinearLambdaMilli) / 1000.0,
+         double(jointMaxAngularLambdaMilli) / 1000.0,
+         double(jointMaxLinearDriveLambdaMilli) / 1000.0,
+         double(jointMaxAngularDriveLambdaMilli) / 1000.0,
+         double(jointMaxConeLambdaMilli) / 1000.0,
+         mDiagSeqMaxLinearJointIndex, mDiagSeqMaxLinearJointBodyA,
+         mDiagSeqMaxLinearJointBodyB, mDiagSeqMaxLinearDriveJointIndex,
+         mDiagSeqMaxLinearDriveJointBodyA,
+         mDiagSeqMaxLinearDriveJointBodyB);
+  fflush(stdout);
 }
 
 AvbdDynamicsContext::~AvbdDynamicsContext() {
@@ -256,6 +611,62 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
     cached.frameAge = 0; // Reset age on update
   }
 }
+
+void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
+                                 AvbdD6JointConstraint &constraint,
+                                 PxU64 cacheKey) {
+  constraint.cacheIndex = PX_MAX_U32;
+
+  if (!ctx.mEnableLambdaWarmStart || cacheKey == 0 ||
+      ctx.mJointLambdaCache.empty()) {
+    return;
+  }
+
+  const PxU32 cacheIdx =
+      getJointLambdaCacheIndex(cacheKey, ctx.mJointLambdaCache.size());
+  constraint.cacheIndex = cacheIdx;
+    constraint.cacheKey = cacheKey;
+
+  AvbdDynamicsContext::CachedJointLambda &cached =
+      ctx.mJointLambdaCache[cacheIdx];
+  if (cached.key != cacheKey || cached.frameAge > AvbdDynamicsContext::LAMBDA_MAX_AGE) {
+    return;
+  }
+
+  const PxReal warmScale = 0.95f * 0.99f;
+  constraint.lambdaLinear = cached.lambdaLinear * warmScale;
+  constraint.lambdaAngular = cached.lambdaAngular * warmScale;
+  constraint.lambdaDriveLinear = cached.lambdaDriveLinear * warmScale;
+  constraint.lambdaDriveAngular = cached.lambdaDriveAngular * warmScale;
+  constraint.coneLambda = cached.coneLambda * warmScale;
+}
+
+void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
+                             AvbdD6JointConstraint *constraints,
+                             PxU32 numConstraints) {
+  if (!ctx.mEnableLambdaWarmStart || !constraints || numConstraints == 0 ||
+      ctx.mJointLambdaCache.empty()) {
+    return;
+  }
+
+  for (PxU32 i = 0; i < numConstraints; ++i) {
+    const AvbdD6JointConstraint &constraint = constraints[i];
+    const PxU32 cacheIdx = constraint.cacheIndex;
+    if (cacheIdx >= ctx.mJointLambdaCache.size()) {
+      continue;
+    }
+
+    AvbdDynamicsContext::CachedJointLambda &cached =
+        ctx.mJointLambdaCache[cacheIdx];
+    cached.key = constraint.cacheKey;
+    cached.lambdaLinear = constraint.lambdaLinear;
+    cached.lambdaAngular = constraint.lambdaAngular;
+    cached.lambdaDriveLinear = constraint.lambdaDriveLinear;
+    cached.lambdaDriveAngular = constraint.lambdaDriveAngular;
+    cached.coneLambda = constraint.coneLambda;
+    cached.frameAge = 0;
+  }
+}
 } // namespace Dy
 } // namespace physx
 
@@ -268,6 +679,8 @@ void AvbdDynamicsContext::update(
 
   PX_PROFILE_ZONE("AVBD.update", mContextID);
 
+  beginIterationDiagnosticsFrame();
+
   // Increment global frame counter for motor deduplication
   gAvbdMotorFrameCounter++;
 
@@ -277,6 +690,11 @@ void AvbdDynamicsContext::update(
     for (PxU32 i = 0; i < mLambdaCache.size(); ++i) {
       if (mLambdaCache[i].frameAge < 255) {
         mLambdaCache[i].frameAge++;
+      }
+    }
+    for (PxU32 i = 0; i < mJointLambdaCache.size(); ++i) {
+      if (mJointLambdaCache[i].frameAge < 255) {
+        mJointLambdaCache[i].frameAge++;
       }
     }
   }
@@ -760,7 +1178,7 @@ void AvbdDynamicsContext::update(
               // Prepare articulation internal joints as unified D6
               PxU32 artD6 = 0, artGear = 0;
               prepareArticulationInternalJoints(
-                  articulation, localFirstBodyIdx,
+                  *this, articulation, localFirstBodyIdx,
                   d6Joints + currD6Idx + numD6, artD6,
                   totalJointCapacity - currD6Idx - numD6,
                   gearJoints + currGearIdx + numGear, artGear,
@@ -891,38 +1309,49 @@ void AvbdDynamicsContext::update(
     }
 
     // Spawn Solve Task
-#if AVBD_DEBUG_SEQUENTIAL
-    // ===== Sequential debug mode: run solver inline (no task parallelism)
-    // =====
-    {
+    if (AVBD_DEBUG_SEQUENTIAL || mIterationDiagnosticsSequential) {
       const bool hasJoints = (batch.numD6 > 0 || batch.numGear > 0);
-      if (hasJoints) {
+      const bool hasSoftBodies =
+          (batch.numSoftParticles > 0 && batch.numSoftBodies > 0);
+      if (hasJoints || hasSoftBodies) {
         mSolver.solveWithJoints(
             dt, batch.bodies, batch.numBodies, batch.constraints,
             batch.numConstraints, batch.d6Joints, batch.numD6,
             batch.gearJoints, batch.numGear, gravity, &batch.contactMap,
             &batch.d6Map, &batch.gearMap, batch.colorBatches,
-            batch.numColors, batch.iterationOverride);
+            batch.numColors, batch.iterationOverride, batch.softParticles,
+            batch.numSoftParticles, batch.softBodies, batch.numSoftBodies,
+            batch.softContacts, batch.numSoftContacts);
       } else {
         mSolver.solve(dt, batch.bodies, batch.numBodies, batch.constraints,
                       batch.numConstraints, gravity, &batch.contactMap,
                       batch.colorBatches, batch.numColors,
                       batch.iterationOverride);
       }
+
+      const PxU32 baseIterations =
+          batch.iterationOverride > 0 ? batch.iterationOverride
+                                      : mSolver.getConfig().innerIterations;
+      const PxU32 requestedIterations = hasJoints
+          ? PxMax(baseIterations, PxU32(8))
+          : baseIterations;
+      recordIterationDiagnostics(requestedIterations, mSolver.getStats(),
+                     hasJoints, batch.d6Joints, batch.numD6);
+
       // Write back lambda cache inline
       writeLambdaToCache(*this, batch.constraints, batch.numConstraints);
+      writeJointLambdaToCache(*this, batch.d6Joints, batch.numD6);
       // Release constraint maps
       PxAllocatorCallback &alloc = getAllocator();
       batch.contactMap.release(alloc);
       batch.d6Map.release(alloc);
       batch.gearMap.release(alloc);
+    } else {
+      AvbdSolveIslandTask *solveTask =
+          mTaskFactory->createSolveTask(*this, mSolver, batch, dt, gravity);
+      solveTask->setContinuation(coordTask);
+      solveTask->removeReference();
     }
-#else
-    AvbdSolveIslandTask *solveTask =
-        mTaskFactory->createSolveTask(*this, mSolver, batch, dt, gravity);
-    solveTask->setContinuation(coordTask);
-    solveTask->removeReference();
-#endif
     tasksSpawned++;
   }
 
@@ -979,7 +1408,8 @@ void AvbdDynamicsContext::writeBackBodies(AvbdSolverBody *avbdBodies,
 //=============================================================================
 
 static void prepareArticulationInternalJoints(
-    FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
+  AvbdDynamicsContext &context, FeatherstoneArticulation *articulation,
+  PxU32 firstBodyIndex,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxReal dt) {
@@ -1156,7 +1586,10 @@ static void prepareArticulationInternalJoints(
       //            + damping/(S+D)  * targetV
       //   rho_drive = (S+D) / dt^2   (capped)
       // ---------------------------------------------------------------
-      const PxReal maxDriveStiffness = 100.0f;
+        const PxReal maxDriveStiffness = 100.0f;
+        const PxReal maxDrivePenalty = 2.0f * c.header.rho;
+        const PxReal maxDriveStiffnessFromPenalty =
+          maxDrivePenalty / artInvDt2;
       const PxReal invDt = (dt > 0.0f) ? (1.0f / dt) : 60.0f;
 
       // Precompute world-space anchor separation and joint frame for
@@ -1186,17 +1619,20 @@ static void prepareArticulationInternalJoints(
           const PxArticulationDrive &drive = jointCore->drives[linAxes[a]];
           if (drive.driveType == PxArticulationDriveType::eNONE)
             continue;
-          PxReal totalSD =
-              PxMin(drive.stiffness + drive.damping, maxDriveStiffness);
-          if (totalSD <= 0.0f)
-            continue;
-          c.driveFlags |= (1u << a); // bit 0=X, 1=Y, 2=Z
-          (&c.linearDamping.x)[a] = totalSD;
+          if (drive.driveType == PxArticulationDriveType::eACCELERATION)
+            c.driveAccelerationFlags |= (1u << a);
 
           // Compute current joint displacement along the driven axis
           PxVec3 localAxis(0.0f);
           (&localAxis.x)[a] = 1.0f;
           PxVec3 worldAxis = worldFrameA_drive.rotate(localAxis);
+          PxReal totalSD = PxMin(drive.stiffness + drive.damping,
+                                 PxMin(maxDriveStiffness,
+                                       maxDriveStiffnessFromPenalty));
+          if (totalSD <= 0.0f)
+            continue;
+          c.driveFlags |= (1u << a); // bit 0=X, 1=Y, 2=Z
+          (&c.linearDamping.x)[a] = totalSD;
           PxReal currentQ = anchorSep.dot(worldAxis);
 
           // Position-error spring: drive toward (targetP - currentQ)
@@ -1204,8 +1640,11 @@ static void prepareArticulationInternalJoints(
           PxReal posVel = (targetP - currentQ) * invDt;
           PxReal velVel = jointCore->targetV[linAxes[a]];
           PxReal invSD = 1.0f / totalSD;
-          PxReal sClamped = PxMin(drive.stiffness, maxDriveStiffness);
+              PxReal sClamped = PxMin(drive.stiffness,
+                      PxMin(maxDriveStiffness,
+                        maxDriveStiffnessFromPenalty));
           PxReal dClamped = totalSD - sClamped;
+              (&c.linearStiffness.x)[a] = sClamped;
           (&c.driveLinearVelocity.x)[a] =
               sClamped * invSD * posVel + dClamped * invSD * velVel;
         }
@@ -1222,13 +1661,8 @@ static void prepareArticulationInternalJoints(
           const PxArticulationDrive &drive = jointCore->drives[angAxes[a]];
           if (drive.driveType == PxArticulationDriveType::eNONE)
             continue;
-          PxReal totalSD =
-              PxMin(drive.stiffness + drive.damping, maxDriveStiffness);
-          if (totalSD <= 0.0f)
-            continue;
-          c.driveFlags |= angBits[a];
-          (&c.angularDamping.x)[a] = totalSD;
-
+          if (drive.driveType == PxArticulationDriveType::eACCELERATION)
+            c.driveAccelerationFlags |= angBits[a];
           // Compute current joint angle for the driven axis.
           // For twist (a=0) use atan2(x,w); for swings approximate
           // with atan2(y,w) / atan2(z,w).
@@ -1240,16 +1674,31 @@ static void prepareArticulationInternalJoints(
           else
             currentAngle = 2.0f * PxAtan2(relRotDrive.z, relRotDrive.w);
 
+          PxReal totalSD = PxMin(drive.stiffness + drive.damping,
+                                 PxMin(maxDriveStiffness,
+                                       maxDriveStiffnessFromPenalty));
+          if (totalSD <= 0.0f)
+            continue;
+          c.driveFlags |= angBits[a];
+          (&c.angularDamping.x)[a] = totalSD;
+
           PxReal targetAng = jointCore->targetP[angAxes[a]];
           PxReal posVel = (targetAng - currentAngle) * invDt;
           PxReal velVel = jointCore->targetV[angAxes[a]];
           PxReal invSD = 1.0f / totalSD;
-          PxReal sClamped = PxMin(drive.stiffness, maxDriveStiffness);
+              PxReal sClamped = PxMin(drive.stiffness,
+                      PxMin(maxDriveStiffness,
+                        maxDriveStiffnessFromPenalty));
           PxReal dClamped = totalSD - sClamped;
+              (&c.angularStiffness.x)[a] = sClamped;
           (&c.driveAngularVelocity.x)[a] =
               sClamped * invSD * posVel + dClamped * invSD * velVel;
         }
       }
+
+      restoreJointLambdaFromCache(
+          context, c,
+          reinterpret_cast<PxU64>(jointCore));
 
       numD6++;
     }

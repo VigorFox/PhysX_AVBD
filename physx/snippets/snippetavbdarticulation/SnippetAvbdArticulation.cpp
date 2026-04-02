@@ -80,6 +80,21 @@ static int getSelectedAvbdTestId()
   return testId > 0 ? testId : -1;
 }
 
+static PxU32 getConfiguredSolverIterations()
+{
+  const char* value = std::getenv("PHYSX_AVBD_SOLVER_ITERS");
+  if (!value || !value[0])
+    return 32;
+
+  const int iterations = std::atoi(value);
+  return iterations > 0 ? PxU32(iterations) : 32;
+}
+
+static void applyConfiguredSolverIterations(PxArticulationReducedCoordinate* articulation)
+{
+  articulation->setSolverIterationCounts(getConfiguredSolverIterations());
+}
+
 static bool shouldRunAvbdTest(int selectedTestId, int testId)
 {
   return selectedTestId < 0 || selectedTestId == testId;
@@ -133,7 +148,7 @@ static PxArticulationReducedCoordinate* createRevoluteChain(
   // compatibility, even though the solver-side articulation handling is
   // maximal-coordinate oriented.
   PxArticulationReducedCoordinate* artic = gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* parent = artic->createLink(NULL, PxTransform(basePos));
   PxRigidActorExt::createExclusiveShape(*parent, PxBoxGeometry(0.05f, linkLength * 0.5f, 0.05f), *gMaterial);
@@ -243,7 +258,7 @@ static void testJointLimits()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -291,7 +306,7 @@ static void testVelocityDrive()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -345,7 +360,7 @@ static void testPositionDrive()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -401,7 +416,7 @@ static void testAccelerationDrive()
     PxScene* scene = createAvbdScene(PxVec3(0, 0, 0));
     PxArticulationReducedCoordinate* artic =
         gPhysics->createArticulationReducedCoordinate();
-    artic->setSolverIterationCounts(32);
+    applyConfiguredSolverIterations(artic);
 
     PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
     PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -500,7 +515,7 @@ static void testMimicJoint()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   // Base (fixed)
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
@@ -573,7 +588,7 @@ static void testPrismaticJoint()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.2f, 0.2f, 0.2f), *gMaterial);
@@ -623,7 +638,7 @@ static void testFloatingBase()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* root = artic->createLink(NULL, PxTransform(PxVec3(0, 2, 0)));
   PxRigidActorExt::createExclusiveShape(*root, PxBoxGeometry(0.2f, 0.2f, 0.2f), *gMaterial);
@@ -711,7 +726,7 @@ static void testJointVelocityLimit()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -758,7 +773,7 @@ static void testSphericalJoint()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.1f, 0.1f, 0.1f), *gMaterial);
@@ -811,7 +826,7 @@ static void testMixedJointChain()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   // Link 0: root (fixed)
   PxArticulationLink* base = artic->createLink(NULL, PxTransform(PxVec3(0, 5, 0)));
@@ -998,7 +1013,7 @@ static void testScissorLift()
   PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.5f, 0.25f, 1.5f), *gMaterial);
   PxRigidBodyExt::updateMassAndInertia(*base, 3.f);
 
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   // Left root - fixed to base
   PxArticulationLink* leftRoot = artic->createLink(base, PxTransform(PxVec3(0.f, 0.55f, -0.9f)));
@@ -1391,7 +1406,7 @@ static void testChildLinkStaticWorldLoopD6()
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
-  artic->setSolverIterationCounts(32);
+  applyConfiguredSolverIterations(artic);
 
   const PxVec3 rootHalfExt(0.3f, 0.2f, 0.2f);
   const PxVec3 childHalfExt(0.5f, 0.12f, 0.12f);
