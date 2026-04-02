@@ -41,6 +41,9 @@ namespace physx
 	/**
 	\brief A joint between two links in an articulation.
 
+	\note AVBD may create joints with maximal-coordinate-style solver handling through this legacy PhysX 5 interface.
+	      The type name remains reduced-coordinate because there is no longer a solver-neutral PxArticulation abstraction in upstream PhysX 5.
+
 	\see PxArticulationReducedCoordinate, PxArticulationLink
 	*/
 	class PxArticulationJointReducedCoordinate : public PxBase

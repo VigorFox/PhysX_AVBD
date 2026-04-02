@@ -374,6 +374,9 @@ void initPhysics(bool /*interactive*/)
 	PxRigidStatic* groundPlane = PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
 	gScene->addActor(*groundPlane);
 
+	// TODO(AVBD): PhysX 5 removed the old solver-neutral PxArticulation layer,
+	// so AVBD currently keeps the reduced-coordinate factory name even when the
+	// articulation/joint handling behind it is maximal-coordinate oriented.
 	gArticulation = gPhysics->createArticulationReducedCoordinate();
 
 	createScissorLift();

@@ -408,6 +408,9 @@ namespace physx
 	/**
 	\brief A tree structure of bodies connected by joints that is treated as a unit by the dynamics solver. Parametrized in reduced (joint) coordinates.
 
+	\note AVBD keeps using this PhysX 5 public type for compatibility even when its articulation joints are handled with maximal-coordinate-style solver semantics.
+	      This mismatch is an API naming artifact inherited from PhysX 5 removing the older abstract PxArticulation layer.
+
 	\see PxArticulationJointReducedCoordinate, PxArticulationLink, PxPhysics::createArticulationReducedCoordinate
 	*/
 	class PxArticulationReducedCoordinate : public PxBase

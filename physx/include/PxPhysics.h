@@ -653,6 +653,13 @@ public:
 	/**
 	\brief Creates a reduced-coordinate articulation with all fields initialized to their default values.
 
+	\note AVBD currently reuses this PhysX 5 API entry point even when the articulation/joint path is treated as maximal-coordinate on the solver side.
+	      The public name stays reduced-coordinate because PhysX 5 removed the older solver-agnostic PxArticulation abstraction layer,
+	      and reintroducing a second public/runtime articulation hierarchy here would fork the integration path.
+	
+	\note TODO(AVBD): if upstream PhysX exposes a solver-neutral articulation facade again, move the maximal-coordinate naming to that boundary
+	      instead of duplicating Px/Np/Sc runtime types.
+
 	\return the new articulation
 
 	\see PxArticulationReducedCoordinate

@@ -127,6 +127,11 @@ static PxArticulationReducedCoordinate* createRevoluteChain(
     PxScene* scene, int numLinks, PxReal linkLength, PxReal linkMass,
     PxVec3 basePos, PxVec3 /*axis*/ = PxVec3(0, 0, 1))
 {
+  // TODO(AVBD): rename this API at the public boundary once PhysX exposes a
+  // solver-neutral articulation facade again. In PhysX 5 we still create the
+  // AVBD articulation through the reduced-coordinate entry point for API
+  // compatibility, even though the solver-side articulation handling is
+  // maximal-coordinate oriented.
   PxArticulationReducedCoordinate* artic = gPhysics->createArticulationReducedCoordinate();
   artic->setSolverIterationCounts(32);
 
