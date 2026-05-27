@@ -31,6 +31,8 @@
 // ****************************************************************************
 
 #include <ctype.h>
+#include <cstdlib>
+#include <cstring>
 #include "PxPhysicsAPI.h"
 #include "../snippetutils/SnippetUtils.h"
 #include "../snippetcommon/SnippetPrint.h"
@@ -48,6 +50,51 @@ static PxMaterial*								gMaterial		= NULL;
 static PxPvd*									gPvd			= NULL;
 static PxArticulationReducedCoordinate*			gArticulation	= NULL;
 static PxArticulationJointReducedCoordinate*	gDriveJoint		= NULL;
+static PxSolverType::Enum						gSolverType		= PxSolverType::eAVBD;
+static PxArticulationLink*						gBaseLink		= NULL;
+static PxArticulationLink*						gTopLink		= NULL;
+
+static const char* getSolverTypeName(PxSolverType::Enum solverType)
+{
+	switch(solverType)
+	{
+	case PxSolverType::ePGS:	return "pgs";
+	case PxSolverType::eTGS:	return "tgs";
+	case PxSolverType::eAVBD:	return "avbd";
+	default:					return "unknown";
+	}
+}
+
+static bool tryParseSolverType(const char* value, PxSolverType::Enum& solverType)
+{
+	if(!value || !value[0])
+		return false;
+	if(_stricmp(value, "pgs") == 0)		{ solverType = PxSolverType::ePGS;  return true; }
+	if(_stricmp(value, "tgs") == 0)		{ solverType = PxSolverType::eTGS;  return true; }
+	if(_stricmp(value, "avbd") == 0)	{ solverType = PxSolverType::eAVBD; return true; }
+	return false;
+}
+
+static PxSolverType::Enum getRequestedSolverType(int argc, const char*const* argv)
+{
+	for(int i = 1; i < argc; ++i)
+	{
+		if(!argv[i])
+			continue;
+		static const char prefix[] = "--solver=";
+		if(std::strncmp(argv[i], prefix, sizeof(prefix) - 1) == 0)
+		{
+			PxSolverType::Enum solverType = PxSolverType::eAVBD;
+			if(tryParseSolverType(argv[i] + sizeof(prefix) - 1, solverType))
+				return solverType;
+		}
+	}
+	const char* value = std::getenv("PHYSX_SNIPPET_SOLVER");
+	PxSolverType::Enum solverType = PxSolverType::eAVBD;
+	if(tryParseSolverType(value, solverType))
+		return solverType;
+	return PxSolverType::eAVBD;
+}
 
 static PxFilterFlags scissorFilter(	PxFilterObjectAttributes attributes0, PxFilterData filterData0,
 									PxFilterObjectAttributes attributes1, PxFilterData filterData1,
@@ -81,6 +128,7 @@ static void createScissorLift()
 	PxArticulationLink* base = gArticulation->createLink(NULL, PxTransform(PxVec3(0.f, 0.25f, 0.f)));
 	PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.5f, 0.25f, 1.5f), *gMaterial);
 	PxRigidBodyExt::updateMassAndInertia(*base, 3.f);
+	gBaseLink = base;
 
 	//Now create the slider and fixed joints...
 
@@ -254,6 +302,7 @@ static void createScissorLift()
 	PxArticulationLink* top = gArticulation->createLink(leftTop, topPose);
 	PxRigidActorExt::createExclusiveShape(*top, PxBoxGeometry(0.5f, 0.1f, 1.5f), *gMaterial);
 	PxRigidBodyExt::updateMassAndInertia(*top, 1.f);
+	gTopLink = top;
 
 	joint = top->getInboundJoint();
 	joint->setJointType(PxArticulationJointType::eFIX);
@@ -357,10 +406,13 @@ void initPhysics(bool /*interactive*/)
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
 
-	sceneDesc.solverType = PxSolverType::eAVBD;
+	sceneDesc.solverType = gSolverType;
 	sceneDesc.filterShader = scissorFilter;
 
 	gScene = gPhysics->createScene(sceneDesc);
+
+	printf("[SnippetArticulationRCConfig] solver=%s\n",
+		getSolverTypeName(sceneDesc.solverType));
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
 	{
@@ -383,6 +435,42 @@ void initPhysics(bool /*interactive*/)
 }
 
 static bool gClosing = true;
+static PxU32 gFrame = 0;
+
+struct ScissorStats
+{
+	PxReal topYInitial = 0.0f;
+	PxReal topYMin = PX_MAX_F32;
+	PxReal topYMax = -PX_MAX_F32;
+	PxReal topYLast = 0.0f;
+	PxReal baseYDriftMax = 0.0f;
+	PxReal baseTiltDegMax = 0.0f;
+	PxU32 nonFiniteFrame = PX_MAX_U32;
+	PxU32 firstReportedFrame = PX_MAX_U32;
+};
+
+static ScissorStats gScissorStats;
+
+static bool isFiniteVec(const PxVec3& v)
+{
+	return PxIsFinite(v.x) && PxIsFinite(v.y) && PxIsFinite(v.z);
+}
+
+static void dumpScissorState(PxU32 frame)
+{
+	if(!gBaseLink || !gTopLink)
+		return;
+	const PxTransform basePose = gBaseLink->getGlobalPose();
+	const PxTransform topPose  = gTopLink->getGlobalPose();
+	const PxReal driveTarget  = gDriveJoint->getDriveTarget(PxArticulationAxis::eZ);
+	const PxReal jointPos     = gDriveJoint->getJointPosition(PxArticulationAxis::eZ);
+	const PxReal jointVel     = gDriveJoint->getJointVelocity(PxArticulationAxis::eZ);
+	printf("[Scissor] frame=%u base=(%.3f,%.3f,%.3f) top=(%.3f,%.3f,%.3f) "
+		"driveTarget=%.4f jointPos=%.4f jointVel=%.4f\n",
+		frame, basePose.p.x, basePose.p.y, basePose.p.z,
+		topPose.p.x, topPose.p.y, topPose.p.z,
+		driveTarget, jointPos, jointVel);
+}
 
 void stepPhysics(bool /*interactive*/)
 {
@@ -402,10 +490,55 @@ void stepPhysics(bool /*interactive*/)
 
 	gScene->simulate(dt);
 	gScene->fetchResults(true);
+
+	if(gBaseLink && gTopLink)
+	{
+		const PxTransform basePose = gBaseLink->getGlobalPose();
+		const PxTransform topPose  = gTopLink->getGlobalPose();
+		if(!isFiniteVec(basePose.p) || !isFiniteVec(topPose.p))
+		{
+			if(gScissorStats.nonFiniteFrame == PX_MAX_U32)
+				gScissorStats.nonFiniteFrame = gFrame;
+		}
+		else
+		{
+			if(gScissorStats.firstReportedFrame == PX_MAX_U32)
+			{
+				gScissorStats.firstReportedFrame = gFrame;
+				gScissorStats.topYInitial = topPose.p.y;
+			}
+			gScissorStats.topYLast = topPose.p.y;
+			gScissorStats.topYMin = PxMin(gScissorStats.topYMin, topPose.p.y);
+			gScissorStats.topYMax = PxMax(gScissorStats.topYMax, topPose.p.y);
+			gScissorStats.baseYDriftMax = PxMax(gScissorStats.baseYDriftMax,
+				PxAbs(basePose.p.y - 0.25f));
+			// Base should stay flat on ground (no tilt). Compute tilt as angle
+			// between local +Y and world +Y.
+			const PxVec3 baseUp = basePose.q.rotate(PxVec3(0.f, 1.f, 0.f));
+			const PxReal dotUp = PxClamp(baseUp.y, -1.0f, 1.0f);
+			const PxReal tiltDeg = PxAcos(dotUp) * 180.0f / PxPi;
+			gScissorStats.baseTiltDegMax = PxMax(gScissorStats.baseTiltDegMax, tiltDeg);
+		}
+	}
+
+	const bool snapshotFrame = (gFrame % 60) == 0 || gFrame < 30;
+	if(snapshotFrame)
+		dumpScissorState(gFrame);
+	++gFrame;
 }
 	
 void cleanupPhysics(bool /*interactive*/)
 {
+	printf("[ScissorDiag] frames=%u topY initial=%.4f last=%.4f min=%.4f max=%.4f "
+		"range=%.4f baseDriftYMax=%.4f baseTiltDegMax=%.3f nonFiniteFrame=%u\n",
+		gFrame, gScissorStats.topYInitial, gScissorStats.topYLast,
+		gScissorStats.topYMin == PX_MAX_F32 ? 0.0f : gScissorStats.topYMin,
+		gScissorStats.topYMax == -PX_MAX_F32 ? 0.0f : gScissorStats.topYMax,
+		(gScissorStats.topYMax > -PX_MAX_F32 && gScissorStats.topYMin < PX_MAX_F32)
+			? (gScissorStats.topYMax - gScissorStats.topYMin) : 0.0f,
+		gScissorStats.baseYDriftMax, gScissorStats.baseTiltDegMax,
+		gScissorStats.nonFiniteFrame);
+
 	gArticulation->release();
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
@@ -419,18 +552,54 @@ void cleanupPhysics(bool /*interactive*/)
 	printf("SnippetArticulation done.\n");
 }
 
-int snippetMain(int, const char*const*)
+static bool hasHeadlessArg(int argc, const char*const* argv)
 {
+	for(PxI32 i = 1; i < argc; ++i)
+	{
+		if(!argv[i])
+			continue;
+		if(std::strcmp(argv[i], "--headless") == 0)
+			return true;
+	}
+	return false;
+}
+
+static bool isHeadlessRequested(int argc, const char*const* argv)
+{
+	if(hasHeadlessArg(argc, argv))
+		return true;
+
+	const char* value = std::getenv("PHYSX_SNIPPET_HEADLESS");
+	return value && value[0] && value[0] != '0';
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	setvbuf(stdout, NULL, _IONBF, 0);
+	gSolverType = getRequestedSolverType(argc, argv);
 #ifdef RENDER_SNIPPET
-	extern void renderLoop();
-	renderLoop();
-#else
-	static const PxU32 frameCount = 100;
+	if(!isHeadlessRequested(argc, argv))
+	{
+		extern void renderLoop();
+		renderLoop();
+		return 0;
+	}
+#endif
+
+	// Cover at least one full open/close cycle of the drive joint (~10s) so
+	// regressions in the AVBD articulation path show up in the diag rather
+	// than being masked by a short 1.5s smoke window.
+	PxU32 frameCount = 900;
+	if(const char* override = std::getenv("PHYSX_SNIPPET_FRAME_COUNT"))
+	{
+		const long value = std::strtol(override, nullptr, 10);
+		if(value > 0 && value < 1000000)
+			frameCount = static_cast<PxU32>(value);
+	}
 	initPhysics(false);
 	for(PxU32 i=0; i<frameCount; i++)
 		stepPhysics(false);
 	cleanupPhysics(false);
-#endif
 
 	return 0;
 }

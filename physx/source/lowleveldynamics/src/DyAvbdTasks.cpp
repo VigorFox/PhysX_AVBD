@@ -66,7 +66,7 @@ void AvbdSolveIslandTask::release() {
           : mSolver.getConfig().innerIterations;
   const PxU32 requestedIterations =
       (usesJointPath && hasJointConstraints)
-          ? PxMax(baseIterations, PxU32(8))
+        ? PxMax(baseIterations, PxU32(10))
           : baseIterations;
   mContext.recordIterationDiagnostics(requestedIterations, mSolver.getStats(),
                       hasJointConstraints, mBatch.d6Joints,
@@ -84,7 +84,20 @@ void AvbdSolveIslandTask::release() {
   }
 
   // Write back breakable joint status to ConstraintWriteBackPool
-  // This enables PhysX's checkConstraintBreakage() to detect broken joints
+  // This enables PhysX's checkConstraintBreakage() to detect broken joints.
+  //
+  // AVBD-specific writeback contract:
+  //   * d6.lambdaLinear / d6.lambdaAngular are Lagrange multipliers in
+  //     force / torque units (N, N*m) inside the solver.
+  //   * d6.linBreakImpulse / d6.angBreakImpulse store the authored
+  //     PxConstraint::setBreakForce() thresholds verbatim in N / N*m (no
+  //     dt multiplication, see DyAvbdDynamicsPrep.cpp), so the break gate
+  //     stays in force space.
+  //   * Sc::ConstraintSim::getForce() reports `linearImpulse * (1/dt)`, so
+  //     storing lambda as-is in linearImpulse over-reports the readback by
+  //     1/dt. That is a long-standing AVBD reporting quirk; do not change
+  //     here without auditing every consumer of PxConstraint::getForce()
+  //     under the AVBD solver.
   if (mBatch.numD6 > 0) {
     PxPinnedArray<Dy::ConstraintWriteback> &writeBackPool =
         mContext.getConstraintWriteBackPool();
@@ -94,9 +107,6 @@ void AvbdSolveIslandTask::release() {
       if (d6.writeBackIndex == 0xFFFFFFFFu)
         continue;
 
-      // AVBD lambda has units of force (N) / torque (N*m),
-      // and linBreakImpulse/angBreakImpulse store raw break force/torque.
-      // Compare directly - no dt scaling needed.
       const PxReal linForce = d6.lambdaLinear.magnitude();
       const PxReal angTorque = d6.lambdaAngular.magnitude();
 

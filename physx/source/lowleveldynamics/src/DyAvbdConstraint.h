@@ -1238,6 +1238,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
                            //!< 3-5 angular)
   physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
+  physx::PxU32 sourceFlags; //!< Prep-side source tags (bit1=0x2 same-artic external spherical)
   physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
   physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
   physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)
@@ -1432,6 +1433,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     angularMotion = 0; // All locked by default
     driveFlags = 0;
     driveAccelerationFlags = 0;
+    sourceFlags = 0;
     cacheIndex = 0xFFFFFFFFu; // PX_MAX_U32 = not cached
     cacheKey = 0;
     padding0 = 0.0f;

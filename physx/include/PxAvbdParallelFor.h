@@ -33,8 +33,9 @@
 // Uses a persistent thread pool that stays alive across calls. The pool
 // spawns on first use and is destroyed at program exit.
 //
-// Falls back to sequential execution when count < threshold or when
-// only 1 hardware thread is available.
+// Falls back to sequential execution when count < threshold, when only one
+// hardware thread is available, or when another thread already owns the pool
+// (PhysX may solve multiple AVBD islands concurrently on the cpu dispatcher).
 //
 // Threshold: per-particle VBD/BCD work is ~1-3us. Thread dispatch overhead
 // is ~20-50us (condition_variable notify + wake). So we need at least
@@ -44,7 +45,6 @@
 #include "foundation/PxAllocator.h"
 #include "foundation/PxArray.h"
 #include "foundation/PxAtomic.h"
-#include "foundation/PxMutex.h"
 #include "foundation/PxSync.h"
 #include "foundation/PxThread.h"
 
@@ -100,6 +100,14 @@ class AvbdThreadPool {
           mStartEvent.wait(1);
         }
 
+        if (PxAtomicCompareExchange(&mState.shutdown, 0, 0) != 0) {
+          return;
+        }
+        // Shutdown and spurious wakeups can bump generation without work.
+        if (!mState.func) {
+          continue;
+        }
+
         processChunks(mState);
         PxAtomicIncrement(&mState.workersFinished);
       }
@@ -122,6 +130,14 @@ public:
   }
 
   unsigned numWorkers() const { return mNumWorkers; }
+
+  // Lightweight exclusive-dispatch gate (one CAS). Contended callers fall back
+  // to a sequential loop in avbdParallelFor instead of blocking on a mutex.
+  bool tryAcquireDispatch() {
+    return PxAtomicCompareExchange(&mDispatchBusy, 1, 0) == 0;
+  }
+
+  void releaseDispatch() { PxAtomicExchange(&mDispatchBusy, 0); }
 
   template <typename Func>
   void parallelFor(unsigned begin, unsigned end, const Func &func) {
@@ -157,29 +173,25 @@ public:
     PxAtomicExchange(&mState.workersFinished, 0);
     PxAtomicExchange(&mState.activeWorkers, static_cast<PxI32>(activeWorkers));
 
-    {
-      PxMutex::ScopedLock lock(mMutex);
-      PxAtomicIncrement(&mState.generation);
-      mStartEvent.set();
-    }
+    PxAtomicIncrement(&mState.generation);
+    mStartEvent.set();
 
     processChunks(mState);
 
-    while (static_cast<unsigned>(PxAtomicCompareExchange(&mState.workersFinished, 0, 0)) < activeWorkers) {
+    // All pool workers wake on mStartEvent; wait for every worker thread, not
+    // just activeWorkers (the chunk-participation cap).
+    while (static_cast<unsigned>(PxAtomicCompareExchange(&mState.workersFinished, 0, 0)) < mNumWorkers) {
       PxThread::yield();
     }
 
-    {
-      PxMutex::ScopedLock lock(mMutex);
-      mStartEvent.reset();
-    }
+    mStartEvent.reset();
 
     mState.func = NULL;
     mState.funcData = NULL;
   }
 
 private:
-  AvbdThreadPool() : mWorkers(), mNumWorkers(0), mMutex(), mStartEvent() {
+  AvbdThreadPool() : mWorkers(), mNumWorkers(0), mDispatchBusy(0), mStartEvent() {
     unsigned hwThreads = PxThread::getNbPhysicalCores();
     if (hwThreads == 0)
       hwThreads = 1;
@@ -197,12 +209,12 @@ private:
   }
 
   ~AvbdThreadPool() {
+    while (PxAtomicCompareExchange(&mDispatchBusy, 0, 0) != 0)
+      PxThread::yield();
+
     PxAtomicExchange(&mState.shutdown, 1);
-    {
-      PxMutex::ScopedLock lock(mMutex);
-      PxAtomicIncrement(&mState.generation);
-      mStartEvent.set();
-    }
+    PxAtomicIncrement(&mState.generation);
+    mStartEvent.set();
 
     for (PxU32 i = 0; i < mWorkers.size(); ++i) {
       mWorkers[i]->waitForQuit();
@@ -214,6 +226,9 @@ private:
   AvbdThreadPool &operator=(const AvbdThreadPool &) = delete;
 
   static PX_FORCE_INLINE void processChunks(SharedState &state) {
+    if (!state.func)
+      return;
+
     for (;;) {
       const PxI32 chunkIdx = PxAtomicIncrement(&state.nextChunk) - 1;
       const unsigned chunkBegin = state.workBegin + static_cast<unsigned>(chunkIdx) * state.chunkSize;
@@ -243,7 +258,7 @@ private:
   SharedState mState;
   PxArray<WorkerThread *> mWorkers;
   unsigned mNumWorkers;
-  PxMutex mMutex;
+  volatile PxI32 mDispatchBusy;
   PxSync mStartEvent;
 };
 
@@ -251,18 +266,32 @@ private:
 // avbdParallelFor(begin, end, func)
 //
 // Executes func(i) for i in [begin, end), distributing work to a thread pool.
-// Falls back to sequential when work is trivial.
+// Falls back to sequential when work is trivial or the pool is already in use.
 //-----------------------------------------------------------------------------
 template <typename Func>
 inline void avbdParallelFor(unsigned begin, unsigned end, const Func &func) {
   const unsigned count = end - begin;
-  if (count < AVBD_PARALLEL_MIN_ITEMS ||
-      AvbdThreadPool::instance().numWorkers() == 0) {
+  if (count < AVBD_PARALLEL_MIN_ITEMS) {
     for (unsigned i = begin; i < end; ++i)
       func(i);
     return;
   }
-  AvbdThreadPool::instance().parallelFor(begin, end, func);
+
+  AvbdThreadPool &pool = AvbdThreadPool::instance();
+  if (pool.numWorkers() == 0) {
+    for (unsigned i = begin; i < end; ++i)
+      func(i);
+    return;
+  }
+
+  if (!pool.tryAcquireDispatch()) {
+    for (unsigned i = begin; i < end; ++i)
+      func(i);
+    return;
+  }
+
+  pool.parallelFor(begin, end, func);
+  pool.releaseDispatch();
 }
 
 //-----------------------------------------------------------------------------

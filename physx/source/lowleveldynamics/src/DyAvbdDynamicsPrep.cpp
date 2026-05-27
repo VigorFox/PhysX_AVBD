@@ -643,6 +643,12 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             if (numD6 < maxD6) {
               AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
+              // Tag the original joint type so solver-path source-detection
+              // (DyAvbdSolverJointPath.cpp::getConstraintSourceType and the
+              // prismatic warmstart-clear in DyAvbdDynamics.cpp) can tell a
+              // native PxSphericalJoint apart from an articulation internal
+              // joint that happens to share the same motion-mask shape.
+              c.header.type = AvbdConstraintType::eJOINT_SPHERICAL;
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
@@ -689,6 +695,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             if (numD6 < maxD6) {
               AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
+              c.header.type = AvbdConstraintType::eJOINT_FIXED;
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
@@ -715,6 +722,7 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
               AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
+              c.header.type = AvbdConstraintType::eJOINT_REVOLUTE;
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
@@ -770,12 +778,28 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
               AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();
+              c.header.type = AvbdConstraintType::eJOINT_PRISMATIC;
               c.header.bodyIndexA = localBody0;
               c.header.bodyIndexB = localBody1;
               c.anchorA = anchorA;
               c.anchorB = anchorB;
-              c.localFrameA = frameA;
-              c.localFrameB = frameB;
+              // Forward the authored joint frames verbatim, matching the
+              // contract used by every other joint type (and avbd_standalone's
+              // addD6Joint / addPrismaticJoint).
+              //
+              // Earlier branch-local probes rebuilt prismatic localFrameB
+              // every frame as `bodyB.q^{-1} * worldFrameA` to mask transient
+              // direct-hit divergence (AVBD audit Entry 025). That probe had
+              // the side effect of making the prismatic generic angular-lock
+              // rows blind to real violations: computeAngularError() always
+              // saw the rest-relative quaternion as identity, so the dual
+              // update never accumulated lambda to resist gravity-driven
+              // body rotation. SnippetJoint's prismatic chain then free-fell
+              // to the ground despite Y/Z linear and all-angular locks
+              // (Entry 094 evidence). Keep the authored frame so the angular
+              // error reflects the actual joint violation.
+              c.localFrameA = frameA.getNormalized();
+              c.localFrameB = frameB.getNormalized();
 
               // X = LIMITED or FREE, Y&Z = LOCKED
               bool hasLimit = (prismaticData->jointFlags &
@@ -905,18 +929,38 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
           } // end switch (jointType)
 
-          // Fill breakable joint info for any D6 constraint created above
+          // Fill breakable joint info for any D6 constraint created above.
+          //
+          // The AVBD break threshold contract stores the authored
+          // PxConstraint::setBreakForce() value verbatim (no dt scaling),
+          // and DyAvbdTasks.cpp compares |lambda| > breakForce in force
+          // space. Install the threshold BEFORE the warmstart restore so
+          // restoreJointLambdaFromCache() can apply the breakable-only
+          // lambda reseed policy that prevents stiff-chain ratcheting
+          // (see DyAvbdDynamics.cpp).
           if (numD6 > d6CountBefore) {
             AvbdD6JointConstraint &c = d6Constraints[numD6 - 1];
-            restoreJointLambdaFromCache(*this, c,
-                                        reinterpret_cast<PxU64>(constraint));
-            c.writeBackIndex = constraint->index;
-            // Convert break force to break impulse (force * dt)
-            // Use the same formula as TGS: impulse = force * simDt
-            // dt is not available here, so store raw force; the task will
-            // compare lambda (which is impulse) against force * dt at writeback
+            // Same-articulation external spherical loop closures (scissor
+            // crossings): linear locked + all angular free. Tag before warmstart
+            // restore so downstream local-solve policy can key off sourceFlags.
+            if (!body0IsStatic && !body1IsStatic && localBody0 != PX_MAX_U32 &&
+                localBody1 != PX_MAX_U32 && !nodeIndex0.isStaticBody() &&
+                !nodeIndex1.isStaticBody()) {
+              const IG::Node &node0 = islandSim.getNode(nodeIndex0);
+              const IG::Node &node1 = islandSim.getNode(nodeIndex1);
+              if (node0.getNodeType() == IG::Node::eARTICULATION_TYPE &&
+                  node1.getNodeType() == IG::Node::eARTICULATION_TYPE &&
+                  islandSim.getActiveNodeIndex(nodeIndex0) ==
+                      islandSim.getActiveNodeIndex(nodeIndex1) &&
+                  c.linearMotion == 0 && c.angularMotion == 0x2A) {
+                c.sourceFlags |= 0x2u;
+              }
+            }
             c.linBreakImpulse = constraint->linBreakForce;
             c.angBreakImpulse = constraint->angBreakForce;
+            c.writeBackIndex = constraint->index;
+            restoreJointLambdaFromCache(*this, c,
+                                        reinterpret_cast<PxU64>(constraint));
           }
         } // end else if (jointType != eJOINT_UNKNOWN && ...)
         else if (constraint->constantBlockSize >=

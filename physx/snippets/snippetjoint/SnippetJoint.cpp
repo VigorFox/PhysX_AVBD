@@ -39,6 +39,8 @@
 #include "PxPhysicsAPI.h"
 #include <ctype.h>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 using namespace physx;
@@ -51,11 +53,20 @@ static PxDefaultCpuDispatcher *gDispatcher = NULL;
 static PxScene *gScene = NULL;
 static PxMaterial *gMaterial = NULL;
 static PxPvd *gPvd = NULL;
+static PxSolverType::Enum gSolverType = PxSolverType::eAVBD;
 
 static std::vector<PxRigidDynamic *> gRevoluteChainBodies;
 static std::vector<PxRevoluteJoint *> gRevoluteChainJoints;
+static std::vector<PxRigidDynamic *> gFixedChainBodies;
+static std::vector<PxFixedJoint *> gFixedChainJoints;
+static std::vector<PxU8> gFixedBreakReported;
+static std::vector<PxRigidDynamic *> gPrismaticChainBodies;
+static std::vector<PxPrismaticJoint *> gPrismaticChainJoints;
+static std::vector<PxVec3> gPrismaticRestPositions;
 
 static void getJointWorldAxes(PxRevoluteJoint *joint, PxVec3 &axis0,
+                              PxVec3 &axis1);
+static void getJointWorldAxes(PxPrismaticJoint *joint, PxVec3 &axis0,
                               PxVec3 &axis1);
 
 struct RevoluteJitterStats {
@@ -77,6 +88,28 @@ struct RevoluteJitterStats {
 
 static RevoluteJitterStats gRevoluteStats;
 
+struct FixedChainStats {
+  PxReal maxLinearForce = 0.0f;
+  PxReal maxAngularForce = 0.0f;
+  PxU32 firstBrokenFrame = PX_MAX_U32;
+  PxU32 brokenCount = 0;
+};
+
+static FixedChainStats gFixedStats;
+
+struct PrismaticDriftStats {
+  PxReal maxTailTransverse = 0.0f;
+  PxReal sumTailEarly = 0.0f;
+  PxReal sumTailLate = 0.0f;
+  PxReal sumTailAngVelEarly = 0.0f;
+  PxReal sumTailAngVelLate = 0.0f;
+  PxReal maxJointAxisMisalignDeg = 0.0f;
+  PxU32 cntEarly = 0;
+  PxU32 cntLate = 0;
+};
+
+static PrismaticDriftStats gPrismaticStats;
+
 static bool shouldDumpRevoluteState(PxU32 frame) {
   if (frame <= 180)
     return (frame % 30) == 0;
@@ -85,6 +118,60 @@ static bool shouldDumpRevoluteState(PxU32 frame) {
   if (frame >= 900 && frame <= 1300)
     return (frame % 10) == 0;
   return (frame % 120) == 0;
+}
+
+static const char *getSolverTypeName(PxSolverType::Enum solverType) {
+  switch (solverType) {
+  case PxSolverType::ePGS:
+    return "pgs";
+  case PxSolverType::eTGS:
+    return "tgs";
+  case PxSolverType::eAVBD:
+    return "avbd";
+  default:
+    return "unknown";
+  }
+}
+
+static bool tryParseSolverType(const char *value,
+                               PxSolverType::Enum &solverType) {
+  if (!value || !value[0])
+    return false;
+
+  if (_stricmp(value, "pgs") == 0) {
+    solverType = PxSolverType::ePGS;
+    return true;
+  }
+  if (_stricmp(value, "tgs") == 0) {
+    solverType = PxSolverType::eTGS;
+    return true;
+  }
+  if (_stricmp(value, "avbd") == 0) {
+    solverType = PxSolverType::eAVBD;
+    return true;
+  }
+  return false;
+}
+
+static PxSolverType::Enum getRequestedSolverType(int argc,
+                                                 const char *const *argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (!argv[i])
+      continue;
+    static const char prefix[] = "--solver=";
+    if (std::strncmp(argv[i], prefix, sizeof(prefix) - 1) == 0) {
+      PxSolverType::Enum solverType = PxSolverType::eAVBD;
+      if (tryParseSolverType(argv[i] + sizeof(prefix) - 1, solverType))
+        return solverType;
+    }
+  }
+
+  const char *value = std::getenv("PHYSX_SNIPPET_SOLVER");
+  PxSolverType::Enum solverType = PxSolverType::eAVBD;
+  if (tryParseSolverType(value, solverType))
+    return solverType;
+
+  return PxSolverType::eAVBD;
 }
 
 static void dumpRevoluteChainState(PxU32 frame) {
@@ -115,7 +202,99 @@ static void dumpRevoluteChainState(PxU32 frame) {
   }
 }
 
+static void dumpPrismaticChainState(PxU32 frame) {
+  if (gPrismaticChainBodies.size() < 5 || gPrismaticChainJoints.size() < 5 ||
+      gPrismaticRestPositions.size() < 5)
+    return;
+
+  printf("[PrismaticNodes] frame=%u\n", frame);
+
+  for (PxU32 i = 0; i < gPrismaticChainBodies.size(); ++i) {
+    PxRigidDynamic *body = gPrismaticChainBodies[i];
+    const PxTransform pose = body->getGlobalPose();
+    const PxVec3 linearVelocity = body->getLinearVelocity();
+    const PxVec3 angularVelocity = body->getAngularVelocity();
+    const PxVec3 restDelta = pose.p - gPrismaticRestPositions[i];
+    const PxReal transverse =
+        PxSqrt(restDelta.y * restDelta.y + restDelta.z * restDelta.z);
+    printf("  node%u p=(%.3f,%.3f,%.3f) d=(%.3f,%.3f,%.3f) trans=%.4f "
+           "v=(%.3f,%.3f,%.3f) w=(%.3f,%.3f,%.3f) sleep=%d\n",
+           i, pose.p.x, pose.p.y, pose.p.z, restDelta.x, restDelta.y,
+           restDelta.z, transverse, linearVelocity.x, linearVelocity.y,
+           linearVelocity.z, angularVelocity.x, angularVelocity.y,
+           angularVelocity.z, body->isSleeping() ? 1 : 0);
+  }
+
+  for (PxU32 j = 0; j < gPrismaticChainJoints.size(); ++j) {
+    PxVec3 a0, a1;
+    getJointWorldAxes(gPrismaticChainJoints[j], a0, a1);
+    const PxReal dot = PxClamp(a0.dot(a1), -1.0f, 1.0f);
+    const PxReal misDeg = PxAcos(dot) * 180.0f / PxPi;
+    printf("  joint%u pos=%.4f vel=%.4f axisMisalignDeg=%.3f\n", j,
+           gPrismaticChainJoints[j]->getPosition(),
+           gPrismaticChainJoints[j]->getVelocity(), misDeg);
+  }
+}
+
+static void dumpFixedChainState(PxU32 frame) {
+  if (gFixedChainBodies.size() < 5 || gFixedChainJoints.size() < 5)
+    return;
+
+  printf("[FixedNodes] frame=%u\n", frame);
+
+  for (PxU32 i = 0; i < gFixedChainBodies.size(); ++i) {
+    PxRigidDynamic *body = gFixedChainBodies[i];
+    const PxTransform pose = body->getGlobalPose();
+    const PxVec3 linearVelocity = body->getLinearVelocity();
+    const PxVec3 angularVelocity = body->getAngularVelocity();
+    printf("  node%u p=(%.3f,%.3f,%.3f) v=(%.3f,%.3f,%.3f) w=(%.3f,%.3f,%.3f) sleep=%d\n",
+           i, pose.p.x, pose.p.y, pose.p.z, linearVelocity.x, linearVelocity.y,
+           linearVelocity.z, angularVelocity.x, angularVelocity.y,
+           angularVelocity.z, body->isSleeping() ? 1 : 0);
+  }
+
+  for (PxU32 j = 0; j < gFixedChainJoints.size(); ++j) {
+    PxVec3 linearForce(0.0f), angularForce(0.0f);
+    PxConstraint *constraint = gFixedChainJoints[j]->getConstraint();
+    if (!constraint)
+      continue;
+    constraint->getForce(linearForce, angularForce);
+    const PxReal linMag = linearForce.magnitude();
+    const PxReal angMag = angularForce.magnitude();
+    const bool broken = constraint->getFlags().isSet(PxConstraintFlag::eBROKEN);
+    printf("  joint%u linForce=%.4f angForce=%.4f broken=%d f=(%.3f,%.3f,%.3f) t=(%.3f,%.3f,%.3f)\n",
+           j, linMag, angMag, broken ? 1 : 0, linearForce.x, linearForce.y,
+           linearForce.z, angularForce.x, angularForce.y, angularForce.z);
+  }
+}
+
 static void getJointWorldAxes(PxRevoluteJoint *joint, PxVec3 &axis0,
+                              PxVec3 &axis1) {
+  axis0 = PxVec3(1.0f, 0.0f, 0.0f);
+  axis1 = PxVec3(1.0f, 0.0f, 0.0f);
+  if (!joint)
+    return;
+
+  PxRigidActor *a0 = nullptr;
+  PxRigidActor *a1 = nullptr;
+  joint->getActors(a0, a1);
+
+  const PxTransform lp0 = joint->getLocalPose(PxJointActorIndex::eACTOR0);
+  const PxTransform lp1 = joint->getLocalPose(PxJointActorIndex::eACTOR1);
+  const PxVec3 localAxis(1.0f, 0.0f, 0.0f);
+
+  axis0 = a0 ? a0->getGlobalPose().q.rotate(lp0.q.rotate(localAxis))
+             : lp0.q.rotate(localAxis);
+  axis1 = a1 ? a1->getGlobalPose().q.rotate(lp1.q.rotate(localAxis))
+             : lp1.q.rotate(localAxis);
+
+  const PxReal l0 = axis0.magnitudeSquared();
+  const PxReal l1 = axis1.magnitudeSquared();
+  axis0 = (l0 > 1e-12f) ? axis0 * PxRecipSqrt(l0) : PxVec3(1.0f, 0.0f, 0.0f);
+  axis1 = (l1 > 1e-12f) ? axis1 * PxRecipSqrt(l1) : PxVec3(1.0f, 0.0f, 0.0f);
+}
+
+static void getJointWorldAxes(PxPrismaticJoint *joint, PxVec3 &axis0,
                               PxVec3 &axis1) {
   axis0 = PxVec3(1.0f, 0.0f, 0.0f);
   axis1 = PxVec3(1.0f, 0.0f, 0.0f);
@@ -247,6 +426,23 @@ static void createChain(const PxTransform &t, PxU32 length, const PxGeometry &g,
         if (revolute)
           gRevoluteChainJoints.push_back(revolute);
       }
+    } else if (createJoint == createBreakableFixed) {
+      gFixedChainBodies.push_back(current);
+      if (joint) {
+        PxFixedJoint *fixed = joint->is<PxFixedJoint>();
+        if (fixed) {
+          gFixedChainJoints.push_back(fixed);
+          gFixedBreakReported.push_back(0);
+        }
+      }
+    } else if (createJoint == createLimitedPrismatic) {
+      gPrismaticChainBodies.push_back(current);
+      gPrismaticRestPositions.push_back((t * localTm).p);
+      if (joint) {
+        PxPrismaticJoint *prismatic = joint->is<PxPrismaticJoint>();
+        if (prismatic)
+          gPrismaticChainJoints.push_back(prismatic);
+      }
     }
 
     gScene->addActor(*current);
@@ -272,8 +468,11 @@ void initPhysics(bool /*interactive*/) {
   gDispatcher = PxDefaultCpuDispatcherCreate(2);
   sceneDesc.cpuDispatcher = gDispatcher;
   sceneDesc.filterShader = PxDefaultSimulationFilterShader;
-  sceneDesc.solverType = PxSolverType::eAVBD;
+    sceneDesc.solverType = gSolverType;
   gScene = gPhysics->createScene(sceneDesc);
+
+    printf("[SnippetJointConfig] solver=%s\n",
+      getSolverTypeName(sceneDesc.solverType));
 
   PxPvdSceneClient *pvdClient = gScene->getScenePvdClient();
   if (pvdClient) {
@@ -306,6 +505,32 @@ void stepPhysics(bool /*interactive*/) {
 
   if (shouldDumpRevoluteState(gRevoluteStats.frame))
     dumpRevoluteChainState(gRevoluteStats.frame);
+  if (shouldDumpRevoluteState(gRevoluteStats.frame))
+    dumpFixedChainState(gRevoluteStats.frame);
+  if (shouldDumpRevoluteState(gRevoluteStats.frame))
+    dumpPrismaticChainState(gRevoluteStats.frame);
+
+  for (PxU32 j = 0; j < gFixedChainJoints.size(); ++j) {
+    PxVec3 linearForce(0.0f), angularForce(0.0f);
+    PxConstraint *constraint = gFixedChainJoints[j]->getConstraint();
+    if (!constraint)
+      continue;
+    constraint->getForce(linearForce, angularForce);
+    gFixedStats.maxLinearForce = PxMax(gFixedStats.maxLinearForce,
+                                       linearForce.magnitude());
+    gFixedStats.maxAngularForce = PxMax(gFixedStats.maxAngularForce,
+                                        angularForce.magnitude());
+    const bool broken = constraint->getFlags().isSet(PxConstraintFlag::eBROKEN);
+    if (broken && j < gFixedBreakReported.size() && !gFixedBreakReported[j]) {
+      gFixedBreakReported[j] = 1;
+      if (gFixedStats.firstBrokenFrame == PX_MAX_U32)
+        gFixedStats.firstBrokenFrame = gRevoluteStats.frame;
+      gFixedStats.brokenCount++;
+      printf("[FixedBreak] frame=%u joint=%u linForce=%.4f angForce=%.4f\n",
+             gRevoluteStats.frame, j, linearForce.magnitude(),
+             angularForce.magnitude());
+    }
+  }
 
   const PxU32 earlyBegin = 250, earlyEnd = 550;
   const PxU32 lateBegin = 1000, lateEnd = 1300;
@@ -378,6 +603,38 @@ void stepPhysics(bool /*interactive*/) {
     gRevoluteStats.prevAngle4 = a4;
   }
 
+  if (gPrismaticChainBodies.size() >= 5 && gPrismaticRestPositions.size() >= 5 &&
+      gPrismaticChainJoints.size() >= 5) {
+    const PxVec3 tailDelta =
+        gPrismaticChainBodies[4]->getGlobalPose().p - gPrismaticRestPositions[4];
+    const PxReal tailTransverse =
+        PxSqrt(tailDelta.y * tailDelta.y + tailDelta.z * tailDelta.z);
+    const PxReal tailAngVel =
+        gPrismaticChainBodies[4]->getAngularVelocity().magnitude();
+    gPrismaticStats.maxTailTransverse =
+        PxMax(gPrismaticStats.maxTailTransverse, tailTransverse);
+
+    if (gRevoluteStats.frame >= earlyBegin && gRevoluteStats.frame < earlyEnd) {
+      gPrismaticStats.sumTailEarly += tailTransverse;
+      gPrismaticStats.sumTailAngVelEarly += tailAngVel;
+      gPrismaticStats.cntEarly++;
+    }
+    if (gRevoluteStats.frame >= lateBegin && gRevoluteStats.frame < lateEnd) {
+      gPrismaticStats.sumTailLate += tailTransverse;
+      gPrismaticStats.sumTailAngVelLate += tailAngVel;
+      gPrismaticStats.cntLate++;
+    }
+
+    for (PxU32 j = 0; j < gPrismaticChainJoints.size(); ++j) {
+      PxVec3 a0, a1;
+      getJointWorldAxes(gPrismaticChainJoints[j], a0, a1);
+      const PxReal dot = PxClamp(a0.dot(a1), -1.0f, 1.0f);
+      const PxReal misDeg = PxAcos(dot) * 180.0f / PxPi;
+      gPrismaticStats.maxJointAxisMisalignDeg =
+          PxMax(gPrismaticStats.maxJointAxisMisalignDeg, misDeg);
+    }
+  }
+
   gRevoluteStats.frame++;
 }
 
@@ -437,6 +694,42 @@ void cleanupPhysics(bool /*interactive*/) {
       gRevoluteStats.flip3,
          gRevoluteStats.flip4, jitterReproduced ? "true" : "false");
 
+      const PxReal avgPrismaticTailEarly =
+        gPrismaticStats.cntEarly
+          ? gPrismaticStats.sumTailEarly / gPrismaticStats.cntEarly
+          : 0.0f;
+      const PxReal avgPrismaticTailLate =
+        gPrismaticStats.cntLate ? gPrismaticStats.sumTailLate / gPrismaticStats.cntLate
+                    : 0.0f;
+      const PxReal avgPrismaticTailAngVelEarly =
+        gPrismaticStats.cntEarly
+          ? gPrismaticStats.sumTailAngVelEarly / gPrismaticStats.cntEarly
+          : 0.0f;
+      const PxReal avgPrismaticTailAngVelLate =
+        gPrismaticStats.cntLate
+          ? gPrismaticStats.sumTailAngVelLate / gPrismaticStats.cntLate
+          : 0.0f;
+      const PxReal prismaticTailGrowth =
+        (avgPrismaticTailEarly > 1e-6f)
+          ? (avgPrismaticTailLate / avgPrismaticTailEarly)
+          : 0.0f;
+      const PxReal prismaticAngVelGrowth =
+        (avgPrismaticTailAngVelEarly > 1e-6f)
+          ? (avgPrismaticTailAngVelLate / avgPrismaticTailAngVelEarly)
+          : 0.0f;
+
+      printf("[PrismaticDiag] tail transverse max=%.5f, avgTail early=%.5f, "
+         "avgTail late=%.5f, tailGrowth=%.3f, avgTailAngVel early=%.5f, "
+         "avgTailAngVel late=%.5f, angVelGrowth=%.3f, maxAxisMisalignDeg=%.3f\n",
+         gPrismaticStats.maxTailTransverse, avgPrismaticTailEarly,
+         avgPrismaticTailLate, prismaticTailGrowth, avgPrismaticTailAngVelEarly,
+         avgPrismaticTailAngVelLate, prismaticAngVelGrowth,
+         gPrismaticStats.maxJointAxisMisalignDeg);
+
+    printf("[FixedDiag] maxLinForce=%.5f, maxAngForce=%.5f, firstBrokenFrame=%u, brokenCount=%u\n",
+        gFixedStats.maxLinearForce, gFixedStats.maxAngularForce,
+        gFixedStats.firstBrokenFrame, gFixedStats.brokenCount);
+
   PX_RELEASE(gScene);
   PX_RELEASE(gDispatcher);
   PxCloseExtensions();
@@ -460,18 +753,42 @@ void keyPress(unsigned char key, const PxTransform &camera) {
   }
 }
 
-int snippetMain(int, const char *const *) {
+static bool hasHeadlessArg(int argc, const char *const *argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (!argv[i])
+      continue;
+    if (std::strcmp(argv[i], "--headless") == 0)
+      return true;
+    if (std::strncmp(argv[i], "--headless-", 11) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool isHeadlessRequested(int argc, const char *const *argv) {
+  if (hasHeadlessArg(argc, argv))
+    return true;
+
+  const char *value = std::getenv("PHYSX_SNIPPET_HEADLESS");
+  return value && value[0] && value[0] != '0';
+}
+
+int snippetMain(int argc, const char *const *argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
+  gSolverType = getRequestedSolverType(argc, argv);
 #ifdef RENDER_SNIPPET
-  extern void renderLoop();
-  renderLoop();
-#else
+  if (!isHeadlessRequested(argc, argv)) {
+    extern void renderLoop();
+    renderLoop();
+    return 0;
+  }
+#endif
+
   static const PxU32 frameCount = 1400;
   initPhysics(false);
   for (PxU32 i = 0; i < frameCount; i++)
     stepPhysics(false);
   cleanupPhysics(false);
-#endif
 
   return 0;
 }

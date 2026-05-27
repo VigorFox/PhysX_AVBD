@@ -150,16 +150,45 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
   const physx::PxU32 bodyIndex = body.nodeIndex;
 
+  // Same-artic external spherical loop closures (Entry 081): mildly stiffen the
+  // local body diagonal so block-descent does not over-respond on scissor links.
+  physx::PxReal bodyResponseScale = 1.0f;
+  if (d6Joints && numD6 > 0) {
+    const physx::PxU32 *mapIndices = nullptr;
+    physx::PxU32 mapCount = 0;
+    if (d6Map && d6Map->numBodies > 0)
+      d6Map->getBodyConstraints(bodyIndex, mapIndices, mapCount);
+    const physx::PxU32 loopCount = mapIndices ? mapCount : numD6;
+    for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
+      const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
+      if (j >= numD6)
+        continue;
+      const AvbdD6JointConstraint &jnt = d6Joints[j];
+      if (jnt.header.bodyIndexA != bodyIndex && jnt.header.bodyIndexB != bodyIndex)
+        continue;
+      if ((jnt.sourceFlags & 0x2u) && jnt.linearMotion == 0 &&
+          jnt.angularMotion == 0x2A) {
+        bodyResponseScale = 0.75f;
+        break;
+      }
+    }
+  }
+
+  const physx::PxReal scaledInvMass = body.invMass * bodyResponseScale;
+  const physx::PxMat33 scaledInvInertia =
+      body.invInertiaWorld * bodyResponseScale;
+
   // =========================================================================
   // Step 1: Initialize LHS with mass matrix M/h^2
   // =========================================================================
   AvbdBlock6x6 A;
-  A.initializeDiagonal(body.invMass, body.invInertiaWorld, invDt2);
+  A.initializeDiagonal(scaledInvMass, scaledInvInertia, invDt2);
 
   // =========================================================================
   // Step 2: Initialize RHS with inertia term
   // =========================================================================
-  physx::PxReal mass = (body.invMass > 1e-8f) ? (1.0f / body.invMass) : 0.0f;
+  physx::PxReal mass =
+      (scaledInvMass > 1e-8f) ? (1.0f / scaledInvMass) : 0.0f;
   physx::PxReal massInvDt2 = mass * invDt2;
 
   physx::PxVec3 gLinear = (body.position - body.inertialPosition) * massInvDt2;
@@ -169,7 +198,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
     deltaQ = -deltaQ;
   physx::PxVec3 rotError(deltaQ.x, deltaQ.y, deltaQ.z);
   rotError *= 2.0f;
-  physx::PxMat33 inertiaTensor = body.invInertiaWorld.getInverse();
+  physx::PxMat33 inertiaTensor = scaledInvInertia.getInverse();
   physx::PxVec3 gAngular = (inertiaTensor * rotError) * invDt2;
 
   physx::PxU32 numTouching = 0;

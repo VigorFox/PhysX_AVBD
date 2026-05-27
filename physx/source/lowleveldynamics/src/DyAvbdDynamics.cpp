@@ -639,6 +639,58 @@ void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
   constraint.lambdaDriveLinear = cached.lambdaDriveLinear * warmScale;
   constraint.lambdaDriveAngular = cached.lambdaDriveAngular * warmScale;
   constraint.coneLambda = cached.coneLambda * warmScale;
+
+  // Native PxRevoluteJoint: clear the hinge swing-lock warmstart rows so
+  // they do not accumulate cross-frame and amplify the SnippetJoint
+  // revolute chain's late-window swing burst (AVBD audit Entry 093).
+  //
+  // Match strictly on the original native joint type instead of the
+  // motion-mask shape, because articulation internal joints created by
+  // prepareArticulationInternalJoints() share the same all-linear-locked /
+  // single-angular-movable mask and they need to keep their warmstart for
+  // the articulation chain to remain stable.
+  if (constraint.header.type == AvbdConstraintType::eJOINT_REVOLUTE) {
+    constraint.lambdaAngular.y = 0.0f;
+    constraint.lambdaAngular.z = 0.0f;
+  }
+
+  // Reseed locked/limited row lambdas every frame for joint patterns where
+  // cross-frame accumulation pushes the AVBD dual integrator (lambda <-
+  // 0.99*lambda + rho_dual*C, 10 iters) into a positive-feedback regime.
+  //
+  // 1. Breakable joints (SnippetJoint's fixed chain et al.): the writeback
+  //    in DyAvbdTasks.cpp compares lambda directly against the authored
+  //    break force. With warmScale~=0.94 the steady-state lambda ends up
+  //    an order of magnitude above the physical reaction force for stiff
+  //    chains and crosses authored thresholds spuriously. Mainstream
+  //    PhysX TGS/PGS reseed from prior-substep converged impulses for the
+  //    same reason; avbd_standalone simply skips joint lambdas in
+  //    Solver::warmstart().
+  //
+  // 2. Native PxPrismaticJoint: the chain's slow sliding cascades into
+  //    limit / angular-lock pumping when prior-frame lambda is
+  //    reintroduced (SnippetJoint prismatic chain swings into the wrong
+  //    half-space within a few seconds). Standalone addPrismaticJoint
+  //    persists rest-relative localFrameB but does not carry joint
+  //    lambdas across frames, so match that. Articulation internal
+  //    prismatic joints intentionally retain warmstart because the
+  //    articulation reduced-coord coupling depends on cross-frame
+  //    dual-state continuity.
+  //
+  // Drive rows and unbreakable / loop-closure / articulation D6 caches are
+  // left untouched to preserve steady-state motor tracking and loop tension
+  // continuity.
+  const bool breakable =
+      (constraint.linBreakImpulse < PX_MAX_F32) ||
+      (constraint.angBreakImpulse < PX_MAX_F32);
+  const bool isPrismaticSource =
+      (constraint.header.type == AvbdConstraintType::eJOINT_PRISMATIC);
+
+  if (breakable || isPrismaticSource) {
+    constraint.lambdaLinear = physx::PxVec3(0.0f);
+    constraint.lambdaAngular = physx::PxVec3(0.0f);
+    constraint.coneLambda = 0.0f;
+  }
 }
 
 void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
