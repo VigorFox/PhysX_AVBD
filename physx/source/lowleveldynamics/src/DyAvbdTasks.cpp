@@ -27,6 +27,7 @@
 #include "DyAvbdTasks.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdDynamics.h"
+#include "DyAvbdKinematicShell.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyVArticulation.h"
 #include "PxsRigidBody.h"
@@ -68,7 +69,7 @@ void AvbdSolveIslandTask::release() {
       (usesJointPath && hasJointConstraints)
         ? PxMax(baseIterations, PxU32(10))
           : baseIterations;
-  mContext.recordIterationDiagnostics(requestedIterations, mSolver.getStats(),
+  mContext.recordIterationDiagnostics(requestedIterations, mStats,
                       hasJointConstraints, mBatch.d6Joints,
                       mBatch.numD6);
 
@@ -79,7 +80,7 @@ void AvbdSolveIslandTask::release() {
     PxU32 numConstraints = mBatch.numConstraints;
 
     // Function declared as friend in AvbdDynamicsContext class
-    writeLambdaToCache(mContext, constraints, numConstraints);
+    writeLambdaToCache(mContext, constraints, numConstraints, mBatch.numBodies);
     writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 

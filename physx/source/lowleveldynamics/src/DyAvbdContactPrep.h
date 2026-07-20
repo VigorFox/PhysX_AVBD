@@ -206,20 +206,18 @@ public:
       physx::PxU32 maxConstraints);
 
   /**
-   * @brief Compute combined friction coefficient
+   * Offline/test combine helpers. Production AVBD ingests NP-combined
+   * PxContactPatch fields (PhysX material combine modes already applied).
    */
   static PX_FORCE_INLINE physx::PxReal
   combineFriction(physx::PxReal frictionA, physx::PxReal frictionB) {
-    // Geometric mean for friction combining
+    // Geometric mean (matches common PhysX eMULTIPLY-style friction pairing)
     return physx::PxSqrt(frictionA * frictionB);
   }
 
-  /**
-   * @brief Compute combined restitution coefficient
-   */
   static PX_FORCE_INLINE physx::PxReal
   combineRestitution(physx::PxReal restA, physx::PxReal restB) {
-    // Maximum for restitution combining
+    // Maximum (matches PhysX eMAX restitution combine)
     return (restA > restB) ? restA : restB;
   }
 };

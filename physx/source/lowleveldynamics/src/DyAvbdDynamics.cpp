@@ -30,6 +30,8 @@
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdConstraint.h"
 #include "DyAvbdTasks.h"
+#include "DyAvbdKinematicShell.h"
+#include "PxAvbdSoftBody.h"
 #include "DyConstraint.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyIslandManager.h"
@@ -54,6 +56,12 @@ static physx::PxU64 gAvbdMotorFrameCounter = 0;
 
 static PX_FORCE_INLINE PxU32 getJointLambdaCacheIndex(PxU64 key,
                                                       PxU32 cacheSize) {
+  const PxU64 mixed = key ^ (key >> 33) ^ (key >> 17);
+  return cacheSize ? static_cast<PxU32>(mixed % cacheSize) : 0;
+}
+
+static PX_FORCE_INLINE PxU32 getBodyVelocityHistoryCacheIndex(PxU64 key,
+                                                              PxU32 cacheSize) {
   const PxU64 mixed = key ^ (key >> 33) ^ (key >> 17);
   return cacheSize ? static_cast<PxU32>(mixed % cacheSize) : 0;
 }
@@ -256,12 +264,41 @@ AvbdDynamicsContext::AvbdDynamicsContext(
 
   // Initialize lambda warm-starting cache
   mEnableLambdaWarmStart = true;
-  // Pre-allocate for ~1000 contact managers x 4 contacts each
+  // Small-scene seed; update() grows this to cover every active contact
+  // manager before any island task can access the backing storage.
   mLambdaCache.resize(4096);
   memset(mLambdaCache.begin(), 0, sizeof(CachedLambda) * mLambdaCache.size());
   mJointLambdaCache.resize(JOINT_LAMBDA_CACHE_SIZE);
   memset(mJointLambdaCache.begin(), 0,
          sizeof(CachedJointLambda) * mJointLambdaCache.size());
+  mBodyVelocityHistoryCache.resize(BODY_VELOCITY_HISTORY_CACHE_SIZE);
+  memset(mBodyVelocityHistoryCache.begin(), 0,
+         sizeof(CachedBodyVelocityHistory) *
+             mBodyVelocityHistoryCache.size());
+  mBodyVelocityHistoryFrame = 0;
+}
+
+void AvbdDynamicsContext::restoreAndUpdateBodyVelocityHistory(
+    const PxsBodyCore &bodyCore, AvbdSolverBody &solverBody) {
+  const PxU64 bodyCoreKey = reinterpret_cast<PxU64>(&bodyCore);
+  const PxU32 cacheIndex = getBodyVelocityHistoryCacheIndex(
+      bodyCoreKey, mBodyVelocityHistoryCache.size());
+  CachedBodyVelocityHistory &cached =
+      mBodyVelocityHistoryCache[cacheIndex];
+
+  // initialize()/copyToAvbdSolverBody() deliberately remain the source of all
+  // current-frame state.  Only replace the history sample, and only when the
+  // exact body was gathered in the immediately preceding update.  A sleeping
+  // or otherwise absent frame therefore falls back to full initialization.
+  if (cached.bodyCoreKey == bodyCoreKey &&
+      cached.lastSeenFrame + 1 == mBodyVelocityHistoryFrame) {
+    solverBody.prevLinearVelocity = cached.linearVelocity;
+  }
+
+  // Gather is serial, so it is safe to prepare next frame's history here.
+  cached.bodyCoreKey = bodyCoreKey;
+  cached.lastSeenFrame = mBodyVelocityHistoryFrame;
+  cached.linearVelocity = bodyCore.linearVelocity;
 }
 
 void AvbdDynamicsContext::beginIterationDiagnosticsFrame() {
@@ -584,7 +621,8 @@ namespace physx {
 namespace Dy {
 void writeLambdaToCache(AvbdDynamicsContext &ctx,
                         AvbdContactConstraint *constraints,
-                        PxU32 numConstraints) {
+                        PxU32 numConstraints, PxU32 numBodies) {
+  PX_UNUSED(numBodies);
   if (!ctx.mEnableLambdaWarmStart || !constraints || numConstraints == 0) {
     return;
   }
@@ -600,15 +638,38 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
       continue;
     }
 
-    // Write back solved lambda and penalty values
     AvbdDynamicsContext::CachedLambda &cached = cache[cacheIdx];
+
+    // Dual warmstart policy:
+    //   deformable mesh NP anchor -> no cross-frame lambda / staticPrev
+    //   rigid plane / dyn-dyn -> write dual state
+    // Entry 108/153: CM-index staticPrev aliasing caused long-run heave energy.
+    if (hasDeformableStaticAnchor(constraint)) {
+      cached.key = 0;
+      cached.lambda = 0.0f;
+      cached.tangentLambda0 = 0.0f;
+      cached.tangentLambda1 = 0.0f;
+      cached.penalty = 1000.0f;
+      cached.tangentPenalty0 = 1000.0f;
+      cached.tangentPenalty1 = 1000.0f;
+      cached.stick = 0;
+      cached.prevStaticWorldPoint = PxVec3(0.0f);
+      // Keep frameAge high so a non-deformable pair reusing this CM index
+      // does not inherit mesh dual garbage if the pair type changes.
+      cached.frameAge = 255;
+      continue;
+    }
+
+    // Rigid / dyn-dyn contacts: standard dual warmstart write-back.
+    cached.key = constraint.cacheKey;
     cached.lambda = constraint.header.lambda;
     cached.tangentLambda0 = constraint.tangentLambda0;
     cached.tangentLambda1 = constraint.tangentLambda1;
     cached.penalty = constraint.header.penalty;
     cached.tangentPenalty0 = constraint.tangentPenalty0;
     cached.tangentPenalty1 = constraint.tangentPenalty1;
-    cached.frameAge = 0; // Reset age on update
+    cached.stick = hasFrictionStick(constraint) ? 1u : 0u;
+    cached.frameAge = 0;
   }
 }
 
@@ -735,6 +796,17 @@ void AvbdDynamicsContext::update(
 
   // Increment global frame counter for motor deduplication
   gAvbdMotorFrameCounter++;
+
+  // Advance independently of active islands.  If a body sleeps or is absent
+  // for one update, its cached velocity must not be treated as contiguous
+  // history when it next appears.
+  ++mBodyVelocityHistoryFrame;
+  if (mBodyVelocityHistoryFrame == 0) {
+    memset(mBodyVelocityHistoryCache.begin(), 0,
+           sizeof(CachedBodyVelocityHistory) *
+               mBodyVelocityHistoryCache.size());
+    ++mBodyVelocityHistoryFrame;
+  }
 
   // Lambda warm-starting: age all cached entries at frame start
   if (mEnableLambdaWarmStart) {
@@ -918,20 +990,26 @@ void AvbdDynamicsContext::update(
 
             const PxsBodyCore *bodyCore = link.bodyCore;
             if (bodyCore) {
-              solverBody.position = bodyCore->body2World.p;
-              solverBody.rotation = bodyCore->body2World.q;
-              solverBody.linearVelocity = bodyCore->linearVelocity;
-              solverBody.angularVelocity = bodyCore->angularVelocity;
-              solverBody.invMass = bodyCore->inverseMass;
+              if (bodyCore->fixedBaseLink) {
+                // PhysX filters fixed-base articulation roots as static.  AVBD
+                // must preserve the same semantics; otherwise the root is
+                // integrated under gravity while its static contacts are
+                // deliberately absent from narrow phase.
+                initializeStaticAvbdBody(bodyCore->body2World, solverBody,
+                                         bodyIndex);
+              } else {
+                PxMat33 R(bodyCore->body2World.q);
+                const PxMat33 invInertiaLocal =
+                    PxMat33::createDiagonal(bodyCore->inverseInertia);
+                const PxMat33 invInertiaWorld =
+                    R * invInertiaLocal * R.getTranspose();
+                solverBody.initialize(
+                    bodyCore->body2World, bodyCore->linearVelocity,
+                    bodyCore->angularVelocity, bodyCore->inverseMass,
+                    invInertiaWorld, bodyIndex);
+              }
 
-              PxMat33 R(bodyCore->body2World.q);
-              PxMat33 invInertiaLocal =
-                  PxMat33::createDiagonal(bodyCore->inverseInertia);
-              solverBody.invInertiaWorld =
-                  R * invInertiaLocal * R.getTranspose();
-
-              solverBody.nodeIndex = bodyIndex;
-              solverBody.colorGroup = 0;
+              restoreAndUpdateBodyVelocityHistory(*bodyCore, solverBody);
 
               // Copy per-body damping and velocity caps from body core
               solverBody.linearDamping = bodyCore->linearDamping;
@@ -1116,9 +1194,34 @@ void AvbdDynamicsContext::update(
     mSolverInitialized = true;
   }
 
+  // Material response: scene bounce threshold (PhysX default -2) for restitution.
+  if (mSolverInitialized)
+    mSolver.getConfigMutable().bounceThresholdVelocity = getBounceThreshold();
+
   // 5. Allocate Constraints
-  const PxU32 actualContactCount = mContactList.size();
-  const PxU32 maxConstraints = actualContactCount * 4;
+  // Allocate one AVBD row for every contact emitted by narrow phase.  Four is
+  // only the size of the old reduced-manifold helper, not the CPU contact
+  // manager limit (PxContactBuffer can emit up to 256).  Truncating the global
+  // row array here silently dropped later mesh support contacts.
+  PxU64 maxConstraintCount64 = 0;
+  for (PxU32 i = 0; i < mContactList.size(); ++i) {
+    PxsContactManager *cm = mContactList[i].contactManager;
+    if (!cm)
+      continue;
+    const PxU32 npIndex = cm->getWorkUnit().mNpIndex;
+    const PxsContactManagerOutput &output =
+        mOutputIterator.getContactManagerOutput(npIndex);
+    maxConstraintCount64 += output.nbContacts;
+  }
+  const PxU64 maxContactRowsByAllocation =
+      static_cast<PxU64>(PX_MAX_U32) / sizeof(AvbdContactConstraint);
+  if (maxConstraintCount64 > maxContactRowsByAllocation) {
+    PX_WARN_ONCE(
+        "AVBD contact row storage exceeds the 32-bit allocator limit; "
+        "skipping the step instead of truncating contacts or overflowing the allocation.");
+    return;
+  }
+  const PxU32 maxConstraints = static_cast<PxU32>(maxConstraintCount64);
   AvbdContactConstraint *avbdConstraints = nullptr;
   if (maxConstraints > 0) {
     avbdConstraints =
@@ -1126,6 +1229,34 @@ void AvbdDynamicsContext::update(
             mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
             sizeof(AvbdContactConstraint) * maxConstraints,
             "AvbdContactConstraint"));
+  }
+
+  // Reserve the complete contact-cache range before any island task is
+  // submitted.  Islands are prepared and launched in one loop below; growing
+  // PxArray from a later island while an earlier task writes its lambdas would
+  // invalidate the earlier task's cache storage and race the reallocation.
+  if (mEnableLambdaWarmStart && !mContactList.empty()) {
+    PxU64 requiredCacheSize = 0;
+    for (PxU32 i = 0; i < mContactList.size(); ++i) {
+      PxsContactManager *cm = mContactList[i].contactManager;
+      if (!cm)
+        continue;
+      const PxU64 managerEnd =
+          (static_cast<PxU64>(cm->getIndex()) + 1u) *
+          CONTACT_CACHE_SLOTS_PER_CM;
+      requiredCacheSize = PxMax(requiredCacheSize, managerEnd);
+    }
+    if (requiredCacheSize <= PX_MAX_U32 &&
+        requiredCacheSize > mLambdaCache.size()) {
+      const PxU32 oldSize = mLambdaCache.size();
+      const PxU32 requested = static_cast<PxU32>(requiredCacheSize);
+      const PxU32 newSize = requested > PX_MAX_U32 - 1023u
+                                ? requested
+                                : (requested + 1023u) & ~1023u;
+      mLambdaCache.resize(newSize);
+      memset(mLambdaCache.begin() + oldSize, 0,
+             sizeof(CachedLambda) * (newSize - oldSize));
+    }
   }
 
   PxU32 totalJoints = 0;
@@ -1165,6 +1296,23 @@ void AvbdDynamicsContext::update(
 
   // Track color batch allocations for cleanup
   PxArray<AvbdColorBatch *> colorBatchAllocations;
+
+  AvbdSoftParticle *shellParticles = nullptr;
+  PxU32 shellParticleCount = 0;
+  AvbdSoftBody *shellSoftBody = nullptr;
+  if (AvbdKinematicShell::isActive()) {
+    shellParticleCount = AvbdKinematicShell::shellParticleCount();
+    if (shellParticleCount > 0) {
+      shellParticles = reinterpret_cast<AvbdSoftParticle *>(allocWithFallback(
+          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+          sizeof(AvbdSoftParticle) * shellParticleCount, "ShellSoftParticles"));
+      if (shellParticles) {
+        AvbdKinematicShell::syncIslandSoftParticles(shellParticles,
+                                                    shellParticleCount);
+        shellSoftBody = &AvbdKinematicShell::kinematicShellSoftBody();
+      }
+    }
+  }
 
   // 7. Iterate Islands
   for (PxU32 i = 0; i < islandCount; ++i) {
@@ -1271,12 +1419,69 @@ void AvbdDynamicsContext::update(
     batch.numSoftBodies = 0;
     batch.softContacts = nullptr;
     batch.numSoftContacts = 0;
+    batch.kinematicShellBatch = false;
 
     batch.islandStart = i;
     batch.islandEnd = i + 1;
-    batch.iterationOverride = islandArticIterations;
     batch.colorBatches = nullptr;
     batch.numColors = 0;
+
+    if (AvbdKinematicShell::isActive() && batch.numBodies > 0) {
+      const PxU32 shellContactCapacity = batch.numBodies * 90u;
+      AvbdSoftContact *islandShellContacts =
+          reinterpret_cast<AvbdSoftContact *>(allocWithFallback(
+              mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+              sizeof(AvbdSoftContact) * shellContactCapacity,
+              "IslandShellContacts"));
+      if (islandShellContacts) {
+        PxArray<PxU32> deformAnchorCounts;
+        deformAnchorCounts.resize(batch.numBodies);
+        AvbdKinematicShell::countDeformableAnchorsPerBody(
+            batch.constraints, batch.numConstraints, batch.numBodies,
+            deformAnchorCounts.begin());
+        const PxU32 shellContactCount =
+            AvbdKinematicShell::buildIslandShellContacts(
+                batch.constraints, batch.numConstraints, batch.bodies,
+                batch.numBodies, islandShellContacts, shellContactCapacity,
+                deformAnchorCounts.begin());
+        if (shellContactCount > 0) {
+          const PxU32 activeShellCount = shellContactCount;
+          AvbdKinematicShell::restoreIslandShellContactCache(
+              islandShellContacts, activeShellCount);
+          PxArray<bool> shellReplaceBody;
+          shellReplaceBody.resize(batch.numBodies);
+          for (PxU32 bi = 0; bi < batch.numBodies; ++bi)
+            shellReplaceBody[bi] = false;
+          for (PxU32 si = 0; si < activeShellCount; ++si) {
+            AvbdSoftContact &sc = islandShellContacts[si];
+            if (sc.rigidBodyIdx >= batch.numBodies)
+              continue;
+            shellReplaceBody[sc.rigidBodyIdx] = true;
+            const AvbdSolverBody &body = batch.bodies[sc.rigidBodyIdx];
+            AvbdKinematicShell::refineShellSoftContactAnchor(sc, body);
+          }
+          // Do not strip deformable NP rows: they carry mesh-tracked friction for
+          // applyBodyStaticFrictionSweeps; solveLocalSystem skips their normals
+          // when shell rows are present for the same body.
+          if (activeShellCount > 0 && shellParticles && shellSoftBody) {
+            batch.softParticles = shellParticles;
+            batch.numSoftParticles = shellParticleCount;
+            batch.softBodies = shellSoftBody;
+            batch.numSoftBodies = 1;
+            batch.softContacts = islandShellContacts;
+            batch.numSoftContacts = activeShellCount;
+            batch.kinematicShellBatch = true;
+          }
+          numConstraints = batch.numConstraints;
+        }
+      }
+    }
+
+    PxU32 contactOnlyIters = 0;
+    if (numD6 == 0 && numGear == 0 &&
+        (batch.numConstraints > 0 || batch.numSoftContacts > 0))
+      contactOnlyIters = AvbdConstants::AVBD_MIN_INNER_ITERS_BODY_VS_STATIC;
+    batch.iterationOverride = PxMax(islandArticIterations, contactOnlyIters);
 
     // Build constraint-to-body mappings for O(1) lookup in solver
     // This eliminates O(N^2) complexity in the inner loop
@@ -1363,23 +1568,16 @@ void AvbdDynamicsContext::update(
     // Spawn Solve Task
     if (AVBD_DEBUG_SEQUENTIAL || mIterationDiagnosticsSequential) {
       const bool hasJoints = (batch.numD6 > 0 || batch.numGear > 0);
-      const bool hasSoftBodies =
-          (batch.numSoftParticles > 0 && batch.numSoftBodies > 0);
-      if (hasJoints || hasSoftBodies) {
-        mSolver.solveWithJoints(
-            dt, batch.bodies, batch.numBodies, batch.constraints,
-            batch.numConstraints, batch.d6Joints, batch.numD6,
-            batch.gearJoints, batch.numGear, gravity, &batch.contactMap,
-            &batch.d6Map, &batch.gearMap, batch.colorBatches,
-            batch.numColors, batch.iterationOverride, batch.softParticles,
-            batch.numSoftParticles, batch.softBodies, batch.numSoftBodies,
-            batch.softContacts, batch.numSoftContacts);
-      } else {
-        mSolver.solve(dt, batch.bodies, batch.numBodies, batch.constraints,
-                      batch.numConstraints, gravity, &batch.contactMap,
-                      batch.colorBatches, batch.numColors,
-                      batch.iterationOverride);
-      }
+      AvbdSolverStats stats = {};
+      // Single island entry: classification + shared post-AL inside solveIsland.
+      mSolver.solveIsland(
+          dt, batch.bodies, batch.numBodies, batch.constraints,
+          batch.numConstraints, gravity, batch.d6Joints, batch.numD6,
+          batch.gearJoints, batch.numGear, &batch.contactMap, &batch.d6Map,
+          &batch.gearMap, batch.colorBatches, batch.numColors,
+          batch.iterationOverride, batch.softParticles, batch.numSoftParticles,
+          batch.softBodies, batch.numSoftBodies, batch.softContacts,
+          batch.numSoftContacts, batch.kinematicShellBatch, stats);
 
       const PxU32 baseIterations =
           batch.iterationOverride > 0 ? batch.iterationOverride
@@ -1387,11 +1585,17 @@ void AvbdDynamicsContext::update(
       const PxU32 requestedIterations = hasJoints
           ? PxMax(baseIterations, PxU32(8))
           : baseIterations;
-      recordIterationDiagnostics(requestedIterations, mSolver.getStats(),
+      recordIterationDiagnostics(requestedIterations, stats,
                      hasJoints, batch.d6Joints, batch.numD6);
 
       // Write back lambda cache inline
-      writeLambdaToCache(*this, batch.constraints, batch.numConstraints);
+      writeLambdaToCache(*this, batch.constraints, batch.numConstraints,
+                         batch.numBodies);
+      if (AvbdKinematicShell::isActive() && batch.kinematicShellBatch &&
+          batch.softContacts && batch.numSoftContacts > 0) {
+        AvbdKinematicShell::saveIslandShellContactCache(batch.softContacts,
+                                                        batch.numSoftContacts);
+      }
       writeJointLambdaToCache(*this, batch.d6Joints, batch.numD6);
       // Release constraint maps
       PxAllocatorCallback &alloc = getAllocator();
@@ -1437,6 +1641,7 @@ void AvbdDynamicsContext::setupBodies(AvbdSolverBody *avbdBodies,
     if (rigidBody) {
       const PxsBodyCore &core = rigidBody->getCore();
       copyToAvbdSolverBody(core, avbdBodies[i], i);
+      restoreAndUpdateBodyVelocityHistory(core, avbdBodies[i]);
     }
   }
 }
@@ -1598,24 +1803,27 @@ static void prepareArticulationInternalJoints(
 
       if (jointCore->motion[PxArticulationAxis::eTWIST] ==
           PxArticulationMotion::eLIMITED) {
+        // Articulation coordinates measure frame B relative to A, while the
+        // shared D6 angular-error row measures A relative to B.  Convert the
+        // interval into that solver convention: [low, high] -> [-high, -low].
         c.angularLimitLower.x =
-            jointCore->limits[PxArticulationAxis::eTWIST].low;
+            -jointCore->limits[PxArticulationAxis::eTWIST].high;
         c.angularLimitUpper.x =
-            jointCore->limits[PxArticulationAxis::eTWIST].high;
+            -jointCore->limits[PxArticulationAxis::eTWIST].low;
       }
       if (jointCore->motion[PxArticulationAxis::eSWING1] ==
           PxArticulationMotion::eLIMITED) {
         c.angularLimitLower.y =
-            jointCore->limits[PxArticulationAxis::eSWING1].low;
+            -jointCore->limits[PxArticulationAxis::eSWING1].high;
         c.angularLimitUpper.y =
-            jointCore->limits[PxArticulationAxis::eSWING1].high;
+            -jointCore->limits[PxArticulationAxis::eSWING1].low;
       }
       if (jointCore->motion[PxArticulationAxis::eSWING2] ==
           PxArticulationMotion::eLIMITED) {
         c.angularLimitLower.z =
-            jointCore->limits[PxArticulationAxis::eSWING2].low;
+            -jointCore->limits[PxArticulationAxis::eSWING2].high;
         c.angularLimitUpper.z =
-            jointCore->limits[PxArticulationAxis::eSWING2].high;
+            -jointCore->limits[PxArticulationAxis::eSWING2].low;
       }
 
       // ---------------------------------------------------------------
@@ -1634,13 +1842,13 @@ static void prepareArticulationInternalJoints(
       // the raw target, matching the standalone articulation solver.
       // This prevents the drive from applying full-position displacement
       // each step which would overpower fixed joints.
-      //   v_target = stiffness/(S+D) * (targetP - currentQ)/dt
-      //            + damping/(S+D)  * targetV
-      //   rho_drive = (S+D) / dt^2   (capped)
+      // Force drives keep the legacy capped (S+D)/dt^2 penalty. Angular
+      // acceleration drives instead preserve S and D for the native implicit
+      // coefficient based on dt*S+D and inverse joint response.
       // ---------------------------------------------------------------
-        const PxReal maxDriveStiffness = 100.0f;
-        const PxReal maxDrivePenalty = 2.0f * c.header.rho;
-        const PxReal maxDriveStiffnessFromPenalty =
+      const PxReal maxDriveStiffness = 100.0f;
+      const PxReal maxDrivePenalty = 2.0f * c.header.rho;
+      const PxReal maxDriveStiffnessFromPenalty =
           maxDrivePenalty / artInvDt2;
       const PxReal invDt = (dt > 0.0f) ? (1.0f / dt) : 60.0f;
 
@@ -1692,11 +1900,11 @@ static void prepareArticulationInternalJoints(
           PxReal posVel = (targetP - currentQ) * invDt;
           PxReal velVel = jointCore->targetV[linAxes[a]];
           PxReal invSD = 1.0f / totalSD;
-              PxReal sClamped = PxMin(drive.stiffness,
-                      PxMin(maxDriveStiffness,
-                        maxDriveStiffnessFromPenalty));
+          PxReal sClamped = PxMin(drive.stiffness,
+                                  PxMin(maxDriveStiffness,
+                                        maxDriveStiffnessFromPenalty));
           PxReal dClamped = totalSD - sClamped;
-              (&c.linearStiffness.x)[a] = sClamped;
+          (&c.linearStiffness.x)[a] = sClamped;
           (&c.driveLinearVelocity.x)[a] =
               sClamped * invSD * posVel + dClamped * invSD * velVel;
         }
@@ -1713,8 +1921,6 @@ static void prepareArticulationInternalJoints(
           const PxArticulationDrive &drive = jointCore->drives[angAxes[a]];
           if (drive.driveType == PxArticulationDriveType::eNONE)
             continue;
-          if (drive.driveType == PxArticulationDriveType::eACCELERATION)
-            c.driveAccelerationFlags |= angBits[a];
           // Compute current joint angle for the driven axis.
           // For twist (a=0) use atan2(x,w); for swings approximate
           // with atan2(y,w) / atan2(z,w).
@@ -1726,6 +1932,33 @@ static void prepareArticulationInternalJoints(
           else
             currentAngle = 2.0f * PxAtan2(relRotDrive.z, relRotDrive.w);
 
+          const PxReal targetAng = jointCore->targetP[angAxes[a]];
+          const PxReal targetVel = jointCore->targetV[angAxes[a]];
+          const PxReal geomError = targetAng - currentAngle;
+
+          if (drive.driveType == PxArticulationDriveType::eACCELERATION) {
+            // Reduced-coordinate acceleration drives are implicit in
+            // dt * stiffness + damping, not force-drive penalties scaled by
+            // 1 / dt^2. Keep the physical coefficients separate so the
+            // solver can apply the matching inverse-response scaling.
+            const PxReal stiffness = PxMax(0.0f, drive.stiffness);
+            const PxReal damping = PxMax(0.0f, drive.damping);
+            const PxReal effectiveRate = dt * stiffness + damping;
+            if (effectiveRate <= 0.0f)
+              continue;
+
+            c.driveFlags |= angBits[a];
+            c.driveAccelerationFlags |= angBits[a];
+            (&c.angularStiffness.x)[a] = stiffness;
+            (&c.angularDamping.x)[a] = damping;
+            // The shared D6 axis row stores angular targets in the PhysX
+            // (wA - wB) convention, while articulation coordinates are
+            // measured as frame B relative to frame A.
+            (&c.driveAngularVelocity.x)[a] =
+                -(damping * targetVel + stiffness * geomError) / effectiveRate;
+            continue;
+          }
+
           PxReal totalSD = PxMin(drive.stiffness + drive.damping,
                                  PxMin(maxDriveStiffness,
                                        maxDriveStiffnessFromPenalty));
@@ -1734,17 +1967,17 @@ static void prepareArticulationInternalJoints(
           c.driveFlags |= angBits[a];
           (&c.angularDamping.x)[a] = totalSD;
 
-          PxReal targetAng = jointCore->targetP[angAxes[a]];
-          PxReal posVel = (targetAng - currentAngle) * invDt;
-          PxReal velVel = jointCore->targetV[angAxes[a]];
+          PxReal posVel = geomError * invDt;
           PxReal invSD = 1.0f / totalSD;
-              PxReal sClamped = PxMin(drive.stiffness,
-                      PxMin(maxDriveStiffness,
-                        maxDriveStiffnessFromPenalty));
+          PxReal sClamped = PxMin(drive.stiffness,
+                                  PxMin(maxDriveStiffness,
+                                        maxDriveStiffnessFromPenalty));
           PxReal dClamped = totalSD - sClamped;
-              (&c.angularStiffness.x)[a] = sClamped;
+          (&c.angularStiffness.x)[a] = sClamped;
+          // Convert the articulation (B relative to A) target into the
+          // shared D6 axis-drive convention.
           (&c.driveAngularVelocity.x)[a] =
-              sClamped * invSD * posVel + dClamped * invSD * velVel;
+              -(sClamped * invSD * posVel + dClamped * invSD * targetVel);
         }
       }
 

@@ -131,6 +131,15 @@ bool test110_softBodyConvergence();
 bool test111_softBodyToppling();
 bool test112_softBodyAngularMomentum();
 
+bool test114_deformableSphereShot_sequential_gate();
+bool test115_deformableAggregated_noFriction6x6();
+bool test116_deformableFriction_dominantSequential();
+bool test117_deformableStaticAnchor_motion();
+bool test118_boxOnGround_aggregatedUnchangedBySequentialMode();
+bool test119_kinematicShell_sphereShot();
+bool test120_kinematicShell_stressHarness();
+bool test121_kinematicShell_vs_staticAnchor_sphereShot();
+
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
@@ -267,6 +276,15 @@ int main() {
   test110_softBodyConvergence();
   test111_softBodyToppling();
   test112_softBodyAngularMomentum();
+
+  test114_deformableSphereShot_sequential_gate();
+  test115_deformableAggregated_noFriction6x6();
+  test116_deformableFriction_dominantSequential();
+  test117_deformableStaticAnchor_motion();
+  test118_boxOnGround_aggregatedUnchangedBySequentialMode();
+  test119_kinematicShell_sphereShot();
+  test120_kinematicShell_stressHarness();
+  test121_kinematicShell_vs_staticAnchor_sphereShot();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

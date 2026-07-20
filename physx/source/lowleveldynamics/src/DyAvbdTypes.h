@@ -105,7 +105,38 @@ static const PxReal AVBD_CONDITION_NUMBER_THRESHOLD = 1e8f;
 
 // Regularization coefficient for ill-conditioned matrices
 static const PxReal AVBD_REGULARIZATION_COEFFICIENT = 1e-6f;
+
+// Shared body-vs-static constants (kept aligned with avbd_standalone).
+static const PxReal AVBD_PEN_SCALE_BODY_VS_STATIC = 2.0f;
+static const PxReal AVBD_PEN_SCALE_DYN_DYN = 0.05f;
+static const PxReal AVBD_CONTACT_BOOST_FRACTION = 0.005f;
+static const PxU32 AVBD_MIN_INNER_ITERS_BODY_VS_STATIC = 16u;
+// Surface-motion alias reject + friction ride caps (solve-loop contract Phase 4)
+static const PxReal AVBD_SURFACE_STEP_ALIAS_M = 0.5f;
+static const PxReal AVBD_SURFACE_VMESH_CAP = 8.0f;
+static const PxReal AVBD_BODY_STATIC_FAST_IMPACT_SPEED = 60.0f;
+static const PxReal AVBD_SHELL_FAST_IMPACT_SPEED = 60.0f;
+// Fallback approach-speed gate (m/s) when scene bounceThreshold is unset.
+// PhysX scene bounceThresholdVelocity is typically -2 (signed relative speed).
+static const PxReal AVBD_BOUNCE_THRESHOLD = 2.0f;
+// SupportClass fill: multi-corner heavy box disables mesh ride
+static const PxU32 AVBD_SUPPORT_MULTI_CORNER_MIN = 4u;
+static const PxReal AVBD_SUPPORT_MULTI_CORNER_MASS = 40.0f;
 } // namespace AvbdConstants
+
+/**
+ * Body-static support classification used by friction and surface-motion policy.
+ * Filled once per contact for friction/e=0 consumers; replaces ad-hoc mass ifs.
+ */
+struct AvbdSupportClass {
+  enum Enum : physx::PxU8 {
+    eUnset = 0,
+    eRigidPlane = 1,
+    eDeformableFewContact = 2,
+    eDeformableMultiCorner = 3,
+    eShell = 4,
+  };
+};
 
 namespace Dy {
 
@@ -191,6 +222,19 @@ struct AvbdSolverConfig {
       positionTolerance; //!< Position error tolerance for early termination
   physx::PxReal velocityDamping; //!< Global velocity damping factor (0-1)
 
+  /**
+   * Scene bounce threshold (PhysX: typically negative, e.g. -2).
+   * Restitution applies only when approach speed exceeds |bounceThresholdVelocity|.
+   * Copied each step from Dy::Context::getBounceThreshold().
+   */
+  physx::PxReal bounceThresholdVelocity;
+
+  /** Positive approach speed (m/s) required for material restitution bounce. */
+  PX_FORCE_INLINE physx::PxReal bounceApproachSpeedThreshold() const {
+    return bounceThresholdVelocity < 0.0f ? -bounceThresholdVelocity
+                                          : bounceThresholdVelocity;
+  }
+
   //-------------------------------------------------------------------------
   // Constraint correction limits
   //-------------------------------------------------------------------------
@@ -258,6 +302,7 @@ struct AvbdSolverConfig {
         damping(0.5f), angularDamping(0.95f), rotationThreshold(0.001f),
         angularScale(400.0f), angularContactScale(0.2f), baumgarte(0.3f),
         chebyshevRho(0.92f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        bounceThresholdVelocity(-2.0f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
         maxLambda(1e6f), enableParallelization(true),
         enableLocal6x6Solve(false), enableMassWeightedWeld(false),

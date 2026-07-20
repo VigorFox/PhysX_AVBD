@@ -1,5 +1,6 @@
 #pragma once
 #include "avbd_articulation.h"
+#include "avbd_body_static_semantics.h"
 #include "avbd_softbody.h"
 #include "avbd_types.h"
 #include <vector>
@@ -9,6 +10,12 @@ namespace AvbdRef {
 static constexpr float PENALTY_MIN = 1000.0f;
 static constexpr float PENALTY_MAX = 1e9f;
 
+/** Optional island dispatch using the same primal/dual body-static rules. */
+enum class BodyStaticContactSolve {
+  Aggregated6x6,       //!< PhysX default: per-body 6x6 normals; dual tangents
+  SequentialPerContact //!< Standalone alias: normals-only primal pass + dual
+};
+
 struct Solver {
   Vec3 gravity = {0, -9.8f, 0};
   int iterations = 10;
@@ -17,8 +24,7 @@ struct Solver {
   float alpha = 0.95f;              // stabilization
   float beta = 1000.0f;             // penalty growth rate
   float gamma = 0.99f;              // warmstart decay
-  float penaltyScale = 0.25f;       // body-ground penalty floor
-  float penaltyScaleDynDyn = 0.05f; // dynamic-dynamic penalty
+  float penaltyScaleDynDyn = kPenScaleDynDyn; // dyn-dyn floor scale (PhysX-matched)
   int propagationDepth = 4;         // graph-propagation depth
   float propagationDecay = 0.5f;    // per-edge decay factor
   float dt = 1.0f / 60.0f;
@@ -31,6 +37,11 @@ struct Solver {
   int aaWindowSize = 3;                // AA window size (m)
   bool useChebyshev = false;           // Chebyshev semi-iterative position relaxation
   float chebyshevSpectralRadius = 0.92f; // estimated spectral radius
+
+  BodyStaticContactSolve bodyStaticContactSolve =
+      BodyStaticContactSolve::Aggregated6x6;
+  /** If true, allow body-static tangents in 6x6 for low-contact islands (friction tests). */
+  bool allowBodyStaticFrictionIn6x6LowContact = true;
 
   // Per-step convergence history (populated if articulations present)
   std::vector<float> convergenceHistory;
@@ -96,11 +107,10 @@ struct Solver {
   void addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
                   Vec3 rB, float depth, float fric = 0.5f);
 
-  // Soft body creation
-  // Returns index of first particle added
-  uint32_t addSoftBody(const std::vector<Vec3>& vertices,
-                       const std::vector<uint32_t>& tets,
-                       const std::vector<uint32_t>& tris,
+  // Soft body creation — returns index of first particle added
+  uint32_t addSoftBody(const std::vector<Vec3> &vertices,
+                       const std::vector<uint32_t> &tets,
+                       const std::vector<uint32_t> &tris,
                        float youngsModulus = 1e5f,
                        float poissonsRatio = 0.3f,
                        float density = 100.0f,
@@ -108,11 +118,25 @@ struct Solver {
                        float bendingStiffness = 0.0f,
                        float thickness = 0.01f);
 
+  /** Kinematic collision shell: particles with invMass=0, no internal elasticity. */
+  uint32_t addKinematicShell(const std::vector<Vec3> &positions);
+
   // Solver core
   void computeConstraint(Contact &c);
+  void computeConstraintBodyStatic(Contact &c);
   void computeC0(Contact &c);
   void warmstart();
   void step(float dt_);
+
+private:
+  bool isSequentialBodyStaticIsland() const;
+  bool bodyTouchesStatic(uint32_t bodyIdx) const;
+  bool bodyTouchesKinematicShell(uint32_t bodyIdx) const;
+  void sequentialBodyStaticPrimalPass(float dt);
+  void applyBodyStaticDepenetrationSweeps(uint32_t sweeps);
+  void applyLowIslandDynDynFrictionSweeps(uint32_t sweeps);
+  void sequentialDynDynFrictionPass(float dt);
+  float contactGeomViolation(const Contact &c) const;
 };
 
 } // namespace AvbdRef

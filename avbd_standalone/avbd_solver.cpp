@@ -1,4 +1,5 @@
 #include "avbd_solver.h"
+// Keep body-vs-static rules aligned with the PhysX DyAvbd* path.
 #include "avbd_articulation.h"
 #include "avbd_d6_core.h"
 #include <algorithm>
@@ -309,6 +310,8 @@ void Solver::addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
   }
   c.fmin[0] = -1e30f;
   c.fmax[0] = 0.0f;
+  if (bodyB == UINT32_MAX)
+    c.staticPrevWorldPoint = rB;
   contacts.push_back(c);
 }
 
@@ -355,13 +358,62 @@ void Solver::computeConstraint(Contact &c) {
   c.fmin[2] = -frictionBound;
 }
 
+void Solver::computeConstraintBodyStatic(Contact &c) {
+  Body &bA = bodies[c.bodyA];
+
+  Vec3 rAw = bA.rotation.rotate(c.rA);
+  c.JA = Vec6(c.normal, rAw.cross(c.normal));
+  c.JB = Vec6();
+
+  Vec3 t1, t2;
+  if (fabsf(c.normal.y) > 0.9f)
+    t1 = c.normal.cross(Vec3(1, 0, 0)).normalized();
+  else
+    t1 = c.normal.cross(Vec3(0, 1, 0)).normalized();
+  t2 = c.normal.cross(t1);
+
+  c.JAt1 = Vec6(t1, rAw.cross(t1));
+  c.JBt1 = Vec6();
+  c.JAt2 = Vec6(t2, rAw.cross(t2));
+  c.JBt2 = Vec6();
+
+  Vec6 dpA(bA.position - bA.initialPosition, bA.deltaWInitial());
+  const Vec3 staticMotion = c.rB - c.staticPrevWorldPoint;
+  const Vec3 relDisp =
+      Vec3(dpA[0], dpA[1], dpA[2]) - staticMotion;
+
+  const Vec3 wA = bA.position + rAw;
+  float geom = (wA - c.rB).dot(c.normal) - c.depth;
+  // Normal: geometric gap (no alpha*C0), aligned with PhysX body-vs-static.
+  c.C[0] = geom;
+  if (geom < 0.0f)
+    c.C[0] = std::min(geom, -c.depth);
+
+  c.C[1] = c.C0[1] * (1.0f - alpha) + relDisp.dot(t1) +
+           Vec3(dpA[3], dpA[4], dpA[5]).dot(rAw.cross(t1));
+  c.C[2] = c.C0[2] * (1.0f - alpha) + relDisp.dot(t2) +
+           Vec3(dpA[3], dpA[4], dpA[5]).dot(rAw.cross(t2));
+
+  const float frictionBound = fabsf(c.lambda[0]) * c.friction;
+  c.fmax[1] = frictionBound;
+  c.fmin[1] = -frictionBound;
+  c.fmax[2] = frictionBound;
+  c.fmin[2] = -frictionBound;
+}
+
 void Solver::computeC0(Contact &c) {
   Body &bA = bodies[c.bodyA];
-  bool bStatic = (c.bodyB == UINT32_MAX);
-  Body *pB = bStatic ? nullptr : &bodies[c.bodyB];
+  bool bStatic = isBodyVsStaticContact(c.bodyA, c.bodyB);
+  if (bStatic) {
+    c.C0[0] = 0.0f;
+    c.C0[1] = 0.0f;
+    c.C0[2] = 0.0f;
+    return;
+  }
+  Body *pB = &bodies[c.bodyB];
 
   Vec3 wA = bA.position + bA.rotation.rotate(c.rA);
-  Vec3 wB = bStatic ? c.rB : (pB->position + pB->rotation.rotate(c.rB));
+  Vec3 wB = pB->position + pB->rotation.rotate(c.rB);
 
   float rawC0 = (wA - wB).dot(c.normal) - c.depth;
 
@@ -381,6 +433,291 @@ void Solver::computeC0(Contact &c) {
   c.C0[2] = 0.0f;
 }
 
+bool Solver::bodyTouchesStatic(uint32_t bodyIdx) const {
+  for (const auto &c : contacts) {
+    if (c.bodyA == bodyIdx && c.bodyB == UINT32_MAX)
+      return true;
+  }
+  return false;
+}
+
+bool Solver::bodyTouchesKinematicShell(uint32_t bodyIdx) const {
+  for (const auto &sc : softContacts) {
+    if (sc.rigidBodyIdx != bodyIdx)
+      continue;
+    if (sc.particleIdx < softParticles.size() &&
+        softParticles[sc.particleIdx].invMass <= 0.0f)
+      return true;
+  }
+  return false;
+}
+
+float Solver::contactGeomViolation(const Contact &c) const {
+  const Body &bA = bodies[c.bodyA];
+  const Vec3 wA = bA.position + bA.rotation.rotate(c.rA);
+  float geom = (wA - c.rB).dot(c.normal) - c.depth;
+  if (geom < 0.0f)
+    geom = std::min(geom, -c.depth);
+  return geom;
+}
+
+bool Solver::isSequentialBodyStaticIsland() const {
+  if (bodyStaticContactSolve != BodyStaticContactSolve::SequentialPerContact)
+    return false;
+  if (!d6Joints.empty() || !gearJoints.empty() || !articulations.empty())
+    return false;
+  if (!softBodies.empty() || contacts.empty())
+    return false;
+  for (const auto &c : contacts) {
+    if (c.bodyB != UINT32_MAX)
+      return false;
+    if (c.bodyA >= bodies.size() || bodies[c.bodyA].mass <= 0.0f)
+      return false;
+  }
+  return true;
+}
+
+void Solver::sequentialBodyStaticPrimalPass(float dt) {
+  if (contacts.empty())
+    return;
+
+  const float invDt2 = 1.0f / (dt * dt);
+  const float dt2 = dt * dt;
+  const uint32_t bi = contacts[0].bodyA;
+  Body &body = bodies[bi];
+  if (body.mass <= 0.0f)
+    return;
+
+  const float boostFloor = kContactBoostFraction * body.mass * invDt2;
+
+  // Phase A: aggregate all normal rows (stable support, matches PhysX 108).
+  Mat66 lhs = body.getMassMatrix() / dt2;
+  Vec6 disp(body.position - body.inertialPosition, body.deltaWInertial());
+  Vec6 rhs = lhs * disp;
+
+  Contact *deepest = nullptr;
+  float bestGeom = 0.0f;
+
+  for (auto &c : contacts) {
+    if (c.bodyA != bi || c.bodyB != UINT32_MAX)
+      continue;
+    computeConstraint(c);
+    const float g = contactGeomViolation(c);
+    if (g < bestGeom) {
+      bestGeom = g;
+      deepest = &c;
+    }
+    const Vec6 &J = c.JA;
+    const float pen = std::max(c.penalty[0], boostFloor);
+    const float f = std::max(c.fmin[0],
+                             std::min(c.fmax[0], pen * c.C[0] + c.lambda[0]));
+    rhs += J * f;
+    lhs += outer(J, J * pen);
+  }
+
+  {
+    Vec6 delta = solveLDLT(lhs, rhs);
+    body.position -= delta.linear();
+    Quat dq(0, delta[3], delta[4], delta[5]);
+    body.rotation =
+        (body.rotation - dq * body.rotation * 0.5f).normalized();
+  }
+
+  // Friction: dual pass only (tangent rows in aggregated 6x6 over-constrain).
+  (void)deepest;
+}
+
+void Solver::applyBodyStaticDepenetrationSweeps(uint32_t sweeps) {
+  if (contacts.empty() || sweeps == 0)
+    return;
+  for (uint32_t sweep = 0; sweep < sweeps; ++sweep) {
+    bool any = false;
+    for (auto &c : contacts) {
+      if (!isBodyVsStaticContact(c.bodyA, c.bodyB))
+        continue;
+      computeConstraintBodyStatic(c);
+      const float viol = c.C[0];
+      if (viol >= -1e-5f)
+        continue;
+      Body &body = bodies[c.bodyA];
+      if (body.mass <= 0.0f)
+        continue;
+      const float corr = std::min(-viol, 0.05f);
+      body.position += c.normal * corr;
+      any = true;
+    }
+    if (!any)
+      break;
+  }
+}
+
+void Solver::applyLowIslandDynDynFrictionSweeps(uint32_t sweeps) {
+  if (contacts.empty() || sweeps == 0 || dt <= 0.0f)
+    return;
+  uint32_t numDyn = 0;
+  for (const auto &c : contacts) {
+    if (!isBodyVsStaticContact(c.bodyA, c.bodyB))
+      numDyn++;
+  }
+  if (numDyn > kDynDyn6x6FrictionMaxIslandContacts)
+    return;
+
+  const float invDt = 1.0f / dt;
+  std::vector<Vec3> vLin(bodies.size()), vAng(bodies.size());
+  std::vector<Vec3> vLin0(bodies.size()), vAng0(bodies.size());
+  std::vector<bool> touched(bodies.size(), false);
+  for (uint32_t i = 0; i < bodies.size(); ++i) {
+    if (bodies[i].mass <= 0.0f) {
+      vLin[i] = vAng[i] = vLin0[i] = vAng0[i] = Vec3();
+      continue;
+    }
+    vLin[i] = vLin0[i] =
+        (bodies[i].position - bodies[i].inertialPosition) * invDt;
+    vAng[i] = vAng0[i] = bodies[i].deltaWInertial();
+  }
+
+  for (uint32_t sweep = 0; sweep < sweeps; ++sweep) {
+    for (auto &c : contacts) {
+      if (isBodyVsStaticContact(c.bodyA, c.bodyB) || c.friction <= 0.0f)
+        continue;
+      if (c.bodyA >= bodies.size() || c.bodyB >= bodies.size())
+        continue;
+      Body &bA = bodies[c.bodyA];
+      Body &bB = bodies[c.bodyB];
+      if (bA.mass <= 0.0f || bB.mass <= 0.0f)
+        continue;
+      computeConstraint(c);
+
+      const Vec3 rA = bA.rotation.rotate(c.rA);
+      const Vec3 rB = bB.rotation.rotate(c.rB);
+      const Vec3 vA = vLin[c.bodyA] + vAng[c.bodyA].cross(rA);
+      const Vec3 vB = vLin[c.bodyB] + vAng[c.bodyB].cross(rB);
+      const Vec3 relV = vA - vB;
+      const float jmax = std::fabs(c.lambda[0]) * c.friction * dt;
+      if (jmax <= 0.0f)
+        continue;
+
+      Vec3 t1, t2;
+      if (std::fabs(c.normal.y) > 0.9f)
+        t1 = c.normal.cross(Vec3(1, 0, 0)).normalized();
+      else
+        t1 = c.normal.cross(Vec3(0, 1, 0)).normalized();
+      t2 = c.normal.cross(t1);
+      const Vec3 tangents[2] = {t1, t2};
+
+      for (int ti = 0; ti < 2; ++ti) {
+        const Vec3 &t = tangents[ti];
+        const float vn = relV.dot(t);
+        const Vec3 rCrossT_A = rA.cross(t);
+        const Vec3 rCrossT_B = rB.cross(t);
+        const float kEff = bA.invMass + bB.invMass +
+                           rCrossT_A.dot(bA.invInertiaWorld * rCrossT_A) +
+                           rCrossT_B.dot(bB.invInertiaWorld * rCrossT_B);
+        if (kEff <= 1e-10f)
+          continue;
+        float j = -vn / kEff;
+        j = std::max(-jmax, std::min(jmax, j));
+        const Vec3 impulse = t * j;
+        if (bA.mass > 0.0f) {
+          touched[c.bodyA] = true;
+          vLin[c.bodyA] += impulse * bA.invMass;
+          vAng[c.bodyA] += bA.invInertiaWorld * rCrossT_A * j;
+        }
+        if (bB.mass > 0.0f) {
+          touched[c.bodyB] = true;
+          vLin[c.bodyB] -= impulse * bB.invMass;
+          vAng[c.bodyB] -= bB.invInertiaWorld * rCrossT_B * j;
+        }
+      }
+    }
+  }
+
+  for (uint32_t i = 0; i < bodies.size(); ++i) {
+    if (!touched[i] || bodies[i].mass <= 0.0f)
+      continue;
+    bodies[i].position += (vLin[i] - vLin0[i]) * dt;
+    const Vec3 dTheta = (vAng[i] - vAng0[i]) * dt;
+    if (dTheta.length2() > 1e-16f) {
+      Quat dq(0, dTheta.x, dTheta.y, dTheta.z);
+      bodies[i].rotation =
+          (bodies[i].rotation - dq * bodies[i].rotation * 0.5f).normalized();
+    }
+  }
+}
+
+void Solver::sequentialDynDynFrictionPass(float dt) {
+  if (contacts.empty() || dt <= 0.0f)
+    return;
+  uint32_t numDyn = 0;
+  for (const auto &c : contacts) {
+    if (!isBodyVsStaticContact(c.bodyA, c.bodyB))
+      numDyn++;
+  }
+  if (numDyn <= kDynDyn6x6FrictionMaxIslandContacts)
+    return;
+
+  const float invDt = 1.0f / dt;
+  for (auto &c : contacts) {
+    if (isBodyVsStaticContact(c.bodyA, c.bodyB) || c.friction <= 0.0f)
+      continue;
+    if (c.bodyA >= bodies.size() || c.bodyB >= bodies.size())
+      continue;
+    Body &bA = bodies[c.bodyA];
+    Body &bB = bodies[c.bodyB];
+    if (bA.mass <= 0.0f || bB.mass <= 0.0f)
+      continue;
+    computeConstraint(c);
+
+    const Vec3 rA = bA.rotation.rotate(c.rA);
+    const Vec3 rB = bB.rotation.rotate(c.rB);
+    const Vec3 vA =
+        (bA.position - bA.inertialPosition) * invDt + bA.deltaWInertial().cross(rA);
+    const Vec3 vB =
+        (bB.position - bB.inertialPosition) * invDt + bB.deltaWInertial().cross(rB);
+    const Vec3 relV = vA - vB;
+    const float jmax = std::fabs(c.lambda[0]) * c.friction * dt;
+    if (jmax <= 0.0f)
+      continue;
+
+    Vec3 t1, t2;
+    if (std::fabs(c.normal.y) > 0.9f)
+      t1 = c.normal.cross(Vec3(1, 0, 0)).normalized();
+    else
+      t1 = c.normal.cross(Vec3(0, 1, 0)).normalized();
+    t2 = c.normal.cross(t1);
+    const Vec3 tangents[2] = {t1, t2};
+
+    for (int ti = 0; ti < 2; ++ti) {
+      const Vec3 &t = tangents[ti];
+      const float vn = relV.dot(t);
+      const Vec3 rCrossT_A = rA.cross(t);
+      const Vec3 rCrossT_B = rB.cross(t);
+      const float kEff = bA.invMass + bB.invMass +
+                         rCrossT_A.dot(bA.invInertiaWorld * rCrossT_A) +
+                         rCrossT_B.dot(bB.invInertiaWorld * rCrossT_B);
+      if (kEff <= 1e-10f)
+        continue;
+      float j = -vn / kEff;
+      j = std::max(-jmax, std::min(jmax, j));
+      const Vec3 impulse = t * j;
+      if (bA.mass > 0.0f) {
+        bA.position += impulse * bA.invMass * dt;
+        const Vec3 dTheta = bA.invInertiaWorld * rCrossT_A * j * dt;
+        Quat dq(0, dTheta.x, dTheta.y, dTheta.z);
+        bA.rotation =
+            (bA.rotation - dq * bA.rotation * 0.5f).normalized();
+      }
+      if (bB.mass > 0.0f) {
+        bB.position -= impulse * bB.invMass * dt;
+        const Vec3 dTheta = bB.invInertiaWorld * rCrossT_B * (-j) * dt;
+        Quat dq(0, dTheta.x, dTheta.y, dTheta.z);
+        bB.rotation =
+            (bB.rotation - dq * bB.rotation * 0.5f).normalized();
+      }
+    }
+  }
+}
+
 void Solver::warmstart() {
   for (auto &c : contacts) {
     for (int i = 0; i < 3; i++) {
@@ -398,6 +735,17 @@ void Solver::warmstart() {
   }
   for (auto &sc : softContacts) {
     sc.k = std::min(1e4f, sc.ke);
+    if (sc.rigidBodyIdx != UINT32_MAX &&
+        sc.particleIdx < softParticles.size() &&
+        softParticles[sc.particleIdx].invMass <= 0.0f) {
+      sc.lambda = sc.lambda * alpha * gamma;
+      sc.k = std::max(1e3f, std::min(sc.ke, sc.k * gamma));
+      for (int ti = 0; ti < 2; ++ti) {
+        sc.lambdaTangent[ti] = sc.lambdaTangent[ti] * alpha * gamma;
+        sc.penTangent[ti] = std::max(
+            PENALTY_MIN, std::min(PENALTY_MAX, sc.penTangent[ti] * gamma));
+      }
+    }
   }
 }
 
@@ -483,6 +831,33 @@ uint32_t Solver::addSoftBody(const std::vector<Vec3>& vertices,
   return particleStart;
 }
 
+uint32_t Solver::addKinematicShell(const std::vector<Vec3> &positions) {
+  const uint32_t start = (uint32_t)softParticles.size();
+  SoftBody sb;
+  sb.particleStart = start;
+  sb.particleCount = (uint32_t)positions.size();
+  sb.youngsModulus = 0.0f;
+  sb.poissonsRatio = 0.0f;
+  sb.density = 0.0f;
+  sb.mu = 0.0f;
+  sb.lambda = 0.0f;
+  sb.adjacency.resize(sb.particleCount);
+  for (const Vec3 &p : positions) {
+    SoftParticle sp;
+    sp.position = p;
+    sp.velocity = Vec3(0, 0, 0);
+    sp.prevVelocity = Vec3(0, 0, 0);
+    sp.initialPosition = p;
+    sp.predictedPosition = p;
+    sp.outerPosition = p;
+    sp.mass = 0.0f;
+    sp.invMass = 0.0f;
+    softParticles.push_back(sp);
+  }
+  softBodies.push_back(sb);
+  return start;
+}
+
 // =============================================================================
 // Main solver step
 // =============================================================================
@@ -543,7 +918,7 @@ void Solver::step(float dt_) {
       scale = penaltyScaleDynDyn;
     } else {
       effectiveMass = augA;
-      scale = penaltyScale;
+      scale = kPenScaleBodyVsStatic;
     }
     float penFloor = std::max(PENALTY_MIN, scale * effectiveMass / dt2);
     for (int i = 0; i < 3; i++)
@@ -555,7 +930,8 @@ void Solver::step(float dt_) {
     computeC0(c);
 
   // Warmstart bodies
-  for (auto &body : bodies) {
+  for (uint32_t bi = 0; bi < nBodies; ++bi) {
+    Body &body = bodies[bi];
     if (body.mass <= 0)
       continue;
     body.updateInvInertiaWorld();
@@ -577,6 +953,8 @@ void Solver::step(float dt_) {
       accelWeight =
           std::max(0.0f, std::min(1.0f, accel.dot(gravDir) / gravLen));
     }
+    if (bodyTouchesStatic(bi) || bodyTouchesKinematicShell(bi))
+      accelWeight = 0.0f;
 
     body.initialPosition = body.position;
     body.initialRotation = body.rotation;
@@ -779,10 +1157,29 @@ void Solver::step(float dt_) {
     }
   }
 
+  const bool sequentialStatic = isSequentialBodyStaticIsland();
+  const bool allBodyVsStatic =
+      !contacts.empty() &&
+      std::all_of(contacts.begin(), contacts.end(), [this](const Contact &c) {
+        return isBodyVsStaticContact(c.bodyA, c.bodyB);
+      });
+  const bool allKinematicShell =
+      contacts.empty() && !softContacts.empty() &&
+      std::all_of(softContacts.begin(), softContacts.end(),
+                  [this](const SoftContact &sc) {
+                    return sc.rigidBodyIdx != UINT32_MAX &&
+                           sc.particleIdx < softParticles.size() &&
+                           softParticles[sc.particleIdx].invMass <= 0.0f;
+                  });
+  const int primalIterations =
+      (sequentialStatic || allBodyVsStatic || allKinematicShell)
+          ? std::max(iterations, kMinBodyVsStaticInnerIters)
+          : iterations;
+
   // =========================================================================
   // Main solver loop
   // =========================================================================
-  for (int it = 0; it < iterations; it++) {
+  for (int it = 0; it < primalIterations; it++) {
     // Save pre-iteration state for AA
     std::vector<float> preState;
     if (useAndersonAccel)
@@ -798,7 +1195,15 @@ void Solver::step(float dt_) {
       }
     }
 
-    // ---- Primal update (per body in sweep order) ----
+    // ---- Primal update ----
+    if (sequentialStatic) {
+      sequentialBodyStaticPrimalPass(dt);
+    } else {
+    uint32_t numDynContactsInIsland = 0;
+    for (const auto &cc : contacts) {
+      if (!isBodyVsStaticContact(cc.bodyA, cc.bodyB))
+        numDynContactsInIsland++;
+    }
     bool reverseSweep = useTreeSweep && (it % 2 == 1);
     int nSweep = (int)sweepOrder.size();
     for (int si = 0; si < nSweep; si++) {
@@ -828,8 +1233,18 @@ void Solver::step(float dt_) {
       Vec6 disp(body.position - body.inertialPosition, body.deltaWInertial());
       Vec6 rhs = lhs * disp;
 
-      const float contactBoostFraction = 0.005f;
-      float boostFloor = contactBoostFraction * body.mass / dt2;
+      float boostFloor = kContactBoostFraction * body.mass / dt2;
+
+      uint32_t staticContactCount = 0;
+      uint32_t dynContactCount = 0;
+      for (const auto &cc : contacts) {
+        if (cc.bodyA == bi || cc.bodyB == bi) {
+          if (isBodyVsStaticContact(cc.bodyA, cc.bodyB))
+            staticContactCount++;
+          else
+            dynContactCount++;
+        }
+      }
 
       // ---- Contact contributions ----
       for (auto &c : contacts) {
@@ -838,9 +1253,16 @@ void Solver::step(float dt_) {
         if (!isA && !isB)
           continue;
 
-        computeConstraint(c);
+        const bool bStatic = isBodyVsStaticContact(c.bodyA, c.bodyB);
+        if (bStatic)
+          computeConstraintBodyStatic(c);
+        else
+          computeConstraint(c);
 
-        for (int i = 0; i < 3; i++) {
+        const int nRows = contactPrimalRowCount(
+            c.bodyA, c.bodyB, staticContactCount, dynContactCount,
+            numDynContactsInIsland, allowBodyStaticFrictionIn6x6LowContact);
+        for (int i = 0; i < nRows; i++) {
           Vec6 J = isA ? (i == 0 ? c.JA : (i == 1 ? c.JAt1 : c.JAt2))
                        : (i == 0 ? c.JB : (i == 1 ? c.JBt1 : c.JBt2));
           float pen = std::max(c.penalty[i], boostFloor);
@@ -874,6 +1296,18 @@ void Solver::step(float dt_) {
         for (const auto &ac : sb.attachments) {
           addAttachmentContribution_rigid(ac, bi, softParticles, bodies, dt, lhs, rhs);
         }
+      }
+
+      const float shellPenFloor = kPenScaleBodyVsStatic * body.mass / dt2;
+      for (const auto &sc : softContacts) {
+        if (sc.rigidBodyIdx != bi)
+          continue;
+        if (sc.particleIdx >= softParticles.size())
+          continue;
+        if (softParticles[sc.particleIdx].invMass > 0.0f)
+          continue;
+        addKinematicShellContactContribution_rigid(
+            sc, bi, body, shellPenFloor, lhs, rhs);
       }
 
       // ---- Gear Joint contributions ----
@@ -934,6 +1368,9 @@ void Solver::step(float dt_) {
             (body.rotation - dq * body.rotation * 0.5f).normalized();
       }
     }
+    } // !sequentialStatic
+
+    sequentialDynDynFrictionPass(dt);
 
     // ---- Body-level 6x6 solve for soft bodies (mirrors PhysX) ----
     for (uint32_t si = 0; si < (uint32_t)softBodies.size(); si++)
@@ -992,7 +1429,8 @@ void Solver::step(float dt_) {
           if (sc.rigidBodyIdx == UINT32_MAX)
             violation = softParticles[pi].position.dot(n);
           else
-            violation = (softParticles[pi].position - sc.surfacePoint).dot(n) - sc.margin;
+            violation =
+                (softParticles[pi].position - sc.surfacePoint).dot(n) - sc.depth;
 
           float pen = sc.k;
           Vec3 rCrossN = r.cross(n);
@@ -1231,9 +1669,12 @@ void Solver::step(float dt_) {
     }
 
     // ---- Dual update ----
-    // Contact dual
+    // Contact dual (body-vs-static: computeConstraintBodyStatic + all 3 rows)
     for (auto &c : contacts) {
-      computeConstraint(c);
+      if (isBodyVsStaticContact(c.bodyA, c.bodyB))
+        computeConstraintBodyStatic(c);
+      else
+        computeConstraint(c);
       for (int i = 0; i < 3; i++) {
         float oldLambda = c.lambda[i];
         float rawLambda = c.penalty[i] * c.C[i] + oldLambda;
@@ -1304,8 +1745,39 @@ void Solver::step(float dt_) {
         for (auto &kp : sb.pins)
           updatePinDual(kp, softParticles, beta);
       }
-      for (auto &sc : softContacts)
-        updateSoftContactDual(sc, softParticles, beta);
+      for (auto &sc : softContacts) {
+      if (sc.rigidBodyIdx != UINT32_MAX &&
+          sc.particleIdx < softParticles.size() &&
+          softParticles[sc.particleIdx].invMass <= 0.0f &&
+          sc.rigidBodyIdx < bodies.size()) {
+        Body &shellBody = bodies[sc.rigidBodyIdx];
+        const float Cn =
+            kinematicShellContactViolation(sc, shellBody);
+        const float rawLambdaN = sc.k * Cn + sc.lambda;
+        sc.lambda = std::min(0.0f, rawLambdaN);
+        if (sc.lambda < 0.0f)
+          sc.k = std::min(sc.k + beta * fabsf(Cn), sc.ke);
+
+        float Ctangent[2];
+        computeKinematicShellConstraint(sc, shellBody, alpha, Ctangent);
+        const float frictionBound = fabsf(sc.lambda) * sc.friction;
+        for (int ti = 0; ti < 2; ++ti) {
+          const float fmin = -frictionBound;
+          const float fmax = frictionBound;
+          const float oldLt = sc.lambdaTangent[ti];
+          const float rawLt =
+              sc.penTangent[ti] * Ctangent[ti] + oldLt;
+          sc.lambdaTangent[ti] =
+              std::max(fmin, std::min(fmax, rawLt));
+          if (sc.lambdaTangent[ti] < fmax && sc.lambdaTangent[ti] > fmin)
+            sc.penTangent[ti] = std::min(sc.penTangent[ti] +
+                                             beta * fabsf(Ctangent[ti]),
+                                         PENALTY_MAX);
+        }
+        continue;
+      }
+      updateSoftContactDual(sc, softParticles, beta);
+    }
 
       // AVBD elastic proximal dual update: increase proximal weight
       // proportional to displacement from the outer-iteration anchor
@@ -1470,6 +1942,9 @@ void Solver::step(float dt_) {
       convergenceHistory.push_back(maxViol);
     }
   } // end iteration loop
+
+  applyBodyStaticDepenetrationSweeps(4);
+  applyLowIslandDynDynFrictionSweeps(2);
 
   // =========================================================================
   // Post-solve motor drives (matches PhysX Stage 5b)

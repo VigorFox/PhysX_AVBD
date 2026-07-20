@@ -120,6 +120,9 @@ struct Contact {
 
   float lambda[3];
   float penalty[3];
+
+  /** World anchor on static/deforming partner (bodyB == UINT32_MAX). */
+  Vec3 staticPrevWorldPoint = {};
 };
 
 // ====================== Unified D6 Joint ====================================

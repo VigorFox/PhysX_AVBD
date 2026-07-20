@@ -81,6 +81,8 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamicsPrep.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKinematicShell.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKinematicShell.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointProjection.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointProjection.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdParallel.h

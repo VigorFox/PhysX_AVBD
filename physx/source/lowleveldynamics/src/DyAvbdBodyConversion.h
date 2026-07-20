@@ -99,7 +99,7 @@ PX_FORCE_INLINE void writeBackAvbdSolverBody(const AvbdSolverBody &body,
 PX_FORCE_INLINE void initializeStaticAvbdBody(const PxTransform &pose,
                                               AvbdSolverBody &body,
                                               PxU32 bodyIndex) {
-  body.initialize(pose, PxVec3(0.0f), PxVec3(0.0f), 0.0f, PxMat33(PxIdentity),
+  body.initialize(pose, PxVec3(0.0f), PxVec3(0.0f), 0.0f, PxMat33(PxZero),
                   bodyIndex);
 }
 

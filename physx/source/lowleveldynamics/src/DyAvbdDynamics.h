@@ -36,6 +36,8 @@
 
 namespace physx {
 
+struct PxsBodyCore;
+
 namespace Dy {
 
 /**
@@ -52,7 +54,7 @@ class AvbdDynamicsContext : public DynamicsContextBase {
   // private mLambdaCache)
   friend void writeLambdaToCache(AvbdDynamicsContext &ctx,
                                  AvbdContactConstraint *constraints,
-                                 PxU32 numConstraints);
+                                 PxU32 numConstraints, PxU32 numBodies);
   friend void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
                                       AvbdD6JointConstraint *constraints,
                                       PxU32 numConstraints);
@@ -122,19 +124,23 @@ public:
   /**
    * @brief Cached lambda values for warm-starting across frames
    *
-   * Indexed by [cmIndex * 4 + contactIdx] where:
-   * - cmIndex: PxsContactManager::getIndex()
-   * - contactIdx: contact index within patch (0-3, max 4 contacts per CM)
+   * Each contact manager owns a fixed, disjoint group of direct-mapped slots.
+   * Rows are selected by a stable contact-identity hash and the stored key is
+   * validated before restore.  This prevents patch reordering and recycled
+   * contact-manager indices from applying another row's dual state.
    */
   struct CachedLambda {
+    PxU64 key;             //!< Stable contact identity for slot validation
     PxReal lambda;         //!< Normal constraint lambda
     PxReal tangentLambda0; //!< Friction lambda 1
     PxReal tangentLambda1; //!< Friction lambda 2
     PxReal penalty; //!< Adaptive penalty for normal (persists across frames)
     PxReal tangentPenalty0; //!< Adaptive penalty for tangent 0
     PxReal tangentPenalty1; //!< Adaptive penalty for tangent 1
+    PxVec3 prevStaticWorldPoint; //!< Deformable/static anchor for friction
     PxU8 frameAge;          //!< Frames since last update (0 = current frame)
-    PxU8 padding[3];
+    PxU8 stick;             //!< Coulomb stick flag (static μ next frame)
+    PxU8 padding[2];
   };
 
   PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
@@ -153,8 +159,8 @@ public:
 
   PxArray<CachedJointLambda> mJointLambdaCache; //!< Per-D6 warm-start storage
 
-  static const PxU32 MAX_CONTACTS_PER_CM =
-      4; //!< Max contact points per ContactManager
+  static const PxU32 CONTACT_CACHE_SLOTS_PER_CM =
+      64; //!< Direct-mapped cache slots owned by each ContactManager
   static const PxU32 JOINT_LAMBDA_CACHE_SIZE =
       8192; //!< Fixed-size hashed cache for D6 joints
   static const PxU8 LAMBDA_MAX_AGE = 3; //!< Max frames to keep cached lambda
@@ -162,9 +168,24 @@ public:
       0.9f; //!< Damping for warm-started lambda
 
 private:
+  struct CachedBodyVelocityHistory {
+    PxU64 bodyCoreKey;
+    PxU64 lastSeenFrame;
+    PxVec3 linearVelocity;
+  };
+
+  // Fixed-size, direct-mapped storage keeps stale body identities bounded.
+  // The exact bodyCore pointer is still validated before any history is used.
+  static const PxU32 BODY_VELOCITY_HISTORY_CACHE_SIZE = 16384;
+  PxArray<CachedBodyVelocityHistory> mBodyVelocityHistoryCache;
+  PxU64 mBodyVelocityHistoryFrame;
+
   //-------------------------------------------------------------------------
   // Internal Methods
   //-------------------------------------------------------------------------
+
+  void restoreAndUpdateBodyVelocityHistory(const PxsBodyCore &bodyCore,
+                                           AvbdSolverBody &solverBody);
 
   /**
    * @brief Solve constraints for a single island using AVBD algorithm
@@ -289,7 +310,7 @@ private:
 // Lambda cache write-back function (declared friend in AvbdDynamicsContext)
 void writeLambdaToCache(AvbdDynamicsContext &ctx,
                         AvbdContactConstraint *constraints,
-                        PxU32 numConstraints);
+                        PxU32 numConstraints, PxU32 numBodies);
 
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,

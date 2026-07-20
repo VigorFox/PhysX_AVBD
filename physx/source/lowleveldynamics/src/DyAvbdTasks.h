@@ -28,6 +28,7 @@
 #define DY_AVBD_TASKS_H
 
 #include "DyAvbdConstraint.h"
+#include "DyAvbdKinematicShell.h"
 #include "DyAvbdSolver.h"
 #include "DyAvbdSolverBody.h"
 #include "DyAvbdTypes.h"
@@ -73,6 +74,9 @@ struct AvbdIslandBatch {
 
   AvbdSoftContact *softContacts;
   PxU32 numSoftContacts;
+
+  /** Island kinematic shell via solve() + solveLocalSystem (not full soft VBD). */
+  bool kinematicShellBatch;
 
   PxU32 islandStart;
   PxU32 islandEnd;
@@ -123,30 +127,22 @@ public:
                       const AvbdIslandBatch &batch, PxReal dt,
                       const PxVec3 &gravity)
       : AvbdTask(context), mSolver(solver), mBatch(batch), mDt(dt),
-        mGravity(gravity) {}
+        mGravity(gravity), mStats() {}
 
   virtual void run() override {
-    const bool hasJoints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
-    const bool hasSoftBodies = (mBatch.numSoftParticles > 0 && mBatch.numSoftBodies > 0);
-
-    if (hasJoints || hasSoftBodies) {
-      // Use full joint + soft body solver
-      mSolver.solveWithJoints(mDt, mBatch.bodies, mBatch.numBodies,
-                              mBatch.constraints, mBatch.numConstraints,
-                              mBatch.d6Joints, mBatch.numD6, mBatch.gearJoints,
-                              mBatch.numGear, mGravity, &mBatch.contactMap,
-                              &mBatch.d6Map, &mBatch.gearMap,
-                              mBatch.colorBatches, mBatch.numColors,
-                              mBatch.iterationOverride,
-                              mBatch.softParticles, mBatch.numSoftParticles,
-                              mBatch.softBodies, mBatch.numSoftBodies,
-                              mBatch.softContacts, mBatch.numSoftContacts);
-    } else {
-      // Optimized contact-only path using external contactMap for thread safety
-      mSolver.solve(mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
-                    mBatch.numConstraints, mGravity, &mBatch.contactMap,
-                    mBatch.colorBatches, mBatch.numColors,
-                    mBatch.iterationOverride);
+    // Single island schedule (classification + shared post-AL inside solver).
+    mSolver.solveIsland(
+        mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+        mBatch.numConstraints, mGravity, mBatch.d6Joints, mBatch.numD6,
+        mBatch.gearJoints, mBatch.numGear, &mBatch.contactMap, &mBatch.d6Map,
+        &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors,
+        mBatch.iterationOverride, mBatch.softParticles, mBatch.numSoftParticles,
+        mBatch.softBodies, mBatch.numSoftBodies, mBatch.softContacts,
+        mBatch.numSoftContacts, mBatch.kinematicShellBatch, mStats);
+    if (AvbdKinematicShell::isActive() && mBatch.kinematicShellBatch &&
+        mBatch.softContacts && mBatch.numSoftContacts > 0) {
+      AvbdKinematicShell::saveIslandShellContactCache(mBatch.softContacts,
+                                                    mBatch.numSoftContacts);
     }
   }
 
@@ -159,6 +155,7 @@ private:
   AvbdIslandBatch mBatch;
   PxReal mDt;
   PxVec3 mGravity;
+  AvbdSolverStats mStats;
 };
 
 //=============================================================================

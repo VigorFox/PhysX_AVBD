@@ -213,6 +213,13 @@ struct AvbdSoftContact
 	PxVec3 tangent1, tangent2;
 	PxVec3 surfacePoint;    // reference point on the other body's surface (world space)
 
+	// Kinematic shell rigid coupling (invMass=0 shell particle, moving surfacePoint).
+	PxVec3 surfacePointPrev;
+	PxVec3 rigidLocalPoint;
+	PxReal alLambda;
+	PxReal alLambdaTangent[2];
+	PxReal penTangent[2];
+
 	PxReal k;
 	PxReal ke;
 
@@ -220,7 +227,10 @@ struct AvbdSoftContact
 		: particleIdx(0), rigidBodyIdx(PX_MAX_U32), normal(0.0f, 1.0f, 0.0f),
 		  projNormal(0.0f, 1.0f, 0.0f),
 		  depth(0.0f), margin(0.0f), friction(0.5f), tangent1(1.0f, 0.0f, 0.0f),
-		  tangent2(0.0f, 0.0f, 1.0f), surfacePoint(0.0f), k(1e4f), ke(1e6f) {}
+		  tangent2(0.0f, 0.0f, 1.0f), surfacePoint(0.0f),
+		  surfacePointPrev(0.0f), rigidLocalPoint(0.0f), alLambda(0.0f),
+		  alLambdaTangent{0.0f, 0.0f}, penTangent{1000.0f, 1000.0f},
+		  k(1e4f), ke(1e6f) {}
 };
 
 // =============================================================================

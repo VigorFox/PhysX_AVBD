@@ -124,9 +124,17 @@ class AvbdThreadPool {
   };
 
 public:
+  // The pool is a program-lifetime singleton, but it is *intentionally leaked*
+  // (heap-allocated, never deleted). A function-local static would run its
+  // destructor at process exit, AFTER PxFoundation has been released; tearing
+  // down the worker PxThreads then deallocates PxThreadImpl through the freed
+  // foundation allocator -> access violation at exit (observed on heavy AVBD
+  // scenes that actually spawn the workers). By leaking, no destructor runs at
+  // exit: ExitProcess terminates the worker threads and the OS reclaims the
+  // memory, with zero dependency on PhysX teardown order.
   static AvbdThreadPool &instance() {
-    static AvbdThreadPool pool;
-    return pool;
+    static AvbdThreadPool *pool = new AvbdThreadPool();
+    return *pool;
   }
 
   unsigned numWorkers() const { return mNumWorkers; }
@@ -208,19 +216,8 @@ private:
     }
   }
 
-  ~AvbdThreadPool() {
-    while (PxAtomicCompareExchange(&mDispatchBusy, 0, 0) != 0)
-      PxThread::yield();
-
-    PxAtomicExchange(&mState.shutdown, 1);
-    PxAtomicIncrement(&mState.generation);
-    mStartEvent.set();
-
-    for (PxU32 i = 0; i < mWorkers.size(); ++i) {
-      mWorkers[i]->waitForQuit();
-      PX_DELETE(mWorkers[i]);
-    }
-  }
+  // No destructor: the singleton is intentionally leaked (see instance()).
+  // Defining one would reintroduce the at-exit teardown ordering crash.
 
   AvbdThreadPool(const AvbdThreadPool &) = delete;
   AvbdThreadPool &operator=(const AvbdThreadPool &) = delete;

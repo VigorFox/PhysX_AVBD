@@ -140,7 +140,8 @@ static PxScene* createAvbdScene(PxVec3 gravity = PxVec3(0.0f, -9.81f, 0.0f))
 // ============================================================================
 static PxArticulationReducedCoordinate* createRevoluteChain(
     PxScene* scene, int numLinks, PxReal linkLength, PxReal linkMass,
-    PxVec3 basePos, PxVec3 /*axis*/ = PxVec3(0, 0, 1))
+    PxVec3 basePos, PxVec3 /*axis*/ = PxVec3(0, 0, 1),
+    bool fixedBase = true)
 {
   // TODO(AVBD): rename this API at the public boundary once PhysX exposes a
   // solver-neutral articulation facade again. In PhysX 5 we still create the
@@ -169,7 +170,7 @@ static PxArticulationReducedCoordinate* createRevoluteChain(
     parent = child;
   }
 
-  artic->setArticulationFlag(PxArticulationFlag::eFIX_BASE, true);
+  artic->setArticulationFlag(PxArticulationFlag::eFIX_BASE, fixedBase);
   scene->addArticulation(*artic);
   return artic;
 }
@@ -202,6 +203,8 @@ static void testSinglePendulum()
 
   TEST_CHECK(tipPos.y < basePos.y, "Pendulum tip below base");
   TEST_CHECK(tipPos.y < 4.5f, "Pendulum tip dropped significantly");
+  TEST_CHECK((basePos - PxVec3(0, 5, 0)).magnitude() < 1e-4f,
+             "Fixed articulation base remains fixed");
 
   artic->release();
   scene->release();
@@ -254,7 +257,7 @@ static void testMultiLinkChain()
 static void testJointLimits()
 {
   printf("\n--- Test 3: Joint Limits ---\n");
-  PxScene* scene = createAvbdScene();
+  PxScene* scene = createAvbdScene(PxVec3(0.0f));
 
   PxArticulationReducedCoordinate* artic =
       gPhysics->createArticulationReducedCoordinate();
@@ -271,26 +274,54 @@ static void testJointLimits()
   PxArticulationJointReducedCoordinate* joint = child->getInboundJoint();
   joint->setJointType(PxArticulationJointType::eREVOLUTE);
   joint->setMotion(PxArticulationAxis::eTWIST, PxArticulationMotion::eLIMITED);
-  joint->setLimitParams(PxArticulationAxis::eTWIST, {-0.5f, 0.5f});
+  joint->setLimitParams(PxArticulationAxis::eTWIST,
+                        PxArticulationLimit(-0.2f, 0.5f));
   joint->setParentPose(PxTransform(PxVec3(0, -0.5f, 0)));
   joint->setChildPose(PxTransform(PxVec3(0, 0.5f, 0)));
+  joint->setDriveParams(PxArticulationAxis::eTWIST,
+                        PxArticulationDrive(1.0f, 0.2f, PX_MAX_F32));
+  joint->setDriveTarget(PxArticulationAxis::eTWIST, 1.0f);
 
   artic->setArticulationFlag(PxArticulationFlag::eFIX_BASE, true);
   scene->addArticulation(*artic);
 
   PxReal dt = 1.0f / 60.0f;
-  for (int i = 0; i < 300; i++)
+  auto getTwist = [&]() -> PxReal
+  {
+    const PxTransform parentFrame =
+        base->getGlobalPose() * joint->getParentPose();
+    const PxTransform childFrame =
+        child->getGlobalPose() * joint->getChildPose();
+    PxQuat relativeRotation = parentFrame.q.getConjugate() * childFrame.q;
+    if (relativeRotation.w < 0.0f)
+      relativeRotation = -relativeRotation;
+    relativeRotation.normalize();
+    PxQuat twist(relativeRotation.x, 0.0f, 0.0f, relativeRotation.w);
+    twist.normalize();
+    return 2.0f * PxAtan2(twist.x, twist.w);
+  };
+
+  for (int i = 0; i < 600; i++)
   {
     scene->simulate(dt);
     scene->fetchResults(true);
   }
 
-  // Joint should respect limits: angle should be <= 0.5 rad (with some tolerance)
-  PxVec3 childEnd = child->getGlobalPose().p;
-  PxVec3 baseP = base->getGlobalPose().p;
-  PxVec3 dir = (childEnd - baseP).getNormalized();
-  // If limited to +-0.5 rad, the child can't swing past ~0.48 (sin(0.5))
-  TEST_CHECK(PxAbs(dir.x) < 0.6f, "Joint stayed within limit region");
+  const PxReal upperTwist = getTwist();
+  joint->setDriveTarget(PxArticulationAxis::eTWIST, -1.0f);
+  for (int i = 0; i < 600; i++)
+  {
+    scene->simulate(dt);
+    scene->fetchResults(true);
+  }
+  const PxReal lowerTwist = getTwist();
+
+  printf("  [JointLimits] upperTwist=%.6f lowerTwist=%.6f limits=[-0.2, 0.5]\n",
+         upperTwist, lowerTwist);
+  TEST_CHECK(upperTwist > 0.4f && upperTwist < 0.65f,
+             "Asymmetric upper twist limit uses articulation coordinates");
+  TEST_CHECK(lowerTwist < -0.1f && lowerTwist > -0.4f,
+             "Asymmetric lower twist limit uses articulation coordinates");
 
   artic->release();
   scene->release();
@@ -342,9 +373,13 @@ static void testVelocityDrive()
   PxVec3 childPos = child->getGlobalPose().p;
   PxVec3 basePos2 = base->getGlobalPose().p;
   PxReal distFromVertical = PxAbs(childPos.x - basePos2.x) + PxAbs(childPos.z - basePos2.z);
-  // With non-zero target velocity, child should have moved from its initial position
-  TEST_CHECK(distFromVertical > 0.01f || PxAbs(childPos.y - basePos2.y) < 0.95f,
-             "Velocity drive caused rotation");
+  const PxReal relativeOmegaX =
+      (child->getAngularVelocity() - base->getAngularVelocity()).x;
+  printf("  [VelocityDrive] relativeOmegaX=%.6f lateral=%.6f\n",
+         relativeOmegaX, distFromVertical);
+  TEST_CHECK(PxAbs(relativeOmegaX - 2.0f) < 0.5f &&
+                 distFromVertical > 0.01f,
+             "Velocity drive tracks its angular target");
 
   artic->release();
   scene->release();
@@ -396,8 +431,22 @@ static void testPositionDrive()
   PxVec3 basePos2 = base->getGlobalPose().p;
   PxVec3 diff = childPos - basePos2;
   PxReal lateralDist = PxSqrt(diff.x * diff.x + diff.z * diff.z);
-  // With position target 1.0 rad, the child should have moved laterally
-  TEST_CHECK(lateralDist > 0.1f || PxAbs(diff.y) < 0.95f, "PD drive moved joint towards target");
+  const PxTransform parentFrame =
+      base->getGlobalPose().transform(joint->getParentPose());
+  const PxTransform childFrame =
+      child->getGlobalPose().transform(joint->getChildPose());
+  PxQuat relativeRotation = parentFrame.q.getConjugate() * childFrame.q;
+  if (relativeRotation.w < 0.0f)
+    relativeRotation = -relativeRotation;
+  relativeRotation.normalize();
+  const PxReal twist =
+      2.0f * PxAtan2(relativeRotation.x, relativeRotation.w);
+  const PxReal anchorError =
+      (childFrame.p - parentFrame.p).magnitude();
+  printf("  [PositionDrive] twist=%.6f lateral=%.6f anchorError=%.6f\n",
+         twist, lateralDist, anchorError);
+  TEST_CHECK(PxAbs(twist - 1.0f) < 0.2f && anchorError < 0.01f,
+             "PD drive tracks its position target");
 
   artic->release();
   scene->release();
@@ -411,8 +460,14 @@ static void testAccelerationDrive()
   printf("\n--- Test 6: Acceleration Drive ---\n");
   fflush(stdout);
 
+  struct DriveResult {
+    PxReal angle;
+    PxReal anchorError;
+  };
+
   // Run two separate scenes with different masses but same acceleration drive
-  auto runArm = [&](PxReal mass) -> PxReal {
+  auto runArm = [&](PxReal mass, PxArticulationAxis::Enum driveAxis,
+                    const char* axisName) -> DriveResult {
     PxScene* scene = createAvbdScene(PxVec3(0, 0, 0));
     PxArticulationReducedCoordinate* artic =
         gPhysics->createArticulationReducedCoordinate();
@@ -428,15 +483,17 @@ static void testAccelerationDrive()
     PxRigidBodyExt::updateMassAndInertia(*child, mass);
 
     PxArticulationJointReducedCoordinate* joint = child->getInboundJoint();
-    joint->setJointType(PxArticulationJointType::eREVOLUTE);
-    joint->setMotion(PxArticulationAxis::eTWIST, PxArticulationMotion::eFREE);
+    joint->setJointType(driveAxis == PxArticulationAxis::eTWIST
+                            ? PxArticulationJointType::eREVOLUTE
+                            : PxArticulationJointType::eSPHERICAL);
+    joint->setMotion(driveAxis, PxArticulationMotion::eFREE);
     joint->setParentPose(PxTransform(PxVec3(0, -0.5f, 0)));
     joint->setChildPose(PxTransform(PxVec3(0, 0.5f, 0)));
 
-    joint->setDriveParams(PxArticulationAxis::eTWIST,
+    joint->setDriveParams(driveAxis,
                           PxArticulationDrive(50.0f, 5.0f, PX_MAX_F32,
                                              PxArticulationDriveType::eACCELERATION));
-    joint->setDriveTarget(PxArticulationAxis::eTWIST, 0.5f);
+    joint->setDriveTarget(driveAxis, 0.5f);
 
     artic->setArticulationFlag(PxArticulationFlag::eFIX_BASE, true);
     scene->addArticulation(*artic);
@@ -447,18 +504,60 @@ static void testAccelerationDrive()
       scene->fetchResults(true);
     }
 
-    PxVec3 childPos = child->getGlobalPose().p;
-    PxReal angle = PxAtan2(childPos.x, -(childPos.y - 5.0f));
+    const PxTransform parentFrame =
+        base->getGlobalPose().transform(joint->getParentPose());
+    const PxTransform childFrame =
+        child->getGlobalPose().transform(joint->getChildPose());
+    PxQuat relativeRotation =
+        parentFrame.q.getConjugate() * childFrame.q;
+    if (relativeRotation.w < 0.0f)
+      relativeRotation = -relativeRotation;
+    relativeRotation.normalize();
+    const PxReal angleComponent =
+        driveAxis == PxArticulationAxis::eTWIST ? relativeRotation.x
+                                                : relativeRotation.z;
+    const PxReal angle =
+        2.0f * PxAtan2(angleComponent, relativeRotation.w);
+    const PxReal anchorError =
+        (childFrame.p - parentFrame.p).magnitude();
+    const PxVec3 childPos = child->getGlobalPose().p;
+    printf("  [AccelerationDriveArm] axis=%s mass=%.3f "
+           "child=(%.6f,%.6f,%.6f) "
+           "angle=%.6f anchorError=%.6f\n",
+           axisName, mass, childPos.x, childPos.y, childPos.z, angle,
+           anchorError);
     artic->release();
     scene->release();
-    return angle;
+    return {angle, anchorError};
   };
 
-  PxReal angle1 = runArm(1.0f);
-  PxReal angle2 = runArm(10.0f);
+  const DriveResult twistLight =
+      runArm(1.0f, PxArticulationAxis::eTWIST, "twist");
+  const DriveResult twistHeavy =
+      runArm(10.0f, PxArticulationAxis::eTWIST, "twist");
+  const DriveResult swing2Light =
+      runArm(1.0f, PxArticulationAxis::eSWING2, "swing2");
+  const DriveResult swing2Heavy =
+      runArm(10.0f, PxArticulationAxis::eSWING2, "swing2");
+  printf("  [AccelerationDrive] twistDelta=%.6f swing2Delta=%.6f\n",
+         PxAbs(twistLight.angle - twistHeavy.angle),
+         PxAbs(swing2Light.angle - swing2Heavy.angle));
 
-  // With acceleration drive, both should reach similar angles despite different masses
-  TEST_CHECK(PxAbs(angle1 - angle2) < 0.5f, "Acceleration drive is mass-invariant");
+  // Acceleration drive should track the authored target independently of mass
+  // while the internal joint anchors remain coincident.
+  const bool tracksTarget = PxAbs(twistLight.angle - 0.5f) < 0.15f &&
+                            PxAbs(twistHeavy.angle - 0.5f) < 0.15f &&
+                            PxAbs(swing2Light.angle - 0.5f) < 0.15f &&
+                            PxAbs(swing2Heavy.angle - 0.5f) < 0.15f;
+  const bool massInvariant =
+      PxAbs(twistLight.angle - twistHeavy.angle) < 0.05f &&
+      PxAbs(swing2Light.angle - swing2Heavy.angle) < 0.05f;
+  const bool anchorsValid = twistLight.anchorError < 0.01f &&
+                            twistHeavy.anchorError < 0.01f &&
+                            swing2Light.anchorError < 0.01f &&
+                            swing2Heavy.anchorError < 0.01f;
+  TEST_CHECK(tracksTarget && massInvariant && anchorsValid,
+             "Acceleration drive tracks target independent of mass");
 }
 
 // ============================================================================
@@ -690,7 +789,8 @@ static void testArticulationContact()
 
   // Create a short articulation chain starting above ground
   PxArticulationReducedCoordinate* artic =
-      createRevoluteChain(scene, 3, 0.5f, 1.0f, PxVec3(0, 3, 0));
+      createRevoluteChain(scene, 3, 0.5f, 1.0f, PxVec3(0, 3, 0),
+                          PxVec3(0, 0, 1), false);
 
   PxReal dt = 1.0f / 60.0f;
   for (int i = 0; i < 300; i++)
@@ -705,11 +805,45 @@ static void testArticulationContact()
   artic->getLinks(links, 16);
 
   bool allAboveGround = true;
+  PxReal minLinkY = PX_MAX_F32;
+  PxReal minBoundsY = PX_MAX_F32;
+  PxReal maxAnchorError = 0.0f;
+  PxU32 minLinkIndex = PX_MAX_U32;
   for (PxU32 i = 0; i < nLinks; i++) {
-    if (links[i]->getGlobalPose().p.y < -0.2f)
+    const PxReal linkY = links[i]->getGlobalPose().p.y;
+    minBoundsY = PxMin(minBoundsY,
+                       links[i]->getWorldBounds(1.0f).minimum.y);
+    if (linkY < minLinkY) {
+      minLinkY = linkY;
+      minLinkIndex = i;
+    }
+    if (i > 0) {
+      PxArticulationJointReducedCoordinate* joint =
+          links[i]->getInboundJoint();
+      const PxTransform parentFrame =
+          joint->getParentArticulationLink().getGlobalPose().transform(
+              joint->getParentPose());
+      const PxTransform childFrame =
+          links[i]->getGlobalPose().transform(joint->getChildPose());
+      maxAnchorError = PxMax(maxAnchorError,
+                             (childFrame.p - parentFrame.p).magnitude());
+    }
+    if (minBoundsY < -0.05f)
       allAboveGround = false;
   }
-  TEST_CHECK(allAboveGround, "All links rest above ground plane");
+  printf("  [ArticulationGround] minLinkY=%.6f link=%u minBoundsY=%.6f "
+         "maxAnchorError=%.6f\n",
+         minLinkY, minLinkIndex, minBoundsY, maxAnchorError);
+  if (!allAboveGround) {
+    for (PxU32 i = 0; i < nLinks; ++i) {
+      const PxVec3 p = links[i]->getGlobalPose().p;
+      printf("  [ArticulationGroundLink] link=%u pos=(%.6f,%.6f,%.6f)\n",
+             i, p.x, p.y, p.z);
+    }
+  }
+  const bool reachedGround = minBoundsY < 0.05f;
+  TEST_CHECK(allAboveGround && reachedGround && maxAnchorError < 0.05f,
+             "Floating articulation rests above ground with valid anchors");
 
   artic->release();
   ground->release();

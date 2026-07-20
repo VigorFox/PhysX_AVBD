@@ -116,12 +116,77 @@ struct SoftContact {
   float friction;
 
   Vec3 tangent1, tangent2;
-  Vec3 surfacePoint;        // contact point on surface (for collision projection)
+  Vec3 surfacePoint;        // contact point on kinematic shell / rigid surface
+  Vec3 surfacePointPrev;    // shell vertex at previous substep (moving partner)
+  Vec3 rigidLocalPoint;     // contact offset on rigid body (local frame)
+  float lambda;             // AL multiplier (rigid vs kinematic shell normal)
+  float lambdaTangent[2];   // friction dual (iteration loop, not in 6x6 primal)
+  float penTangent[2];      // tangent penalty growth (body-static dual parity)
 
   SoftContact()
       : particleIdx(0), rigidBodyIdx(UINT32_MAX),
-        depth(0), k(1e4f), ke(1e6f), friction(0.5f) {}
+        depth(0), k(1e4f), ke(1e6f), friction(0.5f), lambda(0.0f),
+        lambdaTangent{0.0f, 0.0f}, penTangent{1000.0f, 1000.0f} {}
 };
+
+/** Rigid body vs kinematic shell particle (invMass=0): normals-only 6x6 row. */
+inline void addKinematicShellContactContribution_rigid(
+    const SoftContact &sc, uint32_t bodyIdx, Body &body, float boostFloor,
+    Mat66 &lhs, Vec6 &rhs) {
+  if (sc.rigidBodyIdx != bodyIdx)
+    return;
+
+  const Vec3 n = sc.normal;
+  const Vec3 rAw = body.rotation.rotate(sc.rigidLocalPoint);
+  const Vec3 wA = body.position + rAw;
+  float geom = (wA - sc.surfacePoint).dot(n) - sc.depth;
+  if (geom < 0.0f)
+    geom = std::min(geom, -sc.depth);
+
+  const Vec6 J(n, rAw.cross(n));
+  const float pen = std::max(sc.k, boostFloor);
+  const float f = std::min(0.0f, pen * geom + sc.lambda);
+  rhs += J * f;
+  lhs += outer(J, J * pen);
+}
+
+inline float kinematicShellContactViolation(const SoftContact &sc,
+                                            const Body &body) {
+  const Vec3 rAw = body.rotation.rotate(sc.rigidLocalPoint);
+  const Vec3 wA = body.position + rAw;
+  float geom = (wA - sc.surfacePoint).dot(sc.normal) - sc.depth;
+  if (geom < 0.0f)
+    geom = std::min(geom, -sc.depth);
+  return geom;
+}
+
+/** Body-static dual parity: normal + tangent violations for kinematic shell. */
+inline void computeKinematicShellConstraint(const SoftContact &sc,
+                                            const Body &body, float alpha,
+                                            float Ctangent[2]) {
+  const Vec3 n = sc.normal;
+  Vec3 t1 = sc.tangent1;
+  Vec3 t2 = sc.tangent2;
+  if (t1.dot(t1) < 1e-8f) {
+    if (fabsf(n.y) > 0.9f)
+      t1 = n.cross(Vec3(1, 0, 0)).normalized();
+    else
+      t1 = n.cross(Vec3(0, 1, 0)).normalized();
+    t2 = n.cross(t1);
+  }
+
+  const Vec3 rAw = body.rotation.rotate(sc.rigidLocalPoint);
+  const Vec6 dpA(body.position - body.initialPosition, body.deltaWInitial());
+  const Vec3 staticMotion = sc.surfacePoint - sc.surfacePointPrev;
+  const Vec3 relDisp =
+      Vec3(dpA[0], dpA[1], dpA[2]) - staticMotion;
+
+  Ctangent[0] = relDisp.dot(t1) +
+                Vec3(dpA[3], dpA[4], dpA[5]).dot(rAw.cross(t1));
+  Ctangent[1] = relDisp.dot(t2) +
+                Vec3(dpA[3], dpA[4], dpA[5]).dot(rAw.cross(t2));
+  (void)alpha;
+}
 
 // =============================================================================
 // SoftBody — mesh + VBD elements + AVBD constraints

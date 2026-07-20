@@ -44,6 +44,7 @@ include(${PHYSX_ROOT_DIR}/${PROJECT_CMAKE_FILES_DIR}/${TARGET_BUILD_PLATFORM}/Ph
 SET(PHYSX_HEADERS
 	${PHYSX_ROOT_DIR}/include/PxActor.h
 	${PHYSX_ROOT_DIR}/include/PxAggregate.h
+	${PHYSX_ROOT_DIR}/include/PxAvbdKinematicShell.h
 	${PHYSX_ROOT_DIR}/include/PxArticulationFlag.h
 	${PHYSX_ROOT_DIR}/include/PxArticulationJointReducedCoordinate.h
 	${PHYSX_ROOT_DIR}/include/PxArticulationLink.h
@@ -251,6 +252,7 @@ SOURCE_GROUP(src\\articulations FILES ${PHYSX_ARTICULATIONS_SOURCE})
 
 SET(PHYSX_CORE_SOURCE
 	${PX_SOURCE_DIR}/NpActor.cpp
+	${PX_SOURCE_DIR}/NpAvbdKinematicShell.cpp
 	${PX_SOURCE_DIR}/NpAggregate.cpp
 	${PX_SOURCE_DIR}/NpDeformableAttachment.cpp
 	${PX_SOURCE_DIR}/NpDeformableElementFilter.cpp
@@ -465,4 +467,3 @@ ENDIF()
 
 # enable -fPIC so we can link static libs with the editor
 SET_TARGET_PROPERTIES(PhysX PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-

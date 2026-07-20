@@ -57,7 +57,6 @@ static PxSolverType::Enum gSolverType = PxSolverType::eAVBD;
 
 static std::vector<PxRigidDynamic *> gRevoluteChainBodies;
 static std::vector<PxRevoluteJoint *> gRevoluteChainJoints;
-static std::vector<PxRigidDynamic *> gFixedChainBodies;
 static std::vector<PxFixedJoint *> gFixedChainJoints;
 static std::vector<PxU8> gFixedBreakReported;
 static std::vector<PxRigidDynamic *> gPrismaticChainBodies;
@@ -109,16 +108,6 @@ struct PrismaticDriftStats {
 };
 
 static PrismaticDriftStats gPrismaticStats;
-
-static bool shouldDumpRevoluteState(PxU32 frame) {
-  if (frame <= 180)
-    return (frame % 30) == 0;
-  if (frame >= 200 && frame <= 420)
-    return (frame % 10) == 0;
-  if (frame >= 900 && frame <= 1300)
-    return (frame % 10) == 0;
-  return (frame % 120) == 0;
-}
 
 static const char *getSolverTypeName(PxSolverType::Enum solverType) {
   switch (solverType) {
@@ -172,100 +161,6 @@ static PxSolverType::Enum getRequestedSolverType(int argc,
     return solverType;
 
   return PxSolverType::eAVBD;
-}
-
-static void dumpRevoluteChainState(PxU32 frame) {
-  if (gRevoluteChainBodies.size() < 5 || gRevoluteChainJoints.size() < 5)
-    return;
-
-  printf("[RevoluteNodes] frame=%u\n", frame);
-
-  for (PxU32 i = 0; i < gRevoluteChainBodies.size(); ++i) {
-    PxRigidDynamic *body = gRevoluteChainBodies[i];
-    const PxTransform pose = body->getGlobalPose();
-    const PxVec3 w = body->getAngularVelocity();
-    printf("  node%u p=(%.3f,%.3f,%.3f) q=(%.4f,%.4f,%.4f,%.4f) "
-           "w=(%.3f,%.3f,%.3f) sleep=%d\n",
-           i, pose.p.x, pose.p.y, pose.p.z, pose.q.x, pose.q.y, pose.q.z,
-           pose.q.w, w.x, w.y, w.z, body->isSleeping() ? 1 : 0);
-  }
-
-  for (PxU32 j = 0; j < gRevoluteChainJoints.size(); ++j) {
-    PxVec3 a0, a1;
-    getJointWorldAxes(gRevoluteChainJoints[j], a0, a1);
-    const PxReal dot = PxClamp(a0.dot(a1), -1.0f, 1.0f);
-    const PxReal misDeg = PxAcos(dot) * 180.0f / PxPi;
-    const PxReal angle = gRevoluteChainJoints[j]->getAngle();
-    const PxReal vel = gRevoluteChainJoints[j]->getVelocity();
-    printf("  joint%u angle=%.4f vel=%.4f axisMisalignDeg=%.3f\n", j, angle,
-           vel, misDeg);
-  }
-}
-
-static void dumpPrismaticChainState(PxU32 frame) {
-  if (gPrismaticChainBodies.size() < 5 || gPrismaticChainJoints.size() < 5 ||
-      gPrismaticRestPositions.size() < 5)
-    return;
-
-  printf("[PrismaticNodes] frame=%u\n", frame);
-
-  for (PxU32 i = 0; i < gPrismaticChainBodies.size(); ++i) {
-    PxRigidDynamic *body = gPrismaticChainBodies[i];
-    const PxTransform pose = body->getGlobalPose();
-    const PxVec3 linearVelocity = body->getLinearVelocity();
-    const PxVec3 angularVelocity = body->getAngularVelocity();
-    const PxVec3 restDelta = pose.p - gPrismaticRestPositions[i];
-    const PxReal transverse =
-        PxSqrt(restDelta.y * restDelta.y + restDelta.z * restDelta.z);
-    printf("  node%u p=(%.3f,%.3f,%.3f) d=(%.3f,%.3f,%.3f) trans=%.4f "
-           "v=(%.3f,%.3f,%.3f) w=(%.3f,%.3f,%.3f) sleep=%d\n",
-           i, pose.p.x, pose.p.y, pose.p.z, restDelta.x, restDelta.y,
-           restDelta.z, transverse, linearVelocity.x, linearVelocity.y,
-           linearVelocity.z, angularVelocity.x, angularVelocity.y,
-           angularVelocity.z, body->isSleeping() ? 1 : 0);
-  }
-
-  for (PxU32 j = 0; j < gPrismaticChainJoints.size(); ++j) {
-    PxVec3 a0, a1;
-    getJointWorldAxes(gPrismaticChainJoints[j], a0, a1);
-    const PxReal dot = PxClamp(a0.dot(a1), -1.0f, 1.0f);
-    const PxReal misDeg = PxAcos(dot) * 180.0f / PxPi;
-    printf("  joint%u pos=%.4f vel=%.4f axisMisalignDeg=%.3f\n", j,
-           gPrismaticChainJoints[j]->getPosition(),
-           gPrismaticChainJoints[j]->getVelocity(), misDeg);
-  }
-}
-
-static void dumpFixedChainState(PxU32 frame) {
-  if (gFixedChainBodies.size() < 5 || gFixedChainJoints.size() < 5)
-    return;
-
-  printf("[FixedNodes] frame=%u\n", frame);
-
-  for (PxU32 i = 0; i < gFixedChainBodies.size(); ++i) {
-    PxRigidDynamic *body = gFixedChainBodies[i];
-    const PxTransform pose = body->getGlobalPose();
-    const PxVec3 linearVelocity = body->getLinearVelocity();
-    const PxVec3 angularVelocity = body->getAngularVelocity();
-    printf("  node%u p=(%.3f,%.3f,%.3f) v=(%.3f,%.3f,%.3f) w=(%.3f,%.3f,%.3f) sleep=%d\n",
-           i, pose.p.x, pose.p.y, pose.p.z, linearVelocity.x, linearVelocity.y,
-           linearVelocity.z, angularVelocity.x, angularVelocity.y,
-           angularVelocity.z, body->isSleeping() ? 1 : 0);
-  }
-
-  for (PxU32 j = 0; j < gFixedChainJoints.size(); ++j) {
-    PxVec3 linearForce(0.0f), angularForce(0.0f);
-    PxConstraint *constraint = gFixedChainJoints[j]->getConstraint();
-    if (!constraint)
-      continue;
-    constraint->getForce(linearForce, angularForce);
-    const PxReal linMag = linearForce.magnitude();
-    const PxReal angMag = angularForce.magnitude();
-    const bool broken = constraint->getFlags().isSet(PxConstraintFlag::eBROKEN);
-    printf("  joint%u linForce=%.4f angForce=%.4f broken=%d f=(%.3f,%.3f,%.3f) t=(%.3f,%.3f,%.3f)\n",
-           j, linMag, angMag, broken ? 1 : 0, linearForce.x, linearForce.y,
-           linearForce.z, angularForce.x, angularForce.y, angularForce.z);
-  }
 }
 
 static void getJointWorldAxes(PxRevoluteJoint *joint, PxVec3 &axis0,
@@ -427,7 +322,6 @@ static void createChain(const PxTransform &t, PxU32 length, const PxGeometry &g,
           gRevoluteChainJoints.push_back(revolute);
       }
     } else if (createJoint == createBreakableFixed) {
-      gFixedChainBodies.push_back(current);
       if (joint) {
         PxFixedJoint *fixed = joint->is<PxFixedJoint>();
         if (fixed) {
@@ -451,7 +345,7 @@ static void createChain(const PxTransform &t, PxU32 length, const PxGeometry &g,
   }
 }
 
-void initPhysics(bool /*interactive*/) {
+void initPhysics(bool interactive) {
   gFoundation =
       PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
   gPvd = PxCreatePvd(*gFoundation);
@@ -468,11 +362,12 @@ void initPhysics(bool /*interactive*/) {
   gDispatcher = PxDefaultCpuDispatcherCreate(2);
   sceneDesc.cpuDispatcher = gDispatcher;
   sceneDesc.filterShader = PxDefaultSimulationFilterShader;
-    sceneDesc.solverType = gSolverType;
+  sceneDesc.solverType = gSolverType;
   gScene = gPhysics->createScene(sceneDesc);
 
+  if (!interactive)
     printf("[SnippetJointConfig] solver=%s\n",
-      getSolverTypeName(sceneDesc.solverType));
+           getSolverTypeName(sceneDesc.solverType));
 
   PxPvdSceneClient *pvdClient = gScene->getScenePvdClient();
   if (pvdClient) {
@@ -499,16 +394,12 @@ void initPhysics(bool /*interactive*/) {
               PxBoxGeometry(2.0f, 0.5f, 0.5f), 4.0f, createLimitedRevolute);
 }
 
-void stepPhysics(bool /*interactive*/) {
+void stepPhysics(bool interactive) {
   gScene->simulate(1.0f / 60.0f);
   gScene->fetchResults(true);
 
-  if (shouldDumpRevoluteState(gRevoluteStats.frame))
-    dumpRevoluteChainState(gRevoluteStats.frame);
-  if (shouldDumpRevoluteState(gRevoluteStats.frame))
-    dumpFixedChainState(gRevoluteStats.frame);
-  if (shouldDumpRevoluteState(gRevoluteStats.frame))
-    dumpPrismaticChainState(gRevoluteStats.frame);
+  if (interactive)
+    return;
 
   for (PxU32 j = 0; j < gFixedChainJoints.size(); ++j) {
     PxVec3 linearForce(0.0f), angularForce(0.0f);
@@ -516,19 +407,16 @@ void stepPhysics(bool /*interactive*/) {
     if (!constraint)
       continue;
     constraint->getForce(linearForce, angularForce);
-    gFixedStats.maxLinearForce = PxMax(gFixedStats.maxLinearForce,
-                                       linearForce.magnitude());
-    gFixedStats.maxAngularForce = PxMax(gFixedStats.maxAngularForce,
-                                        angularForce.magnitude());
+    gFixedStats.maxLinearForce =
+        PxMax(gFixedStats.maxLinearForce, linearForce.magnitude());
+    gFixedStats.maxAngularForce =
+        PxMax(gFixedStats.maxAngularForce, angularForce.magnitude());
     const bool broken = constraint->getFlags().isSet(PxConstraintFlag::eBROKEN);
     if (broken && j < gFixedBreakReported.size() && !gFixedBreakReported[j]) {
       gFixedBreakReported[j] = 1;
       if (gFixedStats.firstBrokenFrame == PX_MAX_U32)
         gFixedStats.firstBrokenFrame = gRevoluteStats.frame;
       gFixedStats.brokenCount++;
-      printf("[FixedBreak] frame=%u joint=%u linForce=%.4f angForce=%.4f\n",
-             gRevoluteStats.frame, j, linearForce.magnitude(),
-             angularForce.magnitude());
     }
   }
 
@@ -638,97 +526,116 @@ void stepPhysics(bool /*interactive*/) {
   gRevoluteStats.frame++;
 }
 
-void cleanupPhysics(bool /*interactive*/) {
-  const PxReal avgW4Early = gRevoluteStats.cntEarly
-                                ? gRevoluteStats.sumW4Early / gRevoluteStats.cntEarly
-                                : 0.0f;
-  const PxReal avgW5Early = gRevoluteStats.cntEarly
-                                ? gRevoluteStats.sumW5Early / gRevoluteStats.cntEarly
-                                : 0.0f;
-  const PxReal avgW4Late = gRevoluteStats.cntLate
-                               ? gRevoluteStats.sumW4Late / gRevoluteStats.cntLate
-                               : 0.0f;
-  const PxReal avgW5Late = gRevoluteStats.cntLate
-                               ? gRevoluteStats.sumW5Late / gRevoluteStats.cntLate
-                               : 0.0f;
-    const PxReal avgW4PerpEarly = gRevoluteStats.cntEarly
-             ? gRevoluteStats.sumW4PerpEarly / gRevoluteStats.cntEarly
-             : 0.0f;
-    const PxReal avgW5PerpEarly = gRevoluteStats.cntEarly
-             ? gRevoluteStats.sumW5PerpEarly / gRevoluteStats.cntEarly
-             : 0.0f;
-    const PxReal avgW4PerpLate = gRevoluteStats.cntLate
+void cleanupPhysics(bool interactive) {
+  if (!interactive) {
+    const PxReal avgW4Early =
+        gRevoluteStats.cntEarly
+            ? gRevoluteStats.sumW4Early / gRevoluteStats.cntEarly
+            : 0.0f;
+    const PxReal avgW5Early =
+        gRevoluteStats.cntEarly
+            ? gRevoluteStats.sumW5Early / gRevoluteStats.cntEarly
+            : 0.0f;
+    const PxReal avgW4Late = gRevoluteStats.cntLate ? gRevoluteStats.sumW4Late /
+                                                          gRevoluteStats.cntLate
+                                                    : 0.0f;
+    const PxReal avgW5Late = gRevoluteStats.cntLate ? gRevoluteStats.sumW5Late /
+                                                          gRevoluteStats.cntLate
+                                                    : 0.0f;
+    const PxReal avgW4PerpEarly =
+        gRevoluteStats.cntEarly
+            ? gRevoluteStats.sumW4PerpEarly / gRevoluteStats.cntEarly
+            : 0.0f;
+    const PxReal avgW5PerpEarly =
+        gRevoluteStats.cntEarly
+            ? gRevoluteStats.sumW5PerpEarly / gRevoluteStats.cntEarly
+            : 0.0f;
+    const PxReal avgW4PerpLate =
+        gRevoluteStats.cntLate
             ? gRevoluteStats.sumW4PerpLate / gRevoluteStats.cntLate
             : 0.0f;
-    const PxReal avgW5PerpLate = gRevoluteStats.cntLate
+    const PxReal avgW5PerpLate =
+        gRevoluteStats.cntLate
             ? gRevoluteStats.sumW5PerpLate / gRevoluteStats.cntLate
             : 0.0f;
-  const PxReal awake4LateRatio = gRevoluteStats.cntLate
-                                     ? PxReal(gRevoluteStats.awake4Late) / PxReal(gRevoluteStats.cntLate)
-                                     : 0.0f;
-  const PxReal awake5LateRatio = gRevoluteStats.cntLate
-                                     ? PxReal(gRevoluteStats.awake5Late) / PxReal(gRevoluteStats.cntLate)
-                                     : 0.0f;
-  const PxReal growth4 = (avgW4Early > 1e-6f) ? (avgW4Late / avgW4Early) : 0.0f;
-  const PxReal growth5 = (avgW5Early > 1e-6f) ? (avgW5Late / avgW5Early) : 0.0f;
-    const PxReal growth4Perp = (avgW4PerpEarly > 1e-6f) ? (avgW4PerpLate / avgW4PerpEarly) : 0.0f;
-    const PxReal growth5Perp = (avgW5PerpEarly > 1e-6f) ? (avgW5PerpLate / avgW5PerpEarly) : 0.0f;
-    const bool jitterReproduced = (growth4Perp > 1.10f) || (growth5Perp > 1.10f) ||
-                                (gRevoluteStats.maxW4PerpLate > 2.0f && awake4LateRatio > 0.30f) ||
-                                (gRevoluteStats.maxW5PerpLate > 2.0f && awake5LateRatio > 0.30f) ||
-                                (gRevoluteStats.flip4 > 140);
+    const PxReal awake4LateRatio =
+        gRevoluteStats.cntLate
+            ? PxReal(gRevoluteStats.awake4Late) / PxReal(gRevoluteStats.cntLate)
+            : 0.0f;
+    const PxReal awake5LateRatio =
+        gRevoluteStats.cntLate
+            ? PxReal(gRevoluteStats.awake5Late) / PxReal(gRevoluteStats.cntLate)
+            : 0.0f;
+    const PxReal growth4 =
+        (avgW4Early > 1e-6f) ? (avgW4Late / avgW4Early) : 0.0f;
+    const PxReal growth5 =
+        (avgW5Early > 1e-6f) ? (avgW5Late / avgW5Early) : 0.0f;
+    const PxReal growth4Perp =
+        (avgW4PerpEarly > 1e-6f) ? (avgW4PerpLate / avgW4PerpEarly) : 0.0f;
+    const PxReal growth5Perp =
+        (avgW5PerpEarly > 1e-6f) ? (avgW5PerpLate / avgW5PerpEarly) : 0.0f;
+    const bool jitterReproduced =
+        (growth4Perp > 1.10f) || (growth5Perp > 1.10f) ||
+        (gRevoluteStats.maxW4PerpLate > 2.0f && awake4LateRatio > 0.30f) ||
+        (gRevoluteStats.maxW5PerpLate > 2.0f && awake5LateRatio > 0.30f) ||
+        (gRevoluteStats.flip4 > 140);
 
-  printf("[RevoluteDiag] tail lateral max=%.5f, avgW early=(%.5f,%.5f), "
-      "avgW late=(%.5f,%.5f), growth=(%.3f,%.3f), "
-      "avgWPerp early=(%.5f,%.5f), avgWPerp late=(%.5f,%.5f), "
-      "growthPerp=(%.3f,%.3f), maxWPerpLate=(%.5f,%.5f), awakeLate=(%.3f,%.3f), "
-      "max|angle|=(%.3f,%.3f), axisMisalignDeg=(%.3f,%.3f), flips=(%u,%u), "
-      "jitter_reproduced=%s\n",
-         gRevoluteStats.maxTailLateral, avgW4Early, avgW5Early, avgW4Late,
-      avgW5Late, growth4, growth5, avgW4PerpEarly, avgW5PerpEarly,
-      avgW4PerpLate, avgW5PerpLate, growth4Perp, growth5Perp,
-      gRevoluteStats.maxW4PerpLate, gRevoluteStats.maxW5PerpLate,
-      awake4LateRatio, awake5LateRatio,
-      gRevoluteStats.maxAbsAngle3, gRevoluteStats.maxAbsAngle4,
-      gRevoluteStats.maxAxisMisalign3Deg, gRevoluteStats.maxAxisMisalign4Deg,
-      gRevoluteStats.flip3,
-         gRevoluteStats.flip4, jitterReproduced ? "true" : "false");
+    printf(
+        "[RevoluteDiag] tail lateral max=%.5f, avgW early=(%.5f,%.5f), "
+        "avgW late=(%.5f,%.5f), growth=(%.3f,%.3f), "
+        "avgWPerp early=(%.5f,%.5f), avgWPerp late=(%.5f,%.5f), "
+        "growthPerp=(%.3f,%.3f), maxWPerpLate=(%.5f,%.5f), "
+        "awakeLate=(%.3f,%.3f), "
+        "max|angle|=(%.3f,%.3f), axisMisalignDeg=(%.3f,%.3f), flips=(%u,%u), "
+        "jitter_reproduced=%s\n",
+        gRevoluteStats.maxTailLateral, avgW4Early, avgW5Early, avgW4Late,
+        avgW5Late, growth4, growth5, avgW4PerpEarly, avgW5PerpEarly,
+        avgW4PerpLate, avgW5PerpLate, growth4Perp, growth5Perp,
+        gRevoluteStats.maxW4PerpLate, gRevoluteStats.maxW5PerpLate,
+        awake4LateRatio, awake5LateRatio, gRevoluteStats.maxAbsAngle3,
+        gRevoluteStats.maxAbsAngle4, gRevoluteStats.maxAxisMisalign3Deg,
+        gRevoluteStats.maxAxisMisalign4Deg, gRevoluteStats.flip3,
+        gRevoluteStats.flip4, jitterReproduced ? "true" : "false");
 
-      const PxReal avgPrismaticTailEarly =
+    const PxReal avgPrismaticTailEarly =
         gPrismaticStats.cntEarly
-          ? gPrismaticStats.sumTailEarly / gPrismaticStats.cntEarly
-          : 0.0f;
-      const PxReal avgPrismaticTailLate =
-        gPrismaticStats.cntLate ? gPrismaticStats.sumTailLate / gPrismaticStats.cntLate
-                    : 0.0f;
-      const PxReal avgPrismaticTailAngVelEarly =
-        gPrismaticStats.cntEarly
-          ? gPrismaticStats.sumTailAngVelEarly / gPrismaticStats.cntEarly
-          : 0.0f;
-      const PxReal avgPrismaticTailAngVelLate =
+            ? gPrismaticStats.sumTailEarly / gPrismaticStats.cntEarly
+            : 0.0f;
+    const PxReal avgPrismaticTailLate =
         gPrismaticStats.cntLate
-          ? gPrismaticStats.sumTailAngVelLate / gPrismaticStats.cntLate
-          : 0.0f;
-      const PxReal prismaticTailGrowth =
+            ? gPrismaticStats.sumTailLate / gPrismaticStats.cntLate
+            : 0.0f;
+    const PxReal avgPrismaticTailAngVelEarly =
+        gPrismaticStats.cntEarly
+            ? gPrismaticStats.sumTailAngVelEarly / gPrismaticStats.cntEarly
+            : 0.0f;
+    const PxReal avgPrismaticTailAngVelLate =
+        gPrismaticStats.cntLate
+            ? gPrismaticStats.sumTailAngVelLate / gPrismaticStats.cntLate
+            : 0.0f;
+    const PxReal prismaticTailGrowth =
         (avgPrismaticTailEarly > 1e-6f)
-          ? (avgPrismaticTailLate / avgPrismaticTailEarly)
-          : 0.0f;
-      const PxReal prismaticAngVelGrowth =
+            ? (avgPrismaticTailLate / avgPrismaticTailEarly)
+            : 0.0f;
+    const PxReal prismaticAngVelGrowth =
         (avgPrismaticTailAngVelEarly > 1e-6f)
-          ? (avgPrismaticTailAngVelLate / avgPrismaticTailAngVelEarly)
-          : 0.0f;
+            ? (avgPrismaticTailAngVelLate / avgPrismaticTailAngVelEarly)
+            : 0.0f;
 
-      printf("[PrismaticDiag] tail transverse max=%.5f, avgTail early=%.5f, "
-         "avgTail late=%.5f, tailGrowth=%.3f, avgTailAngVel early=%.5f, "
-         "avgTailAngVel late=%.5f, angVelGrowth=%.3f, maxAxisMisalignDeg=%.3f\n",
-         gPrismaticStats.maxTailTransverse, avgPrismaticTailEarly,
-         avgPrismaticTailLate, prismaticTailGrowth, avgPrismaticTailAngVelEarly,
-         avgPrismaticTailAngVelLate, prismaticAngVelGrowth,
-         gPrismaticStats.maxJointAxisMisalignDeg);
+    printf(
+        "[PrismaticDiag] tail transverse max=%.5f, avgTail early=%.5f, "
+        "avgTail late=%.5f, tailGrowth=%.3f, avgTailAngVel early=%.5f, "
+        "avgTailAngVel late=%.5f, angVelGrowth=%.3f, maxAxisMisalignDeg=%.3f\n",
+        gPrismaticStats.maxTailTransverse, avgPrismaticTailEarly,
+        avgPrismaticTailLate, prismaticTailGrowth, avgPrismaticTailAngVelEarly,
+        avgPrismaticTailAngVelLate, prismaticAngVelGrowth,
+        gPrismaticStats.maxJointAxisMisalignDeg);
 
-    printf("[FixedDiag] maxLinForce=%.5f, maxAngForce=%.5f, firstBrokenFrame=%u, brokenCount=%u\n",
-        gFixedStats.maxLinearForce, gFixedStats.maxAngularForce,
-        gFixedStats.firstBrokenFrame, gFixedStats.brokenCount);
+    printf("[FixedDiag] maxLinForce=%.5f, maxAngForce=%.5f, "
+           "firstBrokenFrame=%u, brokenCount=%u\n",
+           gFixedStats.maxLinearForce, gFixedStats.maxAngularForce,
+           gFixedStats.firstBrokenFrame, gFixedStats.brokenCount);
+  }
 
   PX_RELEASE(gScene);
   PX_RELEASE(gDispatcher);

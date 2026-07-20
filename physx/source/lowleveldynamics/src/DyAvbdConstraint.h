@@ -31,6 +31,8 @@
 #include "foundation/PxSimpleTypes.h"
 #include "foundation/PxVec3.h"
 
+#include "DyAvbdTypes.h"
+
 // Forward declarations for D6 joint drive constants
 struct PxD6Drive {
   enum Enum {
@@ -120,6 +122,119 @@ struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
         padding0(0) {}
 } PX_ALIGN_SUFFIX(16);
 
+/** One island body dynamic, the other world/static (triangle mesh ground). */
+PX_FORCE_INLINE bool isBodyVsStaticContact(physx::PxU32 bodyAIdx,
+                                           physx::PxU32 bodyBIdx,
+                                           physx::PxU32 numBodies) {
+  const bool dynA = bodyAIdx < numBodies;
+  const bool dynB = bodyBIdx < numBodies;
+  return dynA != dynB;
+}
+
+/** Set in prep when static partner has negative rest (e.g. deformable mesh). */
+struct AvbdContactConstraintFlags {
+  enum Enum : physx::PxU16 {
+    eNONE = 0,
+    eDEFORMABLE_STATIC_ANCHOR = 1u << 0,
+    eKINEMATIC_SHELL_ANCHOR = 1u << 1,
+    /** Last dual step was inside Coulomb cone (static μ for next evaluation). */
+    eFRICTION_STICK = 1u << 2,
+  };
+};
+
+// -----------------------------------------------------------------------------
+// Coulomb friction (aligned with avbd-demo3d manifold.cpp / standalone
+// avbd_friction_semantics.h). Bound uses normal force F_n, not raw λ alone;
+// tangents are projected as a 2D cone, not independent axis clamps.
+// -----------------------------------------------------------------------------
+static constexpr physx::PxReal AVBD_FRICTION_STICK_THRESH = 1e-5f;
+
+PX_FORCE_INLINE physx::PxReal avbdCoulombMu(physx::PxReal staticMu,
+                                            physx::PxReal dynamicMu,
+                                            bool stick) {
+  const physx::PxReal muS = staticMu > 0.0f ? staticMu : dynamicMu;
+  const physx::PxReal muD = dynamicMu > 0.0f ? dynamicMu : staticMu;
+  if (muS <= 0.0f && muD <= 0.0f)
+    return 0.0f;
+  // Prefer dynamic μ unless truly sticking. Using μ_s while stick is sticky
+  // but still warm from impact over-damps HelloWorld ball-shot stacks.
+  // Cap static boost: never more than 1.25× dynamic for the dual cone.
+  if (!stick)
+    return muD;
+  const physx::PxReal muStick = physx::PxMin(muS, muD * 1.25f);
+  return muStick > 0.0f ? muStick : muD;
+}
+
+PX_FORCE_INLINE void avbdProjectCoulombCone(physx::PxReal Fn, physx::PxReal mu,
+                                            physx::PxReal &Ft0,
+                                            physx::PxReal &Ft1) {
+  if (mu <= 0.0f) {
+    Ft0 = 0.0f;
+    Ft1 = 0.0f;
+    return;
+  }
+  const physx::PxReal bounds = physx::PxAbs(Fn) * mu;
+  const physx::PxReal len = physx::PxSqrt(Ft0 * Ft0 + Ft1 * Ft1);
+  if (len > bounds && len > 1e-20f) {
+    const physx::PxReal s = bounds / len;
+    Ft0 *= s;
+    Ft1 *= s;
+  }
+}
+
+/** Returns pre-projection ||Ft|| for penalty growth / stick tests. */
+PX_FORCE_INLINE physx::PxReal avbdEvaluateContactForcesCone(
+    physx::PxReal penN, physx::PxReal Cn, physx::PxReal lambdaN,
+    physx::PxReal penT0, physx::PxReal Ct0, physx::PxReal lambdaT0,
+    physx::PxReal penT1, physx::PxReal Ct1, physx::PxReal lambdaT1,
+    physx::PxReal mu, physx::PxReal &Fn, physx::PxReal &Ft0,
+    physx::PxReal &Ft1) {
+  Fn = penN * Cn + lambdaN;
+  if (Fn > 0.0f)
+    Fn = 0.0f;
+  Ft0 = penT0 * Ct0 + lambdaT0;
+  Ft1 = penT1 * Ct1 + lambdaT1;
+  const physx::PxReal preLen = physx::PxSqrt(Ft0 * Ft0 + Ft1 * Ft1);
+  // Capacity: max(|Fn|, |prior compressive λ|) so brief separation does not
+  // zero the Coulomb bound while dual still carries normal force.
+  const physx::PxReal priorCompress = (lambdaN < 0.0f) ? -lambdaN : 0.0f;
+  const physx::PxReal nCap = physx::PxMax(-Fn, priorCompress);
+  avbdProjectCoulombCone(-nCap, mu, Ft0, Ft1);
+  return preLen;
+}
+
+PX_FORCE_INLINE bool avbdFrictionStickFromDual(
+    physx::PxReal nForceCap, physx::PxReal mu, physx::PxReal preTangentForceLen,
+    physx::PxReal Ct0, physx::PxReal Ct1,
+    physx::PxReal stickThresh = AVBD_FRICTION_STICK_THRESH) {
+  const physx::PxReal bounds = physx::PxAbs(nForceCap) * mu;
+  if (preTangentForceLen > bounds)
+    return false;
+  const physx::PxReal cLen = physx::PxSqrt(Ct0 * Ct0 + Ct1 * Ct1);
+  return cLen < stickThresh;
+}
+
+PX_FORCE_INLINE void avbdProjectImpulseCone(physx::PxReal jMax,
+                                            physx::PxReal &j0,
+                                            physx::PxReal &j1) {
+  if (jMax <= 0.0f) {
+    j0 = 0.0f;
+    j1 = 0.0f;
+    return;
+  }
+  const physx::PxReal len = physx::PxSqrt(j0 * j0 + j1 * j1);
+  if (len > jMax && len > 1e-20f) {
+    const physx::PxReal s = jMax / len;
+    j0 *= s;
+    j1 *= s;
+  }
+}
+
+PX_FORCE_INLINE bool isDeformableStaticAnchorContact(bool bodyVsStatic,
+                                                     physx::PxReal restDistance) {
+  return bodyVsStatic && restDistance < -0.05f;
+}
+
 /**
  * @brief Contact constraint for AVBD solver
  *
@@ -143,10 +258,15 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
                                   //!< (negative = penetrating)
 
   physx::PxVec3 contactPointB; //!< Contact point on body B (local space)
-  physx::PxReal restitution;   //!< Coefficient of restitution
+  /**
+   * Combined coefficient of restitution from NP patch (material combine done
+   * upstream). Consumed in post-AL material normal response (rigid bounce).
+   * e < 0 (PhysX compliant) treated as inelastic for now.
+   */
+  physx::PxReal restitution;
 
   physx::PxVec3 contactNormal; //!< Contact normal (world space, from B to A)
-  physx::PxReal friction;      //!< Friction coefficient
+  physx::PxReal friction;      //!< Dynamic friction μ_d (NP-combined)
 
   //-------------------------------------------------------------------------
   // Friction tangents
@@ -157,6 +277,8 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
 
   physx::PxVec3 tangent1;       //!< Second friction tangent direction
   physx::PxReal tangentLambda1; //!< Lambda for second friction direction
+
+  physx::PxReal staticFriction; //!< Static friction μ_s (NP-combined)
 
   //-------------------------------------------------------------------------
   // Per-row penalty for 3-row AL friction model (ref: AVBD3D)
@@ -173,12 +295,22 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
 
   physx::PxU32 cacheIndex; //!< Index into lambda cache for warm-starting
                            //!< (PX_MAX_U32 = not cached)
+  physx::PxU64 cacheKey;   //!< Contact identity expected in the cache slot
 
   //-------------------------------------------------------------------------
   // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
   //-------------------------------------------------------------------------
 
   physx::PxReal C0; //!< Initial normal constraint violation at step start
+
+  /** Previous-frame world contact on static/deformable partner (friction). */
+  physx::PxVec3 staticPrevWorldPoint;
+
+  /**
+   * Support classification for surface-motion and friction policy.
+   * Filled in post-AL friction prep.
+   */
+  physx::PxU8 supportClass;
 
   //-------------------------------------------------------------------------
   // Methods
@@ -355,6 +487,87 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   }
 
 } PX_ALIGN_SUFFIX(16);
+
+PX_FORCE_INLINE bool hasKinematicShellAnchor(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags & AvbdContactConstraintFlags::eKINEMATIC_SHELL_ANCHOR) !=
+         0;
+}
+
+PX_FORCE_INLINE bool hasDeformableStaticAnchor(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::eDEFORMABLE_STATIC_ANCHOR) != 0;
+}
+
+PX_FORCE_INLINE bool hasFrictionStick(const AvbdContactConstraint &c) {
+  return (c.header.flags & AvbdContactConstraintFlags::eFRICTION_STICK) != 0;
+}
+
+PX_FORCE_INLINE void setFrictionStick(AvbdContactConstraint &c, bool stick) {
+  if (stick)
+    c.header.flags =
+        physx::PxU16(c.header.flags | AvbdContactConstraintFlags::eFRICTION_STICK);
+  else
+    c.header.flags = physx::PxU16(
+        c.header.flags & ~AvbdContactConstraintFlags::eFRICTION_STICK);
+}
+
+PX_FORCE_INLINE physx::PxReal contactCoulombMu(const AvbdContactConstraint &c) {
+  return avbdCoulombMu(c.staticFriction, c.friction, hasFrictionStick(c));
+}
+
+/** Primal-only: never stack body-static tangents in multi-contact 6x6. */
+PX_FORCE_INLINE bool useBodyVsStaticFrictionIn6x6(
+    physx::PxU32 bodyAIdx, physx::PxU32 bodyBIdx, physx::PxU32 numBodies) {
+  return !isBodyVsStaticContact(bodyAIdx, bodyBIdx, numBodies);
+}
+
+/** Body-static tangents in 6x6: one dominant contact, or all if N<=4 on body. */
+PX_FORCE_INLINE bool useBodyVsStaticTangentPrimalIn6x6(
+    bool bodyVsStatic, physx::PxU32 contactIdx,
+    physx::PxU32 dominantBodyStaticContactIdx,
+    physx::PxU32 staticContactsOnBody) {
+  if (!bodyVsStatic)
+    return true;
+  if (staticContactsOnBody <= 8u)
+    return true;
+  return contactIdx == dominantBodyStaticContactIdx;
+}
+
+PX_FORCE_INLINE void getBodyVsStaticWorldContact(
+    const AvbdContactConstraint &c, physx::PxU32 numBodies,
+    physx::PxVec3 &worldNow, physx::PxVec3 &worldPrev) {
+  if (c.header.bodyIndexA < numBodies) {
+    worldNow = c.contactPointB;
+  } else {
+    worldNow = c.contactPointA;
+  }
+  worldPrev = c.staticPrevWorldPoint;
+}
+
+PX_FORCE_INLINE physx::PxVec3 computeBodyVsStaticRelDisp(
+    const physx::PxVec3 &worldPosA, const physx::PxVec3 &prevWorldPosA,
+    const physx::PxVec3 &worldPosB, const physx::PxVec3 &prevWorldPosB,
+    const AvbdContactConstraint &c, physx::PxU32 numBodies) {
+  physx::PxVec3 staticNow, staticPrev;
+  getBodyVsStaticWorldContact(c, numBodies, staticNow, staticPrev);
+  if (c.header.bodyIndexA < numBodies)
+    return (worldPosA - prevWorldPosA) - (staticNow - staticPrev);
+  return (worldPosB - prevWorldPosB) - (staticNow - staticPrev);
+}
+
+PX_FORCE_INLINE physx::PxReal finalizeBodyVsStaticViolation(
+    physx::PxReal violation, physx::PxReal penetrationDepth) {
+  if (violation >= 0.0f)
+    return violation;
+  // penetrationDepth follows the PhysX separation convention after the
+  // deformable rest-distance adjustment: negative means penetrating.  Keep
+  // that captured depth as the lower bound while the row is active.  Negating
+  // it loses real negative depth and turns positive separation into a false
+  // penetration impulse.
+  return physx::PxMin(violation, penetrationDepth);
+}
 
 /**
  * @brief Weld joint constraint for AVBD solver (Unified Fixed/Weld Joint)
@@ -1168,6 +1381,11 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
  *   - Spring forces (optional)
  */
 struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
+  enum SourceFlag {
+    eD6_SLERP_DRIVE = 1u << 0,
+    eSAME_ARTICULATION_EXTERNAL_SPHERICAL = 1u << 1
+  };
+
   AvbdConstraintHeader header;
 
   //-------------------------------------------------------------------------
@@ -1238,7 +1456,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
                            //!< 3-5 angular)
   physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
-  physx::PxU32 sourceFlags; //!< Prep-side source tags (bit1=0x2 same-artic external spherical)
+  physx::PxU32 sourceFlags; //!< Prep-side SourceFlag tags
   physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
   physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
   physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)

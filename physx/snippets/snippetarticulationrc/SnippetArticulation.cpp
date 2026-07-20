@@ -53,6 +53,16 @@ static PxArticulationJointReducedCoordinate*	gDriveJoint		= NULL;
 static PxSolverType::Enum						gSolverType		= PxSolverType::eAVBD;
 static PxArticulationLink*						gBaseLink		= NULL;
 static PxArticulationLink*						gTopLink		= NULL;
+static PxArticulationLink*						gDriveLink		= NULL;
+static PxD6Joint*								gLoopJoints[8]	= {};
+static PxU32									gLoopJointCount	= 0;
+
+static void trackLoopJoint(PxD6Joint* joint)
+{
+	PX_ASSERT(gLoopJointCount < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]));
+	if(gLoopJointCount < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]))
+		gLoopJoints[gLoopJointCount++] = joint;
+}
 
 static const char* getSolverTypeName(PxSolverType::Enum solverType)
 {
@@ -141,6 +151,7 @@ static void createScissorLift()
 	PxArticulationLink* rightRoot = gArticulation->createLink(base, PxTransform(PxVec3(0.f, 0.55f, 0.9f)));
 	PxRigidActorExt::createExclusiveShape(*rightRoot, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);
 	PxRigidBodyExt::updateMassAndInertia(*rightRoot, 1.f);
+	gDriveLink = rightRoot;
 
 	PxArticulationJointReducedCoordinate* joint = leftRoot->getInboundJoint();
 	joint->setJointType(PxArticulationJointType::eFIX);
@@ -199,6 +210,7 @@ static void createScissorLift()
 		rightParentRot = rightRot;
 
 		PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, leftLink, PxTransform(PxIdentity), rightLink, PxTransform(PxIdentity));
+		trackLoopJoint(d6joint);
 
 		d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
 		d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
@@ -275,6 +287,7 @@ static void createScissorLift()
 		rightParentRot = rightRot;
 
 		PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, leftLink, PxTransform(PxIdentity), rightLink, PxTransform(PxIdentity));
+		trackLoopJoint(d6joint);
 
 		d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
 		d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
@@ -285,12 +298,14 @@ static void createScissorLift()
 	}
 
 	PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, currLeft, PxTransform(PxVec3(0.f, 0.f, -1.f)), leftTop, PxTransform(PxVec3(-0.5f, 0.f, 0.f)));
+	trackLoopJoint(d6joint);
 
 	d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
 	d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
 	d6joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
 
 	d6joint = PxD6JointCreate(*gPhysics, currRight, PxTransform(PxVec3(0.f, 0.f, 1.f)), rightTop, PxTransform(PxVec3(-0.5f, 0.f, 0.f)));
+	trackLoopJoint(d6joint);
 
 	d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
 	d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
@@ -447,13 +462,256 @@ struct ScissorStats
 	PxReal baseTiltDegMax = 0.0f;
 	PxU32 nonFiniteFrame = PX_MAX_U32;
 	PxU32 firstReportedFrame = PX_MAX_U32;
+	PxReal driveCoord = 0.0f;
+	PxReal driveCoordVelocity = 0.0f;
+	PxReal driveErrorMax = 0.0f;
+	PxU32 firstDriveErrorFrame = PX_MAX_U32;
+	PxU32 firstStallFrame = PX_MAX_U32;
+	PxReal stallWindowCoord = 0.0f;
+	PxReal stallWindowTarget = 0.0f;
+	PxU32 stallWindowFrame = PX_MAX_U32;
+	PxReal internalAnchorError = 0.0f;
+	PxU32 internalAnchorLink = PX_MAX_U32;
+	PxReal internalAnchorErrorMax = 0.0f;
+	PxU32 internalAnchorErrorMaxLink = PX_MAX_U32;
+	PxU32 firstInternalAnchorBadFrame = PX_MAX_U32;
+	PxU32 firstInternalAnchorBadLink = PX_MAX_U32;
+	PxReal internalAngularErrorDeg = 0.0f;
+	PxU32 internalAngularLink = PX_MAX_U32;
+	PxReal internalAngularErrorDegMax = 0.0f;
+	PxU32 internalAngularErrorMaxLink = PX_MAX_U32;
+	PxReal twistLimitViolationDeg = 0.0f;
+	PxU32 twistLimitViolationLink = PX_MAX_U32;
+	PxReal twistLimitViolationDegMax = 0.0f;
+	PxU32 twistLimitViolationMaxLink = PX_MAX_U32;
+	PxU32 firstInternalAngularBadFrame = PX_MAX_U32;
+	PxU32 firstInternalAngularBadLink = PX_MAX_U32;
+	PxReal loopAnchorError = 0.0f;
+	PxU32 loopAnchorIndex = PX_MAX_U32;
+	PxReal loopAnchorErrorMax = 0.0f;
+	PxU32 loopAnchorErrorMaxIndex = PX_MAX_U32;
+	PxU32 firstLoopAnchorBadFrame = PX_MAX_U32;
+	PxU32 firstLoopAnchorBadIndex = PX_MAX_U32;
+	PxU32 phaseHeightCount = 0;
+	PxReal phaseFirstHeight = 0.0f;
+	PxReal phaseReferenceHeight = 0.0f;
+	PxReal phaseBaselineSpread = PX_MAX_F32;
+	PxReal phaseMaxRelativeDrift = 0.0f;
+	PxU32 firstBadPhaseSample = PX_MAX_U32;
+	PxU32 consecutiveBadPhaseSamples = 0;
+	bool phaseRegressionFailed = false;
+	PxReal previousPhaseCoord = 0.0f;
+	PxReal previousPhaseHeight = 0.0f;
+	bool phaseStateValid = false;
 };
 
 static ScissorStats gScissorStats;
+static bool gScissorRegressionOK = true;
 
-static bool isFiniteVec(const PxVec3& v)
+static bool isArticulationStateFinite()
 {
-	return PxIsFinite(v.x) && PxIsFinite(v.y) && PxIsFinite(v.z);
+	if(!gArticulation || !PxIsFinite(gScissorStats.driveCoord)
+		|| !PxIsFinite(gScissorStats.driveCoordVelocity))
+		return false;
+
+	const PxU32 linkCount = gArticulation->getNbLinks();
+	for(PxU32 i = 0; i < linkCount; ++i)
+	{
+		PxArticulationLink* link = NULL;
+		gArticulation->getLinks(&link, 1, i);
+		if(!link)
+			return false;
+		const PxTransform pose = link->getGlobalPose();
+		if(!pose.isSane() || !link->getLinearVelocity().isFinite()
+			|| !link->getAngularVelocity().isFinite())
+			return false;
+	}
+	return true;
+}
+
+static void recordPhaseHeightSample(PxReal sampleHeight)
+{
+	const PxU32 sampleNumber = ++gScissorStats.phaseHeightCount;
+	if(sampleNumber == 1)
+	{
+		gScissorStats.phaseFirstHeight = sampleHeight;
+		return;
+	}
+	if(sampleNumber == 2)
+	{
+		gScissorStats.phaseReferenceHeight = 0.5f
+			* (gScissorStats.phaseFirstHeight + sampleHeight);
+		const PxReal referenceScale = PxMax(
+			PxAbs(gScissorStats.phaseReferenceHeight), 0.1f);
+		gScissorStats.phaseBaselineSpread = PxAbs(sampleHeight
+			- gScissorStats.phaseFirstHeight) / referenceScale;
+		return;
+	}
+
+	const PxReal referenceScale = PxMax(
+		PxAbs(gScissorStats.phaseReferenceHeight), 0.1f);
+	const PxReal drift = PxAbs(sampleHeight
+		- gScissorStats.phaseReferenceHeight) / referenceScale;
+	gScissorStats.phaseMaxRelativeDrift = PxMax(
+		gScissorStats.phaseMaxRelativeDrift, drift);
+	if(drift > 0.20f)
+	{
+		if(gScissorStats.firstBadPhaseSample == PX_MAX_U32)
+			gScissorStats.firstBadPhaseSample = sampleNumber;
+		if(++gScissorStats.consecutiveBadPhaseSamples >= 2)
+			gScissorStats.phaseRegressionFailed = true;
+	}
+	else
+	{
+		gScissorStats.consecutiveBadPhaseSamples = 0;
+	}
+}
+
+static PxReal getDriveCoordinate()
+{
+	if(!gBaseLink || !gDriveLink || !gDriveJoint)
+		return 0.0f;
+	const PxTransform parentFrame = gBaseLink->getGlobalPose() * gDriveJoint->getParentPose();
+	const PxTransform childFrame = gDriveLink->getGlobalPose() * gDriveJoint->getChildPose();
+	return parentFrame.q.getBasisVector2().dot(childFrame.p - parentFrame.p);
+}
+
+static void updateAnchorErrors(PxU32 frame)
+{
+	gScissorStats.internalAnchorError = 0.0f;
+	gScissorStats.internalAnchorLink = PX_MAX_U32;
+	gScissorStats.internalAngularErrorDeg = 0.0f;
+	gScissorStats.internalAngularLink = PX_MAX_U32;
+	gScissorStats.twistLimitViolationDeg = 0.0f;
+	gScissorStats.twistLimitViolationLink = PX_MAX_U32;
+	const PxU32 linkCount = gArticulation->getNbLinks();
+	for(PxU32 i = 1; i < linkCount; ++i)
+	{
+		PxArticulationLink* child = NULL;
+		gArticulation->getLinks(&child, 1, i);
+		PxArticulationJointReducedCoordinate* joint = child->getInboundJoint();
+		const PxTransform parentFrame = joint->getParentArticulationLink().getGlobalPose()
+			* joint->getParentPose();
+		const PxTransform childFrame = child->getGlobalPose() * joint->getChildPose();
+		PxVec3 anchorDelta = childFrame.p - parentFrame.p;
+		if(joint == gDriveJoint)
+		{
+			const PxVec3 driveAxis = parentFrame.q.getBasisVector2();
+			anchorDelta -= driveAxis * driveAxis.dot(anchorDelta);
+		}
+		const PxReal error = anchorDelta.magnitude();
+		if(error > gScissorStats.internalAnchorError)
+		{
+			gScissorStats.internalAnchorError = error;
+			gScissorStats.internalAnchorLink = i;
+		}
+
+		if(joint->getJointType() == PxArticulationJointType::eREVOLUTE)
+		{
+			PxQuat relativeQ = parentFrame.q.getConjugate() * childFrame.q;
+			if(relativeQ.w < 0.0f)
+				relativeQ = PxQuat(-relativeQ.x, -relativeQ.y, -relativeQ.z, -relativeQ.w);
+			relativeQ.normalize();
+			PxQuat twist(relativeQ.x, 0.0f, 0.0f, relativeQ.w);
+			if(twist.magnitudeSquared() > 1.0e-12f)
+				twist.normalize();
+			else
+				twist = PxQuat(PxIdentity);
+			PxQuat swing = relativeQ * twist.getConjugate();
+			if(swing.w < 0.0f)
+				swing = PxQuat(-swing.x, -swing.y, -swing.z, -swing.w);
+			swing.normalize();
+			const PxReal swingErrorDeg = swing.getAngle() * 180.0f / PxPi;
+			if(swingErrorDeg > gScissorStats.internalAngularErrorDeg)
+			{
+				gScissorStats.internalAngularErrorDeg = swingErrorDeg;
+				gScissorStats.internalAngularLink = i;
+			}
+
+			if(joint->getMotion(PxArticulationAxis::eTWIST) ==
+				PxArticulationMotion::eLIMITED)
+			{
+				const PxReal twistAngle = 2.0f * PxAtan2(twist.x, twist.w);
+				const PxArticulationLimit limit =
+					joint->getLimitParams(PxArticulationAxis::eTWIST);
+				PxReal violation = 0.0f;
+				if(twistAngle < limit.low)
+					violation = limit.low - twistAngle;
+				else if(twistAngle > limit.high)
+					violation = twistAngle - limit.high;
+				const PxReal violationDeg = violation * 180.0f / PxPi;
+				if(violationDeg > gScissorStats.twistLimitViolationDeg)
+				{
+					gScissorStats.twistLimitViolationDeg = violationDeg;
+					gScissorStats.twistLimitViolationLink = i;
+				}
+			}
+		}
+	}
+	if(gScissorStats.internalAnchorError > gScissorStats.internalAnchorErrorMax)
+	{
+		gScissorStats.internalAnchorErrorMax = gScissorStats.internalAnchorError;
+		gScissorStats.internalAnchorErrorMaxLink = gScissorStats.internalAnchorLink;
+	}
+	if(gScissorStats.firstInternalAnchorBadFrame == PX_MAX_U32
+		&& gScissorStats.internalAnchorError > 0.1f)
+	{
+		gScissorStats.firstInternalAnchorBadFrame = frame;
+		gScissorStats.firstInternalAnchorBadLink = gScissorStats.internalAnchorLink;
+		printf("[ScissorInternalAnchor] firstFrame=%u link=%u error=%.4f\n",
+			frame, gScissorStats.internalAnchorLink, gScissorStats.internalAnchorError);
+	}
+	if(gScissorStats.internalAngularErrorDeg > gScissorStats.internalAngularErrorDegMax)
+	{
+		gScissorStats.internalAngularErrorDegMax = gScissorStats.internalAngularErrorDeg;
+		gScissorStats.internalAngularErrorMaxLink = gScissorStats.internalAngularLink;
+	}
+	if(gScissorStats.twistLimitViolationDeg > gScissorStats.twistLimitViolationDegMax)
+	{
+		gScissorStats.twistLimitViolationDegMax = gScissorStats.twistLimitViolationDeg;
+		gScissorStats.twistLimitViolationMaxLink = gScissorStats.twistLimitViolationLink;
+	}
+	if(gScissorStats.firstInternalAngularBadFrame == PX_MAX_U32
+		&& gScissorStats.internalAngularErrorDeg > 5.0f)
+	{
+		gScissorStats.firstInternalAngularBadFrame = frame;
+		gScissorStats.firstInternalAngularBadLink = gScissorStats.internalAngularLink;
+		printf("[ScissorRevoluteSwing] firstFrame=%u link=%u errorDeg=%.3f\n",
+			frame, gScissorStats.internalAngularLink,
+			gScissorStats.internalAngularErrorDeg);
+	}
+
+	gScissorStats.loopAnchorError = 0.0f;
+	gScissorStats.loopAnchorIndex = PX_MAX_U32;
+	for(PxU32 i = 0; i < gLoopJointCount; ++i)
+	{
+		PxRigidActor* actor0 = NULL;
+		PxRigidActor* actor1 = NULL;
+		gLoopJoints[i]->getActors(actor0, actor1);
+		const PxTransform frame0 = actor0->getGlobalPose()
+			* gLoopJoints[i]->getLocalPose(PxJointActorIndex::eACTOR0);
+		const PxTransform frame1 = actor1->getGlobalPose()
+			* gLoopJoints[i]->getLocalPose(PxJointActorIndex::eACTOR1);
+		const PxReal error = (frame1.p - frame0.p).magnitude();
+		if(error > gScissorStats.loopAnchorError)
+		{
+			gScissorStats.loopAnchorError = error;
+			gScissorStats.loopAnchorIndex = i;
+		}
+	}
+	if(gScissorStats.loopAnchorError > gScissorStats.loopAnchorErrorMax)
+	{
+		gScissorStats.loopAnchorErrorMax = gScissorStats.loopAnchorError;
+		gScissorStats.loopAnchorErrorMaxIndex = gScissorStats.loopAnchorIndex;
+	}
+	if(gScissorStats.firstLoopAnchorBadFrame == PX_MAX_U32
+		&& gScissorStats.loopAnchorError > 0.1f)
+	{
+		gScissorStats.firstLoopAnchorBadFrame = frame;
+		gScissorStats.firstLoopAnchorBadIndex = gScissorStats.loopAnchorIndex;
+		printf("[ScissorLoopAnchor] firstFrame=%u loop=%u error=%.4f\n",
+			frame, gScissorStats.loopAnchorIndex, gScissorStats.loopAnchorError);
+	}
 }
 
 static void dumpScissorState(PxU32 frame)
@@ -466,10 +724,20 @@ static void dumpScissorState(PxU32 frame)
 	const PxReal jointPos     = gDriveJoint->getJointPosition(PxArticulationAxis::eZ);
 	const PxReal jointVel     = gDriveJoint->getJointVelocity(PxArticulationAxis::eZ);
 	printf("[Scissor] frame=%u base=(%.3f,%.3f,%.3f) top=(%.3f,%.3f,%.3f) "
-		"driveTarget=%.4f jointPos=%.4f jointVel=%.4f\n",
+		"driveTarget=%.4f driveCoord=%.4f driveCoordVel=%.4f driveError=%.4f "
+		"internalAnchor=%.4f(link=%u) revoluteSwingDeg=%.3f(link=%u) "
+		"twistLimitViolationDeg=%.3f(link=%u) "
+		"loopAnchor=%.4f(loop=%u) "
+		"jointPos=%.4f jointVel=%.4f\n",
 		frame, basePose.p.x, basePose.p.y, basePose.p.z,
 		topPose.p.x, topPose.p.y, topPose.p.z,
-		driveTarget, jointPos, jointVel);
+		driveTarget, gScissorStats.driveCoord, gScissorStats.driveCoordVelocity,
+		gScissorStats.driveCoord - driveTarget,
+		gScissorStats.internalAnchorError, gScissorStats.internalAnchorLink,
+		gScissorStats.internalAngularErrorDeg, gScissorStats.internalAngularLink,
+		gScissorStats.twistLimitViolationDeg, gScissorStats.twistLimitViolationLink,
+		gScissorStats.loopAnchorError, gScissorStats.loopAnchorIndex,
+		jointPos, jointVel);
 }
 
 void stepPhysics(bool /*interactive*/)
@@ -491,52 +759,192 @@ void stepPhysics(bool /*interactive*/)
 	gScene->simulate(dt);
 	gScene->fetchResults(true);
 
-	if(gBaseLink && gTopLink)
+	const PxReal previousDriveCoord = gScissorStats.driveCoord;
+	gScissorStats.driveCoord = getDriveCoordinate();
+	gScissorStats.driveCoordVelocity = gFrame
+		? (gScissorStats.driveCoord - previousDriveCoord) / dt : 0.0f;
+	if(!isArticulationStateFinite())
 	{
-		const PxTransform basePose = gBaseLink->getGlobalPose();
-		const PxTransform topPose  = gTopLink->getGlobalPose();
-		if(!isFiniteVec(basePose.p) || !isFiniteVec(topPose.p))
+		if(gScissorStats.nonFiniteFrame == PX_MAX_U32)
+			gScissorStats.nonFiniteFrame = gFrame;
+	}
+	else
+	{
+		updateAnchorErrors(gFrame);
+		const PxReal driveError = gScissorStats.driveCoord - driveValue;
+		gScissorStats.driveErrorMax = PxMax(gScissorStats.driveErrorMax,
+			PxAbs(driveError));
+		if(gScissorStats.firstDriveErrorFrame == PX_MAX_U32
+			&& PxAbs(driveError) > 0.1f)
+			gScissorStats.firstDriveErrorFrame = gFrame;
+
+		// Detect a full one-second window in which the target moves by at least
+		// 0.2 m while the geometric prismatic coordinate moves by at most 0.02 m.
+		if(gScissorStats.stallWindowFrame == PX_MAX_U32)
 		{
-			if(gScissorStats.nonFiniteFrame == PX_MAX_U32)
-				gScissorStats.nonFiniteFrame = gFrame;
+			gScissorStats.stallWindowFrame = gFrame;
+			gScissorStats.stallWindowCoord = gScissorStats.driveCoord;
+			gScissorStats.stallWindowTarget = driveValue;
 		}
-		else
+		else if(gFrame - gScissorStats.stallWindowFrame >= 60)
 		{
-			if(gScissorStats.firstReportedFrame == PX_MAX_U32)
+			const PxReal targetDelta = driveValue
+				- gScissorStats.stallWindowTarget;
+			const PxReal coordDelta = gScissorStats.driveCoord
+				- gScissorStats.stallWindowCoord;
+			if(gScissorStats.firstStallFrame == PX_MAX_U32
+				&& PxAbs(targetDelta) >= 0.2f && PxAbs(coordDelta) <= 0.02f
+				&& PxAbs(driveError) > 0.1f)
 			{
-				gScissorStats.firstReportedFrame = gFrame;
-				gScissorStats.topYInitial = topPose.p.y;
+				gScissorStats.firstStallFrame = gScissorStats.stallWindowFrame;
+				printf("[ScissorStall] firstFrame=%u endFrame=%u targetDelta=%.4f "
+					"driveCoordDelta=%.4f driveError=%.4f\n",
+					gScissorStats.firstStallFrame, gFrame, targetDelta,
+					coordDelta, driveError);
 			}
-			gScissorStats.topYLast = topPose.p.y;
-			gScissorStats.topYMin = PxMin(gScissorStats.topYMin, topPose.p.y);
-			gScissorStats.topYMax = PxMax(gScissorStats.topYMax, topPose.p.y);
-			gScissorStats.baseYDriftMax = PxMax(gScissorStats.baseYDriftMax,
-				PxAbs(basePose.p.y - 0.25f));
-			// Base should stay flat on ground (no tilt). Compute tilt as angle
-			// between local +Y and world +Y.
+			gScissorStats.stallWindowFrame = gFrame;
+			gScissorStats.stallWindowCoord = gScissorStats.driveCoord;
+			gScissorStats.stallWindowTarget = driveValue;
+		}
+
+		if(gBaseLink && gTopLink)
+		{
+			const PxTransform basePose = gBaseLink->getGlobalPose();
+			const PxTransform topPose  = gTopLink->getGlobalPose();
 			const PxVec3 baseUp = basePose.q.rotate(PxVec3(0.f, 1.f, 0.f));
-			const PxReal dotUp = PxClamp(baseUp.y, -1.0f, 1.0f);
-			const PxReal tiltDeg = PxAcos(dotUp) * 180.0f / PxPi;
-			gScissorStats.baseTiltDegMax = PxMax(gScissorStats.baseTiltDegMax, tiltDeg);
+			const PxReal relativeHeight = baseUp.dot(topPose.p - basePose.p);
+			if(!PxIsFinite(relativeHeight))
+			{
+				if(gScissorStats.nonFiniteFrame == PX_MAX_U32)
+					gScissorStats.nonFiniteFrame = gFrame;
+			}
+			else
+			{
+				const PxReal sampleCoord = -0.6f;
+				if(gScissorStats.phaseStateValid && gClosing
+					&& gScissorStats.previousPhaseCoord > sampleCoord
+					&& gScissorStats.driveCoord <= sampleCoord)
+				{
+					const PxReal denominator = gScissorStats.previousPhaseCoord
+						- gScissorStats.driveCoord;
+					const PxReal alpha = denominator > 1.0e-6f
+						? PxClamp((gScissorStats.previousPhaseCoord - sampleCoord)
+							/ denominator, 0.0f, 1.0f)
+						: 1.0f;
+					const PxReal sampleHeight = gScissorStats.previousPhaseHeight
+						+ alpha * (relativeHeight
+							- gScissorStats.previousPhaseHeight);
+					if(PxIsFinite(sampleHeight))
+					{
+						recordPhaseHeightSample(sampleHeight);
+						printf("[ScissorCycle] sample=%u frame=%u q=%.3f "
+							"relativeHeight=%.4f\n",
+							gScissorStats.phaseHeightCount, gFrame,
+							sampleCoord, sampleHeight);
+					}
+					else if(gScissorStats.nonFiniteFrame == PX_MAX_U32)
+					{
+						gScissorStats.nonFiniteFrame = gFrame;
+					}
+				}
+				gScissorStats.previousPhaseCoord = gScissorStats.driveCoord;
+				gScissorStats.previousPhaseHeight = relativeHeight;
+				gScissorStats.phaseStateValid = true;
+
+				if(gScissorStats.firstReportedFrame == PX_MAX_U32)
+				{
+					gScissorStats.firstReportedFrame = gFrame;
+					gScissorStats.topYInitial = topPose.p.y;
+				}
+				gScissorStats.topYLast = topPose.p.y;
+				gScissorStats.topYMin = PxMin(gScissorStats.topYMin, topPose.p.y);
+				gScissorStats.topYMax = PxMax(gScissorStats.topYMax, topPose.p.y);
+				gScissorStats.baseYDriftMax = PxMax(gScissorStats.baseYDriftMax,
+					PxAbs(basePose.p.y - 0.25f));
+				// Base should stay flat on ground (no tilt). Compute tilt as angle
+				// between local +Y and world +Y.
+				const PxReal dotUp = PxClamp(baseUp.y, -1.0f, 1.0f);
+				const PxReal tiltDeg = PxAcos(dotUp) * 180.0f / PxPi;
+				gScissorStats.baseTiltDegMax = PxMax(
+					gScissorStats.baseTiltDegMax, tiltDeg);
+			}
 		}
 	}
 
-	const bool snapshotFrame = (gFrame % 60) == 0 || gFrame < 30;
+	const bool snapshotFrame = (gFrame % 600) == 0 || gFrame < 5;
 	if(snapshotFrame)
 		dumpScissorState(gFrame);
 	++gFrame;
 }
+
+static bool evaluateScissorRegression()
+{
+	const bool finite = gScissorStats.nonFiniteFrame == PX_MAX_U32;
+	const bool moving = gScissorStats.firstStallFrame == PX_MAX_U32;
+	const bool limitsHeld = gScissorStats.twistLimitViolationDegMax <= 5.0f;
+	const bool anchorsHeld = gScissorStats.internalAnchorErrorMax <= 0.1f
+		&& gScissorStats.internalAngularErrorDegMax <= 5.0f
+		&& gScissorStats.loopAnchorErrorMax <= 0.1f;
+	bool ok = finite && moving && limitsHeld && anchorsHeld
+		&& !gScissorStats.phaseRegressionFailed;
+
+	if(gFrame < 3000)
+	{
+		printf("[ScissorRegression] ok=%d skipped=short-run frames=%u "
+			"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
+			"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
+			ok ? 1 : 0, gFrame, gScissorStats.nonFiniteFrame,
+			gScissorStats.firstStallFrame, gScissorStats.twistLimitViolationDegMax,
+			gScissorStats.internalAnchorErrorMax,
+			gScissorStats.internalAngularErrorDegMax,
+			gScissorStats.loopAnchorErrorMax);
+		return ok;
+	}
+
+	const PxU32 sampleCount = gScissorStats.phaseHeightCount;
+	if(sampleCount < 5 || gScissorStats.phaseBaselineSpread > 0.10f)
+		ok = false;
+
+	printf("[ScissorRegression] ok=%d samples=%u referenceHeight=%.4f "
+		"baselineSpread=%.3f maxRelativeDrift=%.3f firstBadSample=%u "
+		"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
+		"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
+		ok ? 1 : 0, sampleCount, gScissorStats.phaseReferenceHeight,
+		gScissorStats.phaseBaselineSpread, gScissorStats.phaseMaxRelativeDrift,
+		gScissorStats.firstBadPhaseSample, gScissorStats.nonFiniteFrame,
+		gScissorStats.firstStallFrame, gScissorStats.twistLimitViolationDegMax,
+		gScissorStats.internalAnchorErrorMax,
+		gScissorStats.internalAngularErrorDegMax,
+		gScissorStats.loopAnchorErrorMax);
+	return ok;
+}
 	
 void cleanupPhysics(bool /*interactive*/)
 {
+	gScissorRegressionOK = evaluateScissorRegression();
 	printf("[ScissorDiag] frames=%u topY initial=%.4f last=%.4f min=%.4f max=%.4f "
-		"range=%.4f baseDriftYMax=%.4f baseTiltDegMax=%.3f nonFiniteFrame=%u\n",
+		"range=%.4f baseDriftYMax=%.4f baseTiltDegMax=%.3f "
+		"driveCoord=%.4f driveErrorMax=%.4f firstDriveErrorFrame=%u "
+		"firstStallFrame=%u internalAnchorMax=%.4f(link=%u) "
+		"firstInternalAnchorBadFrame=%u(link=%u) revoluteSwingDegMax=%.3f(link=%u) "
+		"firstRevoluteSwingBadFrame=%u(link=%u) twistLimitViolationDegMax=%.3f(link=%u) "
+		"loopAnchorMax=%.4f(loop=%u) "
+		"firstLoopAnchorBadFrame=%u(loop=%u) nonFiniteFrame=%u\n",
 		gFrame, gScissorStats.topYInitial, gScissorStats.topYLast,
 		gScissorStats.topYMin == PX_MAX_F32 ? 0.0f : gScissorStats.topYMin,
 		gScissorStats.topYMax == -PX_MAX_F32 ? 0.0f : gScissorStats.topYMax,
 		(gScissorStats.topYMax > -PX_MAX_F32 && gScissorStats.topYMin < PX_MAX_F32)
 			? (gScissorStats.topYMax - gScissorStats.topYMin) : 0.0f,
 		gScissorStats.baseYDriftMax, gScissorStats.baseTiltDegMax,
+		gScissorStats.driveCoord, gScissorStats.driveErrorMax,
+		gScissorStats.firstDriveErrorFrame, gScissorStats.firstStallFrame,
+		gScissorStats.internalAnchorErrorMax, gScissorStats.internalAnchorErrorMaxLink,
+		gScissorStats.firstInternalAnchorBadFrame, gScissorStats.firstInternalAnchorBadLink,
+		gScissorStats.internalAngularErrorDegMax, gScissorStats.internalAngularErrorMaxLink,
+		gScissorStats.firstInternalAngularBadFrame, gScissorStats.firstInternalAngularBadLink,
+		gScissorStats.twistLimitViolationDegMax, gScissorStats.twistLimitViolationMaxLink,
+		gScissorStats.loopAnchorErrorMax, gScissorStats.loopAnchorErrorMaxIndex,
+		gScissorStats.firstLoopAnchorBadFrame, gScissorStats.firstLoopAnchorBadIndex,
 		gScissorStats.nonFiniteFrame);
 
 	gArticulation->release();
@@ -586,10 +994,9 @@ int snippetMain(int argc, const char*const* argv)
 	}
 #endif
 
-	// Cover at least one full open/close cycle of the drive joint (~10s) so
-	// regressions in the AVBD articulation path show up in the diag rather
-	// than being masked by a short 1.5s smoke window.
-	PxU32 frameCount = 900;
+	// Cover enough complete cycles to catch branch changes caused by an
+	// incorrectly mapped asymmetric articulation limit.
+	PxU32 frameCount = 3600;
 	if(const char* override = std::getenv("PHYSX_SNIPPET_FRAME_COUNT"))
 	{
 		const long value = std::strtol(override, nullptr, 10);
@@ -601,5 +1008,5 @@ int snippetMain(int argc, const char*const* argv)
 		stepPhysics(false);
 	cleanupPhysics(false);
 
-	return 0;
+	return gScissorRegressionOK ? 0 : 1;
 }

@@ -30,6 +30,7 @@
 
 #include "DyAvbdDynamics.h"
 #include "DyAvbdConstraint.h"
+#include "DyAvbdKinematicShell.h"
 #include "DyConstraint.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyIslandManager.h"
@@ -66,6 +67,42 @@ static PxU32 findArticulationLinkIndex(FeatherstoneArticulation *articulation,
 #endif
 
 static constexpr physx::PxU16 AVBD_PRISMATIC_LIMIT_ENABLED_FLAG = 0x0002;
+
+// Match the standalone contact cache's 1 mm local-anchor quantization.  The
+// cache slot itself is still scoped by the persistent contact-manager index;
+// this key validates row identity when NP patch/contact ordering changes.
+static PX_FORCE_INLINE PxI32 quantizeAvbdContactAnchor(PxReal value) {
+  const PxReal scaled = PxClamp(value * 1000.0f, -2147483000.0f,
+                                2147483000.0f);
+  return static_cast<PxI32>(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+}
+
+static PX_FORCE_INLINE void mixAvbdContactKey(PxU64 &hash, PxU32 value) {
+  hash ^= static_cast<PxU64>(value);
+  hash *= 1099511628211ull;
+}
+
+static PxU64 makeAvbdContactCacheKey(PxU32 globalBody0Idx,
+                                     PxU32 globalBody1Idx,
+                                     const PxVec3 &localPointA,
+                                     const PxVec3 &localPointB) {
+  PxU64 hash = 14695981039346656037ull;
+  mixAvbdContactKey(hash, globalBody0Idx);
+  mixAvbdContactKey(hash, globalBody1Idx);
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.x)));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.y)));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.z)));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.x)));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.y)));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.z)));
+  return hash != 0 ? hash : 1;
+}
 
 // Helper struct for joint data protocol (must match SnippetAvbdDx11)
 struct AvbdSnippetJointData {
@@ -326,62 +363,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         constraint.header.penalty =
             AvbdConstants::AVBD_MIN_PENALTY_RHO; // PENALTY_MIN = 1000
 
-        // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
-        //   lambda *= alpha * gamma
-        //   penalty = clamp(penalty * gamma, PENALTY_MIN, PENALTY_MAX)
-        const PxU32 cmIdx = cm->getIndex();
-        const PxU32 cacheIdx = cmIdx * MAX_CONTACTS_PER_CM + c;
-        constraint.cacheIndex = cacheIdx;
-
-        // AVBD warmstart decay constants
-        // alpha=0.95, gamma=0.99 => alpha*gamma=0.9405
-        const PxReal wsAlpha = 0.95f;
-        const PxReal wsGamma = 0.99f;
-        const PxReal wsPenaltyMin = 1000.0f;
-        const PxReal wsPenaltyMax = 1e9f;
-
-        if (mEnableLambdaWarmStart && cacheIdx < mLambdaCache.size()) {
-          CachedLambda &cached = mLambdaCache[cacheIdx];
-          if (cached.frameAge <= LAMBDA_MAX_AGE) {
-            // Apply warmstart decay (ref Eq. 19)
-            constraint.header.lambda = cached.lambda * wsAlpha * wsGamma;
-            constraint.tangentLambda0 =
-                cached.tangentLambda0 * wsAlpha * wsGamma;
-            constraint.tangentLambda1 =
-                cached.tangentLambda1 * wsAlpha * wsGamma;
-            // Restore and decay penalty (normal + tangent)
-            constraint.header.penalty =
-                PxClamp(cached.penalty * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty0 = PxClamp(
-                cached.tangentPenalty0 * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty1 = PxClamp(
-                cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            localHits++;
-          } else {
-            constraint.header.lambda = 0.0f;
-            constraint.tangentLambda0 = 0.0f;
-            constraint.tangentLambda1 = 0.0f;
-            constraint.header.penalty = wsPenaltyMin;
-            constraint.tangentPenalty0 = wsPenaltyMin;
-            constraint.tangentPenalty1 = wsPenaltyMin;
-            localMisses++;
-          }
-        } else {
-          constraint.header.lambda = 0.0f;
-          constraint.tangentLambda0 = 0.0f;
-          constraint.tangentLambda1 = 0.0f;
-          constraint.header.penalty = wsPenaltyMin;
-          constraint.tangentPenalty0 = wsPenaltyMin;
-          constraint.tangentPenalty1 = wsPenaltyMin;
-          localMisses++;
-          // Grow cache if needed (for next frame)
-          if (mEnableLambdaWarmStart && cacheIdx >= mLambdaCache.size()) {
-            PxU32 newSize =
-                ((cacheIdx + 1) + 1023u) & ~1023u; // Round up to 1024
-            mLambdaCache.resize(newSize);
-          }
-        }
-
         if (bodyA) {
           constraint.contactPointA =
               bodyA->rotation.rotateInv(contact->contact - bodyA->position);
@@ -396,10 +377,101 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           constraint.contactPointB = contact->contact;
         }
 
+        // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
+        //   lambda *= alpha * gamma
+        //   penalty = clamp(penalty * gamma, PENALTY_MIN, PENALTY_MAX)
+        const PxU32 cmIdx = cm->getIndex();
+        const PxU64 cacheKey = makeAvbdContactCacheKey(
+            globalBody0Idx, globalBody1Idx, constraint.contactPointA,
+            constraint.contactPointB);
+        const PxU64 cacheIdx64 =
+            static_cast<PxU64>(cmIdx) * CONTACT_CACHE_SLOTS_PER_CM +
+            (cacheKey & (CONTACT_CACHE_SLOTS_PER_CM - 1u));
+        const PxU32 cacheIdx = cacheIdx64 < PX_MAX_U32
+                                   ? static_cast<PxU32>(cacheIdx64)
+                                   : PX_MAX_U32;
+        constraint.cacheIndex = cacheIdx;
+        constraint.cacheKey = cacheKey;
+
+        // AVBD warmstart decay constants
+        // alpha=0.95, gamma=0.99 => alpha*gamma=0.9405
+        const PxReal wsAlpha = 0.95f;
+        const PxReal wsGamma = 0.99f;
+        const PxReal wsPenaltyMin = 1000.0f;
+        const PxReal wsPenaltyMax = 1e9f;
+
+        const bool bodyVsStatic =
+            (bodyA != nullptr) != (bodyB != nullptr);
+        const PxReal restDist = cm->getRestDistance();
+        const bool deformableStaticAnchor =
+            isDeformableStaticAnchorContact(bodyVsStatic, restDist);
+
+        if (deformableStaticAnchor) {
+          // Entry 108: no lambda/penalty warmstart on deformable mesh anchors.
+          // Stale multipliers from the moving surface cause impact blow-up without CCD.
+          constraint.header.lambda = 0.0f;
+          constraint.tangentLambda0 = 0.0f;
+          constraint.tangentLambda1 = 0.0f;
+          constraint.header.penalty = wsPenaltyMin;
+          constraint.tangentPenalty0 = wsPenaltyMin;
+          constraint.tangentPenalty1 = wsPenaltyMin;
+          setFrictionStick(constraint, false);
+          localMisses++;
+        } else if (mEnableLambdaWarmStart && cacheIdx < mLambdaCache.size()) {
+          CachedLambda &cached = mLambdaCache[cacheIdx];
+          if (cached.key == cacheKey &&
+              cached.frameAge <= LAMBDA_MAX_AGE) {
+            // Apply warmstart decay (ref Eq. 19)
+            constraint.header.lambda = cached.lambda * wsAlpha * wsGamma;
+            constraint.tangentLambda0 =
+                cached.tangentLambda0 * wsAlpha * wsGamma;
+            constraint.tangentLambda1 =
+                cached.tangentLambda1 * wsAlpha * wsGamma;
+            // Restore and decay penalty (normal + tangent)
+            constraint.header.penalty =
+                PxClamp(cached.penalty * wsGamma, wsPenaltyMin, wsPenaltyMax);
+            constraint.tangentPenalty0 = PxClamp(
+                cached.tangentPenalty0 * wsGamma, wsPenaltyMin, wsPenaltyMax);
+            constraint.tangentPenalty1 = PxClamp(
+                cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
+            setFrictionStick(constraint, cached.stick != 0);
+            localHits++;
+          } else {
+            constraint.header.lambda = 0.0f;
+            constraint.tangentLambda0 = 0.0f;
+            constraint.tangentLambda1 = 0.0f;
+            constraint.header.penalty = wsPenaltyMin;
+            constraint.tangentPenalty0 = wsPenaltyMin;
+            constraint.tangentPenalty1 = wsPenaltyMin;
+            setFrictionStick(constraint, false);
+            localMisses++;
+          }
+        } else {
+          constraint.header.lambda = 0.0f;
+          constraint.tangentLambda0 = 0.0f;
+          constraint.tangentLambda1 = 0.0f;
+          constraint.header.penalty = wsPenaltyMin;
+          constraint.tangentPenalty0 = wsPenaltyMin;
+          constraint.tangentPenalty1 = wsPenaltyMin;
+          setFrictionStick(constraint, false);
+          localMisses++;
+        }
+
         constraint.contactNormal = normal;
-        constraint.penetrationDepth = contact->separation;
+        constraint.header.flags = deformableStaticAnchor
+                                      ? AvbdContactConstraintFlags::
+                                            eDEFORMABLE_STATIC_ANCHOR
+                                      : 0;
+        // Deformable mesh only: TGS-style separation - restDistance. Plane/stack
+        // keep baseline separation.
+        constraint.penetrationDepth =
+            deformableStaticAnchor ? (contact->separation - restDist)
+                                   : contact->separation;
+        // Material slice from NP-combined patch (PxCombineMode already applied).
+        // Restitution -> post-AL material normal response; mu -> dual + friction.
         constraint.restitution = patch->restitution;
         constraint.friction = patch->dynamicFriction;
+        constraint.staticFriction = patch->staticFriction;
 
         PxVec3 t0, t1;
         if (PxAbs(normal.y) > 0.9f) {
@@ -416,6 +488,28 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 
         // Initialize C0 to 0 (will be computed by solver before iterations)
         constraint.C0 = 0.0f;
+        constraint.supportClass = AvbdSupportClass::eUnset;
+
+        if (deformableStaticAnchor) {
+          const PxVec3 worldContact = contact->contact;
+          // Entry 153: never restore staticPrev from CM-index lambda cache.
+          // Contact order within a mesh CM reorders every frame -> aliasing
+          // injects multi-metre fictitious mesh steps after long runs.
+          // Shell path: bilinearSurfacePointPrev at body xz (feature-stable).
+          // Non-shell: prev = now (zero mesh velocity from cache; dual still
+          // works with C0=0 / geometric normal).
+          if (AvbdKinematicShell::isActive()) {
+            const bool shellApplied =
+                AvbdKinematicShell::applyShellNormalAndPrev(
+                    constraint, bodyA, bodyB, restDist, t0, t1);
+            if (!shellApplied)
+              constraint.staticPrevWorldPoint = worldContact;
+          } else {
+            constraint.staticPrevWorldPoint = worldContact;
+          }
+        } else {
+          constraint.staticPrevWorldPoint = PxVec3(0.0f);
+        }
 
         ++constraintIndex;
       }
@@ -426,14 +520,9 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
   sDebugHits += localHits;
   sDebugMisses += localMisses;
   sFrameCount++;
-  // DEBUG: Lambda cache stats disabled during explosion debugging
-  // if (sFrameCount % 60 == 0 && constraintIndex > 0) {
-  //   PxU32 total = sDebugHits + sDebugMisses;
-  //   float hitRate = total > 0 ? (float)sDebugHits / total * 100.0f : 0.0f;
-  //   printf(
-  //       "[AVBD Lambda Cache] Frame %u: hits=%u misses=%u (%.1f%% hit
-  //       rate)\n", sFrameCount, sDebugHits, sDebugMisses, hitRate);
-  // }
+  // DEBUG: Lambda cache statistics intentionally disabled in production.
+
+  // Kinematic shell box rows are built per-island in DyAvbdDynamics (AvbdSoftContact).
 
   return constraintIndex;
 }
@@ -901,9 +990,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                   c.driveFlags |= 1 << 4; // SWING1 -> bit 4 (angular Y)
                 if (d6Data->driving & (1 << PxD6Drive::eSWING2))
                   c.driveFlags |= 1 << 5; // SWING2 -> bit 5 (angular Z)
-                if (d6Data->driving & (1 << PxD6Drive::eSLERP))
+                if (d6Data->driving & (1 << PxD6Drive::eSLERP)) {
                   c.driveFlags |=
                       1 << 5; // SLERP -> bit 5 (angular Z, reuse SWING2)
+                  c.sourceFlags |= AvbdD6JointConstraint::eD6_SLERP_DRIVE;
+                }
                 if (d6Data->driving & (1 << PxD6Drive::eSWING))
                   c.driveFlags |= 1 << 3; // SWING (deprecated) -> bit 3
                                           // (angular X, reuse TWIST)
@@ -953,7 +1044,8 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                   islandSim.getActiveNodeIndex(nodeIndex0) ==
                       islandSim.getActiveNodeIndex(nodeIndex1) &&
                   c.linearMotion == 0 && c.angularMotion == 0x2A) {
-                c.sourceFlags |= 0x2u;
+                c.sourceFlags |= AvbdD6JointConstraint::
+                    eSAME_ARTICULATION_EXTERNAL_SPHERICAL;
               }
             }
             c.linBreakImpulse = constraint->linBreakForce;

@@ -120,6 +120,8 @@ void AvbdContactPrep::convertContact(
   outContact.header.damping = 0.0f;
   outContact.header.lambda = 0.0f;
   outContact.header.rho = config.initialRho;
+  outContact.cacheIndex = PX_MAX_U32;
+  outContact.cacheKey = 0;
 
   // Transform contact point to body local space
   physx::PxVec3 worldContactA = contactPoint;

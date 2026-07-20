@@ -88,10 +88,15 @@ public:
   void solve(physx::PxReal dt, AvbdSolverBody *bodies, physx::PxU32 numBodies,
              AvbdContactConstraint *contacts, physx::PxU32 numContacts,
              const physx::PxVec3 &gravity,
-             const AvbdBodyConstraintMap *contactMap = nullptr,
-             AvbdColorBatch *colorBatches = nullptr,
-             physx::PxU32 numColors = 0,
-             physx::PxU32 iterationOverride = 0);
+             const AvbdBodyConstraintMap *contactMap,
+             AvbdColorBatch *colorBatches,
+             physx::PxU32 numColors,
+             physx::PxU32 iterationOverride,
+             AvbdSoftParticle *kinematicShellParticles,
+             physx::PxU32 numKinematicShellParticles,
+             AvbdSoftContact *kinematicShellContacts,
+             physx::PxU32 numKinematicShellContacts,
+             AvbdSolverStats &stats);
 
   /**
    * @brief Execute one simulation step with joint constraints (unified D6 + gear)
@@ -117,29 +122,57 @@ public:
                        AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
                        AvbdGearJointConstraint *gearJoints,
                        physx::PxU32 numGear, const physx::PxVec3 &gravity,
-                       const AvbdBodyConstraintMap *contactMap = nullptr,
-                       const AvbdBodyConstraintMap *d6Map = nullptr,
-                       const AvbdBodyConstraintMap *gearMap = nullptr,
-                       AvbdColorBatch *colorBatches = nullptr,
-                       physx::PxU32 numColors = 0,
-                       physx::PxU32 iterationOverride = 0,
+                       const AvbdBodyConstraintMap *contactMap,
+                       const AvbdBodyConstraintMap *d6Map,
+                       const AvbdBodyConstraintMap *gearMap,
+                       AvbdColorBatch *colorBatches,
+                       physx::PxU32 numColors,
+                       physx::PxU32 iterationOverride,
                        // Soft body VBD parameters
-                       AvbdSoftParticle *softParticles = nullptr,
-                       physx::PxU32 numSoftParticles = 0,
-                       AvbdSoftBody *softBodies = nullptr,
-                       physx::PxU32 numSoftBodies = 0,
-                       AvbdSoftContact *softContacts = nullptr,
-                       physx::PxU32 numSoftContacts = 0);
+                       AvbdSoftParticle *softParticles,
+                       physx::PxU32 numSoftParticles,
+                       AvbdSoftBody *softBodies,
+                       physx::PxU32 numSoftBodies,
+                       AvbdSoftContact *softContacts,
+                       physx::PxU32 numSoftContacts,
+                       AvbdSolverStats &stats);
 
   /**
-   * @brief Get solver statistics from last solve
+   * @brief Single island solve entry.
+   *
+   * Classifies the batch and runs the shared stage list. Contact-only,
+   * kinematic-shell, and joint/soft islands share post-AL stages; primal
+   * joint rows remain on the joint module path when D6/gear/soft-VBD present.
    */
-  const AvbdSolverStats &getStats() const { return mStats; }
+  void solveIsland(physx::PxReal dt, AvbdSolverBody *bodies,
+                   physx::PxU32 numBodies, AvbdContactConstraint *contacts,
+                   physx::PxU32 numContacts, const physx::PxVec3 &gravity,
+                   AvbdD6JointConstraint *d6Joints,
+                   physx::PxU32 numD6,
+                   AvbdGearJointConstraint *gearJoints,
+                   physx::PxU32 numGear,
+                   const AvbdBodyConstraintMap *contactMap,
+                   const AvbdBodyConstraintMap *d6Map,
+                   const AvbdBodyConstraintMap *gearMap,
+                   AvbdColorBatch *colorBatches,
+                   physx::PxU32 numColors,
+                   physx::PxU32 iterationOverride,
+                   AvbdSoftParticle *softParticles,
+                   physx::PxU32 numSoftParticles,
+                   AvbdSoftBody *softBodies,
+                   physx::PxU32 numSoftBodies,
+                   AvbdSoftContact *softContacts,
+                   physx::PxU32 numSoftContacts,
+                   bool kinematicShellBatch,
+                   AvbdSolverStats &stats);
 
   /**
    * @brief Get solver configuration
    */
   const AvbdSolverConfig &getConfig() const { return mConfig; }
+
+  /** Mutable config (scene bounce threshold, material gates). */
+  AvbdSolverConfig &getConfigMutable() { return mConfig; }
 
 private:
   //-------------------------------------------------------------------------
@@ -158,7 +191,8 @@ private:
    */
   void computeGraphColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
                             AvbdContactConstraint *contacts,
-                            physx::PxU32 numContacts);
+                            physx::PxU32 numContacts,
+                            AvbdSolverStats &stats);
 
   /**
    * @brief Stage 2b: Compute body-based coloring for block coordinate descent
@@ -166,7 +200,8 @@ private:
    */
   void computeBodyColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
                            AvbdContactConstraint *contacts,
-                           physx::PxU32 numContacts);
+                           physx::PxU32 numContacts,
+                           AvbdSolverStats &stats);
 
   /**
    * @brief Stage 3: Block coordinate descent iteration
@@ -181,7 +216,34 @@ private:
                              physx::PxU32 numContacts, physx::PxReal dt,
                              const AvbdBodyConstraintMap *contactMap = nullptr,
                              AvbdColorBatch *colorBatches = nullptr,
-                             physx::PxU32 numColors = 0);
+                             physx::PxU32 numColors = 0,
+                             AvbdSoftParticle *kinematicShellParticles = nullptr,
+                             physx::PxU32 numKinematicShellParticles = 0,
+                             AvbdSoftContact *kinematicShellContacts = nullptr,
+                             physx::PxU32 numKinematicShellContacts = 0);
+
+  void updateKinematicShellDual(AvbdSolverBody *bodies, physx::PxU32 numBodies,
+                                AvbdSoftContact *shellContacts,
+                                physx::PxU32 numShellContacts);
+
+  /**
+   * @brief Shared contact + kinematic-shell primal rows for one body (Phase 1).
+   *
+   * Body-static contract (both contact and joint local solvers):
+   *   - skip NP deformable normals when shell owns the body
+   *   - dominant body-static normal only when contact count > 4
+   *   - finalizeBodyVsStaticViolation for deformable anchors
+   *   - no multi-contact body-static tangents in aggregated 6x6
+   *   - shell soft rows via avbdAddKinematicShellContactContribution_rigid
+   */
+  void accumulateBodyContactRows(
+      AvbdSolverBody &body, physx::PxU32 bodyIndex, AvbdSolverBody *bodies,
+      physx::PxU32 numBodies, AvbdContactConstraint *contacts,
+      physx::PxU32 numContacts, const AvbdBodyConstraintMap *contactMap,
+      AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
+      AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
+      physx::PxReal massInvDt2, AvbdBlock6x6 &A, physx::PxVec3 &gLinear,
+      physx::PxVec3 &gAngular, physx::PxU32 &numTouching);
 
   /**
    * @brief Solve local 6x6 system for a single body
@@ -191,7 +253,11 @@ private:
                         physx::PxU32 numBodies, AvbdContactConstraint *contacts,
                         physx::PxU32 numContacts, physx::PxReal dt,
                         physx::PxReal invDt2,
-                        const AvbdBodyConstraintMap *contactMap = nullptr);
+                        const AvbdBodyConstraintMap *contactMap = nullptr,
+                        AvbdSoftParticle *kinematicShellParticles = nullptr,
+                        physx::PxU32 numKinematicShellParticles = 0,
+                        AvbdSoftContact *kinematicShellContacts = nullptr,
+                        physx::PxU32 numKinematicShellContacts = 0);
 
   /**
    * @brief Solve local 6x6 system for a single body with BOTH contacts AND
@@ -212,7 +278,11 @@ private:
       physx::PxReal dt, physx::PxReal invDt2,
       const AvbdBodyConstraintMap *contactMap = nullptr,
       const AvbdBodyConstraintMap *d6Map = nullptr,
-      const AvbdBodyConstraintMap *gearMap = nullptr);
+      const AvbdBodyConstraintMap *gearMap = nullptr,
+      AvbdSoftParticle *softParticles = nullptr,
+      physx::PxU32 numSoftParticles = 0,
+      AvbdSoftContact *softContacts = nullptr,
+      physx::PxU32 numSoftContacts = 0);
 
   /**
    * @brief Solve decoupled 3x3 system for a single body
@@ -242,7 +312,64 @@ private:
   void updateLagrangianMultipliers(AvbdSolverBody *bodies,
                                    physx::PxU32 numBodies,
                                    AvbdContactConstraint *contacts,
-                                   physx::PxU32 numContacts, physx::PxReal dt);
+                                   physx::PxU32 numContacts, physx::PxReal dt,
+                                   AvbdSolverStats &stats);
+
+  /**
+   * @brief Sequential (Gauss-Seidel) velocity-level friction for body-vs-static
+   *        contacts (rigid plane and deformable-mesh anchors).
+   *
+   * The aggregated 6x6 block solve cannot apply per-contact Coulomb friction to
+   * heavily-loaded body-static contacts without ill-conditioning/diverging, so
+   * such tangents are kept out of the block (see useBodyVsStaticFrictionIn6x6).
+   * This decoupled TGS-style pass restores grip via one dominant contact per body.
+   * Deformable anchors on shell-normal bodies are skipped (shell friction pass).
+   */
+  void applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
+                                     physx::PxU32 numBodies,
+                                     AvbdContactConstraint *contacts,
+                                     physx::PxU32 numContacts, physx::PxReal dt,
+                                     physx::PxU32 sweeps,
+                                     const physx::PxArray<physx::PxVec3> *velSeedPos,
+                                     const physx::PxArray<physx::PxQuat> *velSeedRot,
+                                     const physx::PxArray<bool> *skipForBodies = nullptr);
+
+  /** Post-pass friction for kinematic-shell AvbdSoftContact rows (island 1c). */
+  void applyKinematicShellFrictionSweeps(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxReal dt, physx::PxU32 sweeps,
+      const physx::PxArray<physx::PxVec3> *velSeedPos,
+      const physx::PxArray<physx::PxQuat> *velSeedRot);
+
+  /** TGS-style capped normal projection on kinematic-shell soft rows. */
+  void applyKinematicShellNormalDepenetrationSweeps(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps);
+
+  /** e=0 normal clamp for bodies on kinematic shell (mesh-relative when dt>0). */
+  void clampKinematicShellInelasticNormalVelocities(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
+      physx::PxReal dt);
+
+  /**
+   * @brief Gauss-Seidel geometric normal depenetration for body-vs-static.
+   *
+   * TGS limits separation speed via maxDepenetrationVelocity; AVBD must bleed
+   * deep narrow-phase overlap off over sweeps so Stage-5 velocity does not
+   * encode a full bounce from one substep's position solve (no CCD).
+   */
+  void applyBodyStaticNormalDepenetrationSweeps(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps,
+      const physx::PxArray<bool> *skipDepenForBodies = nullptr);
 
   /**
    * @brief Stage 5: Update velocities from position change
@@ -250,6 +377,27 @@ private:
    */
   void updateVelocities(AvbdSolverBody *bodies, physx::PxU32 numBodies,
                         physx::PxReal invDt);
+
+  /**
+   * Shared post-AL stage list (Decision A + depen + e=0 + pose-split velocity).
+   * Called from both contact and joint island paths after primal/dual iterations.
+   * Motors (optional) run after friction pose updates, before velocity finalize
+   * when d6Joints is non-null. Soft particle velocity write is optional.
+   */
+  void postAlStages(
+      physx::PxReal dt, physx::PxReal invDt, AvbdSolverBody *bodies,
+      physx::PxU32 numBodies, AvbdContactConstraint *contacts,
+      physx::PxU32 numContacts, const physx::PxVec3 &gravity,
+      bool hasBodyStaticContact, bool deformableFastImpactIsland,
+      const physx::PxArray<bool> &touchingBodyStatic,
+      const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
+      AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
+      AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
+      const physx::PxArray<bool> &touchesKinematicShell,
+      const physx::PxArray<physx::PxVec3> *shellLinearVelAtSolveStart,
+      AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+      bool applyVelocityDamping, AvbdSoftParticle *softParticlesForVel,
+      physx::PxU32 numSoftParticlesForVel);
 
   //-------------------------------------------------------------------------
   // Energy Minimization Framework
@@ -368,7 +516,6 @@ private:
   //-------------------------------------------------------------------------
 
   AvbdSolverConfig mConfig;
-  AvbdSolverStats mStats;
   AvbdGraphColoring mColoring;
   AvbdParallelColoring
       mParallelColoring; //!< Constraint-based parallel coloring
@@ -440,7 +587,6 @@ inline void AvbdSolver::initialize(const AvbdSolverConfig &config,
                                    physx::PxAllocatorCallback &allocator) {
   mConfig = config;
   mAllocator = &allocator;
-  mStats.reset();
   mInitialized = true;
 }
 
