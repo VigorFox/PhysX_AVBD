@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved. 
 
@@ -43,12 +43,11 @@
 #include "PxgContactManager.h"
 #include "PxgConvexConvexShape.h"
 #include "PxgFEMCloth.h"
-#include "PxgFEMClothCore.h"
-#include "PxgFEMCore.h"
+#include "PxgDeformableContactInfo.h"
 #include "PxgNpKernelIndices.h"
 #include "PxgSimulationCoreDesc.h"
 
-#include "PxsTransformCache.h"
+#include "PxsCachedTransform.h"
 
 #include <vector_types.h>
 
@@ -723,6 +722,7 @@ struct ClothTreeVertexTraverser
 	PxU32* totalContactCount;			// output
 	const float4* vertices1;
 	const float4* restVerts1;
+	const PxU32 numTriangles; // Triangle count of the cloth whose BVH is being traversed; used to bound primitiveIndex.
 
 	PX_FORCE_INLINE __device__ ClothTreeVertexTraverser(
 		const PxU32 contactSize, const PxReal contactDist,
@@ -732,7 +732,8 @@ struct ClothTreeVertexTraverser
 		PxgFemFemContactInfo* outContactInfo,	// output
 		PxU32* totalContactCount,			// output
 		const float4* vertices1,
-		const float4* restVerts1)
+		const float4* restVerts1,
+		const PxU32 numTriangles)
 	: contactSize(contactSize)
 	, contactDist(contactDist)
 	, filterDistSq(filterDistSq)
@@ -746,6 +747,7 @@ struct ClothTreeVertexTraverser
 	, totalContactCount(totalContactCount)
 	, vertices1(vertices1)
 	, restVerts1(restVerts1)
+	, numTriangles(numTriangles)
 	{
 	}
 
@@ -754,7 +756,11 @@ struct ClothTreeVertexTraverser
 		PxReal s, t;
 
 		bool intersect = false;
-		if(primitiveIndex != 0xFFFFFFFF)
+		// Bound primitiveIndex against the cloth's actual triangle count.
+		// The previous != 0xFFFFFFFF guard let any value in [numTriangles, 0xFFFFFFFE]
+		// pass, leading to OOB reads of triIndices[] and assertion failures inside
+		// PxEncodeClothIndex (20-bit field). Bug 6156209 / OMPE-92966.
+		if(primitiveIndex < numTriangles)
 		{
 			const uint4 triIdx1 = triIndices[primitiveIndex];
 
@@ -849,6 +855,7 @@ struct ClothTreeEdgeTraverser
 	const float4* vertices1;
 	const float4* restVerts1;
 	const uint4* triVertIndices1;
+	const PxU32 numTriangles; // Triangle count of the cloth whose BVH is being traversed; used to bound primitiveIndex.
 
 	PX_FORCE_INLINE __device__ ClothTreeEdgeTraverser(
 		const PxU32 contactSize, const PxReal contactDist,
@@ -858,7 +865,8 @@ struct ClothTreeEdgeTraverser
 		PxU32* totalContactCount,				// output
 		const float4* vertices1,
 		const float4* restVerts1,
-		const uint4* triVertIndices1)
+		const uint4* triVertIndices1,
+		const PxU32 numTriangles)
 		: contactSize(contactSize)
 		, contactDist(contactDist)
 		, filterDistSq(filterDistSq)
@@ -870,6 +878,7 @@ struct ClothTreeEdgeTraverser
 		, vertices1(vertices1)
 		, restVerts1(restVerts1)
 		, triVertIndices1(triVertIndices1)
+		, numTriangles(numTriangles)
 	{
 	}
 
@@ -896,7 +905,9 @@ struct ClothTreeEdgeTraverser
 		uint2 localEdgeIndices[9]; // Up to three edges per triangle
 		PxU32 intersectCount = 0;
 
-		if(primitiveIndex != 0xFFFFFFFF & (clothId0 != clothId1 | t0_index > primitiveIndex))
+		// Bound primitiveIndex against the cloth's actual triangle count.
+		// See ClothTreeVertexTraverser for rationale. Bug 6156209 / OMPE-92966.
+		if(primitiveIndex < numTriangles & (clothId0 != clothId1 | t0_index > primitiveIndex))
 		{
 			const uint4 triVertexIdx1 = triVertIndices1[primitiveIndex];
 			const PxU32 edgeAuthorship1 = triVertexIdx1.w;
@@ -997,7 +1008,15 @@ struct ClothTreeEdgeTraverser
 		{
 			// Add multiple elements per thread.
 			const PxU32 index = globalScanExclusiveSingleWarp(intersectCount, totalContactCount);
-			if(index < contactSize)
+
+			// Per-thread guard: validCount above is warp-aggregate. Lanes with
+			// intersectCount == 0 skip the writeback for-loop below, but still
+			// call PxEncodeClothIndex above with their input primitiveIndex.
+			// In debug builds that fires the encoder's PX_ASSERT when the input
+			// is the 0xFFFFFFFF empty-leaf sentinel. The release-build effect
+			// is benign (the bogus encoded value lives only in a thread-local
+			// register that the for-loop never persists). Bug 6156209 / OMPE-92966.
+			if(index < contactSize && intersectCount)
 			{
 				PxgFemFemContactInfo contactInfo;
 				const PxU32 pairInd0 = PxEncodeClothIndex(clothId0, t0_index);
@@ -1091,7 +1110,7 @@ __device__ static inline void cloth_selfCollisionMidphaseCoreVT(
 	{
 		ClothTreeVertexTraverser traverser(maxContacts, contactDist, filterDistance * filterDistance, clothId, clothId, restPosition,
 										   s_warpScratch->meshVertsIndices, clothClothPairs, numClothClothPairs, outContactInfo,
-										   totalContactCount, s_warpScratch->meshVerts, restPosition);
+										   totalContactCount, s_warpScratch->meshVerts, restPosition, cloth->mNbTriangles);
 
 		traverser.vertexIdx = globalWarpIdx;
 		traverser.vertex = PxLoad3(triVerts[globalWarpIdx]);
@@ -1150,7 +1169,7 @@ __device__ static inline void cloth_selfCollisionMidphaseCoreEE(
 
 	ClothTreeEdgeTraverser traverser(maxContacts, contactDist, filterDistance * filterDistance, clothId, clothId, restPosition,
 									 outContactInfo, totalContactCount, s_warpScratch->meshVerts, restPosition,
-									 s_warpScratch->meshVertsIndices);
+									 s_warpScratch->meshVertsIndices, cloth->mNbTriangles);
 
 	const PxU32 triIdx = cloth->mTrianglesWithActiveEdges[globalWarpIdx];
 	const uint4 triVertices = s_warpScratch->meshVertsIndices[triIdx];
@@ -1297,7 +1316,7 @@ __device__ static inline void femDifferentClothCollisionCoreVT(
 		const float4* verts0 = myCloth->mPosition_InvMass;
 		ClothTreeVertexTraverser traverser(maxContacts, contactDist, 0.0f, myClothId, otherClothId, NULL, s_warpScratch->meshVertsIndices,
 										   clothClothPairs, numClothClothPairs, outContactInfo, totalContactCount, s_warpScratch->meshVerts,
-										   NULL);
+										   NULL, otherCloth->mNbTriangles);
 
 		traverser.vertexIdx = vertexIndex;
 		traverser.vertex = PxLoad3(verts0[vertexIndex]);
@@ -1374,7 +1393,7 @@ __device__ static inline void femDifferentClothCollisionCoreEE(
 
 		const float4* verts0 = myCloth->mPosition_InvMass;
 		ClothTreeEdgeTraverser traverser(maxContacts, contactDist, 0.0f, myClothId, otherClothId, NULL, outContactInfo, totalContactCount,
-										 s_warpScratch->meshVerts, NULL, s_warpScratch->meshVertsIndices);
+										 s_warpScratch->meshVerts, NULL, s_warpScratch->meshVertsIndices, otherCloth->mNbTriangles);
 
 		const PxU32 triIdx = myCloth->mTrianglesWithActiveEdges[globalWarpIdx];
 		const uint4 triVertices = myCloth->mTriangleVertexIndices[triIdx];

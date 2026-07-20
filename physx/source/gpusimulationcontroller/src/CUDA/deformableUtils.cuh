@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -30,15 +30,81 @@
 #define __DEFORMABLE_UTILS_CUH__
 
 #include "foundation/PxMathUtils.h"
+#include "PxDeformableSurface.h" // for PX_MAX_NB_DEFORMABLE_SURFACE_TRI
+#include "PxDeformableVolume.h" // for PX_MAX_NB_DEFORMABLE_VOLUME_TET
 #include "PxsMaterialCombiner.h"
-#include "PxgFEMCore.h"
+#include "PxsDeformableVolumeMaterialCore.h"
+#include "PxsDeformableSurfaceMaterialCore.h"
+#include "PxgDeformableContactInfo.h"
+#include "PxgDeformableConstraints.h"
 #include "PxgFEMCloth.h"
 #include "PxgSoftBody.h"
 #include "PxgArticulation.h"
 #include "PxgBodySim.h"
 #include "dataReadWriteHelper.cuh"
+#include "PxgSolverCoreDesc.h"
+#include "atomic.cuh"
 
-using namespace physx;
+namespace physx
+{
+
+// Accumulate per-vertex position-delta + ref count into a deformable's
+// mDeltaPos/mSimDelta buffer. Gates each vertex on bary*invMass > 0: a
+// zero-bary write would still bump the .w ref count consumed by finalize
+// (mDeltaPos /= .w), inflating the count, dampening the position
+// correction, and leaving any attached rigid under-restored.
+static __device__ void updateTetPositionDelta(float4* outputDeltaPositions, const uint4& tetVertIndices,
+	const PxVec3& deltaPosition, const float4& invMassBary, const PxReal constraintWeight)
+{
+	if (invMassBary.x > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.x], deltaPosition*invMassBary.x, constraintWeight);
+	if (invMassBary.y > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.y], deltaPosition*invMassBary.y, constraintWeight);
+	if (invMassBary.z > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.z], deltaPosition*invMassBary.z, constraintWeight);
+	if (invMassBary.w > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.w], deltaPosition*invMassBary.w, constraintWeight);
+}
+
+static __device__ void updateTriPositionDelta(float4* outputDeltaPositions, const uint4& triVertIndices,
+	const PxVec3& deltaPosition, const float4& invMassBary, const PxReal constraintWeight)
+{
+	if (invMassBary.x > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.x], deltaPosition*invMassBary.x, constraintWeight);
+	if (invMassBary.y > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.y], deltaPosition*invMassBary.y, constraintWeight);
+	if (invMassBary.z > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.z], deltaPosition*invMassBary.z, constraintWeight);
+}
+
+// Like updateTetPositionDelta but does NOT touch .w. For callers that have already
+// pre-counted .w out-of-band (matches the FEMCollision contact-path pattern -- the
+// per-vertex refCount lives in mSimDelta[v].w, populated by a dedicated pre-count
+// kernel before the solve, and used by the solve both as the invMass mass-splitting
+// multiplier AND as the finalize divisor).
+static __device__ void updateTetPositionDeltaNoCount(float4* outputDeltaPositions, const uint4& tetVertIndices,
+	const PxVec3& deltaPosition, const float4& invMassBary)
+{
+	if (invMassBary.x > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.x], deltaPosition*invMassBary.x);
+	if (invMassBary.y > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.y], deltaPosition*invMassBary.y);
+	if (invMassBary.z > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.z], deltaPosition*invMassBary.z);
+	if (invMassBary.w > 0.0f)
+		AtomicAdd(outputDeltaPositions[tetVertIndices.w], deltaPosition*invMassBary.w);
+}
+
+static __device__ void updateTriPositionDeltaNoCount(float4* outputDeltaPositions, const uint4& triVertIndices,
+	const PxVec3& deltaPosition, const float4& invMassBary)
+{
+	if (invMassBary.x > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.x], deltaPosition*invMassBary.x);
+	if (invMassBary.y > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.y], deltaPosition*invMassBary.y);
+	if (invMassBary.z > 0.0f)
+		AtomicAdd(outputDeltaPositions[triVertIndices.z], deltaPosition*invMassBary.z);
+}
 
 //This code is based on Matthias Muller's paper: A robust method to extract the rotational part of deformations
 //Basically, this is another way to extract a rotational matrix from deformation gradient instead of using polar
@@ -56,7 +122,14 @@ __device__ inline void extractRotation(const PxMat33 &A, PxQuat& q, int maxIter)
 		omega *= 1.0f / (PxAbs(R.column0.dot(A.column0) + R.column1.dot(A.column1) + R.column2.dot(A.column2)) + eps);
 
 		const float w = omega.normalize();
-		const PxQuat tempQ = PxQuat(w, omega);
+
+		PxQuat tempQ;
+
+		if (w < eps) // near-zero omega produces non-unit vector after normalize()
+			tempQ = PxQuat(PxIdentity);
+		else
+			tempQ = PxQuat(w, omega);
+
 		q = tempQ * q;
 		q = q.getNormalized();
 
@@ -436,11 +509,11 @@ struct FEMCollision
 
 	PX_FORCE_INLINE __device__ PxReal getCombinedFriction()
 	{
-		return PxsCombinePxReal(rigidBodyFriction, deformableFriction, frictionCombineMode);
+		return combineScalars(rigidBodyFriction, deformableFriction, frictionCombineMode);
 	}
 
 	PX_FORCE_INLINE __device__ int getGlobalRigidBodyId(const PxgPrePrepDesc* const prePrepDesc, const PxNodeIndex& rigidId,
-														PxU32 numSolverBodies)
+														PxU32 numSolverBodies, PxU32 maxLinksPerArticulation)
 	{
 		// Following PxgVelocityReader style to read rigid body indices.
 		if(rigidId.isStaticBody())
@@ -450,9 +523,17 @@ struct FEMCollision
 
 		const PxU32 solverBodyIdx = prePrepDesc->solverBodyIndices[rigidId.index()];
 
-		// Placing articulation indices at the end of rigid body indices to distinguish between rigid body reference counts and
-		// articulation reference counts.
-		return rigidId.isArticulation() ? static_cast<int>(numSolverBodies + solverBodyIdx) : static_cast<int>(solverBodyIdx);
+		// OMPE-42519: articulation buckets are keyed per-LINK (not per-articulation),
+		// so that the reference count matches the per-link grouping used by
+		// accumulateRigidDeltas. Otherwise, when multiple links of the same
+		// articulation contact the same deformable, rigidRefCount double-counts
+		// against the per-link averaging and the chain receives 2x the correct
+		// per-iter impulse.
+		// Layout: [0..numSolverBodies)        = rigid-body slots
+		//         [numSolverBodies..end)      = numArticulations * maxLinksPerArticulation slots
+		return rigidId.isArticulation()
+				 ? static_cast<int>(numSolverBodies + solverBodyIdx * maxLinksPerArticulation + rigidId.articulationLinkId())
+				 : static_cast<int>(solverBodyIdx);
 	}
 
 	PX_FORCE_INLINE __device__ void readRigidBody(const PxNodeIndex& rigidId, int globalRigidBodyId, PxReal rigidInvMass,
@@ -636,5 +717,7 @@ struct FEMCollision
 		}
 	}
 };
+
+} // namespace physx
 
 #endif // __DEFORMABLE_UTILS_CUH__

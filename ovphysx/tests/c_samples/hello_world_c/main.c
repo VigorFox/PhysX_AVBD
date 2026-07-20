@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
-// NOTE: This file is included verbatim in documentation.
-// When editing, keep tutorial line ranges in sync.
+// NOTE: This file is included verbatim in documentation via literalinclude.
+// Tutorial marker comments below define the included range.
 
 // Compile-time check: fail compilation if C++ compiler is used (for internal testing)
 #ifdef __cplusplus
 #error "This file should be compiled as C, not C++"
 #endif
 
+// [tutorial-start]
 #include "ovphysx/ovphysx.h"
 #include <stdio.h>
 
@@ -21,9 +22,6 @@ int main() {
   ovphysx_result_t result = ovphysx_create_instance(&create_args, &handle);
   if (result.status != OVPHYSX_API_SUCCESS) {
     fprintf(stderr, "Failed to create PhysX instance\n");
-    if (result.error.ptr) {
-      ovphysx_destroy_error(result.error);
-    }
     return 1;
   }
 
@@ -35,9 +33,6 @@ int main() {
   ovphysx_enqueue_result_t add_result = ovphysx_add_usd(handle, path_str, prefix_str, &usd_handle);
   if (add_result.status != OVPHYSX_API_SUCCESS) {
     fprintf(stderr, "Failed to load USD\n");
-    if (add_result.error.ptr) {
-      ovphysx_destroy_error(add_result.error);
-    }
     ovphysx_destroy_instance(handle);
     return 1;
   }
@@ -46,9 +41,6 @@ int main() {
   ovphysx_enqueue_result_t step_result = ovphysx_step(handle, 0.016f, 0.0f);
   if (step_result.status != OVPHYSX_API_SUCCESS) {
     fprintf(stderr, "Failed to step simulation\n");
-    if (step_result.error.ptr) {
-      ovphysx_destroy_error(step_result.error);
-    }
     ovphysx_destroy_instance(handle);
     return 1;
   }
@@ -56,22 +48,19 @@ int main() {
   // Wait for step to complete
   ovphysx_op_wait_result_t step_wait_result = {0};
   ovphysx_result_t step_wait_status = ovphysx_wait_op(handle, step_result.op_index, UINT64_MAX, &step_wait_result);
-  if (step_wait_status.status != OVPHYSX_API_SUCCESS || step_wait_result.num_errors > 0) {
+  int step_ok = (step_wait_status.status == OVPHYSX_API_SUCCESS && step_wait_result.num_errors == 0);
+  ovphysx_destroy_wait_result(&step_wait_result);
+  if (!step_ok) {
     fprintf(stderr, "Simulation step failed\n");
-    if (step_wait_result.errors) {
-      ovphysx_destroy_errors(step_wait_result.errors, step_wait_result.num_errors);
-    }
-    if (step_wait_status.error.ptr) {
-      ovphysx_destroy_error(step_wait_status.error);
-    }
     ovphysx_destroy_instance(handle);
     return 1;
   }
-  
+
   printf("Simulation step completed successfully\n");
 
-  // Clean up
   ovphysx_destroy_instance(handle);
+  printf("Cleanup complete\n");
 
   return 0;
 }
+// [tutorial-end]

@@ -41,7 +41,9 @@
 #include "PxsRigidBody.h"
 #include "PxsSimpleIslandManager.h"
 #include "common/PxProfileZone.h"
+#include "extensions/PxD6Joint.h"
 #include "foundation/PxMath.h"
+#include "extensions/PxJoint.h"
 
 using namespace physx;
 using namespace physx::Dy;
@@ -238,20 +240,21 @@ enum PhysXJointType {
   eJOINT_GEAR = 5
 };
 
-// Helper function to convert Dy::ConstraintJointType to local PhysXJointType
-static PhysXJointType getJointTypeFromConstraint(Dy::ConstraintJointType cjt) {
-  switch (cjt) {
-  case Dy::eCONSTRAINT_JOINT_SPHERICAL:
+// Convert the extension concrete type stored by Sc::ConstraintSim into the
+// compact joint categories used by AVBD constraint preparation.
+static PhysXJointType getJointTypeFromConcreteType(PxU16 concreteType) {
+  switch (concreteType) {
+  case PxJointConcreteType::eSPHERICAL:
     return eJOINT_SPHERICAL;
-  case Dy::eCONSTRAINT_JOINT_REVOLUTE:
+  case PxJointConcreteType::eREVOLUTE:
     return eJOINT_REVOLUTE;
-  case Dy::eCONSTRAINT_JOINT_PRISMATIC:
+  case PxJointConcreteType::ePRISMATIC:
     return eJOINT_PRISMATIC;
-  case Dy::eCONSTRAINT_JOINT_FIXED:
+  case PxJointConcreteType::eFIXED:
     return eJOINT_FIXED;
-  case Dy::eCONSTRAINT_JOINT_D6:
+  case PxJointConcreteType::eD6:
     return eJOINT_D6;
-  case Dy::eCONSTRAINT_JOINT_GEAR:
+  case PxJointConcreteType::eGEAR:
     return eJOINT_GEAR;
   default:
     return eJOINT_UNKNOWN;
@@ -545,22 +548,22 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
   const IG::Island &island =
       islandSim.getIsland(islandSim.getActiveIslands()[islandIndex]);
-  IG::EdgeIndex edgeIndex = island.mFirstEdge[IG::Edge::eCONSTRAINT];
 
   numD6 = 0;
   numGear = 0;
 
-  while (edgeIndex != IG_INVALID_EDGE) {
-    const IG::Edge &edge = islandSim.getEdge(edgeIndex);
-    Dy::Constraint *constraint = mIslandManager.getConstraint(edgeIndex);
+  START_ENUMERATING_ISLAND_EDGES(IG::Edge::eCONSTRAINT) {
+    GET_CURRENT_ISLAND_EDGE
+
+    Dy::Constraint *constraint = mIslandManager.getConstraint(edgeId);
 
     if (constraint && constraint->constantBlock &&
         constraint->constantBlockSize > 0) {
 
       const PxNodeIndex nodeIndex0 =
-          islandSim.mCpuData.getNodeIndex1(edgeIndex);
+          islandSim.mCpuData.getNodeIndex1(edgeId);
       const PxNodeIndex nodeIndex1 =
-          islandSim.mCpuData.getNodeIndex2(edgeIndex);
+          islandSim.mCpuData.getNodeIndex2(edgeId);
 
       PxU32 localBody0 = PX_MAX_U32;
       PxU32 localBody1 = PX_MAX_U32;
@@ -625,15 +628,15 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
         }
       }
 
-      // Use the jointType field to detect joint type reliably
-      PhysXJointType jointType =
-          getJointTypeFromConstraint(constraint->jointType);
+      const PxU16 concreteType = getConstraintConcreteType(constraint->index);
+      const PhysXJointType jointType =
+          getJointTypeFromConcreteType(concreteType);
 
 #if AVBD_JOINT_DEBUG
       if (getAvbdMotorFrameCounter() < AVBD_JOINT_DEBUG_FRAMES) {
         printf("[Constraint Parse] type: %d, internal type: %d, block size: "
                "%u, expected: %zu\n",
-               jointType, constraint->jointType, constraint->constantBlockSize,
+               jointType, concreteType, constraint->constantBlockSize,
                sizeof(PhysXJointData));
         if (constraint->constantBlockSize >= sizeof(PhysXJointData)) {
           const PhysXJointData *physXData =
@@ -962,25 +965,24 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 c.linearDamping =
                     PxVec3(d6Data->drive[0].damping, d6Data->drive[1].damping,
                            d6Data->drive[2].damping);
-                // Angular drive data indices:
-                // drive[3] = eSWING (deprecated), also used for eSWING1
-                // drive[4] = eTWIST
-                // drive[5] = eSLERP, also used for eSWING2
+                // PhysX 5.9 angular drive data indices:
+                // drive[3] = eTWIST
+                // drive[4] = eSWING1
+                // drive[5] = eSWING2, also used for eSLERP
                 // For AVBD: angularDamping.x = TWIST, .y = SWING1, .z =
                 // SWING2/SLERP
                 c.angularStiffness = PxVec3(
-                    d6Data->drive[4].stiffness,  // TWIST
-                    d6Data->drive[3].stiffness,  // SWING1 (uses SWING slot)
+                    d6Data->drive[3].stiffness,  // TWIST
+                    d6Data->drive[4].stiffness,  // SWING1
                     d6Data->drive[5].stiffness); // SWING2/SLERP
                 c.angularDamping =
-                    PxVec3(d6Data->drive[4].damping, // TWIST
-                           d6Data->drive[3].damping, // SWING1 (uses SWING slot)
+                    PxVec3(d6Data->drive[3].damping, // TWIST
+                           d6Data->drive[4].damping, // SWING1
                            d6Data->drive[5].damping); // SWING2/SLERP
                 // Map D6 Joint driving flags to AVBD driveFlags format
                 // PhysX D6 Joint uses PxD6Drive::Enum bit positions:
                 //   eX=0, eY=1, eZ=2 (linear drives - bit 0-2)
-                //   eTWIST=4, eSWING1=6, eSWING2=7 (angular drives - need remap
-                //   to bit 3-5)
+                //   eTWIST=3, eSWING1=4, eSWING2=5, eSLERP=6
                 // AVBD expects: bit 0-2=linear X/Y/Z, bit 3-5=angular X/Y/Z
                 c.driveFlags = d6Data->driving &
                                0x07; // Linear drives (eX,eY,eZ) - bit 0-2
@@ -995,9 +997,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                       1 << 5; // SLERP -> bit 5 (angular Z, reuse SWING2)
                   c.sourceFlags |= AvbdD6JointConstraint::eD6_SLERP_DRIVE;
                 }
-                if (d6Data->driving & (1 << PxD6Drive::eSWING))
-                  c.driveFlags |= 1 << 3; // SWING (deprecated) -> bit 3
-                                          // (angular X, reuse TWIST)
 
                 // Set target drive velocities
                 c.driveLinearVelocity = d6Data->driveLinearVelocity;
@@ -1008,8 +1007,8 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                                             d6Data->drive[1].forceLimit,
                                             d6Data->drive[2].forceLimit);
                 c.driveAngularForce =
-                    PxVec3(d6Data->drive[4].forceLimit,  // TWIST
-                           d6Data->drive[3].forceLimit,  // SWING1
+                    PxVec3(d6Data->drive[3].forceLimit,  // TWIST
+                           d6Data->drive[4].forceLimit,  // SWING1
                            d6Data->drive[5].forceLimit); // SWING2/SLERP
               }
 
@@ -1095,6 +1094,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
         }
       } // end else if (AvbdSnippetJointData)
     } // end if (constraint && constraint->constantBlock && ...)
-    edgeIndex = edge.mNextIslandEdge;
-  } // end while (edgeIndex != IG_INVALID_EDGE)
+    GET_NEXT_ISLAND_EDGE
+  } // end island constraint-edge enumeration
 } // end prepareAvbdConstraints

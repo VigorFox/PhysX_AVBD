@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 
 #ifndef DY_AVBD_CONSTRAINT_H
 #define DY_AVBD_CONSTRAINT_H
@@ -32,21 +32,6 @@
 #include "foundation/PxVec3.h"
 
 #include "DyAvbdTypes.h"
-
-// Forward declarations for D6 joint drive constants
-struct PxD6Drive {
-  enum Enum {
-    eX = 0,
-    eY = 1,
-    eZ = 2,
-    eSWING = 3,
-    eTWIST = 4,
-    eSLERP = 5,
-    eSWING1 = 6,
-    eSWING2 = 7,
-    eCOUNT = 8
-  };
-};
 
 #pragma warning(push)
 #pragma warning(disable                                                        \

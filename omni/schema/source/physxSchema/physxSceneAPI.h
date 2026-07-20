@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #ifndef PHYSXSCHEMA_GENERATED_PHYSXSCENEAPI_H
 #define PHYSXSCHEMA_GENERATED_PHYSXSCENEAPI_H
@@ -479,28 +462,6 @@ public:
 
 public:
     // --------------------------------------------------------------------- //
-    // ENABLERESIDUALREPORTING 
-    // --------------------------------------------------------------------- //
-    /// Calculates solver residuals and reports them through optional Residual Report APIs at a slight expense of performance.
-    ///
-    /// | ||
-    /// | -- | -- |
-    /// | Declaration | `bool physxScene:enableResidualReporting = 0` |
-    /// | C++ Type | bool |
-    /// | \ref Usd_Datatypes "Usd Type" | SdfValueTypeNames->Bool |
-    PHYSXSCHEMA_API
-    UsdAttribute GetEnableResidualReportingAttr() const;
-
-    /// See GetEnableResidualReportingAttr(), and also 
-    /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create.
-    /// If specified, author \p defaultValue as the attribute's default,
-    /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
-    /// the default for \p writeSparsely is \c false.
-    PHYSXSCHEMA_API
-    UsdAttribute CreateEnableResidualReportingAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
-
-public:
-    // --------------------------------------------------------------------- //
     // ENABLEEXTERNALFORCESEVERYITERATION 
     // --------------------------------------------------------------------- //
     /// Enables greater TGS solver stability.
@@ -520,6 +481,28 @@ public:
     /// the default for \p writeSparsely is \c false.
     PHYSXSCHEMA_API
     UsdAttribute CreateEnableExternalForcesEveryIterationAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
+
+public:
+    // --------------------------------------------------------------------- //
+    // SOLVEARTICULATIONCONTACTLAST 
+    // --------------------------------------------------------------------- //
+    /// Order articulation contact constraints and articulation joint maximum velocity constraints so that they are solved after all other constraints in the solver.
+    ///
+    /// | ||
+    /// | -- | -- |
+    /// | Declaration | `bool physxScene:solveArticulationContactLast = 0` |
+    /// | C++ Type | bool |
+    /// | \ref Usd_Datatypes "Usd Type" | SdfValueTypeNames->Bool |
+    PHYSXSCHEMA_API
+    UsdAttribute GetSolveArticulationContactLastAttr() const;
+
+    /// See GetSolveArticulationContactLastAttr(), and also 
+    /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create.
+    /// If specified, author \p defaultValue as the attribute's default,
+    /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
+    /// the default for \p writeSparsely is \c false.
+    PHYSXSCHEMA_API
+    UsdAttribute CreateSolveArticulationContactLastAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // --------------------------------------------------------------------- //
@@ -547,6 +530,7 @@ public:
     // --------------------------------------------------------------------- //
     // TIMESTEPSPERSECOND 
     // --------------------------------------------------------------------- //
+    /// Deprecated: use newton:timeStepsPerSecond (NewtonSceneAPI) instead.
     /// Simulation scene step defined as number of steps per second.
     /// Note that application might cap the number of simulation steps to avoid
     /// running more simulations steps with a low frame rate.
@@ -723,25 +707,25 @@ public:
 
 public:
     // --------------------------------------------------------------------- //
-    // GPUMAXSOFTBODYCONTACTS 
+    // GPUMAXDEFORMABLEVOLUMECONTACTS 
     // --------------------------------------------------------------------- //
-    /// Gpu max soft body contacts.
+    /// Gpu max deformable volume contacts.
     ///
     /// | ||
     /// | -- | -- |
-    /// | Declaration | `uint physxScene:gpuMaxSoftBodyContacts = 1048576` |
+    /// | Declaration | `uint physxScene:gpuMaxDeformableVolumeContacts = 1048576` |
     /// | C++ Type | unsigned int |
     /// | \ref Usd_Datatypes "Usd Type" | SdfValueTypeNames->UInt |
     PHYSXSCHEMA_API
-    UsdAttribute GetGpuMaxSoftBodyContactsAttr() const;
+    UsdAttribute GetGpuMaxDeformableVolumeContactsAttr() const;
 
-    /// See GetGpuMaxSoftBodyContactsAttr(), and also 
+    /// See GetGpuMaxDeformableVolumeContactsAttr(), and also 
     /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create.
     /// If specified, author \p defaultValue as the attribute's default,
     /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
     /// the default for \p writeSparsely is \c false.
     PHYSXSCHEMA_API
-    UsdAttribute CreateGpuMaxSoftBodyContactsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
+    UsdAttribute CreateGpuMaxDeformableVolumeContactsAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // --------------------------------------------------------------------- //
@@ -908,7 +892,7 @@ public:
     // --------------------------------------------------------------------- //
     // MINPOSITIONITERATIONCOUNT 
     // --------------------------------------------------------------------- //
-    /// Minimum position iteration count for all actors (rigid bodies, cloth, particles etc).
+    /// Minimum position iteration count for all actors (rigid bodies, deformables, particles etc).
     /// Range: [1, 255]
     ///
     /// | ||
@@ -932,7 +916,7 @@ public:
     // --------------------------------------------------------------------- //
     // MAXPOSITIONITERATIONCOUNT 
     // --------------------------------------------------------------------- //
-    /// Maximum position iteration count for all actors (rigid bodies, cloth, particles etc).
+    /// Maximum position iteration count for all actors (rigid bodies, deformables, particles etc).
     /// Note that this setting will override solver iteration settings of individual actors that have requested more iterations.
     /// Range: [1, 255]
     ///
@@ -957,7 +941,7 @@ public:
     // --------------------------------------------------------------------- //
     // MINVELOCITYITERATIONCOUNT 
     // --------------------------------------------------------------------- //
-    /// Minimum velocity iteration count for all actors (rigid bodies, cloth, particles etc).
+    /// Minimum velocity iteration count for all actors (rigid bodies, deformables, particles etc).
     /// Range: [0, 255]
     ///
     /// | ||
@@ -981,7 +965,7 @@ public:
     // --------------------------------------------------------------------- //
     // MAXVELOCITYITERATIONCOUNT 
     // --------------------------------------------------------------------- //
-    /// Maximum velocity iteration count for all actors (rigid bodies, cloth, particles etc).
+    /// Maximum velocity iteration count for all actors (rigid bodies, deformables, particles etc).
     /// Note that this setting will override solver iteration settings of individual actors that have requested more iterations.
     /// Range: [0, 255]
     ///
@@ -1001,6 +985,29 @@ public:
     /// the default for \p writeSparsely is \c false.
     PHYSXSCHEMA_API
     UsdAttribute CreateMaxVelocityIterationCountAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
+
+public:
+    // --------------------------------------------------------------------- //
+    // DISABLESLEEPING 
+    // --------------------------------------------------------------------- //
+    /// Disables sleeping for all actors (rigids, articulations and deformables) in the scene.
+    ///
+    /// | ||
+    /// | -- | -- |
+    /// | Declaration | `uniform bool physxScene:disableSleeping = 0` |
+    /// | C++ Type | bool |
+    /// | \ref Usd_Datatypes "Usd Type" | SdfValueTypeNames->Bool |
+    /// | \ref SdfVariability "Variability" | SdfVariabilityUniform |
+    PHYSXSCHEMA_API
+    UsdAttribute GetDisableSleepingAttr() const;
+
+    /// See GetDisableSleepingAttr(), and also 
+    /// \ref Usd_Create_Or_Get_Property for when to use Get vs Create.
+    /// If specified, author \p defaultValue as the attribute's default,
+    /// sparsely (when it makes sense to do so) if \p writeSparsely is \c true -
+    /// the default for \p writeSparsely is \c false.
+    PHYSXSCHEMA_API
+    UsdAttribute CreateDisableSleepingAttr(VtValue const &defaultValue = VtValue(), bool writeSparsely=false) const;
 
 public:
     // ===================================================================== //

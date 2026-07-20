@@ -22,13 +22,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
 #include "PxgFEMCloth.h"
-#include "PxgFEMCore.h"
-#include "PxgFEMClothCore.h"
 #include "vector_types.h"
 #include "foundation/PxVec3.h"
 #include "foundation/PxMathUtils.h"
@@ -437,13 +435,13 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 		PxgFEMCloth& cloth = clothes[clothId];
 
 		const float4* pos_invMass = cloth.mPosition_InvMass;
-		const float4 low_high_limits = attachment.coneLimitParams.low_high_limits;
-		const float4 axis_angle = attachment.coneLimitParams.axis_angle;
 
 		float4 attachmentPose;
+		float invMass1;
 		if (elemIsVertex)
 		{
 			attachmentPose = pos_invMass[elemIdx];
+			invMass1 = attachmentPose.w;
 		}
 		else
 		{
@@ -453,13 +451,15 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 			const float4 pos_iMass1 = pos_invMass[triVertInd.y];
 			const float4 pos_iMass2 = pos_invMass[triVertInd.z];
 			attachmentPose = pos_iMass0 * barycentric.x + pos_iMass1 * barycentric.y + pos_iMass2 * barycentric.z;
+			// Squared-bary invMass for the constraint Jacobian-Mass-Jacobian denominator.
+			// Matches the solve kernel + FEMCollision.
+			invMass1 = barycentric.x * barycentric.x * pos_iMass0.w
+			         + barycentric.y * barycentric.y * pos_iMass1.w
+			         + barycentric.z * barycentric.z * pos_iMass2.w;
 		}
-
-		float invMass1 = attachmentPose.w;
 		const PxVec3 point(attachmentPose.x, attachmentPose.y, attachmentPose.z);
-		const PxVec3 axis(axis_angle.x, axis_angle.y, axis_angle.z);
 
-		float4 ra4 = attachment.localPose0;
+		float4 ra4 = make_float4(attachment.localPose0.x, attachment.localPose0.y, attachment.localPose0.z, 0.f);
 
 		//nodeIndex
 		PxNodeIndex rigidId = reinterpret_cast<const PxNodeIndex&>(attachment.index0);
@@ -487,8 +487,6 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 
 			const PxVec3 bodyFrame0p(body2World.p.x, body2World.p.y, body2World.p.z);
 
-			const PxVec3 worldAxis = (body2World.rotate(axis)).getNormalized();
-
 			PxVec3 ra(ra4.x, ra4.y, ra4.z);
 			ra = body2World.rotate(ra);
 			PxVec3 error = ra + bodyFrame0p - point;
@@ -503,8 +501,8 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 			const Cm::UnAlignedSpatialVector deltaV2 = spatialResponse * Cm::UnAlignedSpatialVector(normal2, raXn2);
 
 			const PxReal resp0 = deltaV0.top.dot(raXn0) + deltaV0.bottom.dot(normal0) + invMass1;
-			const PxReal resp1 = deltaV0.top.dot(raXn1) + deltaV0.bottom.dot(normal1) + invMass1;
-			const PxReal resp2 = deltaV0.top.dot(raXn2) + deltaV0.bottom.dot(normal2) + invMass1;
+			const PxReal resp1 = deltaV1.top.dot(raXn1) + deltaV1.bottom.dot(normal1) + invMass1;
+			const PxReal resp2 = deltaV2.top.dot(raXn2) + deltaV2.bottom.dot(normal2) + invMass1;
 
 			const float velMultiplier0 = (resp0 > 0.f) ? (1.f / resp0) : 0.f;
 			const float velMultiplier1 = (resp1 > 0.f) ? (1.f / resp1) : 0.f;
@@ -523,8 +521,7 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 			constraint.elemId[offset] = elemId;
 			constraint.rigidId[offset] = rigidId.getInd();
 			constraint.baryOrType[offset] = attachment.baryOrType1;
-			constraint.low_high_limits[offset] = low_high_limits;
-			constraint.axis_angle[offset] = make_float4(worldAxis.x, worldAxis.y, worldAxis.z, axis_angle.w);
+			constraint.rigidBodyReferenceCount[offset] = attachment.rigidBodyReferenceCount;
 
 		}
 		else
@@ -552,9 +549,6 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 			ra = bodyFrame0.rotate(ra);
 			PxVec3 error = ra + bodyFrame0p - point;
 
-			const PxVec3 worldAxis = (bodyFrame0.rotate(axis)).getNormalized();
-			
-
 			const PxVec3 raXn0 = ra.cross(normal0);
 			const PxVec3 raXn1 = ra.cross(normal1);
 			const PxVec3 raXn2 = ra.cross(normal2);
@@ -581,8 +575,7 @@ extern "C" __global__ void cloth_rigidAttachmentPrepareLaunch(
 			constraint.elemId[offset] = elemId;
 			constraint.rigidId[offset] = rigidId.getInd();
 			constraint.baryOrType[offset] = attachment.baryOrType1;
-			constraint.low_high_limits[offset] = low_high_limits;
-			constraint.axis_angle[offset] = make_float4(worldAxis.x, worldAxis.y, worldAxis.z, axis_angle.w);
+			constraint.rigidBodyReferenceCount[offset] = attachment.rigidBodyReferenceCount;
 
 			if (rigidDeltaVel)
 			{

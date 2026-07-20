@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -31,6 +31,7 @@
 
 #include "PxgFEMCloth.h"
 #include "vector_types.h"
+#include "foundation/PxVec2.h"
 #include "foundation/PxVec3.h"
 #include "foundation/PxVec4.h"
 #include "foundation/PxBounds3.h"
@@ -48,7 +49,8 @@
 #include "utils.cuh"
 
 
-using namespace physx;
+namespace physx
+{
 
 
 /*******************************************************************************
@@ -63,6 +65,10 @@ using namespace physx;
 #define FEMCLOTH_SQRT3		1.7320508075688772935274463415059f
 
 #define FEMCLOTH_THRESHOLD	1.0e-14f
+
+// Closest-pt direction is precision-unreliable below this dist^2; fall back to triangle/edge normal.
+#define FEMCLOTH_NORMAL_FALLBACK_DISTSQ	1.0e-10f
+
 #define FEMCLOTH_PI			3.14159265358979323846f
 #define FEMCLOTH_HALF_PI	1.57079632679489661923f
 #define FEMCLOTH_2PI		6.28318530717958647692f
@@ -701,5 +707,7 @@ void
 	// Bending constraint for the triangle pair
 	bendingEnergySolvePerTrianglePair(shFEMCloth, x0, x1, x2, x3, vertexReferenceCount, dt, trianglePairIndex, true, isTGS);
 }
+
+} // namespace physx
 
 #endif  // FEMCLOTHUTIL

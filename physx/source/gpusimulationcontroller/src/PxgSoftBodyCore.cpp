@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.
 
@@ -75,17 +75,21 @@ namespace physx
 	}
 
 	PxgSoftBodyCore::PxgSoftBodyCore(PxgCudaKernelWranglerManager* gpuKernelWrangler, PxCudaContextManager* cudaContextManager,
-		PxgHeapMemoryAllocatorManager* heapMemoryManager, PxgSimulationController* simController, PxgGpuContext* gpuContext, const PxU32 maxContacts, const PxU32 collisionStackSize, const bool isTGS) :
-		PxgFEMCore(gpuKernelWrangler, cudaContextManager, heapMemoryManager, simController, gpuContext, maxContacts, collisionStackSize, isTGS, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCContactPointBuffer(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCContactNormalPenBuffer(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCContactBarycentricBuffer0(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCContactBarycentricBuffer1(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCContactInfoBuffer(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCTotalContactCountBuffer(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mPrevSCContactCountBuffer(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCConstraintBuf(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY),
-		mSCLambdaNBuf(heapMemoryManager, PxsHeapStats::eSHARED_SOFTBODY), 
+		PxgAllocatorDesc& allocDesc, PxgSimulationController* simController, PxgGpuContext* gpuContext, const PxU32 maxContacts, const PxU32 collisionStackSize, const bool isTGS) :
+		PxgFEMCore(gpuKernelWrangler, cudaContextManager, allocDesc, simController, gpuContext, maxContacts, collisionStackSize, isTGS, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCContactPointBuffer(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCContactNormalPenBuffer(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCContactBarycentricBuffer0(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCContactBarycentricBuffer1(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCContactInfoBuffer(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCTotalContactCountBuffer(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mPrevSCContactCountBuffer(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCConstraintBuf(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY),
+		mSCLambdaNBuf(allocDesc.deviceAlloc, PxsHeapStats::eSHARED_SOFTBODY), 
+		mBoundUpdateEvent(NULL),
+		mSolveRigidEvent(NULL),
+		mConstraintPrepSoftBodyParticleEvent(NULL),
+		mSolveSoftBodyParticleEvent(NULL),
 		mPostSolveCallback(NULL)
 	{
 		mGpuContext->mGpuSoftBodyCore = this;
@@ -343,22 +347,25 @@ namespace physx
 
 	void PxgSoftBodyCore::checkBufferOverflows()
 	{
-		PxU32 contactCountNeeded = PxMax(*mParticleContactCountPrevTimestep, PxMax(*mRigidContactCountPrevTimestep, *mVolumeContactorVTContactCountPrevTimestep));
+		PxU32 contactCountNeeded = PxMax(mContactCountsPrevTimestep[ContactCounts::ePARTICLE],
+										 PxMax(mContactCountsPrevTimestep[ContactCounts::eRIGID],
+											   mContactCountsPrevTimestep[ContactCounts::eVOLUME_CONTACTOR_VT]));
+		
 		if (contactCountNeeded >= mMaxContacts) 
 		{
 			PxGetFoundation().error(::physx::PxErrorCode::eINTERNAL_ERROR, PX_FL, "Deformable volume contact buffer overflow detected, please increase PxGpuDynamicsMemoryConfig::maxDeformableVolumeContacts to at least %u\n", contactCountNeeded);
 		}
 
-		if (*mStackSizeNeededPinned > mCollisionStackSizeBytes)
+		if (mStackSizeNeededPinned.get() > mCollisionStackSizeBytes)
 		{
-			PxGetFoundation().error(::physx::PxErrorCode::eINTERNAL_ERROR, PX_FL, "PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least %i in the scene desc! Contacts have been dropped.\n", *mStackSizeNeededPinned);
+			PxGetFoundation().error(::physx::PxErrorCode::eINTERNAL_ERROR, PX_FL, "PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least %i in the scene desc! Contacts have been dropped.\n", mStackSizeNeededPinned.get());
 		}
 
 #if PX_ENABLE_SIM_STATS
 		mContactCountStats = PxMax(mContactCountStats, contactCountNeeded);
 		mGpuContext->getSimStats().mGpuDynamicsDeformableVolumeContacts = mContactCountStats;
 
-		mCollisionStackSizeBytesStats = PxMax(*mStackSizeNeededPinned, mCollisionStackSizeBytesStats);
+		mCollisionStackSizeBytesStats = PxMax(mStackSizeNeededPinned.get(), mCollisionStackSizeBytesStats);
 		mGpuContext->getSimStats().mGpuDynamicsCollisionStackSize = PxMax(mCollisionStackSizeBytesStats, mGpuContext->getSimStats().mGpuDynamicsCollisionStackSize);
 #else
 		PX_CATCH_UNDEFINED_ENABLE_SIM_STATS
@@ -393,7 +400,7 @@ namespace physx
 
 		if (nbActiveSelfCollisionSoftbodies)
 		{
-			PxgSoftBodyContactWriter writer(this);
+			PxgSoftBodyContactWriter writer = createSoftBodyContactWriter();
 
 			CUfunction scMidphaseFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::SB_SELFCOLLISION_MIDPHASE);
 
@@ -942,6 +949,7 @@ namespace physx
 			}
 
 
+			if(!mGpuContext->isSleepingDisabled())
 			{
 				const PxReal resetCounter = 0.4f;
 				const PxU32 numBlocks = (nbActiveSoftbodies + numThreadsPerBlock - 1) / numThreadsPerBlock;
@@ -1005,7 +1013,7 @@ namespace physx
 	void PxgSoftBodyCore::createActivatedDeactivatedLists()
 	{
 		PxgSimulationCore* core = mSimController->getSimulationCore();
-		PxBitMapPinned& sbChangedMap = core->getActiveSBStateChangedMap();
+		Cm::PinnableBitMap& sbChangedMap = core->getActiveSBStateChangedMap();
 
 		PxArray<Dy::DeformableVolume*>& deformableVolumes = mSimController->getBodySimManager().mDeformableVolumes;
 
@@ -1016,10 +1024,10 @@ namespace physx
 		mActivatingDeformableVolumes.forceSize_Unsafe(0);
 		mDeactivatingDeformableVolumes.forceSize_Unsafe(0);
 
-		PxBitMapPinned::Iterator iter(sbChangedMap);
+		Cm::PinnableBitMap::Iterator iter(sbChangedMap);
 
 		PxU32 dirtyIdx;
-		while ((dirtyIdx = iter.getNext()) != PxBitMapPinned::Iterator::DONE)
+		while ((dirtyIdx = iter.getNext()) != Cm::PinnableBitMap::Iterator::DONE)
 		{
 			PX_ASSERT(dirtyIdx < bodyManager.mActiveSoftbodies.size());
 			PxU32 idx = bodyManager.mActiveSoftbodies[dirtyIdx];
@@ -1093,6 +1101,10 @@ namespace physx
 		//accumulate velocity delta for rigid body and impulse delta for articulation link
 		accumulateRigidDeltas(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, mRigidSortedRigidIdBuf.getDevicePtr(),
 							  mRigidTotalContactCountBuf.getDevicePtr(), solverStream, false);
+
+		// if the contact is between articulation and soft body, after accumulated all the related contact's
+		// impulse, we need to propagate the accumulated impulse to the articulation block solver
+		mGpuContext->mGpuArticulationCore->pushImpulse(solverStream);
 	}
 
 	void PxgSoftBodyCore::solveRSContactsOutputRigidDeltaTGS(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd,
@@ -1159,6 +1171,8 @@ namespace physx
 		//impulse, we need to propagate the accumulated impulse to the articulation block solver
 		accumulateRigidDeltas(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, mRigidSortedRigidIdBuf.getDevicePtr(),
 							  mRigidTotalContactCountBuf.getDevicePtr(), solverStream, true);
+
+		mGpuContext->mGpuArticulationCore->pushImpulse(solverStream);
 	}
 
 
@@ -1787,8 +1801,47 @@ namespace physx
 #endif
 	}
 
+	// Pre-count per-vertex refCount for rigid-soft attachments, bumping
+	// softbody.mSimDelta[v].w via atomicAdd. Pairs with the modified
+	// sb_solveRigidSoftAttachmentLaunch{,TGS} kernels that read .w as the
+	// per-vertex Jacobi mass-splitting factor, for both PGS and TGS. Must
+	// run after the FEM finalize (so .w starts from 0) and before both
+	// attach + contact solves (they read the combined .w).
+	void PxgSoftBodyCore::queryRigidAttachmentReferenceCount(CUstream solverStream)
+	{
+		PxgSimulationCore* simCore = mSimController->getSimulationCore();
+		const PxU32 nbRigidAttachments = simCore->getNbRigidSoftBodyAttachments();
+		if(nbRigidAttachments == 0)
+			return;
+
+		PxgSoftBody* softbodiesd = reinterpret_cast<PxgSoftBody*>(simCore->getSoftBodyBuffer().getDevicePtr());
+		PxgDevicePointer<PxgFEMRigidAttachmentConstraint> constraintsd = simCore->getSoftBodyRigidConstraints();
+
+		const CUfunction kernelFunction =
+			mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::SB_QUERY_RIGID_SOFT_ATTACHMENT_REFERENCE_COUNT);
+
+		PxCudaKernelParam kernelParams[] = {
+			PX_CUDA_KERNEL_PARAM(softbodiesd),
+			PX_CUDA_KERNEL_PARAM(constraintsd),
+			PX_CUDA_KERNEL_PARAM(nbRigidAttachments)
+		};
+
+		const PxU32 numThreadsPerBlock = PxgSoftBodyKernelBlockDim::SB_UPDATEROTATION;
+		const PxU32 numBlocks = PxgSoftBodyKernelGridDim::SB_UPDATEROTATION;
+		CUresult result = mCudaContext->launchKernel(kernelFunction, numBlocks, 1, 1, numThreadsPerBlock, 1, 1, 0,
+			solverStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
+		PX_ASSERT(result == CUDA_SUCCESS);
+		PX_UNUSED(result);
+
+#if SB_GPU_DEBUG
+		result = mCudaContext->streamSynchronize(solverStream);
+		if (result != CUDA_SUCCESS)
+			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU sb_queryRigidSoftAttachmentReferenceCountLaunch kernel fail!\n");
+#endif
+	}
+
 	void PxgSoftBodyCore::solveRigidAttachment(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
-		PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, CUstream solverStream, const PxReal dt) 
+		PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, CUstream solverStream, const PxReal dt)
 	{
 		
 		PxgSimulationCore* simCore = mSimController->getSimulationCore();
@@ -1841,6 +1894,9 @@ namespace physx
 			//solver body velocites before we update them
 			accumulateRigidDeltas(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, rigidAttachmentIds, totalRigidAttachmentsd,
 								  solverStream, false);
+
+			// OMPE-42519: flush mScratchImpulse so a same-iter contact-path pushImpulse doesn't read stale link velocity.
+			mGpuContext->mGpuArticulationCore->pushImpulse(solverStream);
 		}
 	}
 
@@ -1902,6 +1958,9 @@ namespace physx
 
 			accumulateRigidDeltas(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, rigidAttachmentIds, totalRigidAttachmentsd,
 								  solverStream, true);
+
+			// OMPE-42519: flush mScratchImpulse so a same-iter contact-path pushImpulse doesn't read stale link velocity.
+			mGpuContext->mGpuArticulationCore->pushImpulse(solverStream);
 		}
 	}
 
@@ -1940,50 +1999,6 @@ namespace physx
 					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU sb_solveOutputAttachmentSoftDeltaVLaunchTGS kernel fail!\n");
 #endif
 			}
-		}
-	}
-
-	void PxgSoftBodyCore::solveParticleAttachmentDelta()
-	{
-		PxgSimulationCore* simCore = mSimController->getSimulationCore();
-
-		const PxU32 nbParticleAttachments = simCore->getNbSoftBodyParticleAttachments();
-
-		if (nbParticleAttachments)
-		{
-			PxgSoftBody* softbodiesd = reinterpret_cast<PxgSoftBody*>(simCore->getSoftBodyBuffer().getDevicePtr());
-			
-			PxgParticleSystemCore* particleCore = mSimController->getPBDParticleSystemCore();
-			
-			PxgDevicePointer<PxgParticleSystem> particlesd = particleCore->getParticleSystemBuffer().getTypedDevicePtr();
-
-			PxgDevicePointer<PxgFEMFEMAttachmentConstraint> constraintsd = simCore->getSoftBodyParticleConstraints();
-
-			{
-				const CUfunction solveParticleAttachmentKernelFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::SB_SOLVE_PARTICLE_ATTACHMENT_DELTA);
-
-				PxCudaKernelParam kernelParams[] =
-				{
-					PX_CUDA_KERNEL_PARAM(softbodiesd),
-					PX_CUDA_KERNEL_PARAM(particlesd),
-					PX_CUDA_KERNEL_PARAM(constraintsd),
-					PX_CUDA_KERNEL_PARAM(nbParticleAttachments)
-				};
-
-				const PxU32 numThreadsPerBlock = PxgSoftBodyKernelBlockDim::SB_UPDATEROTATION;
-				const PxU32 numBlocks = PxgSoftBodyKernelGridDim::SB_UPDATEROTATION;
-				CUresult result = mCudaContext->launchKernel(solveParticleAttachmentKernelFunction, numBlocks, 1, 1, numThreadsPerBlock, 1, 1, 0, mStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
-				PX_ASSERT(result == CUDA_SUCCESS);
-				PX_UNUSED(result);
-
-
-#if SB_GPU_DEBUG
-				result = mCudaContext->streamSynchronize(mStream);
-				if (result != CUDA_SUCCESS)
-					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU sb_solveOutputAttachmentSoftDeltaVLaunchTGS kernel fail!\n");
-#endif
-			}
-	
 		}
 	}
 
@@ -2170,49 +2185,6 @@ namespace physx
 
 	}
 
-	void PxgSoftBodyCore::prepParticleAttachmentConstraints(CUstream stream)
-	{
-		PxgSimulationCore* simCore = mSimController->getSimulationCore();
-
-		const PxU32 nbParticleAttachments = simCore->getNbSoftBodyParticleAttachments();
-
-		if (nbParticleAttachments)
-		{
-
-			PxgDevicePointer<PxgFEMFEMAttachment> particleAttachments = simCore->getSoftBodyParticleAttachments();
-			PxgDevicePointer<PxU32> activeParticleAttachments = simCore->getActiveSoftBodyParticleAttachments();
-			PxgDevicePointer<PxgFEMFEMAttachmentConstraint> constraintsd = simCore->getSoftBodyParticleConstraints();
-			//PxgDevicePointer<PxU32> particleAttachmentIds = simCore->getSoftBodyParticleAttachmentIds().getTypedDevicePtr();
-
-			//prepare primitive constraints sorted by particle id
-			{
-				const CUfunction prepAttachmentKernelFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::FEM_ATTACHMENT_CONSTRAINT_PREP);
-
-				PxCudaKernelParam kernelParams[] =
-				{
-
-					PX_CUDA_KERNEL_PARAM(particleAttachments),
-					PX_CUDA_KERNEL_PARAM(activeParticleAttachments),
-			/*		PX_CUDA_KERNEL_PARAM(particleAttachmentIds),*/
-					PX_CUDA_KERNEL_PARAM(nbParticleAttachments),
-					PX_CUDA_KERNEL_PARAM(constraintsd)
-				};
-
-				const PxU32 numThreadsPerBlock = PxgSoftBodyKernelBlockDim::SB_UPDATEROTATION;
-				const PxU32 numBlocks = PxgSoftBodyKernelGridDim::SB_UPDATEROTATION;
-				CUresult result = mCudaContext->launchKernel(prepAttachmentKernelFunction, numBlocks, 1, 1, numThreadsPerBlock, 1, 1, 0, stream, kernelParams, sizeof(kernelParams), 0, PX_FL);
-				PX_ASSERT(result == CUDA_SUCCESS);
-				PX_UNUSED(result);
-#if SB_GPU_DEBUG
-				result = mCudaContext->streamSynchronize(stream);
-				if (result != CUDA_SUCCESS)
-					PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU sb_clothAttachmentPrepareLaunch ps_rigidAttachmentPrepareLaunch kernel fail!\n");
-				PX_ASSERT(result == CUDA_SUCCESS);
-#endif
-			}
-		}
-	}
-
 	void PxgSoftBodyCore::prepRigidContactConstraint(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd,
 		const PxReal invDt, PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, CUstream solverStream, const bool isTGS, PxU32 numSolverBodies, PxU32 numArticulations)
 	{
@@ -2230,10 +2202,16 @@ namespace physx
 			PxgDevicePointer<PxgFemRigidConstraintBlock> constraintsd = mRigidConstraintBuf.getTypedDevicePtr();
 			PxgDevicePointer<PxReal> rigidAppliedForced = mRigidFEMAppliedForcesBuf.getTypedDevicePtr();
 
-			// Allocating femRigidContactCount based on the size of rigid bodies plus articulations.
-			if (mFemRigidReferenceCount.getNbElements() != numSolverBodies + numArticulations)
+			// OMPE-42519: per-link buckets for articulations (was per-articulation).
+			// Layout: [0..numSolverBodies) rigid bodies, then numArticulations * maxLinks
+			// slots so that contacts on different links of the same articulation
+			// don't share a reference count and double-count against the per-link
+			// averaging in accumulateRigidDeltas.
+			const PxU32 maxLinksPerArti = mSimController->getSimulationCore()->getMaxArticulationLinks();
+			const PxU32 femRefCountElems = numSolverBodies + numArticulations * maxLinksPerArti;
+			if (mFemRigidReferenceCount.getNbElements() != femRefCountElems)
 			{
-				mFemRigidReferenceCount.allocateElements(numSolverBodies + numArticulations, PX_FL);
+				mFemRigidReferenceCount.allocateElements(femRefCountElems, PX_FL);
 			}
 
 			const CUfunction rigidContactPrepKernelFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::SB_RS_CONTACTPREPARE);
@@ -2607,8 +2585,6 @@ namespace physx
 
 		prepClothAttachmentConstraints(solverStream);
 
-		prepParticleAttachmentConstraints(solverStream);
-
 		synchronizeStreams(mCudaContext, solverStream, mStream);
 	}
 
@@ -2660,8 +2636,11 @@ namespace physx
 
 	void PxgSoftBodyCore::solveTGS(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 		PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, const PxReal dt, CUstream solverStream,
-		bool isVelocityIteration, const PxReal biasCoefficient, const bool isFirstIteration, const PxVec3& gravity)
+		bool isVelocityIteration, const PxReal contactBiasCoefficient, const PxReal attachBiasCoefficient, const bool isFirstIteration, const PxVec3& gravity)
 	{
+		// contactBiasCoefficient: callsite already scaled by invStepDt (legacy soft-soft and
+		// soft-particle contact convention); contact kernel uses as-is.
+		// attachBiasCoefficient: bare; the TGS attach kernel scales by invDt internally.
 #if SB_GPU_DEBUG
 		PX_PROFILE_ZONE("PxgSoftBodyCore.solveTGS", 0);
 #endif
@@ -2686,25 +2665,32 @@ namespace physx
 		
 		solveCorotationalFEM(softbodies, softbodiesd, activeSoftBodiesd, nbActiveSoftbodies, dt, mStream, true, isFirstIteration);
 
-		// Interaction with rigid body
+		// Interaction with rigid body. Attach + contact share a single merged
+		// refcount phase: both pre-counts populate softbody.mSimDelta[v].w, both
+		// solves read it, and one finalize closes the phase. The FEM finalize
+		// runs first so .w starts at 0 for the pre-counts. See the FEMCollision
+		// pattern in deformableUtils.cuh.
 		{
-			synchronizeStreams(mCudaContext, mStream, solverStream);
-
-			// Solve soft-rigid attachment constraints (runs on solverStream)
-			solveRigidAttachmentTGS(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt, biasCoefficient, isVelocityIteration);
-
-			mCudaContext->streamWaitEvent(mStream, mSolveRigidEvent);
-
+			// Finalize FEM so .w is zero before the attach+contact pre-count runs.
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
 
 			synchronizeStreams(mCudaContext, mStream, solverStream);
 
-			// Solve soft-rigid collision constraints (runs on solverStream)
+			// Pre-count refCount per vertex. Both attach + contact bump .w on the
+			// same buffer -- mixed-writer vertices end up with the combined count.
+			queryRigidAttachmentReferenceCount(solverStream);
 			queryRigidContactReferenceCount(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
+
+			// Solve both: each reads the combined .w, writes inflated .xyz, does
+			// not bump .w. Order between them is irrelevant for correctness
+			// since they're both atomic writers and read .w from the pre-count.
+			solveRigidAttachmentTGS(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt, attachBiasCoefficient, isVelocityIteration);
 			solveRSContactsOutputRigidDeltaTGS(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
 
 			mCudaContext->streamWaitEvent(mStream, mSolveRigidEvent);
 
+			// Single finalize for the merged phase: pos += .xyz / max(.w, 1);
+			// zero both .xyz and .w.
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
 		}
 
@@ -2716,7 +2702,7 @@ namespace physx
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
 
 			//solve soft body vs soft body and soft body selfcollision
-			solveSSContactsOutputSoftBodyDelta(dt, biasCoefficient, true);
+			solveSSContactsOutputSoftBodyDelta(dt, contactBiasCoefficient, true);
 
 			//This function is going to update the pos and vel for the FEM verts
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
@@ -2734,9 +2720,6 @@ namespace physx
 
 				synchronizeStreams(mCudaContext, particleStream, mStream);
 
-				//solve particle attachment at soft body stream
-				solveParticleAttachmentDelta();
-
 				synchronizeStreams(mCudaContext, mStream, particleStream);
 
 				//This function is going to update the pos and vel for the FEM verts
@@ -2750,10 +2733,10 @@ namespace physx
 				synchronizeStreams(mCudaContext, particleStream, mStream);
 
 				//solve soft body vs particle contact in soft body stream
-				solveSPContactsOutputSoftBodyDelta(dt, biasCoefficient);
+				solveSPContactsOutputSoftBodyDelta(dt, contactBiasCoefficient);
 
 				//solve soft body vs particle contact in particle stream
-				solveSPContactsOutputParticleDelta(dt, biasCoefficient, particleStream);
+				solveSPContactsOutputParticleDelta(dt, contactBiasCoefficient, particleStream);
 				//solveSPContactsOutputParticleDelta(dt, mStream);
 
 				//soft body stream need to wait till soft body vs particle finish in the particle stream
@@ -2811,7 +2794,7 @@ namespace physx
 
 	void PxgSoftBodyCore::solve(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 		PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, const PxReal dt, CUstream solverStream,
-		const bool isFirstIteration)
+		const bool isFirstIteration, const PxReal biasCoefficient)
 	{
 #if SB_GPU_DEBUG
 		PX_PROFILE_ZONE("PxgSoftBodyCore.solve", 0);
@@ -2837,25 +2820,30 @@ namespace physx
 
 		solveCorotationalFEM(softbodies, softbodiesd, activeSoftBodiesd, nbActiveSoftbodies, dt, mStream, false, isFirstIteration);
 
-		// Interaction with rigid body
+		// Interaction with rigid body. Attach + contact share a single merged
+		// refcount phase: both pre-counts populate softbody.mSimDelta[v].w, both
+		// solves read it, and one finalize closes the phase. The FEM finalize
+		// runs first so .w starts at 0 for the pre-counts. See the FEMCollision
+		// pattern in deformableUtils.cuh.
 		{
-			synchronizeStreams(mCudaContext, mStream, solverStream);
-
-			// Solve soft-rigid attachment constraints (runs on solverStream)
-			solveRigidAttachment(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
-
-			mCudaContext->streamWaitEvent(mStream, mSolveRigidEvent);
-
+			// Finalize FEM so .w is zero before the attach+contact pre-count runs.
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
 
 			synchronizeStreams(mCudaContext, mStream, solverStream);
 
-			// Solve soft-rigid collision constraints (runs on solverStream)
+			// Pre-count refCount per vertex. Both attach + contact bump .w on the
+			// same buffer -- mixed-writer vertices end up with the combined count.
+			queryRigidAttachmentReferenceCount(solverStream);
 			queryRigidContactReferenceCount(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
+
+			// Solve both: each reads the combined .w, writes inflated .xyz, does
+			// not bump .w.
+			solveRigidAttachment(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
 			solveRSContactsOutputRigidDelta(prePrepDescd, solverCoreDescd, sharedDescd, artiCoreDescd, solverStream, dt);
 
 			mCudaContext->streamWaitEvent(mStream, mSolveRigidEvent);
 
+			// Single finalize for the merged phase.
 			applyExternalTetraDeltaGM(nbActiveSoftbodies, dt, mStream);
 		}
 
@@ -2889,9 +2877,6 @@ namespace physx
 
 				synchronizeStreams(mCudaContext, particleStream, mStream);
 
-				//solve particle attachment at soft body stream
-				solveParticleAttachmentDelta();
-
 				synchronizeStreams(mCudaContext, mStream, particleStream);
 
 				//This function is going to update the pos and vel for the FEM verts
@@ -2903,10 +2888,10 @@ namespace physx
 				synchronizeStreams(mCudaContext, particleStream, mStream);
 
 				//solve soft body vs particle contact in soft body stream
-				solveSPContactsOutputSoftBodyDelta(dt, 0.7f/dt);
+				solveSPContactsOutputSoftBodyDelta(dt, biasCoefficient/dt);
 
 				//solve soft body vs particle contact in particle stream
-				solveSPContactsOutputParticleDelta(dt, 0.7f/dt, particleStream);
+				solveSPContactsOutputParticleDelta(dt, biasCoefficient/dt, particleStream);
 				//solveSPContactsOutputParticleDelta(dt, mStream);
 
 				//soft body stream need to wait till soft body vs particle finish in the particle stream
@@ -3070,7 +3055,7 @@ namespace physx
 
 	}
 
-	bool PxgSoftBodyCore::updateUserData(PxPinnedArray<PxgSoftBody>& softBodyPool, PxArray<PxU32>& softBodyNodeIndexPool,
+	bool PxgSoftBodyCore::updateUserData(Cm::PinnableArray<PxgSoftBody>& softBodyPool, PxArray<PxU32>& softBodyNodeIndexPool,
 		const PxU32* activeSoftBodies, const PxU32 nbActiveSoftBodies, void** bodySimsLL)
 	{
 		bool anyDirty = false;
@@ -3109,82 +3094,31 @@ namespace physx
 
 		return anyDirty;
 	}
-	
-	void PxgSoftBodyCore::copyOrApplySoftBodyDataDEPRECATED(PxU32 dataIndex, PxU32* softBodyIndices, PxU8** data, PxU32* dataSizes, PxU32 maxSizeInBytes, const PxU32 nbSoftbodies, const PxU32 applyDataToSoftBodies)
+
+	PxgSoftBodyContactWriter PxgSoftBodyCore::createSoftBodyContactWriter()
 	{
-		CUfunction kernelFunction = mGpuKernelWranglerManager->getKernelWrangler()->getCuFunction(PxgKernelIds::SB_COPY_OR_APPLY_SOFTBODY_DATA_DEPRECATED);
-
-		PxgSimulationCore* core = mSimController->getSimulationCore();
-
-		PxU32 maxElementsToCopyPerThread = 4;
-		PxU32 maxSize = (maxSizeInBytes + 4 - 1) / 4; //We copy 4 bytes at a time
-
-		PxU32 threadsPerSoftBody = (maxSize + maxElementsToCopyPerThread - 1) / maxElementsToCopyPerThread;
-		PxU32 totalNumberOfThreads = nbSoftbodies * threadsPerSoftBody;
-		PxU32 threadsPerBlock = 128;
-		PxU32 numBlocks = (totalNumberOfThreads + threadsPerBlock - 1) / threadsPerBlock;
-
-		PxCudaKernelParam kernelParams[] =
-		{
-			PX_CUDA_KERNEL_PARAM(core->getSoftBodyBuffer()),
-			PX_CUDA_KERNEL_PARAM(dataIndex),
-			PX_CUDA_KERNEL_PARAM(softBodyIndices),
-			PX_CUDA_KERNEL_PARAM(nbSoftbodies),
-			PX_CUDA_KERNEL_PARAM(data),
-			PX_CUDA_KERNEL_PARAM(dataSizes),
-			PX_CUDA_KERNEL_PARAM(threadsPerSoftBody),
-			PX_CUDA_KERNEL_PARAM(applyDataToSoftBodies)
-		};
-
-		CUresult result = mCudaContext->launchKernel(kernelFunction, numBlocks, 1, 1, threadsPerBlock, 1, 1, 0, mStream, kernelParams, sizeof(kernelParams), 0, PX_FL);
-		PX_ASSERT(result == CUDA_SUCCESS);
-		PX_UNUSED(result);
-
-#if SB_GPU_DEBUG
-		result = mCudaContext->streamSynchronize(mStream);
-		PX_ASSERT(result == CUDA_SUCCESS);
-		if (result != CUDA_SUCCESS)
-			PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "GPU softbody direct API kernel fail!\n");
-
-#endif
-	}	
-
-	void PxgSoftBodyCore::copySoftBodyDataDEPRECATED(void** data, void* dataEndIndices, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent)
-	{
-		PxU32 dataIndex = PxgSoftBody::dataIndexFromFlagDEPRECATED(flag);
-
-		copyOrApplySoftBodyDataDEPRECATED(dataIndex, reinterpret_cast<PxU32*>(softBodyIndices), reinterpret_cast<PxU8**>(data),
-			reinterpret_cast<PxU32*>(dataEndIndices), maxSize, nbCopySoftBodies, 0);
-
-		if (copyEvent)
-		{
-			mCudaContext->eventRecord(copyEvent, mStream);
-		}
-		else
-		{
-			CUresult result = mCudaContext->streamSynchronize(mStream);
-			PX_UNUSED(result);
-		}
+		PxgSoftBodyContactWriter writer;
+		writer.totalContactCount = getVolumeContactOrVTContactCount().getTypedPtr();
+		writer.outPoint = getFemContacts().getTypedPtr();
+		writer.outNormalPen = getFemNormalPens().getTypedPtr();
+		writer.outBarycentric0 = getFemBarycentrics0().getTypedPtr();
+		writer.outBarycentric1 = getFemBarycentrics1().getTypedPtr();
+		writer.outContactInfo = getVolumeContactOrVTContactInfos().getTypedPtr();
+		writer.maxContacts = mMaxContacts;
+		return writer;
 	}
 
-	void PxgSoftBodyCore::applySoftBodyDataDEPRECATED(void** data, void* dataEndIndices, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbUpdatedSoftBodies, const PxU32 maxSize, CUevent applyEvent, CUevent signalEvent)
+	PxgSoftBodyContactWriter PxgSoftBodyCore::createClothVsSoftBodyContactWriter(PxU32 clothMaxContacts)
 	{
-		if (applyEvent)
-			mCudaContext->streamWaitEvent(mStream, applyEvent);
-
-		PxU32 dataIndex = PxgSoftBody::dataIndexFromFlagDEPRECATED(flag);
-
-		copyOrApplySoftBodyDataDEPRECATED(dataIndex, reinterpret_cast<PxU32*>(softBodyIndices), reinterpret_cast<PxU8**>(data),
-			reinterpret_cast<PxU32*>(dataEndIndices), maxSize, nbUpdatedSoftBodies, 1);
-
-		if (signalEvent)
-			mCudaContext->eventRecord(signalEvent, mStream);
-		else
-		{
-			CUresult result = mCudaContext->streamSynchronize(mStream);
-			PX_UNUSED(result);
-		}
-
+		PxgSoftBodyContactWriter writer;
+		writer.totalContactCount = getClothVsSoftBodyContactCount().getTypedPtr();
+		writer.outPoint = getClothVsSoftBodyContacts().getTypedPtr();
+		writer.outNormalPen = getClothVsSoftBodyNormalPens().getTypedPtr();
+		writer.outBarycentric0 = getClothVsSoftBodyBarycentrics0().getTypedPtr();
+		writer.outBarycentric1 = getClothVsSoftBodyBarycentrics1().getTypedPtr();
+		writer.outContactInfo = getClothVsSoftBodyContactInfos().getTypedPtr();
+		writer.maxContacts = PxMin(mMaxContacts, clothMaxContacts);
+		return writer;
 	}
 
 }

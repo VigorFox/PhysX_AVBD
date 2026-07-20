@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -48,7 +48,9 @@
 #include "NpSceneQueries.h"
 #include "NpSceneAccessor.h"
 #include "NpPruningStructure.h"
-#include "NpDirectGPUAPI.h"
+#if PX_SUPPORT_GPU_PHYSX
+	#include "NpDirectGPUAPI.h"
+#endif
 
 #if PX_SUPPORT_PVD
 	#include "PxPhysics.h"
@@ -106,6 +108,14 @@ class NpDeformableVolumeMaterial;
 class NpPBDMaterial;
 #endif
 
+struct NpRigidDynamicAcceleration
+{
+	PxVec3	mLinAccel;
+	PxVec3	mAngAccel;
+	PxVec3	mPrevLinVel;
+	PxVec3	mPrevAngVel;
+};
+
 struct NpInternalAttachmentType
 {
 	enum Enum
@@ -134,7 +144,35 @@ struct NpInternalAttachmentType
 };
 
 // returns an error if scene state is corrupted due to GPU errors.
-#define NP_CHECK_SCENE_CORRUPTION if(mCorruptedState) { return outputError<PxErrorCode::eINTERNAL_ERROR>(__LINE__, "Scene state is corrupted. Simulation cannot continue!"); }	
+#define NP_CHECK_SCENE_CORRUPTION_ERROR if(mCorruptedState) { return outputError<PxErrorCode::eINTERNAL_ERROR>(__LINE__, "Scene state is corrupted. Simulation cannot continue!"); }	
+
+#if PX_SUPPORT_GPU_PHYSX
+	// check scene corruption and return silently
+	#define NP_CHECK_CORRUPTION_AND_RETURN								\
+		{ if (hasCorruptedState()) return; }
+
+	// check scene corruption and return provided value silently
+	#define NP_CHECK_CORRUPTION_AND_RETURN_VAL(val)						\
+		{ if (hasCorruptedState()) return val; }
+
+	// check scene corruption and return silently
+	#define NP_CHECK_SCENE_CORRUPTION_AND_RETURN(npScene)				\
+		if(npScene) { if (npScene->hasCorruptedState()) return; }
+
+	// check scene corruption and return provided value silently
+	#define NP_CHECK_SCENE_CORRUPTION_AND_RETURN_VAL(npScene, val)		\
+		if(npScene) { if (npScene->hasCorruptedState()) return val; }
+
+	// check if cuda context is in abort mode and mark as corrupted
+	#define NP_CHECK_SCENE_CUDA_ABORT_AND_SET_CORRUPTION(npScene)		\
+		if(npScene)	{ npScene->checkAbortModeAndSetCorruptedState(); }
+#else
+	#define NP_CHECK_CORRUPTION_AND_RETURN
+	#define NP_CHECK_CORRUPTION_AND_RETURN_VAL(val)
+	#define NP_CHECK_SCENE_CORRUPTION_AND_RETURN(npScene)
+	#define NP_CHECK_SCENE_CORRUPTION_AND_RETURN_VAL(npScene, val)
+	#define NP_CHECK_SCENE_CUDA_ABORT_AND_SET_CORRUPTION(npScene)
+#endif
 
 class NpScene : public NpSceneAccessor, public PxUserAllocated
 {
@@ -189,9 +227,6 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 	virtual			PxU32							getNbPBDParticleSystems() const	PX_OVERRIDE PX_FINAL;
 	virtual			PxU32							getPBDParticleSystems(PxPBDParticleSystem** userBuffer, PxU32 bufferSize, PxU32 startIndex = 0) const	PX_OVERRIDE PX_FINAL;
 
-	virtual			PxU32							getNbParticleSystems(PxParticleSolverType::Enum type) const	PX_OVERRIDE PX_FINAL;
-	virtual			PxU32							getParticleSystems(PxParticleSolverType::Enum type, PxPBDParticleSystem** userBuffer, PxU32 bufferSize, PxU32 startIndex = 0) const	PX_OVERRIDE PX_FINAL;
-
 	// Aggregates
     virtual			bool							addAggregate(PxAggregate&)	PX_OVERRIDE PX_FINAL;
 	virtual			void							removeAggregate(PxAggregate&, bool wakeOnLostTouch)	PX_OVERRIDE PX_FINAL;
@@ -211,7 +246,6 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 
 	// Run
 	virtual			void							getSimulationStatistics(PxSimulationStatistics& s) const	PX_OVERRIDE PX_FINAL;
-	virtual			PxSceneResidual					getSolverResidual() const PX_OVERRIDE PX_FINAL { return mScene.getSolverResidual(); }
 
 	// Multiclient 
 	virtual			PxClientID						createClient()	PX_OVERRIDE PX_FINAL;
@@ -313,11 +347,6 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 
 	virtual         PxPvdSceneClient*				getScenePvdClient()	PX_OVERRIDE PX_FINAL;
 	
-	PX_DEPRECATED	virtual	void					copySoftBodyData(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent)	PX_OVERRIDE	PX_FINAL;
-	PX_DEPRECATED	virtual	void					applySoftBodyData(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbUpdatedSoftBodies, const PxU32 maxSize, CUevent applyEvent, CUevent signalEvent)	PX_OVERRIDE	PX_FINAL;
-
-	PX_DEPRECATED	virtual	void					applyParticleBufferData(const PxU32* indices, const PxGpuParticleBufferIndexPair* bufferIndexPairs, const PxParticleBufferFlags* flags, PxU32 nbUpdatedBuffers, CUevent waitEvent, CUevent signalEvent)	PX_OVERRIDE	PX_FINAL;
-
 	virtual	void									setDeformableSurfaceGpuPostSolveCallback(PxPostSolveCallback* postSolveCallback)	PX_OVERRIDE	PX_FINAL;
 	virtual	void									setDeformableVolumeGpuPostSolveCallback(PxPostSolveCallback* postSolveCallback)	PX_OVERRIDE	PX_FINAL;
 
@@ -506,6 +535,19 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 
 	PX_FORCE_INLINE PxReal							getElapsedTime()					const	{ return mElapsedTime;				}
 
+	PX_FORCE_INLINE PxArray<NpRigidDynamicAcceleration>&		getRigidDynamicsAccelerations()			{ return mRigidDynamicsAccelerations;	}
+	PX_FORCE_INLINE const PxArray<NpRigidDynamicAcceleration>&	getRigidDynamicsAccelerations()	const	{ return mRigidDynamicsAccelerations;	}
+					void							computeBodyAccelerations(PxBaseTask* continuation);
+
+#if PX_SUPPORT_GPU_PHYSX
+					// PdHC: Lazy GPU acceleration copy - copies GPU accelerations to the external array on demand
+					// Call isGpuAccelerationsCopyPending() first to avoid function call overhead when not needed
+	PX_FORCE_INLINE bool							isGpuAccelerationsCopyPending()		const	{ return mGpuAccelerationsCopyPending;	}
+					void							ensureGpuAccelerationsCopied();
+					// PdHC: One-time warning for legacy acceleration getters in DirectGPU mode
+					bool							warnOnceDirectGpuAccelGetter();
+#endif
+
 					// PT: TODO: consider merging the "sc" methods with the np ones, as we did for constraints
 
 					void 							scAddActor(NpRigidStatic&, bool noSim, PxBounds3* uninflatedBounds, const Gu::BVH* bvh);
@@ -561,6 +603,11 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 
 					void							updateConstants(const PxArray<NpConstraint*>& constraints);
 
+#if PX_SUPPORT_GPU_PHYSX
+	PX_FORCE_INLINE bool							hasCorruptedState() const { return mCorruptedState; }
+					void							checkAbortModeAndSetCorruptedState();
+#endif
+
 	virtual			PxGpuDynamicsMemoryConfig		getGpuDynamicsConfig() const	PX_OVERRIDE PX_FINAL	{ return mGpuDynamicsConfig; }
 
 private:
@@ -591,7 +638,7 @@ private:
 
 					void							fetchResultsPreContactCallbacks();
 					void							fetchResultsPostContactCallbacks();
-					void							fetchResultsParticleSystem();
+			virtual	void							fetchResultsParticleSystem() PX_OVERRIDE;
 
 					bool							addSpatialTendonInternal(NpArticulationReducedCoordinate* npaRC, Sc::ArticulationSim* scArtSim);
 					bool							addFixedTendonInternal(NpArticulationReducedCoordinate* npaRC, Sc::ArticulationSim* scArtSim);
@@ -614,26 +661,15 @@ private:
 					Cm::RenderBuffer				mRenderBuffer;
 	public:
 					Cm::IDPool						mRigidActorIndexPool;
-					struct Acceleration
-					{
-						PX_FORCE_INLINE	Acceleration() : mLinAccel(0.0f), mAngAccel(0.0f), mPrevLinVel(0.0f), mPrevAngVel(0.0f)
-						{}
-						PxVec3	mLinAccel;
-						PxVec3	mAngAccel;
-						PxVec3	mPrevLinVel;
-						PxVec3	mPrevAngVel;
-					};
 	private:
 					PxArray<NpRigidDynamic*>								mRigidDynamics;	// no hash set used because it would be quite a bit slower when adding a large number of actors
+					PxArray<NpRigidDynamicAcceleration>						mRigidDynamicsAccelerations;	// contiguous acceleration array, only allocated when eENABLE_BODY_ACCELERATIONS is set
 					PxArray<NpRigidStatic*>									mRigidStatics;	// no hash set used because it would be quite a bit slower when adding a large number of actors
 					PxCoalescedHashSet<PxArticulationReducedCoordinate*>	mArticulations;
 					PxCoalescedHashSet<PxDeformableSurface*>				mDeformableSurfaces;
 					PxCoalescedHashSet<PxDeformableVolume*>					mDeformableVolumes;
 					PxCoalescedHashSet<PxPBDParticleSystem*>				mPBDParticleSystems;
 					PxCoalescedHashSet<PxAggregate*>						mAggregates;
-	public:
-					PxArray<Acceleration>									mRigidDynamicsAccelerations;
-	private:
 #ifdef NEW_DIRTY_SHADERS_CODE
 					PxArray<NpConstraint*>									mAlwaysUpdatedConstraints;
 					PxArray<NpConstraint*>									mDirtyConstraints;
@@ -657,7 +693,7 @@ private:
 					struct SceneCompletion : public Cm::Task
 					{
 						SceneCompletion(PxU64 contextId, PxSync& sync) : Cm::Task(contextId), mSync(sync){}
-						virtual void runInternal() {}
+						virtual void runInternal() PX_OVERRIDE {}
 						//ML: As soon as mSync.set is called, and the scene is shutting down,
 						//the scene may be deleted. That means this running task may also be deleted.
 						//As such, we call mSync.set() inside release() to avoid a crash because the v-table on this
@@ -687,6 +723,7 @@ private:
 					typedef Cm::DelegateTask<NpScene, &NpScene::executeScene> SceneExecution;
 					typedef Cm::DelegateTask<NpScene, &NpScene::executeCollide> SceneCollide;
 					typedef Cm::DelegateTask<NpScene, &NpScene::executeAdvance> SceneAdvance;
+					typedef Cm::DelegateTask<NpScene, &NpScene::computeBodyAccelerations> BodyAccelerationPhase;
 					
 					PxTaskManager*					mTaskManager;
 					PxCudaContextManager*			mCudaContextManager;
@@ -696,6 +733,7 @@ private:
 					SceneExecution					mSceneExecution;
 					SceneCollide					mSceneCollide;
 					SceneAdvance					mSceneAdvance;
+					BodyAccelerationPhase			mBodyAccelerationPhase;
 					PxSQBuildStepHandle				mStaticBuildStepHandle;
 					PxSQBuildStepHandle				mDynamicBuildStepHandle;
 					bool                            mControllingSimulation;
@@ -745,7 +783,20 @@ private:
 					PxArray<MaterialEvent>		mSceneDeformableVolumeMaterialBuffer;
 					PxArray<MaterialEvent>		mScenePBDMaterialBuffer;
 					Sc::Scene					mScene;
+#if PX_SUPPORT_GPU_PHYSX
 					NpDirectGPUAPI*				mDirectGPUAPI;
+					// PdHC: Lazy GPU acceleration copy - set at simulate() start if copy will be needed
+					// Getter checks this single flag; if true, triggers bulk copy then clears flag
+					volatile bool				mGpuAccelerationsCopyPending;
+					// PdHC: One-time warning flag for legacy acceleration getters in DirectGPU mode
+					bool						mDirectGpuAccelGetterWarningIssued;
+					// Persistent completion sync + task counter for the parallel GPU-acceleration copy
+					// (NpScene::ensureGpuAccelerationsCopied). Kept as members (reset() before each batch)
+					// so their lifetime outlives the worker fibers: a stack-local PxSync could be destroyed
+					// (CloseHandle) while a worker is still inside set(). See NvBugs 6224727.
+					PxSync						mGpuAccelerationCopySync;
+					volatile PxI32				mGpuAccelerationCopyTaskCounter;
+#endif
 #if PX_SUPPORT_PVD
 					Vd::PvdSceneClient			mScenePvdClient;
 #endif

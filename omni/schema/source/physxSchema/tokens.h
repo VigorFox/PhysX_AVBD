@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #ifndef PHYSXSCHEMA_TOKENS_H
 #define PHYSXSCHEMA_TOKENS_H
@@ -66,14 +49,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Fallback value for PhysxSchemaPhysxForceAPI::GetModeAttr(), Possible value for PhysxSchemaPhysxVehicleContextAPI::GetUpdateModeAttr()
     const TfToken acceleration;
-    /// \brief "actor0"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken actor0;
-    /// \brief "actor1"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken actor1;
     /// \brief "alwaysUpdateEnabled"
     /// 
     /// PhysxSchemaPhysxCameraAPI
@@ -82,10 +57,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Possible value for PhysxSchemaPhysxSceneAPI::GetUpdateTypeAttr()
     const TfToken Asynchronous;
-    /// \brief "attachmentEnabled"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken attachmentEnabled;
     /// \brief "average"
     /// 
     /// Fallback value for PhysxSchemaPhysxMaterialAPI::GetDampingCombineModeAttr(), Fallback value for PhysxSchemaPhysxMaterialAPI::GetFrictionCombineModeAttr(), Fallback value for PhysxSchemaPhysxMaterialAPI::GetRestitutionCombineModeAttr()
@@ -110,18 +81,6 @@ struct PhysxSchemaTokensType {
     /// 
     ///  This token represents braking system 1 used in PhysxVehicleBrakesAPI. It also holds the instance name to use for PhysxVehicleNonlinearCommandResponseAPI when applied to braking system 1. 
     const TfToken brakes1;
-    /// \brief "clothConstaint"
-    /// 
-    ///  This token represents the collection name to use with PhysxCookedDataAPI to represent cooked data of a clothConstaint. 
-    const TfToken clothConstaint;
-    /// \brief "collisionFilterIndices0"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken collisionFilterIndices0;
-    /// \brief "collisionFilterIndices1"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken collisionFilterIndices1;
     /// \brief "collisionmeshes"
     /// 
     ///  This token defines the PhysxMeshMergeCollisionAPI collection that gathers the collision meshes. 
@@ -162,14 +121,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxParticleSystem
     const TfToken enableCCD;
-    /// \brief "filterType0"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken filterType0;
-    /// \brief "filterType1"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken filterType1;
     /// \brief "flood"
     /// 
     /// Fallback value for PhysxSchemaPhysxSphereFillCollisionAPI::GetFillModeAttr()
@@ -186,10 +137,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxVehicleTireFrictionTable
     const TfToken frictionValues;
-    /// \brief "Geometry"
-    /// 
-    /// Possible value for PhysxSchemaPhysxPhysicsAttachment::GetFilterType0Attr(), Possible value for PhysxSchemaPhysxPhysicsAttachment::GetFilterType1Attr()
-    const TfToken Geometry;
     /// \brief "globalSelfCollisionEnabled"
     /// 
     /// PhysxSchemaPhysxParticleSystem
@@ -202,10 +149,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxVehicleTireFrictionTable
     const TfToken groundMaterials;
-    /// \brief "indices"
-    /// 
-    /// PhysxSchemaTetrahedralMesh
-    const TfToken indices;
     /// \brief "max"
     /// 
     /// Possible value for PhysxSchemaPhysxMaterialAPI::GetDampingCombineModeAttr(), Possible value for PhysxSchemaPhysxMaterialAPI::GetFrictionCombineModeAttr(), Possible value for PhysxSchemaPhysxMaterialAPI::GetRestitutionCombineModeAttr()
@@ -362,54 +305,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxArticulationAPI
     const TfToken physxArticulationStabilizationThreshold;
-    /// \brief "physxAutoAttachment:collisionFilteringOffset"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentCollisionFilteringOffset;
-    /// \brief "physxAutoAttachment:deformableVertexOverlapOffset"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentDeformableVertexOverlapOffset;
-    /// \brief "physxAutoAttachment:enableCollisionFiltering"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentEnableCollisionFiltering;
-    /// \brief "physxAutoAttachment:enableDeformableFilteringPairs"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentEnableDeformableFilteringPairs;
-    /// \brief "physxAutoAttachment:enableDeformableVertexAttachments"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentEnableDeformableVertexAttachments;
-    /// \brief "physxAutoAttachment:enableRigidSurfaceAttachments"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentEnableRigidSurfaceAttachments;
-    /// \brief "physxAutoAttachment:rigidSurfaceSamplingDistance"
-    /// 
-    /// PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken physxAutoAttachmentRigidSurfaceSamplingDistance;
-    /// \brief "physxAutoParticleCloth:disableMeshWelding"
-    /// 
-    /// PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken physxAutoParticleClothDisableMeshWelding;
-    /// \brief "physxAutoParticleCloth:springBendStiffness"
-    /// 
-    /// PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken physxAutoParticleClothSpringBendStiffness;
-    /// \brief "physxAutoParticleCloth:springDamping"
-    /// 
-    /// PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken physxAutoParticleClothSpringDamping;
-    /// \brief "physxAutoParticleCloth:springShearStiffness"
-    /// 
-    /// PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken physxAutoParticleClothSpringShearStiffness;
-    /// \brief "physxAutoParticleCloth:springStretchStiffness"
-    /// 
-    /// PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken physxAutoParticleClothSpringStretchStiffness;
     /// \brief "physxCamera:subject"
     /// 
     /// PhysxSchemaPhysxCameraAPI
@@ -530,150 +425,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxCookedDataAPI
     const TfToken physxCookedData_MultipleApplyTemplate_Buffer;
-    /// \brief "physxDeformableBodyMaterial:dampingScale"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialDampingScale;
-    /// \brief "physxDeformableBodyMaterial:density"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialDensity;
-    /// \brief "physxDeformableBodyMaterial:dynamicFriction"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialDynamicFriction;
-    /// \brief "physxDeformableBodyMaterial:elasticityDamping"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialElasticityDamping;
-    /// \brief "physxDeformableBodyMaterial:poissonsRatio"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialPoissonsRatio;
-    /// \brief "physxDeformableBodyMaterial:youngsModulus"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken physxDeformableBodyMaterialYoungsModulus;
-    /// \brief "physxDeformable:collisionIndices"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableCollisionIndices;
-    /// \brief "physxDeformable:collisionPoints"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableCollisionPoints;
-    /// \brief "physxDeformable:collisionRestPoints"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableCollisionRestPoints;
-    /// \brief "physxDeformable:deformableEnabled"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableDeformableEnabled;
-    /// \brief "physxDeformable:disableGravity"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableDisableGravity;
-    /// \brief "physxDeformable:enableCCD"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableEnableCCD;
-    /// \brief "physxDeformable:maxDepenetrationVelocity"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableMaxDepenetrationVelocity;
-    /// \brief "physxDeformable:restPoints"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableRestPoints;
-    /// \brief "physxDeformable:selfCollision"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSelfCollision;
-    /// \brief "physxDeformable:selfCollisionFilterDistance"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSelfCollisionFilterDistance;
-    /// \brief "physxDeformable:settlingThreshold"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSettlingThreshold;
-    /// \brief "physxDeformable:simulationIndices"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSimulationIndices;
-    /// \brief "physxDeformable:simulationOwner"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSimulationOwner;
-    /// \brief "physxDeformable:simulationPoints"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableSimulationPoints;
-    /// \brief "physxDeformable:simulationRestPoints"
-    /// 
-    /// PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken physxDeformableSimulationRestPoints;
-    /// \brief "physxDeformable:simulationVelocities"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSimulationVelocities;
-    /// \brief "physxDeformable:sleepDamping"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSleepDamping;
-    /// \brief "physxDeformable:sleepThreshold"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSleepThreshold;
-    /// \brief "physxDeformable:solverPositionIterationCount"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableSolverPositionIterationCount;
-    /// \brief "physxDeformableSurface:bendingStiffnessScale"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken physxDeformableSurfaceBendingStiffnessScale;
-    /// \brief "physxDeformableSurface:collisionIterationMultiplier"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken physxDeformableSurfaceCollisionIterationMultiplier;
-    /// \brief "physxDeformableSurface:collisionPairUpdateFrequency"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken physxDeformableSurfaceCollisionPairUpdateFrequency;
-    /// \brief "physxDeformableSurface:flatteningEnabled"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken physxDeformableSurfaceFlatteningEnabled;
-    /// \brief "physxDeformableSurfaceMaterial:density"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken physxDeformableSurfaceMaterialDensity;
-    /// \brief "physxDeformableSurfaceMaterial:dynamicFriction"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken physxDeformableSurfaceMaterialDynamicFriction;
-    /// \brief "physxDeformableSurfaceMaterial:poissonsRatio"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken physxDeformableSurfaceMaterialPoissonsRatio;
-    /// \brief "physxDeformableSurfaceMaterial:thickness"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken physxDeformableSurfaceMaterialThickness;
-    /// \brief "physxDeformableSurfaceMaterial:youngsModulus"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken physxDeformableSurfaceMaterialYoungsModulus;
-    /// \brief "physxDeformableSurface:maxVelocity"
-    /// 
-    /// PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken physxDeformableSurfaceMaxVelocity;
-    /// \brief "physxDeformable:vertexVelocityDamping"
-    /// 
-    /// PhysxSchemaPhysxDeformableAPI
-    const TfToken physxDeformableVertexVelocityDamping;
     /// \brief "physxDiffuseParticles:airDrag"
     /// 
     /// PhysxSchemaPhysxDiffuseParticlesAPI
@@ -954,10 +705,18 @@ struct PhysxSchemaTokensType {
     /// 
     /// Property namespace prefix for the PhysxSchemaPhysxMimicJointAPI schema.
     const TfToken physxMimicJoint;
+    /// \brief "physxMimicJoint:__INSTANCE_NAME__:dampingRatio"
+    /// 
+    /// PhysxSchemaPhysxMimicJointAPI
+    const TfToken physxMimicJoint_MultipleApplyTemplate_DampingRatio;
     /// \brief "physxMimicJoint:__INSTANCE_NAME__:gearing"
     /// 
     /// PhysxSchemaPhysxMimicJointAPI
     const TfToken physxMimicJoint_MultipleApplyTemplate_Gearing;
+    /// \brief "physxMimicJoint:__INSTANCE_NAME__:naturalFrequency"
+    /// 
+    /// PhysxSchemaPhysxMimicJointAPI
+    const TfToken physxMimicJoint_MultipleApplyTemplate_NaturalFrequency;
     /// \brief "physxMimicJoint:__INSTANCE_NAME__:offset"
     /// 
     /// PhysxSchemaPhysxMimicJointAPI
@@ -1042,14 +801,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxParticleAPI
     const TfToken physxParticleParticleSystem;
-    /// \brief "physxParticle:pressure"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticlePressure;
-    /// \brief "physxParticle:restPoints"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleRestPoints;
     /// \brief "physxParticleSampling:maxSamples"
     /// 
     /// PhysxSchemaPhysxParticleSamplingAPI
@@ -1070,10 +821,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxParticleAPI
     const TfToken physxParticleSelfCollision;
-    /// \brief "physxParticle:selfCollisionFilter"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleSelfCollisionFilter;
     /// \brief "physxParticle:simulationPoints"
     /// 
     /// PhysxSchemaPhysxParticleSetAPI
@@ -1086,22 +833,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxParticleSmoothingAPI
     const TfToken physxParticleSmoothingStrength;
-    /// \brief "physxParticle:springDampings"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleSpringDampings;
-    /// \brief "physxParticle:springIndices"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleSpringIndices;
-    /// \brief "physxParticle:springRestLengths"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleSpringRestLengths;
-    /// \brief "physxParticle:springStiffnesses"
-    /// 
-    /// PhysxSchemaPhysxParticleClothAPI
-    const TfToken physxParticleSpringStiffnesses;
     /// \brief "physxPBDMaterial:adhesion"
     /// 
     /// PhysxSchemaPhysxPBDMaterialAPI
@@ -1126,10 +857,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxPBDMaterialAPI
     const TfToken physxPBDMaterialDensity;
-    /// \brief "physxPBDMaterial:drag"
-    /// 
-    /// PhysxSchemaPhysxPBDMaterialAPI
-    const TfToken physxPBDMaterialDrag;
     /// \brief "physxPBDMaterial:friction"
     /// 
     /// PhysxSchemaPhysxPBDMaterialAPI
@@ -1138,10 +865,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxPBDMaterialAPI
     const TfToken physxPBDMaterialGravityScale;
-    /// \brief "physxPBDMaterial:lift"
-    /// 
-    /// PhysxSchemaPhysxPBDMaterialAPI
-    const TfToken physxPBDMaterialLift;
     /// \brief "physxPBDMaterial:particleAdhesionScale"
     /// 
     /// PhysxSchemaPhysxPBDMaterialAPI
@@ -1174,22 +897,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxPhysicsDistanceJointAPI
     const TfToken physxPhysicsDistanceJointSpringStiffness;
-    /// \brief "physxResidualReporting:maxResidualPositionIteration"
-    /// 
-    /// PhysxSchemaPhysxResidualReportingAPI
-    const TfToken physxResidualReportingMaxResidualPositionIteration;
-    /// \brief "physxResidualReporting:maxResidualVelocityIteration"
-    /// 
-    /// PhysxSchemaPhysxResidualReportingAPI
-    const TfToken physxResidualReportingMaxResidualVelocityIteration;
-    /// \brief "physxResidualReporting:rmsResidualPositionIteration"
-    /// 
-    /// PhysxSchemaPhysxResidualReportingAPI
-    const TfToken physxResidualReportingRmsResidualPositionIteration;
-    /// \brief "physxResidualReporting:rmsResidualVelocityIteration"
-    /// 
-    /// PhysxSchemaPhysxResidualReportingAPI
-    const TfToken physxResidualReportingRmsResidualVelocityIteration;
     /// \brief "physxRigidBody:angularDamping"
     /// 
     /// PhysxSchemaPhysxRigidBodyAPI
@@ -1282,6 +989,10 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxSceneAPI
     const TfToken physxSceneCollisionSystem;
+    /// \brief "physxScene:disableSleeping"
+    /// 
+    /// PhysxSchemaPhysxSceneAPI
+    const TfToken physxSceneDisableSleeping;
     /// \brief "physxScene:enableCCD"
     /// 
     /// PhysxSchemaPhysxSceneAPI
@@ -1298,10 +1009,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxSceneAPI
     const TfToken physxSceneEnableGPUDynamics;
-    /// \brief "physxScene:enableResidualReporting"
-    /// 
-    /// PhysxSchemaPhysxSceneAPI
-    const TfToken physxSceneEnableResidualReporting;
     /// \brief "physxScene:enableSceneQuerySupport"
     /// 
     /// PhysxSchemaPhysxSceneAPI
@@ -1342,6 +1049,10 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxSceneAPI
     const TfToken physxSceneGpuMaxDeformableSurfaceContacts;
+    /// \brief "physxScene:gpuMaxDeformableVolumeContacts"
+    /// 
+    /// PhysxSchemaPhysxSceneAPI
+    const TfToken physxSceneGpuMaxDeformableVolumeContacts;
     /// \brief "physxScene:gpuMaxNumPartitions"
     /// 
     /// PhysxSchemaPhysxSceneAPI
@@ -1358,10 +1069,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxSceneAPI
     const TfToken physxSceneGpuMaxRigidPatchCount;
-    /// \brief "physxScene:gpuMaxSoftBodyContacts"
-    /// 
-    /// PhysxSchemaPhysxSceneAPI
-    const TfToken physxSceneGpuMaxSoftBodyContacts;
     /// \brief "physxScene:gpuTempBufferCapacity"
     /// 
     /// PhysxSchemaPhysxSceneAPI
@@ -1406,6 +1113,10 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxSceneAPI
     const TfToken physxSceneReportKinematicStaticPairs;
+    /// \brief "physxScene:solveArticulationContactLast"
+    /// 
+    /// PhysxSchemaPhysxSceneAPI
+    const TfToken physxSceneSolveArticulationContactLast;
     /// \brief "physxScene:solverType"
     /// 
     /// PhysxSchemaPhysxSceneAPI
@@ -1550,22 +1261,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxTriangleMeshSimplificationCollisionAPI
     const TfToken physxTriangleMeshSimplificationCollisionWeldTolerance;
-    /// \brief "physxTrigger:enterScriptType"
-    /// 
-    /// PhysxSchemaPhysxTriggerAPI
-    const TfToken physxTriggerEnterScriptType;
-    /// \brief "physxTrigger:leaveScriptType"
-    /// 
-    /// PhysxSchemaPhysxTriggerAPI
-    const TfToken physxTriggerLeaveScriptType;
-    /// \brief "physxTrigger:onEnterScript"
-    /// 
-    /// PhysxSchemaPhysxTriggerAPI
-    const TfToken physxTriggerOnEnterScript;
-    /// \brief "physxTrigger:onLeaveScript"
-    /// 
-    /// PhysxSchemaPhysxTriggerAPI
-    const TfToken physxTriggerOnLeaveScript;
     /// \brief "physxTrigger:triggeredCollisions"
     /// 
     /// PhysxSchemaPhysxTriggerStateAPI
@@ -2074,14 +1769,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// PhysxSchemaPhysxVehicleWheelAPI
     const TfToken physxVehicleWheelWidth;
-    /// \brief "points0"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken points0;
-    /// \brief "points1"
-    /// 
-    /// PhysxSchemaPhysxPhysicsAttachment
-    const TfToken points1;
     /// \brief "posX"
     /// 
     /// Possible value for PhysxSchemaPhysxVehicleContextAPI::GetLongitudinalAxisAttr(), Possible value for PhysxSchemaPhysxVehicleContextAPI::GetVerticalAxisAttr()
@@ -2138,10 +1825,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Possible value for PhysxSchemaPhysxSceneAPI::GetCollisionSystemAttr()
     const TfToken SAT;
-    /// \brief "scriptFile"
-    /// 
-    /// Fallback value for PhysxSchemaPhysxTriggerAPI::GetEnterScriptTypeAttr(), Fallback value for PhysxSchemaPhysxTriggerAPI::GetLeaveScriptTypeAttr()
-    const TfToken scriptFile;
     /// \brief "sdf"
     /// 
     ///  This token represents the SDF triangle mesh approximation. 
@@ -2218,10 +1901,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Fallback value for PhysxSchemaPhysxVehicleContextAPI::GetUpdateModeAttr()
     const TfToken velocityChange;
-    /// \brief "Vertices"
-    /// 
-    /// Possible value for PhysxSchemaPhysxPhysicsAttachment::GetFilterType0Attr(), Possible value for PhysxSchemaPhysxPhysicsAttachment::GetFilterType1Attr()
-    const TfToken Vertices;
     /// \brief "wind"
     /// 
     /// PhysxSchemaPhysxParticleSystem
@@ -2246,14 +1925,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxArticulationAPI
     const TfToken PhysxArticulationAPI;
-    /// \brief "PhysxAutoAttachmentAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxAutoAttachmentAPI
-    const TfToken PhysxAutoAttachmentAPI;
-    /// \brief "PhysxAutoParticleClothAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxAutoParticleClothAPI
-    const TfToken PhysxAutoParticleClothAPI;
     /// \brief "PhysxCameraAPI"
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxCameraAPI
@@ -2298,26 +1969,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxCookedDataAPI
     const TfToken PhysxCookedDataAPI;
-    /// \brief "PhysxDeformableAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxDeformableAPI
-    const TfToken PhysxDeformableAPI;
-    /// \brief "PhysxDeformableBodyAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxDeformableBodyAPI
-    const TfToken PhysxDeformableBodyAPI;
-    /// \brief "PhysxDeformableBodyMaterialAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxDeformableBodyMaterialAPI
-    const TfToken PhysxDeformableBodyMaterialAPI;
-    /// \brief "PhysxDeformableSurfaceAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxDeformableSurfaceAPI
-    const TfToken PhysxDeformableSurfaceAPI;
-    /// \brief "PhysxDeformableSurfaceMaterialAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxDeformableSurfaceMaterialAPI
-    const TfToken PhysxDeformableSurfaceMaterialAPI;
     /// \brief "PhysxDiffuseParticlesAPI"
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxDiffuseParticlesAPI
@@ -2354,10 +2005,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxParticleAPI
     const TfToken PhysxParticleAPI;
-    /// \brief "PhysxParticleClothAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxParticleClothAPI
-    const TfToken PhysxParticleClothAPI;
     /// \brief "PhysxParticleIsosurfaceAPI"
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxParticleIsosurfaceAPI
@@ -2382,10 +2029,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxPBDMaterialAPI
     const TfToken PhysxPBDMaterialAPI;
-    /// \brief "PhysxPhysicsAttachment"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxPhysicsAttachment
-    const TfToken PhysxPhysicsAttachment;
     /// \brief "PhysxPhysicsDistanceJointAPI"
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxPhysicsDistanceJointAPI
@@ -2406,10 +2049,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxPhysicsRackAndPinionJoint
     const TfToken PhysxPhysicsRackAndPinionJoint;
-    /// \brief "PhysxResidualReportingAPI"
-    /// 
-    /// Schema identifer and family for PhysxSchemaPhysxResidualReportingAPI
-    const TfToken PhysxResidualReportingAPI;
     /// \brief "PhysxRigidBodyAPI"
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxRigidBodyAPI
@@ -2562,10 +2201,6 @@ struct PhysxSchemaTokensType {
     /// 
     /// Schema identifer and family for PhysxSchemaPhysxVehicleWheelControllerAPI
     const TfToken PhysxVehicleWheelControllerAPI;
-    /// \brief "TetrahedralMesh"
-    /// 
-    /// Schema identifer and family for PhysxSchemaTetrahedralMesh
-    const TfToken TetrahedralMesh;
     /// A vector of all of the tokens listed above.
     const std::vector<TfToken> allTokens;
 };

@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
+// NOTE: This file is included verbatim in documentation via literalinclude.
+// Tutorial marker comments below define the included range.
+
 #include <ovphysx/ovphysx.h>
 #include <ovphysx/ovphysx_types.h>
 #include <stdio.h>
@@ -25,9 +28,9 @@ typedef struct TensorBuffer {
 static int check_result(ovphysx_result_t result, const char* context) {
     if (result.status != OVPHYSX_API_SUCCESS) {
         fprintf(stderr, "ERROR in %s: ", context);
-        if (result.error.ptr && result.error.length > 0) {
-            fprintf(stderr, "%.*s\n", (int)result.error.length, result.error.ptr);
-            ovphysx_destroy_error(result.error);
+        ovphysx_string_t err = ovphysx_get_last_error();
+        if (err.ptr && err.length > 0) {
+            fprintf(stderr, "%.*s\n", (int)err.length, err.ptr);
         } else {
             fprintf(stderr, "status=%d\n", (int)result.status);
         }
@@ -93,15 +96,14 @@ static int wait_op(ovphysx_handle_t handle, ovphysx_op_index_t op_index, const c
     ovphysx_op_wait_result_t wait_result = {0};
     ovphysx_result_t result = ovphysx_wait_op(handle, op_index, 10ULL * 1000 * 1000 * 1000, &wait_result);
 
-    if (wait_result.num_errors > 0) {
+    int has_errors = (wait_result.num_errors > 0);
+    ovphysx_destroy_wait_result(&wait_result);
+    if (has_errors) {
         fprintf(stderr, "ERROR in %s: async operation failed\n", context);
-        ovphysx_destroy_errors(wait_result.errors, wait_result.num_errors);
         return 0;
     }
     if (result.status != OVPHYSX_API_SUCCESS) {
         fprintf(stderr, "ERROR in %s: wait failed (status=%d)\n", context, (int)result.status);
-        if (result.error.ptr)
-            ovphysx_destroy_error(result.error);
         return 0;
     }
     return 1;
@@ -132,9 +134,10 @@ int main(void) {
 
     if (add_result.status != OVPHYSX_API_SUCCESS) {
         fprintf(stderr, "Failed to load USD scene\n");
-        if (add_result.error.ptr && add_result.error.length > 0) {
-            fprintf(stderr, "ERROR in add_usd enqueue: %.*s\n", (int)add_result.error.length, add_result.error.ptr);
-            ovphysx_destroy_error(add_result.error);
+        {
+            ovphysx_string_t err = ovphysx_get_last_error();
+            if (err.ptr && err.length > 0)
+                fprintf(stderr, "ERROR in add_usd enqueue: %.*s\n", (int)err.length, err.ptr);
         }
         ovphysx_destroy_instance(handle);
         return 1;
@@ -148,6 +151,7 @@ int main(void) {
 
     printf("USD scene loaded.\n");
 
+    // [tutorial-start]
     // 3. Create tensor bindings
     // 3a. DOF velocity target binding (write control targets)
     ovphysx_tensor_binding_handle_t dof_target_binding = 0;
@@ -258,17 +262,16 @@ int main(void) {
         ovphysx_enqueue_result_t step_result = ovphysx_step(handle, dt, sim_time);
         if (step_result.status != OVPHYSX_API_SUCCESS) {
             fprintf(stderr, "ERROR in step enqueue (status=%d)\n", (int)step_result.status);
-            if (step_result.error.ptr && step_result.error.length > 0) {
-                fprintf(stderr, "  %.*s\n", (int)step_result.error.length, step_result.error.ptr);
-                ovphysx_destroy_error(step_result.error);
+            {
+                ovphysx_string_t err = ovphysx_get_last_error();
+                if (err.ptr && err.length > 0)
+                    fprintf(stderr, "  %.*s\n", (int)err.length, err.ptr);
             }
             destroy_tensor(&dof_target_tensor);
             destroy_tensor(&link_pose_tensor);
             ovphysx_destroy_instance(handle);
             return 1;
         }
-        if (step_result.error.ptr)
-            ovphysx_destroy_error(step_result.error);
         if (!wait_op(handle, step_result.op_index, "step")) {
             destroy_tensor(&dof_target_tensor);
             destroy_tensor(&link_pose_tensor);
@@ -315,8 +318,11 @@ int main(void) {
     ovphysx_destroy_tensor_binding(handle, dof_target_binding);
     ovphysx_destroy_tensor_binding(handle, link_pose_binding);
 
-    ovphysx_destroy_instance(handle);
-
     printf("=== Articulation control sample completed successfully ===\n");
+    // [tutorial-end]
+
+    ovphysx_destroy_instance(handle);
+    printf("Cleanup complete\n");
+
     return 0;
 }

@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.
 
@@ -30,7 +30,7 @@
 #define PXG_SOFTBODY_CORE_H
 
 #include "PxgFEMCore.h"
-#include "PxSoftBodyFlag.h"
+#include "PxgSoftBody.h"
 #include "foundation/PxPreprocessor.h"
 
 namespace physx
@@ -38,24 +38,8 @@ namespace physx
 	//this is needed to force PhysXSimulationControllerGpu linkage as Static Library!
 	void createPxgSoftBody();
 
-	struct PxGpuDynamicsMemoryConfig;
-
-	class PxgCudaBroadPhaseSap;
-	class PxgGpuNarrowphaseCore;
-	class PxgSoftBody;
-
 	struct PxgConstraintPrepareDesc;
-
 	class PxPostSolveCallback;
-
-	struct PxgSoftBodySoftBodyConstraintBlock
-	{
-		float4 barycentric0[32];
-		float4 barycentric1[32];
-		float4 normal_pen[32];
-		PxReal velMultiplier[32];
-		PxReal friction[32];
-	};
 
 	namespace Dy
 	{
@@ -66,8 +50,9 @@ namespace physx
 	{
 	public:
 		PxgSoftBodyCore(PxgCudaKernelWranglerManager* gpuKernelWrangler, PxCudaContextManager* cudaContextManager,
-			PxgHeapMemoryAllocatorManager* heapMemoryManager, PxgSimulationController* simController,
+			PxgAllocatorDesc& allocDesc, PxgSimulationController* simController,
 			PxgGpuContext* context, const PxU32 maxContacts, const PxU32 collisionStackSize, const bool isTGS);
+
 		~PxgSoftBodyCore();
 
 		//integrate verts position based on gravity
@@ -91,11 +76,11 @@ namespace physx
 
 		void solve(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 			PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, const PxReal dt, CUstream solverStream,
-			const bool isFirstIteration);
+			const bool isFirstIteration, const PxReal biasCoefficient);
 
 		void solveTGS(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 			PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, const PxReal dt, CUstream solverStream,
-			const bool isVelocityIteration, const PxReal biasCoefficient, const bool isFirstIteration, const PxVec3& gravity);
+			const bool isVelocityIteration, const PxReal contactBiasCoefficient, const PxReal attachBiasCoefficient, const bool isFirstIteration, const PxVec3& gravity);
 
 		void calculateStress();
 
@@ -104,11 +89,8 @@ namespace physx
 		void constraintPrep(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgConstraintPrepareDesc> prepDescd, const PxReal invDt, PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, CUstream solverStream,
 			const bool isTGS, PxU32 nbSolverBodies, PxU32 nbArticulations);
 
-		bool updateUserData(PxPinnedArray<PxgSoftBody>& softBodyPool, PxArray<PxU32>& softBodyNodeIndexPool,
+		bool updateUserData(Cm::PinnableArray<PxgSoftBody>& softBodyPool, PxArray<PxU32>& softBodyNodeIndexPool,
 			const PxU32* activeSoftBodies, const PxU32 nbActiveSoftBodies, void** bodySimsLL);
-
-		void copySoftBodyDataDEPRECATED(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbCopySoftBodies, const PxU32 maxSize, CUevent copyEvent);
-		void applySoftBodyDataDEPRECATED(void** data, void* dataSizes, void* softBodyIndices, PxSoftBodyGpuDataFlag::Enum flag, const PxU32 nbUpdatedSoftBodies, const PxU32 maxSize, CUevent applyEvent, CUevent signalEvent);
 
 		CUstream getStream() { return mStream; }
 
@@ -130,7 +112,14 @@ namespace physx
 		PxgTypedCudaBuffer<PxU32>& getClothVsSoftBodyContactCount() { return mSCTotalContactCountBuffer; }
 		PxgTypedCudaBuffer<PxU32>& getPrevClothVsSoftBodyContactCount() { return mPrevSCContactCountBuffer; }
 
-		PxgCudaPagedLinearAllocator<PxgHeapMemoryAllocator>& getStackAllocator() { return mIntermStackAlloc; }
+		// Create a soft body contact writer for softbody-vs-softbody or self-collision
+		PxgSoftBodyContactWriter createSoftBodyContactWriter();
+
+		// Create a soft body contact writer for cloth-vs-softbody collision
+		// Uses dedicated cloth-vs-softbody buffers and takes minimum of both max contacts
+		PxgSoftBodyContactWriter createClothVsSoftBodyContactWriter(PxU32 clothMaxContacts);
+
+		PxgCudaPagedLinearAllocator& getStackAllocator() { return mIntermStackAlloc; }
 
 		//apply position delta change original grid model tetra mesh
 		void finalizeVelocities(const PxReal dt, const PxReal scale, const bool isTGS);
@@ -139,8 +128,6 @@ namespace physx
 		void applyExternalTetraDeltaGM(const PxU32 nbActiveSoftbodies, const PxReal dt, CUstream stream);
 
 	private:
-		PX_DEPRECATED void copyOrApplySoftBodyDataDEPRECATED(PxU32 dataIndex, PxU32* softBodyIndices, PxU8** data, PxU32* dataSizes, PxU32 maxSizeInBytes, const PxU32 nbSoftbodies, const PxU32 applyDataToSoftBodies);
-
 		//integrate verts position based on gravity
 		void preIntegrateSystem(PxgDevicePointer<PxgSoftBody> softbodiesd, PxgDevicePointer<PxU32> activeSoftBodiesd,
 			const PxU32 nbActiveSoftBodies, const PxU32 maxVerts, const PxVec3 gravity, const PxReal dt, CUstream bpStream);
@@ -155,8 +142,6 @@ namespace physx
 		void prepSoftBodyAttachmentConstraints(CUstream stream);
 
 		void prepClothAttachmentConstraints(CUstream stream);
-
-		void prepParticleAttachmentConstraints(CUstream stream);
 
 		void solveRSContactsOutputRigidDelta(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 			PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, CUstream solverStream, const PxReal dt);
@@ -189,8 +174,6 @@ namespace physx
 
 		void solveSoftBodyAttachmentDelta();
 
-		void solveParticleAttachmentDelta();
-
 		void solveClothAttachmentDelta();
 
 		void solveRigidAttachmentTGS(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd, PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd, 
@@ -211,6 +194,13 @@ namespace physx
 		void queryRigidContactReferenceCount(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd,
 			PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd, PxgDevicePointer<PxgSolverSharedDescBase> sharedDescd,
 			PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, CUstream solverStream, PxReal dt);
+
+		// Pre-count per-vertex refCount for rigid-soft attachments. Bumps
+		// softbody.mSimDelta[v].w; the attach + contact solves both read .w as
+		// the per-vertex Jacobi mass-splitting factor, for both PGS and TGS.
+		// Must run after the FEM finalize (so .w starts from 0) and before
+		// both attach + contact solves.
+		void queryRigidAttachmentReferenceCount(CUstream solverStream);
 
 		//--------------------------------------------------------------------------------------
 
@@ -237,60 +227,6 @@ namespace physx
 		PxArray<Dy::DeformableVolume*>	mActivatingDeformableVolumes;
 		PxArray<Dy::DeformableVolume*>	mDeactivatingDeformableVolumes;
 		PxPostSolveCallback*			mPostSolveCallback;
-	};
-
-	struct PxgSoftBodyContactWriter
-	{
-		float4* outPoint;
-		float4* outNormalPen;
-		float4* outBarycentric0;
-		float4*	outBarycentric1;
-		PxgFemFemContactInfo* outContactInfo;
-		PxU32* totalContactCount;
-		PxU32 maxContacts;
-
-		PxgSoftBodyContactWriter(PxgSoftBodyCore* softBodyCore, PxgFEMCore* femClothCore = NULL)
-		{
-			if (femClothCore)
-			{
-				totalContactCount = softBodyCore->getClothVsSoftBodyContactCount().getTypedPtr();
-				outPoint = softBodyCore->getClothVsSoftBodyContacts().getTypedPtr();
-				outNormalPen = softBodyCore->getClothVsSoftBodyNormalPens().getTypedPtr();
-				outBarycentric0 = softBodyCore->getClothVsSoftBodyBarycentrics0().getTypedPtr();
-				outBarycentric1 = softBodyCore->getClothVsSoftBodyBarycentrics1().getTypedPtr();
-				outContactInfo = softBodyCore->getClothVsSoftBodyContactInfos().getTypedPtr();
-				maxContacts = PxMin(softBodyCore->mMaxContacts, femClothCore->mMaxContacts);
-			}
-			else
-			{
-				totalContactCount = softBodyCore->getVolumeContactOrVTContactCount().getTypedPtr();
-				outPoint = softBodyCore->getFemContacts().getTypedPtr();
-				outNormalPen = softBodyCore->getFemNormalPens().getTypedPtr();
-				outBarycentric0 = softBodyCore->getFemBarycentrics0().getTypedPtr();
-				outBarycentric1 = softBodyCore->getFemBarycentrics1().getTypedPtr();
-				outContactInfo = softBodyCore->getVolumeContactOrVTContactInfos().getTypedPtr();
-				maxContacts = softBodyCore->mMaxContacts;
-			}
-		}
-
-		PX_FORCE_INLINE PX_CUDA_CALLABLE bool writeContact(PxU32 index, const float4& contact, const float4& normalPen, const float4& barycentric0, const float4& barycentric1,
-			PxU32 pairId0, PxU32 pairId1)
-		{
-			if (index >= maxContacts)
-				return false;
-
-
-			outPoint[index] = contact;
-			outNormalPen[index] = normalPen;
-
-			outBarycentric0[index] = barycentric0;
-			outBarycentric1[index] = barycentric1;
-
-			outContactInfo[index].pairInd0 = pairId0;
-			outContactInfo[index].pairInd1 = pairId1;
-
-			return true;
-		}
 	};
 }
 

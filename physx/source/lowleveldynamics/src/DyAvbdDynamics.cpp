@@ -153,7 +153,7 @@ static PxU32 findArticulationLinkIndex(FeatherstoneArticulation *articulation,
 // so we can use a simpler tracking mechanism without mutex for the common case.
 //=============================================================================
 static void *allocWithFallback(PxcScratchAllocator &scratch,
-                               PxVirtualAllocatorCallback *mainAllocator,
+                               PxAllocatorCallback &mainAllocator,
                                PxArray<void *> &fallbackAllocations, PxU32 size,
                                const char *name) {
 
@@ -164,16 +164,12 @@ static void *allocWithFallback(PxcScratchAllocator &scratch,
   }
 
   // Scratch memory exhausted - use main allocator (slower path)
-  if (mainAllocator) {
-    PxAllocatorCallback *allocator =
-        reinterpret_cast<PxAllocatorCallback *>(mainAllocator);
-    ptr = allocator->allocate(size, name, __FILE__, __LINE__);
-    if (ptr) {
-      // Track for cleanup in mergeResults()
-      // No mutex needed here since update() is called from a single thread
-      // context
-      fallbackAllocations.pushBack(ptr);
-    }
+  ptr = mainAllocator.allocate(size, name, __FILE__, __LINE__);
+  if (ptr) {
+    // Track for cleanup in mergeResults()
+    // No mutex needed here since update() is called from a single thread
+    // context
+    fallbackAllocations.pushBack(ptr);
   }
   return ptr;
 }
@@ -197,6 +193,19 @@ void *AvbdDynamicsContext::ScratchAllocatorAdapter::allocate(size_t size,
 
 void AvbdDynamicsContext::ScratchAllocatorAdapter::deallocate(void *) {}
 
+AvbdDynamicsContext::VirtualAllocatorAdapter::VirtualAllocatorAdapter(
+    Cm::VirtualAllocatorCallback &allocator)
+    : mAllocator(allocator) {}
+
+void *AvbdDynamicsContext::VirtualAllocatorAdapter::allocate(
+    size_t size, const char *, const char *file, int line) {
+  return mAllocator.allocate(size, PxsHeapStats::eSOLVER, file, line);
+}
+
+void AvbdDynamicsContext::VirtualAllocatorAdapter::deallocate(void *ptr) {
+  mAllocator.deallocate(ptr);
+}
+
 //=============================================================================
 // Constructor / Destructor
 //=============================================================================
@@ -204,21 +213,17 @@ void AvbdDynamicsContext::ScratchAllocatorAdapter::deallocate(void *) {}
 AvbdDynamicsContext::AvbdDynamicsContext(
     PxcNpMemBlockPool *memBlockPool, PxcScratchAllocator &scratchAllocator,
     Cm::FlushPool &taskPool, PxvSimStats &simStats, PxTaskManager *taskManager,
-    PxVirtualAllocatorCallback *allocatorCallback,
+    Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
-    PxU64 contextID, bool enableStabilization, bool useEnhancedDeterminism,
-    bool solveArticulationContactLast, PxReal maxBiasCoefficient,
-    bool frictionEveryIteration, PxReal lengthScale,
-    bool isResidualReportingEnabled)
-    : DynamicsContextBase(memBlockPool, taskPool, simStats, allocatorCallback,
+    PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
+    PxSceneFlags sceneFlags)
+    : DynamicsContextBase(memBlockPool, taskPool, simStats, allocator,
                           materialManager, islandManager, contextID,
-                          maxBiasCoefficient, lengthScale, enableStabilization,
-                          useEnhancedDeterminism, solveArticulationContactLast,
-                          isResidualReportingEnabled),
-      mScratchAllocator(scratchAllocator), mTaskManager(taskManager),
-      mScratchAdapter(scratchAllocator),
-      mFrictionEveryIteration(frictionEveryIteration),
-      mAllocatorCallback(allocatorCallback),
+                          maxBiasCoefficient, lengthScale, sceneFlags),
+      mScratchAllocator(scratchAllocator), mScratchAdapter(scratchAllocator),
+      mAllocatorAdapter(allocator), mTaskManager(taskManager),
+      mFrictionEveryIteration(
+          sceneFlags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION),
       mIterationDiagnosticsEnabled(isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG")),
         mIterationDiagnosticsSequential(
           isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG_SEQUENTIAL")),
@@ -244,23 +249,12 @@ AvbdDynamicsContext::AvbdDynamicsContext(
       mDiagSeqMaxLinearDriveJointIndex(PX_MAX_U32),
       mDiagSeqMaxLinearDriveJointBodyA(PX_MAX_U32),
       mDiagSeqMaxLinearDriveJointBodyB(PX_MAX_U32) {
-  PX_UNUSED(frictionEveryIteration);
   mSolverInitialized = false;
-
-  createThresholdStream(*allocatorCallback);
-  createForceChangeThresholdStream(*allocatorCallback);
-
-  mExceededForceThresholdStream[0] =
-      PX_NEW(ThresholdStream)(*allocatorCallback);
-  mExceededForceThresholdStream[1] =
-      PX_NEW(ThresholdStream)(*allocatorCallback);
 
   // Use the main allocator callback for tasks, NOT the scratch adapter.
   // Tasks need explicit deallocation, which ScratchAllocatorAdapter doesn't
   // provide.
-  mTaskFactory = new AvbdTaskFactory(
-      mTaskManager,
-      *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback));
+  mTaskFactory = new AvbdTaskFactory(mTaskManager, mAllocatorAdapter);
 
   // Initialize lambda warm-starting cache
   mEnableLambdaWarmStart = true;
@@ -589,10 +583,7 @@ void AvbdDynamicsContext::flushIterationDiagnosticsFrame() {
 AvbdDynamicsContext::~AvbdDynamicsContext() {
   delete mTaskFactory;
 
-  PX_DELETE(mExceededForceThresholdStream[1]);
-  PX_DELETE(mExceededForceThresholdStream[0]);
-
-  if (mSolverInitialized && mAllocatorCallback) {
+  if (mSolverInitialized) {
     mConstraintColoring.release();
     mSolver.release();
   }
@@ -788,7 +779,7 @@ void AvbdDynamicsContext::update(
     PxBaseTask *postPartitioningTask, PxBaseTask *processLostTouchTask,
     PxvNphaseImplementationContext *nPhaseContext, PxU32 maxPatchesPerCM,
     PxU32 maxArticulationLinks, PxReal dt, const PxVec3 &gravity,
-    PxBitMapPinned &changedHandleMap) {
+    Cm::PinnableBitMap &changedHandleMap) {
 
   PX_PROFILE_ZONE("AVBD.update", mContextID);
 
@@ -855,11 +846,11 @@ void AvbdDynamicsContext::update(
   {
     PX_PROFILE_ZONE("AVBD.allocateMemory", mContextID);
     avbdBodies = reinterpret_cast<AvbdSolverBody *>(allocWithFallback(
-        mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(AvbdSolverBody) * totalBodyCount, "AvbdSolverBody"));
 
     rigidBodies = reinterpret_cast<PxsRigidBody **>(allocWithFallback(
-        mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxsRigidBody *) * totalBodyCount, "RigidBodies"));
   }
 
@@ -874,11 +865,11 @@ void AvbdDynamicsContext::update(
   if (numArticulations > 0 && maxArticulationLinks > 0) {
     articulationForBody =
         reinterpret_cast<FeatherstoneArticulation **>(allocWithFallback(
-            mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
             sizeof(FeatherstoneArticulation *) * totalBodyCount,
             "ArticulationForBody"));
     linkIndexForBody = reinterpret_cast<PxU32 *>(allocWithFallback(
-        mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxU32) * totalBodyCount, "LinkIndexForBody"));
 
     if (articulationForBody && linkIndexForBody) {
@@ -891,7 +882,7 @@ void AvbdDynamicsContext::update(
 
   const PxU32 maxActiveNodes = numDynamicBodies + numArticulations + 1;
   PxU32 *bodyRemapTable = reinterpret_cast<PxU32 *>(allocWithFallback(
-      mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+      mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
       sizeof(PxU32) * maxActiveNodes, "BodyRemapTable"));
 
   if (!bodyRemapTable) {
@@ -907,11 +898,11 @@ void AvbdDynamicsContext::update(
   FeatherstoneArticulation **articulationByActiveIdx = nullptr;
   if (numArticulations > 0) {
     articulationFirstLinkIndex = reinterpret_cast<PxU32 *>(allocWithFallback(
-        mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxU32) * (numArticulations + 1), "ArticulationFirstLinkIndex"));
     articulationByActiveIdx =
         reinterpret_cast<FeatherstoneArticulation **>(allocWithFallback(
-            mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
             sizeof(FeatherstoneArticulation *) * (numArticulations + 1),
             "ArticulationByActiveIdx"));
 
@@ -935,7 +926,7 @@ void AvbdDynamicsContext::update(
 
   AvbdIslandInfo *islandInfos =
       reinterpret_cast<AvbdIslandInfo *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+          mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdIslandInfo) * islandCount, "IslandInfos"));
 
   if (!islandInfos) {
@@ -1061,19 +1052,21 @@ void AvbdDynamicsContext::update(
     info.cmStart = contactIndex;
 
     const IG::Island &island = islandSim.getIsland(islandIds[i]);
-    IG::EdgeIndex contactEdgeIndex =
-        island.mFirstEdge[IG::Edge::eCONTACT_MANAGER];
-
-    while (contactEdgeIndex != IG_INVALID_EDGE) {
-      const IG::Edge &edge = islandSim.getEdge(contactEdgeIndex);
+    START_ENUMERATING_ISLAND_EDGES(IG::Edge::eCONTACT_MANAGER) {
+      GET_CURRENT_ISLAND_EDGE
       PxsContactManager *contactManager =
-          mIslandManager.getContactManager(contactEdgeIndex);
+          mIslandManager.getContactManager(edgeId);
 
       if (contactManager) {
+#if IG_CACHE_CONTACT_MANAGER_DATA
+        const PxNodeIndex nodeIndex1 = edgeIndices[j].getNodeIndex0();
+        const PxNodeIndex nodeIndex2 = edgeIndices[j].getNodeIndex1();
+#else
         const PxNodeIndex nodeIndex1 =
-            islandSim.mCpuData.getNodeIndex1(contactEdgeIndex);
+            islandSim.mCpuData.getNodeIndex1(edgeId);
         const PxNodeIndex nodeIndex2 =
-            islandSim.mCpuData.getNodeIndex2(contactEdgeIndex);
+            islandSim.mCpuData.getNodeIndex2(edgeId);
+#endif
         const PxcNpWorkUnit &workUnit = contactManager->getWorkUnit();
 
         mContactList.pushBack(PxsIndexedContactManager(contactManager));
@@ -1156,17 +1149,12 @@ void AvbdDynamicsContext::update(
         }
         contactIndex++;
       }
-      contactEdgeIndex = edge.mNextIslandEdge;
+      GET_NEXT_ISLAND_EDGE
     }
     info.cmCount = contactIndex - info.cmStart;
 
     // Count constraint joints
-    info.constraintCount = 0;
-    IG::EdgeIndex constraintEdge = island.mFirstEdge[IG::Edge::eCONSTRAINT];
-    while (constraintEdge != IG_INVALID_EDGE) {
-      info.constraintCount++;
-      constraintEdge = islandSim.getEdge(constraintEdge).mNextIslandEdge;
-    }
+    info.constraintCount = island.mEdges.getCount(IG::Edge::eCONSTRAINT);
   }
 
   // 3. Setup bodies (for rigid bodies only, articulation links already set up)
@@ -1175,7 +1163,7 @@ void AvbdDynamicsContext::update(
   }
 
   // 4. Initialize Solver
-  if (!mSolverInitialized && mAllocatorCallback) {
+  if (!mSolverInitialized) {
     AvbdSolverConfig config;
     config.outerIterations = 1;
     config.innerIterations = 4; // Default for contact-only islands; articulations use per-body overrides
@@ -1189,8 +1177,7 @@ void AvbdDynamicsContext::update(
     config.avbdGamma = 0.99f;
     config.avbdPenaltyMin = 1000.0f;
     config.avbdPenaltyMax = 1e9f;
-    mSolver.initialize(
-        config, *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback));
+    mSolver.initialize(config, mAllocatorAdapter);
     mSolverInitialized = true;
   }
 
@@ -1226,7 +1213,7 @@ void AvbdDynamicsContext::update(
   if (maxConstraints > 0) {
     avbdConstraints =
         reinterpret_cast<AvbdContactConstraint *>(allocWithFallback(
-            mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
             sizeof(AvbdContactConstraint) * maxConstraints,
             "AvbdContactConstraint"));
   }
@@ -1272,11 +1259,11 @@ void AvbdDynamicsContext::update(
 
   AvbdD6JointConstraint *d6Joints =
       reinterpret_cast<AvbdD6JointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+          mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdD6JointConstraint) * totalJointCapacity, "D6Joints"));
   AvbdGearJointConstraint *gearJoints =
       reinterpret_cast<AvbdGearJointConstraint *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+          mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdGearJointConstraint) * totalJointCapacity, "GearJoints"));
 
   // 6. Create Task Chain
@@ -1304,7 +1291,7 @@ void AvbdDynamicsContext::update(
     shellParticleCount = AvbdKinematicShell::shellParticleCount();
     if (shellParticleCount > 0) {
       shellParticles = reinterpret_cast<AvbdSoftParticle *>(allocWithFallback(
-          mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+          mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdSoftParticle) * shellParticleCount, "ShellSoftParticles"));
       if (shellParticles) {
         AvbdKinematicShell::syncIslandSoftParticles(shellParticles,
@@ -1430,7 +1417,7 @@ void AvbdDynamicsContext::update(
       const PxU32 shellContactCapacity = batch.numBodies * 90u;
       AvbdSoftContact *islandShellContacts =
           reinterpret_cast<AvbdSoftContact *>(allocWithFallback(
-              mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+              mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
               sizeof(AvbdSoftContact) * shellContactCapacity,
               "IslandShellContacts"));
       if (islandShellContacts) {
@@ -1486,8 +1473,7 @@ void AvbdDynamicsContext::update(
     // Build constraint-to-body mappings for O(1) lookup in solver
     // This eliminates O(N^2) complexity in the inner loop
     if (batch.numBodies > 0) {
-      PxAllocatorCallback &allocator =
-          *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback);
+      PxAllocatorCallback &allocator = mAllocatorAdapter;
       if (batch.numConstraints > 0 && batch.constraints) {
         batch.contactMap.build(batch.numBodies, batch.constraints,
                                batch.numConstraints, allocator);
@@ -1515,7 +1501,7 @@ void AvbdDynamicsContext::update(
 
       if (numColors > 0) {
         batch.colorBatches = static_cast<AvbdColorBatch *>(allocWithFallback(
-            mScratchAllocator, mAllocatorCallback, mHeapFallbackAllocations,
+            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
             sizeof(AvbdColorBatch) * numColors, "ColorBatches"));
 
         // Skip coloring if allocation failed
@@ -1533,7 +1519,7 @@ void AvbdDynamicsContext::update(
 
             if (src.numConstraints > 0) {
               dst.constraintIndices = static_cast<PxU32 *>(allocWithFallback(
-                  mScratchAllocator, mAllocatorCallback,
+                  mScratchAllocator, mAllocatorAdapter,
                   mHeapFallbackAllocations, sizeof(PxU32) * src.numConstraints,
                   "ConstraintIndices"));
 
@@ -2005,12 +1991,10 @@ void AvbdDynamicsContext::mergeResults() {
   // Clean up any heap fallback allocations from this frame
   // No mutex needed since mergeResults() is called from a single thread
   // context
-  if (mHeapFallbackAllocations.size() > 0 && mAllocatorCallback) {
-    PxAllocatorCallback *allocator =
-        reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback);
+  if (mHeapFallbackAllocations.size() > 0) {
     for (PxU32 i = 0; i < mHeapFallbackAllocations.size(); ++i) {
       if (mHeapFallbackAllocations[i]) {
-        allocator->deallocate(mHeapFallbackAllocations[i]);
+        mAllocatorAdapter.deallocate(mHeapFallbackAllocations[i]);
       }
     }
     mHeapFallbackAllocations.clear();
@@ -2025,18 +2009,14 @@ void AvbdDynamicsContext::setSimulationController(
 Dy::Context *Dy::createAVBDDynamicsContext(
     PxcNpMemBlockPool *memBlockPool, PxcScratchAllocator &scratchAllocator,
     Cm::FlushPool &taskPool, PxvSimStats &simStats, PxTaskManager *taskManager,
-    PxVirtualAllocatorCallback *allocatorCallback,
+    Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
-    PxU64 contextID, bool enableStabilization, bool useEnhancedDeterminism,
-    bool solveArticulationContactLast, PxReal maxBiasCoefficient,
-    bool frictionEveryIteration, PxReal lengthScale,
-    bool isResidualReportingEnabled) {
+    PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
+    PxSceneFlags sceneFlags) {
   return PX_PLACEMENT_NEW(
       PX_ALLOC(sizeof(Dy::AvbdDynamicsContext), "AvbdDynamicsContext"),
       Dy::AvbdDynamicsContext)(
       memBlockPool, scratchAllocator, taskPool, simStats, taskManager,
-      allocatorCallback, materialManager, islandManager, contextID,
-      enableStabilization, useEnhancedDeterminism, solveArticulationContactLast,
-      maxBiasCoefficient, frictionEveryIteration, lengthScale,
-      isResidualReportingEnabled);
+      allocator, materialManager, islandManager, contextID, maxBiasCoefficient,
+      lengthScale, sceneFlags);
 }

@@ -24,9 +24,7 @@
 
 #include ".//UsdTools.h"
 #include "pxr/pxr.h"
-
-#include <boost/python/def.hpp>
-
+#include "pxr/external/boost/python.hpp"
 #include "pxr/base/tf/fileUtils.h"
 
 #include <string>
@@ -35,23 +33,23 @@
 using std::string;
 using std::vector;
 
-using namespace boost::python;
-
 PXR_NAMESPACE_USING_DIRECTIVE
 
-static boost::python::tuple 
+using namespace pxr_boost::python;
+
+static pxr_boost::python::tuple 
 _encodeSdfPath(const SdfPath& path) {
 	uint32_t part0;
 	uint32_t part1;
 	encodeSdfPath(path, part0, part1);
-	return boost::python::make_tuple(int(part0), int(part1));
+	return pxr_boost::python::make_tuple(int(part0), int(part1));
 }
 
-static boost::python::tuple 
+static pxr_boost::python::tuple 
 _getMassSpaceInertia(const GfMatrix3f& matrix) {
 	GfQuatf pa;
 	GfVec3f diagonal = getMassSpaceInertia(matrix, pa);		
-	return boost::python::make_tuple(diagonal, pa);
+	return pxr_boost::python::make_tuple(diagonal, pa);
 }
 
 void wrapUsdTools() {
@@ -67,7 +65,7 @@ void wrapUsdTools() {
 		&createMeshSquare, (arg("stage"), arg("path"), arg("halfHeight"), arg("halfWidth")));
 
 	def("createMeshBox",
-		(UsdGeomMesh(*)(const UsdStagePtr&, const SdfPath&, const pxr::GfVec3f&))
+		(UsdGeomMesh(*)(const UsdStagePtr&, const SdfPath&, const PXR_NS::GfVec3f&))
 		&createMeshBox, (arg("stage"), arg("path"), arg("halfExtent")));
 
 	def("createMeshSphere",
@@ -125,7 +123,7 @@ void wrapUsdTools() {
 			arg("size"), arg("position"), arg("orientation"), arg("color")));
 
 	def("addGroundPlane",
-		(void(*)(const UsdStagePtr&, const string&, const pxr::TfToken& , float, const GfVec3f&, const GfVec3f&))
+		(void(*)(const UsdStagePtr&, const string&, const PXR_NS::TfToken& , float, const GfVec3f&, const GfVec3f&))
 		&addGroundPlane, (arg("stage"), arg("path"), arg("axis"),
 			arg("size"), arg("position"), arg("color")));
 
@@ -153,19 +151,19 @@ void wrapUsdTools() {
 			arg("radius"), arg("halfHeight"), arg("position"), arg("orientation"), arg("color"), arg("density"), arg("linVelocity"), arg("angularVelocity")));
 
 	def("addRigidCapsule",
-		(void(*)(const UsdStagePtr&, const string&, float, float, const pxr::TfToken&, const GfVec3f&,
+		(void(*)(const UsdStagePtr&, const string&, float, float, const PXR_NS::TfToken&, const GfVec3f&,
 			const GfQuatf&, const GfVec3f&, float, const GfVec3f&, const GfVec3f&))
 		&addRigidCapsule, (arg("stage"), arg("path"),
 			arg("radius"), arg("halfHeight"), arg("axis"), arg("position"), arg("orientation"), arg("color"), arg("density"), arg("linVelocity"), arg("angularVelocity")));
 
 	def("addRigidCone",
-		(void(*)(const UsdStagePtr&, const string&, float, float, const pxr::TfToken&, const GfVec3f&,
+		(void(*)(const UsdStagePtr&, const string&, float, float, const PXR_NS::TfToken&, const GfVec3f&,
 			const GfQuatf&, const GfVec3f&, float, const GfVec3f&, const GfVec3f&))
 		&addRigidCone, (arg("stage"), arg("path"),
 			arg("radius"), arg("halfHeight"), arg("axis"), arg("position"), arg("orientation"), arg("color"), arg("density"), arg("linVelocity"), arg("angularVelocity")));
 
 	def("addRigidCylinder",
-		(void(*)(const UsdStagePtr&, const string&, float, float, const pxr::TfToken&, const GfVec3f&,
+		(void(*)(const UsdStagePtr&, const string&, float, float, const PXR_NS::TfToken&, const GfVec3f&,
 			const GfQuatf&, const GfVec3f&, float, const GfVec3f&, const GfVec3f&))
 		&addRigidCylinder, (arg("stage"), arg("path"),
 			arg("radius"), arg("halfHeight"), arg("axis"), arg("position"), arg("orientation"), arg("color"), arg("density"), arg("linVelocity"), arg("angularVelocity")));

@@ -19,10 +19,10 @@ static int check_result(ovphysx_result_t result, const char* context)
     if (result.status != OVPHYSX_API_SUCCESS)
     {
         fprintf(stderr, "ERROR in %s: ", context);
-        if (result.error.ptr && result.error.length > 0)
+        ovphysx_string_t err = ovphysx_get_last_error();
+        if (err.ptr && err.length > 0)
         {
-            fprintf(stderr, "%.*s\n", (int)result.error.length, result.error.ptr);
-            ovphysx_destroy_error(result.error);
+            fprintf(stderr, "%.*s\n", (int)err.length, err.ptr);
         }
         else
         {
@@ -39,17 +39,16 @@ static int wait_op(ovphysx_handle_t handle, ovphysx_op_index_t op_index, const c
     ovphysx_op_wait_result_t wait_result = { 0 };
     ovphysx_result_t result = ovphysx_wait_op(handle, op_index, 10ull * 1000ull * 1000ull * 1000ull, &wait_result);
     
-    if (wait_result.num_errors > 0)
+    int has_errors = (wait_result.num_errors > 0);
+    ovphysx_destroy_wait_result(&wait_result);
+    if (has_errors)
     {
         fprintf(stderr, "ERROR in %s: async operation failed\n", context);
-        ovphysx_destroy_errors(wait_result.errors, wait_result.num_errors);
         return 0;
     }
     if (result.status != OVPHYSX_API_SUCCESS)
     {
         fprintf(stderr, "ERROR in %s: wait failed (status=%d)\n", context, (int)result.status);
-        if (result.error.ptr)
-            ovphysx_destroy_error(result.error);
         return 0;
     }
     return 1;
@@ -64,20 +63,22 @@ int main(void)
     printf("=== Tensor Binding API Sample ===\n\n");
 
     // 1. Create instance with GPU mode (default)
-    // GPU mode automatically enables DirectGPU API required for TensorBinding
+    // GPU mode runs PhysX with eENABLE_GPU_DYNAMICS + eGPU broadphase and lets
+    // TensorBinding work directly with kDLCUDA tensors. It does NOT auto-enable
+    // DirectGPU (eENABLE_DIRECT_GPU_API); DirectGPU is an opt-in optimization
+    // gated by the Carbonite setting /physics/suppressReadback=true and is
+    // incompatible with contact-modify callbacks (e.g. PhysxSurfaceVelocityAPI).
     ovphysx_handle_t handle = 0;
     ovphysx_create_args args = OVPHYSX_CREATE_ARGS_DEFAULT;
     // args.device = OVPHYSX_DEVICE_GPU;  // default, enables TensorBinding support
     //
     // Optional: explicitly select which GPU PhysX should use.
-    // This sets the Carbonite setting `/physics/cudaDevice` BEFORE PhysX plugins load.
     //
     // Example (uncomment to use):
     //   args.device = OVPHYSX_DEVICE_GPU;
-    //   args.gpu_index = 1; // run PhysX on CUDA device 1
+    //   args.active_cuda_gpus = ovphysx_cstr("1"); // run PhysX on CUDA device 1
     //
-    // Note: if you want to override via settings instead (higher precedence), you can pass:
-    //   args.settings_keys / args.settings_values with key "/physics/cudaDevice".
+    // Note: active_cuda_gpus on create_args is the recommended way to select the CUDA device.
 
     ovphysx_result_t result = ovphysx_create_instance(&args, &handle);
     if (!check_result(result, "create_instance"))
@@ -96,16 +97,14 @@ int main(void)
     if (add_result.status != OVPHYSX_API_SUCCESS)
     {
         fprintf(stderr, "Failed to load USD scene\n");
-        if (add_result.error.ptr && add_result.error.length > 0)
         {
-            fprintf(stderr, "ERROR in add_usd enqueue: %.*s\n", (int)add_result.error.length, add_result.error.ptr);
-            ovphysx_destroy_error(add_result.error);
+            ovphysx_string_t err = ovphysx_get_last_error();
+            if (err.ptr && err.length > 0)
+                fprintf(stderr, "ERROR in add_usd enqueue: %.*s\n", (int)err.length, err.ptr);
         }
         ovphysx_destroy_instance(handle);
         return 1;
     }
-    if (add_result.error.ptr)
-        ovphysx_destroy_error(add_result.error);
 
     if (!wait_op(handle, add_result.op_index, "add_usd"))
     {
@@ -225,10 +224,14 @@ int main(void)
         return 1;
     }
 
-    // Create DLTensor wrappers - use args.gpu_index to match PhysX device
+    // Use the first CUDA ordinal from active_cuda_gpus as the DLTensor device so
+    // the tensor allocation matches wherever PhysX is actually running.
+    // Default (empty active_cuda_gpus) means GPU 0; "1" means GPU 1; "0,1" means
+    // primary ordinal 0, etc.  strtol stops at the first comma, giving the first ordinal.
     int64_t rb_shape[2] = { (int64_t)rb_count, (int64_t)rb_components };
     int64_t dof_shape[2] = { (int64_t)dof_count, (int64_t)dof_components };
-    int32_t device_id = args.gpu_index;
+    int32_t device_id = (args.active_cuda_gpus.ptr && args.active_cuda_gpus.length > 0)
+        ? (int32_t)strtol(args.active_cuda_gpus.ptr, NULL, 10) : 0;
 
     DLTensor rb_tensor = {
         .data = rb_device,
@@ -350,16 +353,14 @@ int main(void)
         if (step_result.status != OVPHYSX_API_SUCCESS)
         {
             fprintf(stderr, "ERROR in step enqueue (status=%d)\n", (int)step_result.status);
-            if (step_result.error.ptr && step_result.error.length > 0)
             {
-                fprintf(stderr, "  %.*s\n", (int)step_result.error.length, step_result.error.ptr);
-                ovphysx_destroy_error(step_result.error);
+                ovphysx_string_t err = ovphysx_get_last_error();
+                if (err.ptr && err.length > 0)
+                    fprintf(stderr, "  %.*s\n", (int)err.length, err.ptr);
             }
             ovphysx_destroy_instance(handle);
             return 1;
         }
-        if (step_result.error.ptr)
-            ovphysx_destroy_error(step_result.error);
         if (!wait_op(handle, step_result.op_index, "step"))
         {
             ovphysx_destroy_instance(handle);
@@ -441,9 +442,11 @@ int main(void)
     ovphysx_destroy_tensor_binding(handle, dof_target_binding);
     ovphysx_destroy_tensor_binding(handle, dof_vel_binding);
 
-    ovphysx_destroy_instance(handle);
-
     printf("\nTensor Binding sample completed successfully!\n");
+
+    ovphysx_destroy_instance(handle);
+    printf("Cleanup complete\n");
+
     return 0;
 #endif
 }

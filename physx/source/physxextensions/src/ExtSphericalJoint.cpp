@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -44,7 +44,7 @@ SphericalJoint::SphericalJoint(const PxTolerancesScale& /*scale*/, PxRigidActor*
 }
 
 void SphericalJoint::setLimitCone(const PxJointLimitCone &limit)
-{	
+{
 	PX_CHECK_AND_RETURN(limit.isValid(), "PxSphericalJoint::setLimit: invalid parameter");
 	data().limit = limit; 
 	markDirty();
@@ -64,7 +64,7 @@ void SphericalJoint::setLimitCone(const PxJointLimitCone &limit)
 }
 
 PxJointLimitCone SphericalJoint::getLimitCone() const
-{	
+{
 	return data().limit; 
 }
 

@@ -3,14 +3,14 @@
 #
 
 """
-Sample: "TensorAPI-like" views built on TensorBindingsAPI (ctypes).
+Sample: lightweight view wrappers built on TensorBindingsAPI (ctypes).
 
 Purpose
 -------
 This file is intentionally copy/paste-friendly for downstream users (e.g. IsaacLab)
-who want some of the legacy TensorAPI ergonomics (SimulationView/ArticulationView)
-without depending on the CPython-minor-specific pybind11 bindings from
-`omni.physics.tensors`.
+who want convenient SimulationView/ArticulationView-style helpers on top of the
+official TensorBindingsAPI, without depending on any CPython-minor-specific
+pybind11 bindings.
 
 This is *not* an ovphysx-maintained library module; it is a sample that shows
 how easy it is to build these helpers on top of the official TensorBindingsAPI.
@@ -23,11 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from ovphysx import (
-    OVPHYSX_TENSOR_ARTICULATION_DOF_POSITION_F32,
-    OVPHYSX_TENSOR_ARTICULATION_DOF_POSITION_TARGET_F32,
-    PhysX,
-)
+from ovphysx import PhysX
+from ovphysx.types import TensorType
 
 
 def _find_usd_path() -> str:
@@ -78,11 +75,11 @@ class SimulationView:
     def create_articulation_view(self, pattern: str) -> ArticulationView:
         dof_pos = self.physx.create_tensor_binding(
             pattern=pattern,
-            tensor_type=OVPHYSX_TENSOR_ARTICULATION_DOF_POSITION_F32,
+            tensor_type=TensorType.ARTICULATION_DOF_POSITION,
         )
         dof_targets = self.physx.create_tensor_binding(
             pattern=pattern,
-            tensor_type=OVPHYSX_TENSOR_ARTICULATION_DOF_POSITION_TARGET_F32,
+            tensor_type=TensorType.ARTICULATION_DOF_POSITION_TARGET,
         )
         return ArticulationView(dof_positions=dof_pos, dof_position_targets=dof_targets)
 
@@ -123,5 +120,7 @@ if __name__ == "__main__":
     delta = float(np.abs(pos1 - pos0).max())
     print(f"Max DOF position change after 5 steps: {delta:.6f}")
 
+    print("Tensor bindings views sample completed successfully")
+
     physx.release()
-    print("[OK] DONE")
+    print("Cleanup complete")

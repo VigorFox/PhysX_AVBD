@@ -64,13 +64,11 @@ public:
                       PxcScratchAllocator &scratchAllocator,
                       Cm::FlushPool &taskPool, PxvSimStats &simStats,
                       PxTaskManager *taskManager,
-                      PxVirtualAllocatorCallback *allocatorCallback,
+                      Cm::VirtualAllocatorCallback &allocator,
                       PxsMaterialManager *materialManager,
                       IG::SimpleIslandManager &islandManager, PxU64 contextID,
-                      bool enableStabilization, bool useEnhancedDeterminism,
-                      bool solveArticulationContactLast,
-                      PxReal maxBiasCoefficient, bool frictionEveryIteration,
-                      PxReal lengthScale, bool isResidualReportingEnabled);
+                      PxReal maxBiasCoefficient, PxReal lengthScale,
+                      PxSceneFlags sceneFlags);
 
   virtual ~AvbdDynamicsContext();
 
@@ -88,9 +86,7 @@ public:
   /**
    * @brief Get allocator callback for constraint map cleanup
    */
-  PxAllocatorCallback &getAllocator() {
-    return *reinterpret_cast<PxAllocatorCallback *>(mAllocatorCallback);
-  }
+  PxAllocatorCallback &getAllocator() { return mAllocatorAdapter; }
 
   void beginIterationDiagnosticsFrame();
   void recordIterationDiagnostics(PxU32 requestedIterations,
@@ -106,7 +102,7 @@ public:
                       PxvNphaseImplementationContext *nPhaseContext,
                       PxU32 maxPatchesPerCM, PxU32 maxArticulationLinks,
                       PxReal dt, const PxVec3 &gravity,
-                      PxBitMapPinned &changedHandleMap) override;
+                      Cm::PinnableBitMap &changedHandleMap) override;
 
   virtual void mergeResults() override;
 
@@ -115,6 +111,21 @@ public:
 
   virtual PxSolverType::Enum getSolverType() const override {
     return PxSolverType::eAVBD;
+  }
+
+  virtual void setConstraintConcreteType(PxU32 id, PxU16 type) override {
+    if (id >= mConstraintConcreteTypes.size()) {
+      const PxU32 oldSize = mConstraintConcreteTypes.size();
+      mConstraintConcreteTypes.resize(id + 1);
+      for (PxU32 i = oldSize; i <= id; ++i)
+        mConstraintConcreteTypes[i] = 0;
+    }
+    mConstraintConcreteTypes[id] = type;
+  }
+
+  virtual void clearConstraintConcreteType(PxU32 id) override {
+    if (id < mConstraintConcreteTypes.size())
+      mConstraintConcreteTypes[id] = 0;
   }
 
   //-------------------------------------------------------------------------
@@ -168,6 +179,11 @@ public:
       0.9f; //!< Damping for warm-started lambda
 
 private:
+  PX_FORCE_INLINE PxU16 getConstraintConcreteType(PxU32 id) const {
+    return id < mConstraintConcreteTypes.size() ? mConstraintConcreteTypes[id]
+                                                : PxU16(0);
+  }
+
   struct CachedBodyVelocityHistory {
     PxU64 bodyCoreKey;
     PxU64 lastSeenFrame;
@@ -179,6 +195,7 @@ private:
   static const PxU32 BODY_VELOCITY_HISTORY_CACHE_SIZE = 16384;
   PxArray<CachedBodyVelocityHistory> mBodyVelocityHistoryCache;
   PxU64 mBodyVelocityHistoryFrame;
+  PxArray<PxU16> mConstraintConcreteTypes;
 
   //-------------------------------------------------------------------------
   // Internal Methods
@@ -260,9 +277,20 @@ private:
   };
   ScratchAllocatorAdapter mScratchAdapter;
 
+  class VirtualAllocatorAdapter : public PxAllocatorCallback {
+  public:
+    explicit VirtualAllocatorAdapter(Cm::VirtualAllocatorCallback &allocator);
+    virtual void *allocate(size_t size, const char *, const char *file,
+                           int line) override;
+    virtual void deallocate(void *ptr) override;
+
+  private:
+    Cm::VirtualAllocatorCallback &mAllocator;
+  };
+  VirtualAllocatorAdapter mAllocatorAdapter;
+
   PxTaskManager *mTaskManager;   //!< Task manager for parallel execution
   AvbdTaskFactory *mTaskFactory; //!< Factory for creating AVBD tasks
-  PxVirtualAllocatorCallback *mAllocatorCallback; //!< Memory allocator
   bool mFrictionEveryIteration; //!< Apply friction every iteration
   bool mSolverInitialized;      //!< Whether solver has been initialized
   bool mIterationDiagnosticsEnabled; //!< Print AVBD iteration summaries when enabled via env
@@ -326,12 +354,10 @@ void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
 Context *createAVBDDynamicsContext(
     PxcNpMemBlockPool *memBlockPool, PxcScratchAllocator &scratchAllocator,
     Cm::FlushPool &taskPool, PxvSimStats &simStats, PxTaskManager *taskManager,
-    PxVirtualAllocatorCallback *allocatorCallback,
+    Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
-    PxU64 contextID, bool enableStabilization, bool useEnhancedDeterminism,
-    bool solveArticulationContactLast, PxReal maxBiasCoefficient,
-    bool frictionEveryIteration, PxReal lengthScale,
-    bool isResidualReportingEnabled);
+    PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
+    PxSceneFlags sceneFlags);
 
 } // namespace Dy
 

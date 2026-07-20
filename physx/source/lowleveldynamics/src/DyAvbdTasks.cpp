@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 
 #include "DyAvbdTasks.h"
 #include "DyAvbdBodyConversion.h"
@@ -100,7 +100,7 @@ void AvbdSolveIslandTask::release() {
   //     here without auditing every consumer of PxConstraint::getForce()
   //     under the AVBD solver.
   if (mBatch.numD6 > 0) {
-    PxPinnedArray<Dy::ConstraintWriteback> &writeBackPool =
+    Cm::PinnableArray<Dy::ConstraintWriteback> &writeBackPool =
         mContext.getConstraintWriteBackPool();
 
     for (PxU32 j = 0; j < mBatch.numD6; ++j) {
@@ -117,7 +117,7 @@ void AvbdSolveIslandTask::release() {
       Dy::ConstraintWriteback &wb = writeBackPool[d6.writeBackIndex];
       wb.linearImpulse = d6.lambdaLinear;
       wb.angularImpulse = d6.lambdaAngular;
-      wb.setCombined(isBroken, 0.0f);
+      wb.broken = isBroken ? 1u : 0u;
     }
   }
 
@@ -136,12 +136,10 @@ void AvbdWriteBackTask::run() {
   AVBD_LOG("AvbdWriteBackTask::run() START - numBodies=%u", mNumBodies);
 
   for (PxU32 i = 0; i < mNumBodies; ++i) {
-    if (mAvbdBodies[i].isStatic())
-      continue;
-
     if (mRigidBodies[i]) {
       // Regular rigid body - writeback to body core
-      writeBackAvbdSolverBody(mAvbdBodies[i], mRigidBodies[i]->getCore());
+      if (!mAvbdBodies[i].isStatic())
+        writeBackAvbdSolverBody(mAvbdBodies[i], mRigidBodies[i]->getCore());
     } else if (mArticulationForBody && mLinkIndexForBody) {
       // Articulation link - writeback to articulation link body core
       FeatherstoneArticulation *articulation = mArticulationForBody[i];
@@ -150,7 +148,7 @@ void AvbdWriteBackTask::run() {
       if (articulation && linkIndex != PX_MAX_U32) {
         ArticulationData &artData = articulation->getArticulationData();
         if (linkIndex < artData.getLinkCount()) {
-          ArticulationLink &link = artData.getLink(linkIndex);
+          const ArticulationLink &link = artData.getLink(linkIndex);
           PxsBodyCore *bodyCore = link.bodyCore;
 
           if (bodyCore) {
@@ -161,6 +159,16 @@ void AvbdWriteBackTask::run() {
             // Write back velocities
             bodyCore->linearVelocity = mAvbdBodies[i].linearVelocity;
             bodyCore->angularVelocity = mAvbdBodies[i].angularVelocity;
+
+            // PhysX 5.9 public link-velocity queries consume mMotionVelocities,
+            // while articulation sleeping consumes mPosIterMotionVelocities.
+            // Keep both buffers and PxsBodyCore synchronized with AVBD's final
+            // velocity so driven/falling links cannot sleep on stale zeros.
+            Cm::SpatialVectorF &motionVelocity =
+                artData.getMotionVelocity(linkIndex);
+            motionVelocity.top = mAvbdBodies[i].angularVelocity;
+            motionVelocity.bottom = mAvbdBodies[i].linearVelocity;
+            artData.getPosIterMotionVelocity(linkIndex) = motionVelocity;
           }
         }
       }

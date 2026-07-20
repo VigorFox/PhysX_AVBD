@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -32,39 +32,10 @@
 #include "ScConstraintSim.h"
 #include "ScConstraintInteraction.h"
 #include "ScElementSimInteraction.h"
-#include "extensions/PxJoint.h"  // For PxJointConcreteType
 
 using namespace physx;
 using namespace Sc;
-
-// Helper to convert PxJointConcreteType to Dy::ConstraintJointType
-static Dy::ConstraintJointType getConstraintJointType(PxConstraintConnector* connector)
-{
-	if (!connector)
-		return Dy::eCONSTRAINT_JOINT_UNKNOWN;
-	
-	// PxJoint derives from both PxBase and PxConstraintConnector
-	// We can get the concrete type from PxBase::getConcreteType()
-	PxBase* base = connector->getSerializable();
-	if (!base)
-		return Dy::eCONSTRAINT_JOINT_UNKNOWN;
-	
-	PxType type = base->getConcreteType();
-	
-	// Convert PxJointConcreteType to ConstraintJointType
-	switch (type)
-	{
-		case PxJointConcreteType::eSPHERICAL:		return Dy::eCONSTRAINT_JOINT_SPHERICAL;
-		case PxJointConcreteType::eREVOLUTE:		return Dy::eCONSTRAINT_JOINT_REVOLUTE;
-		case PxJointConcreteType::ePRISMATIC:		return Dy::eCONSTRAINT_JOINT_PRISMATIC;
-		case PxJointConcreteType::eFIXED:			return Dy::eCONSTRAINT_JOINT_FIXED;
-		case PxJointConcreteType::eDISTANCE:		return Dy::eCONSTRAINT_JOINT_DISTANCE;
-		case PxJointConcreteType::eD6:				return Dy::eCONSTRAINT_JOINT_D6;
-		case PxJointConcreteType::eGEAR:			return Dy::eCONSTRAINT_JOINT_GEAR;
-		case PxJointConcreteType::eRACK_AND_PINION:	return Dy::eCONSTRAINT_JOINT_RACK_AND_PINION;
-		default:									return Dy::eCONSTRAINT_JOINT_UNKNOWN;
-	}
-}
+using namespace Cm;
 
 static ConstraintInteraction* createInteraction(ConstraintSim* sim, RigidCore* r0, RigidCore* r1, Scene& scene)
 {
@@ -93,7 +64,7 @@ Sc::ConstraintSim::ConstraintSim(ConstraintCore& core, RigidCore* r0, RigidCore*
 	const PxU32 id = scene.getConstraintIDTracker().createID();
 
 	mLowLevelConstraint.index = id;
-	PxPinnedArray<Dy::ConstraintWriteback>& writeBackPool = scene.getDynamicsContext()->getConstraintWriteBackPool();
+	PinnableArray<Dy::ConstraintWriteback>& writeBackPool = scene.getDynamicsContext()->getConstraintWriteBackPool();
 	if(id >= writeBackPool.capacity())
 		writeBackPool.reserve(writeBackPool.capacity() * 2);
 
@@ -122,6 +93,7 @@ Sc::ConstraintSim::~ConstraintSim()
 
 	releaseInteraction(mInteraction, this, mScene);
 
+	mScene.getDynamicsContext()->clearConstraintConcreteType(mLowLevelConstraint.index);
 	mScene.getConstraintIDTracker().releaseID(mLowLevelConstraint.index);
 	destroyLLConstraint();
 
@@ -157,9 +129,13 @@ bool Sc::ConstraintSim::createLLConstraint()
 
 	Dy::Constraint& llc = mLowLevelConstraint;
 	core.getBreakForce(llc.linBreakForce, llc.angBreakForce);
-	llc.flags					= PxU8(core.getFlags());  // Cast to PxU8 as flags field is now PxU8
+	llc.flags					= core.getFlags();
 	llc.constantBlockSize		= PxU16(constantBlockSize);
-	llc.jointType				= getConstraintJointType(core.getPxConnector());
+
+	PxConstraintConnector* connector = core.getPxConnector();
+	PxBase* serializable = connector ? connector->getSerializable() : NULL;
+	mScene.getDynamicsContext()->setConstraintConcreteType(
+		llc.index, serializable ? serializable->getConcreteType() : PxU16(0));
 
 	llc.solverPrep				= core.getSolverPrep();
 	llc.constantBlock			= constantBlock;
@@ -250,7 +226,7 @@ PxConstraintGPUIndex Sc::ConstraintSim::getGPUIndex() const
 	if (mLowLevelConstraint.flags & PxConstraintFlag::eGPU_COMPATIBLE)
 	{
 		PX_COMPILE_TIME_ASSERT(sizeof(Dy::Constraint::index) <= sizeof(PxConstraintGPUIndex));
-		return static_cast<PxConstraintGPUIndex>(mLowLevelConstraint.index);
+		return PxConstraintGPUIndex(mLowLevelConstraint.index);
 	}
 	else
 		return PX_INVALID_CONSTRAINT_GPU_INDEX;

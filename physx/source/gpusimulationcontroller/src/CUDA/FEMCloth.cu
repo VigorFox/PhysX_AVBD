@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -172,7 +172,9 @@ void cloth_preIntegrateLaunch(
 	}
 }
 
-extern "C" __global__
+// __launch_bounds__ required: without it, debug (-G) builds use 79 registers/thread which at
+// 1024 threads/block exceeds the SM register file on Blackwell (sm_100), causing launch failure.
+extern "C" __global__ __launch_bounds__(PxgFEMClothKernelBlockDim::CLOTH_STEP, 1)
 void cloth_stepLaunch(
 	PxgFEMCloth* PX_RESTRICT femCloths, 
 	PxU32* activeId, 
@@ -337,8 +339,8 @@ void cloth_stepLaunch(
 extern "C" __global__ __launch_bounds__(1024, 1)
 void cloth_refitBoundLaunch(
 	PxgFEMCloth* gFemClothes,
-	const PxU32* activeFemClothes,
-	const PxU32 nbActiveFemClothes,
+	const PxU32* activeFemCloths,
+	const PxU32 nbActiveFemCloths,
 	PxReal* contactDists,
 	PxReal* speculativeCCDContactOffset,
 	PxBounds3* boundArray,
@@ -357,7 +359,7 @@ void cloth_refitBoundLaunch(
 
 	femClothRefitMidphaseScratch* s_warpScratch = reinterpret_cast<femClothRefitMidphaseScratch*>(scratchMem);
 
-	const PxU32 femClothId = activeFemClothes[blockIdx.x];
+	const PxU32 femClothId = activeFemCloths[blockIdx.x];
 
 	PxgFEMCloth& gFemCloth = gFemClothes[femClothId];
 
@@ -400,7 +402,7 @@ void cloth_refitBoundLaunch(
 	// each warp to deal with one node
 	for (PxU32 i = maxDepth; i > 0; i--)
 	{
-		const  Gu::BV32DataDepthInfo& info = depthInfo[i - 1];
+		const Gu::BV32DataDepthInfo& info = depthInfo[i - 1];
 
 		const PxU32 offset = info.offset;
 		const PxU32 count = info.count;
@@ -518,7 +520,9 @@ void cloth_refitBoundLaunch(
 	}
 }
 
-extern "C" __global__ 
+// __launch_bounds__ required: without it, debug (-G) builds use 87 registers/thread which at
+// 1024 threads/block exceeds the SM register file on Blackwell (sm_100), causing launch failure.
+extern "C" __global__ __launch_bounds__(PxgFEMClothKernelBlockDim::CLOTH_STEP, 1)
 void cloth_averageTrianglePairVertsLaunch(
 	PxgFEMCloth* gFEMCloths, 
 	const PxU32* activeFEMCloths,	
@@ -1224,7 +1228,9 @@ void cloth_solveTrianglePairEnergyClusterLaunch(
 	}
 }
 
-extern "C" __global__ 
+// __launch_bounds__ required: without it, debug (-G) builds use 72 registers/thread which at
+// 1024 threads/block exceeds the SM register file on Blackwell (sm_100), causing launch failure.
+extern "C" __global__ __launch_bounds__(PxgFEMClothKernelBlockDim::CLOTH_STEP, 1)
 void cloth_finalizeVelocitiesLaunch(
 	PxgFEMCloth* PX_RESTRICT femCloths,
 	const PxU32* activeId,

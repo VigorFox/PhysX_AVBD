@@ -22,13 +22,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
 #include "PxgFEMCloth.h"
-#include "PxgFEMCore.h"
-#include "PxgFEMClothCore.h"
 #include "vector_types.h"
 #include "foundation/PxVec3.h"
 #include "foundation/PxMathUtils.h"
@@ -39,7 +37,7 @@
 #include "PxgSolverCoreDesc.h"
 #include "PxNodeIndex.h"
 #include "PxgBodySim.h"
-#include "PxgArticulation.h"
+#include "PxgArticulationBlockData.h"
 #include "PxgArticulationCoreDesc.h"
 #include "PxgParticleSystem.h"
 #include "PxsDeformableSurfaceMaterialCore.h"
@@ -48,9 +46,8 @@
 #include "dataReadWriteHelper.cuh"
 #include "attachments.cuh"
 #include "deformableCollision.cuh"
+#include "deformableUtils.cuh"
 #include "FEMClothUtil.cuh"
-
-#define FEMCLOTH_BIAS_COEFFICIENT 0.7f
 
 using namespace physx;
 
@@ -346,7 +343,7 @@ static __device__ void queryRigidClothContactReferenceCount(
 			FEMCollision<PxVec3> femCollision;
 			femCollision.isTGS = isTGS;
 
-			const int globalRigidBodyId = femCollision.getGlobalRigidBodyId(prePrepDesc, rigidId, numSolverBodies);
+			const int globalRigidBodyId = femCollision.getGlobalRigidBodyId(prePrepDesc, rigidId, numSolverBodies, artiCoreDesc->mMaxLinksPerArticulation);
 
 			// For vertex collision, only x component of the barycentric coordinates is used (1.0).
 			const PxVec3 bcVec = (bc.w == 0) ? PxVec3(bc.x, bc.y, bc.z) : PxVec3(1.0f, 0.0f, 0.0f);
@@ -491,7 +488,7 @@ static __device__ void solveRigidClothContact(
 			FEMCollision<PxVec3> femCollision;
 			femCollision.isTGS = isTGS;
 
-			const int globalRigidBodyId = femCollision.getGlobalRigidBodyId(prePrepDesc, rigidId, numSolverBodies);
+			const int globalRigidBodyId = femCollision.getGlobalRigidBodyId(prePrepDesc, rigidId, numSolverBodies, artiCoreDesc->mMaxLinksPerArticulation);
 			PxVec3 deltaLinVel0(0.0f), deltaAngVel0(0.0f);
 			PxReal count = 0.0f;
 
@@ -718,7 +715,7 @@ void cloth_solveClothClothDeltaVTLaunch(
 		const PxReal dispSq = disp.magnitudeSquared();
 
 		PxVec3 normal;
-		if(dispSq < FEMCLOTH_THRESHOLD)
+		if(dispSq < FEMCLOTH_NORMAL_FALLBACK_DISTSQ)
 		{
 			// Vertex is nearly on the triangle, use triangle normal
 			const PxVec3 ab = xx2 - xx1;
@@ -841,9 +838,20 @@ void cloth_solveClothClothDeltaEELaunch(
 
 		PxVec4 weights(1.0f - s, s, -(1.0f - t), -t); // cloth0 - cloth1
 		const PxVec3 disp = weights[0] * xx0 + weights[1] * xx1 + weights[2] * xx2 + weights[3] * xx3;
-		const PxReal dist = PxSqrt(distSq);
 
-		const PxVec3 normal = disp * (1.0f / dist);
+		PxVec3 normal;
+		if(distSq < FEMCLOTH_NORMAL_FALLBACK_DISTSQ)
+		{
+			if(!isValid)
+				continue; // edges parallel/zero-length AND close -> normal undefined
+			normal = (xx1 - xx0).cross(xx3 - xx2);
+			normal *= (1.0f / PxSqrt(normal.magnitudeSquared()));
+		}
+		else
+		{
+			const PxReal dist = PxSqrt(distSq);
+			normal = disp * (1.0f / dist);
+		}
 
 		if(!isValid) // Degenerate cases, re-adjust the weights, so the contact constraint is applied at the mid points.
 		{
@@ -1163,7 +1171,8 @@ void cloth_solveCPOutputClothDeltaVLaunch(
 	PxgFEMParticleConstraintBlock* constraints,
 	PxU32* numContacts,
 	float2* appliedForces, // output    
-	PxsDeformableSurfaceMaterialData* materials)
+	PxsDeformableSurfaceMaterialData* materials,
+	const PxReal biasCoefficient)
 {
 	const PxU32 tNumContacts = *numContacts;
 
@@ -1251,7 +1260,7 @@ void cloth_solveCPOutputClothDeltaVLaunch(
 			PxReal deltaFr = PxMin(requiredForce + appliedForce.y, friction) - appliedForce.y;
 			appliedForce.y += deltaFr;
 
-			PxVec3 deltaPos = ((normal * deltaF) - tanDir * deltaFr) * FEMCLOTH_BIAS_COEFFICIENT;
+			PxVec3 deltaPos = ((normal * deltaF) - tanDir * deltaFr) * biasCoefficient;
 
 			// updateTetraPosDelta(invMasses0, barycentric0, tetrahedronId0, deltaPos, softbody0.mDelta);
 			updateTrianglePosDelta(invMasses1, barycentric, triVertId, deltaPos, cloth.mDeltaPos, elementId);
@@ -1271,7 +1280,8 @@ void cloth_solveCPOutputParticleDeltaVLaunch(
 	PxU32* numContacts,
 	float4* deltaP,        // output    
 	float2* appliedForces, // output    
-	PxsDeformableSurfaceMaterialData* materials
+	PxsDeformableSurfaceMaterialData* materials,
+	const PxReal biasCoefficient
 )
 {
 	const PxU32 tNumContacts = *numContacts;
@@ -1357,12 +1367,69 @@ void cloth_solveCPOutputParticleDeltaVLaunch(
 			PxReal deltaFr = PxMin(requiredForce + appliedForce.y, friction) - appliedForce.y;
 			appliedForce.y += deltaFr;
 
-			const PxVec3 deltaV = ((-normal * deltaF) + tanDir * deltaFr) * invMass0 * FEMCLOTH_BIAS_COEFFICIENT;
+			const PxVec3 deltaV = ((-normal * deltaF) + tanDir * deltaFr) * invMass0 * biasCoefficient;
 			PxReal w = 0.f;
 			if(deltaF != 0.f || deltaFr != 0.f)
 				w = 1.f;
 			deltaP[workIndex] = make_float4(deltaV.x, deltaV.y, deltaV.z, w);
 			appliedForces[workIndex] = appliedForce;
+		}
+	}
+}
+
+// Pre-count pass for rigid-cloth attachments. Mirrors the SB-rigid variant
+// (sb_queryRigidSoftAttachmentReferenceCountLaunch in softBodyGM.cu) and the
+// existing cloth contact pre-count (cloth_queryRigidClothContactReferenceCountLaunch
+// above). The solve kernel reads cloth.mDeltaPos[v].w as the per-vertex
+// refCount, inflates per-vertex invMass by it, then writes without
+// touching .w. Finalize divides .xyz by .w, cancelling the inflation.
+// Shared between PGS and TGS host dispatch.
+extern "C" __global__ void cloth_queryRigidClothAttachmentReferenceCountLaunch(
+	PxgFEMCloth* clothes,
+	PxgFEMRigidAttachmentConstraint* attachments,
+	const PxU32 numAttachments)
+{
+	const PxU32 nbBlocksRequired = (numAttachments + blockDim.x - 1) / blockDim.x;
+	const PxU32 nbIterationsPerBlock = (nbBlocksRequired + gridDim.x - 1) / gridDim.x;
+	const PxU32 idx = threadIdx.x;
+
+	for(PxU32 i = 0; i < nbIterationsPerBlock; ++i)
+	{
+		const PxU32 workIndex = i * blockDim.x + idx + nbIterationsPerBlock * blockIdx.x * blockDim.x;
+		if(workIndex >= numAttachments)
+			return;
+
+		const PxU32 index = workIndex / 32;
+		const PxU32 offset = workIndex & 31;
+
+		const PxgFEMRigidAttachmentConstraint& constraint = attachments[index];
+
+		const PxU32 clothId = PxGetClothId(constraint.elemId[offset]);
+		const PxU32 elemIdx = PxGetClothElementIndex(constraint.elemId[offset]);
+		const bool elemIsVertex = PxGetIsVertexType(constraint.baryOrType[offset]);
+
+		PxgFEMCloth& cloth = clothes[clothId];
+		const float4* velGM = cloth.mVelocity_InvMass;
+
+		if(elemIsVertex)
+		{
+			if(velGM[elemIdx].w != 0.0f)
+				atomicAdd(&cloth.mDeltaPos[elemIdx].w, 1.0f);
+		}
+		else
+		{
+			const float4 barycentric = constraint.baryOrType[offset];
+			const uint4 triVertIdx = cloth.mTriangleVertexIndices[elemIdx];
+			const float v0InvM = velGM[triVertIdx.x].w;
+			const float v1InvM = velGM[triVertIdx.y].w;
+			const float v2InvM = velGM[triVertIdx.z].w;
+
+			if(barycentric.x > 1e-3f && v0InvM != 0.0f)
+				atomicAdd(&cloth.mDeltaPos[triVertIdx.x].w, 1.0f);
+			if(barycentric.y > 1e-3f && v1InvM != 0.0f)
+				atomicAdd(&cloth.mDeltaPos[triVertIdx.y].w, 1.0f);
+			if(barycentric.z > 1e-3f && v2InvM != 0.0f)
+				atomicAdd(&cloth.mDeltaPos[triVertIdx.z].w, 1.0f);
 		}
 	}
 }
@@ -1378,7 +1445,8 @@ void cloth_solveRigidClothAttachmentLaunch(
 	PxgArticulationCoreDesc* artiCoreDesc,
 	PxgSolverSharedDesc<IterativeSolveData>* sharedDesc, 
 	const PxReal dt,
-	float4* rigidDeltaVel // output
+	const PxReal biasCoefficient,
+	float4* rigidDeltaVel // output,
 )
 {
 	const PxU32 numSolverBodies = solverCoreDesc->numSolverBodies;
@@ -1413,10 +1481,24 @@ void cloth_solveRigidClothAttachmentLaunch(
 		uint4 triVertIdx;
 		float3 triInvMass;
 		float4 barycentric;
+		PxReal attachPointInvMassSplit;
 
+		// Deformable-side mass-splitting -- refCount per vertex pre-counted by
+		// cloth_queryRigidClothAttachmentReferenceCountLaunch (shared .w with the
+		// contact pre-count). Compute the deformable denominator both ways:
+		// attachPointInvMass (what the prep used) and attachPointInvMassSplit
+		// (refCount-weighted, what we want at solve). Mirrors
+		// FEMCollision::readSoftBody/writeSoftBody.
+		const float4* deltaPosBuf = cloth.mDeltaPos;
+		PxReal attachPointInvMass;
 		if(elemIsVertex)
 		{
-			clothVel = clothVelocities[elemIdx];
+			const float4 v = clothVelocities[elemIdx];
+			const float refCount_v = deltaPosBuf[elemIdx].w;
+			const float invM_split = v.w * refCount_v;
+			clothVel = make_float4(v.x, v.y, v.z, invM_split);
+			attachPointInvMass = v.w;
+			attachPointInvMassSplit = invM_split;
 		}
 		else
 		{
@@ -1426,10 +1508,14 @@ void cloth_solveRigidClothAttachmentLaunch(
 			const float4 v1 = clothVelocities[triVertIdx.y];
 			const float4 v2 = clothVelocities[triVertIdx.z];
 			clothVel = v0 * barycentric.x + v1 * barycentric.y + v2 * barycentric.z;
-			
-			triInvMass.x = v0.w;
-			triInvMass.y = v1.w;
-			triInvMass.z = v2.w;
+			triInvMass.x = v0.w * deltaPosBuf[triVertIdx.x].w;
+			triInvMass.y = v1.w * deltaPosBuf[triVertIdx.y].w;
+			triInvMass.z = v2.w * deltaPosBuf[triVertIdx.z].w;
+			const PxReal bx2 = barycentric.x * barycentric.x;
+			const PxReal by2 = barycentric.y * barycentric.y;
+			const PxReal bz2 = barycentric.z * barycentric.z;
+			attachPointInvMass = bx2 * v0.w + by2 * v1.w + bz2 * v2.w;
+			attachPointInvMassSplit      = bx2 * triInvMass.x + by2 * triInvMass.y + bz2 * triInvMass.z;
 		}
 
 		PxVec3 linVel1(clothVel.x, clothVel.y, clothVel.z);
@@ -1447,11 +1533,15 @@ void cloth_solveRigidClothAttachmentLaunch(
 		// Compute impulses
 		const float4 velMultiplierXYZ_invMassW = constraint.velMultiplierXYZ_invMassW[offset];
 		PxVec3 deltaLinVel, deltaAngVel;
+		const PxU32 rigidBodyReferenceCount = constraint.rigidBodyReferenceCount[offset];
 		const PxVec3 deltaImpulse = calculateAttachmentDeltaImpulsePGS(
-			constraint.raXn0_biasW[offset], constraint.raXn0_biasW[offset], constraint.raXn0_biasW[offset], velMultiplierXYZ_invMassW,
-			constraint.low_high_limits[offset], constraint.axis_angle[offset], vel0, linVel1, 1.f / dt, 0.5f, deltaLinVel, deltaAngVel);
+			constraint.raXn0_biasW[offset], constraint.raXn1_biasW[offset], constraint.raXn2_biasW[offset], velMultiplierXYZ_invMassW,
+			vel0, linVel1, attachPointInvMass, attachPointInvMassSplit, rigidBodyReferenceCount,
+			1.f / dt, biasCoefficient, deltaLinVel, deltaAngVel);
 
-		// Update rigid body
+		// Update rigid body. Mass-splitting: pre-multiply by rigidRefCount so that
+		// accumulateRigidDeltas' sum-then-average (count=1 per write, N writes -> ratio=1/N)
+		// recovers the correct total impulse. Pairs with the denominator scaling in the helper.
 		if(!rigidId.isStaticBody())
 		{
 			if(velMultiplierXYZ_invMassW.w == 0.0f)
@@ -1461,25 +1551,28 @@ void cloth_solveRigidClothAttachmentLaunch(
 			}
 			else
 			{
-				rigidDeltaVel[workIndex] = make_float4(deltaLinVel.x, deltaLinVel.y, deltaLinVel.z, 1.0f);
-				rigidDeltaVel[workIndex + numAttachments] = make_float4(deltaAngVel.x, deltaAngVel.y, deltaAngVel.z, 0.0f);
+				const PxReal refN = static_cast<PxReal>(rigidBodyReferenceCount);
+				rigidDeltaVel[workIndex] = make_float4(deltaLinVel.x * refN, deltaLinVel.y * refN, deltaLinVel.z * refN, 1.0f);
+				rigidDeltaVel[workIndex + numAttachments] = make_float4(deltaAngVel.x * refN, deltaAngVel.y * refN, deltaAngVel.z * refN, 0.0f);
 			}
 		}
 
-		// Update cloth
+		// Update cloth. refCount-inflated write; finalize undoes the inflation
+		// via /.w. Does NOT bump .w (the pre-count owns that channel).
 		if(!deltaImpulse.isZero())
 		{
 			const PxVec3 deltaPos = -deltaImpulse * dt;
 
 			if(elemIsVertex)
 			{
-				AtomicAdd(cloth.mDeltaPos[elemIdx], deltaPos * clothVel.w, 1.f);
+				if(clothVel.w > 0.0f)
+					AtomicAdd(cloth.mDeltaPos[elemIdx], deltaPos * clothVel.w);
 			}
 			else
 			{
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.x], deltaPos * barycentric.x * triInvMass.x, 1.f);
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.y], deltaPos * barycentric.y * triInvMass.y, 1.f);
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.z], deltaPos * barycentric.z * triInvMass.z, 1.f);
+				const float4 bw = make_float4(barycentric.x*triInvMass.x,
+					barycentric.y*triInvMass.y, barycentric.z*triInvMass.z, 0.0f);
+				updateTriPositionDeltaNoCount(cloth.mDeltaPos, triVertIdx, deltaPos, bw);
 			}
 		}
 	}
@@ -1524,7 +1617,6 @@ void cloth_solveOutputAttachmentClothClothDeltaVLaunch(
 		const float4 p02 = clothPos0[triInd0.z];
 
 		const float4 pos0 = p00 * barycentric0.x + p01 * barycentric0.y + p02 * barycentric0.z;
-		const PxReal invMass0 = pos0.w;
 
 		// cloth1
 		const PxU32 elemId1 = constraint.elemId1[offset];
@@ -1541,29 +1633,31 @@ void cloth_solveOutputAttachmentClothClothDeltaVLaunch(
 		const float4 p12 = clothPos1[triInd1.z];
 
 		const float4 pos1 = p10 * barycentric1.x + p11 * barycentric1.y + p12 * barycentric1.z;
-		const PxReal invMass1 = pos1.w;
 
 		float4* PX_RESTRICT accumClothDeltaV0 = cloth0.mDeltaPos;
 		float4* PX_RESTRICT accumClothDeltaV1 = cloth1.mDeltaPos;
 
-		if(invMass1 == 0.f && invMass0 == 0.f)
+		// OMPE-42519: Lagrange-multiplier formulation matching the SB-rigid and
+		// cloth-rigid attach kernels. Effective inverse mass is the sum of
+		// bary^T * M_inv * bary on each side; full position correction (no PBD
+		// under-relaxation).
+		const float4 b0w = make_float4(barycentric0.x*p00.w, barycentric0.y*p01.w, barycentric0.z*p02.w, 0.0f);
+		const float4 b1w = make_float4(barycentric1.x*p10.w, barycentric1.y*p11.w, barycentric1.z*p12.w, 0.0f);
+
+		const PxReal wTot0 = b0w.x*barycentric0.x + b0w.y*barycentric0.y + b0w.z*barycentric0.z;
+		const PxReal wTot1 = b1w.x*barycentric1.x + b1w.y*barycentric1.y + b1w.z*barycentric1.z;
+		const PxReal wTot = wTot0 + wTot1;
+
+		if(wTot <= 0.0f)
 			continue;
 
-		const PxReal coefficient = .5f;
-		const float4 diff = pos1 - pos0;
-		const float4 deltaImpulse = diff * coefficient / (invMass0 + invMass1);
+		const float4 relPos1 = pos1 - pos0;
+		const PxVec3 error(relPos1.x, relPos1.y, relPos1.z);
+		const PxVec3 delta = error * (1.0f/wTot);
 
-		const PxVec3 deltaImp = PxLoad3(deltaImpulse);
-		const PxVec3 deltapos0 = deltaImp;
-		const PxVec3 deltapos1 = -deltaImp;
-
-		AtomicAdd(accumClothDeltaV0[triInd0.x], deltapos0 * barycentric0.x * p00.w, 1.f);
-		AtomicAdd(accumClothDeltaV0[triInd0.y], deltapos0 * barycentric0.y * p01.w, 1.f);
-		AtomicAdd(accumClothDeltaV0[triInd0.z], deltapos0 * barycentric0.z * p02.w, 1.f);
-
-		AtomicAdd(accumClothDeltaV1[triInd1.x], deltapos1 * barycentric1.x * p10.w, 1.f);
-		AtomicAdd(accumClothDeltaV1[triInd1.y], deltapos1 * barycentric1.y * p11.w, 1.f);
-		AtomicAdd(accumClothDeltaV1[triInd1.z], deltapos1 * barycentric1.z * p12.w, 1.f);
+		// updateTriPositionDelta gates writes on bary*invMass > 0.
+		updateTriPositionDelta(accumClothDeltaV0, triInd0,  delta, b0w, 1.0f);
+		updateTriPositionDelta(accumClothDeltaV1, triInd1, -delta, b1w, 1.0f);
 	}
 }
 
@@ -1577,7 +1671,8 @@ extern "C" __global__ void cloth_solveRigidClothAttachmentTGSLaunch(
 	PxgArticulationCoreDesc* artiCoreDesc,
 	PxgSolverSharedDesc<IterativeSolveData>* sharedDesc, 
 	const PxReal dt,
-	float4* rigidDeltaVel // output
+	const PxReal biasCoefficient,
+	float4* rigidDeltaVel // output,
 )
 {
 	const PxU32 numSolverBodies = solverCoreDesc->numSolverBodies;
@@ -1612,10 +1707,21 @@ extern "C" __global__ void cloth_solveRigidClothAttachmentTGSLaunch(
 		uint4 triVertIdx;
 		float3 triInvMass;
 		float4 barycentric;
+		PxReal attachPointInvMassSplit;
 
+		// Deformable-side mass-splitting -- refCount per vertex pre-counted by
+		// cloth_queryRigidClothAttachmentReferenceCountLaunch. See the PGS
+		// variant above for the math rationale.
+		const float4* deltaPosBuf = cloth.mDeltaPos;
+		PxReal attachPointInvMass;
 		if(elemIsVertex)
 		{
-			clothAccumDelta = clothAccumDeltas[elemIdx];
+			const float4 d = clothAccumDeltas[elemIdx];
+			const float refCount_v = deltaPosBuf[elemIdx].w;
+			const float invM_split = d.w * refCount_v;
+			clothAccumDelta = make_float4(d.x, d.y, d.z, invM_split);
+			attachPointInvMass = d.w;
+			attachPointInvMassSplit = invM_split;
 		}
 		else
 		{
@@ -1626,9 +1732,15 @@ extern "C" __global__ void cloth_solveRigidClothAttachmentTGSLaunch(
 			const float4 d2 = clothAccumDeltas[triVertIdx.z];
 			clothAccumDelta = d0 * barycentric.x + d1 * barycentric.y + d2 * barycentric.z;
 
-			triInvMass.x = d0.w;
-			triInvMass.y = d1.w;
-			triInvMass.z = d2.w;
+			triInvMass.x = d0.w * deltaPosBuf[triVertIdx.x].w;
+			triInvMass.y = d1.w * deltaPosBuf[triVertIdx.y].w;
+			triInvMass.z = d2.w * deltaPosBuf[triVertIdx.z].w;
+
+			const PxReal bx2 = barycentric.x * barycentric.x;
+			const PxReal by2 = barycentric.y * barycentric.y;
+			const PxReal bz2 = barycentric.z * barycentric.z;
+			attachPointInvMass = bx2 * d0.w + by2 * d1.w + bz2 * d2.w;
+			attachPointInvMassSplit      = bx2 * triInvMass.x + by2 * triInvMass.y + bz2 * triInvMass.z;
 		}
 		PxVec3 linDelta1(clothAccumDelta.x, clothAccumDelta.y, clothAccumDelta.z);
 
@@ -1644,10 +1756,13 @@ extern "C" __global__ void cloth_solveRigidClothAttachmentTGSLaunch(
 
 		// Compute impulses
 		PxVec3 deltaLinVel, deltaAngVel;
-		PxVec3 deltaImpulse = calculateAttachmentDeltaImpulseTGS(offset, constraint, vel0, linDelta1, dt, FEMCLOTH_BIAS_COEFFICIENT, false,
-																 deltaLinVel, deltaAngVel);
+		PxVec3 deltaImpulse = calculateAttachmentDeltaImpulseTGS(offset, constraint, vel0, linDelta1,
+			attachPointInvMass, attachPointInvMassSplit, dt, biasCoefficient, false,
+			deltaLinVel, deltaAngVel);
 
-		// Update rigid body
+		// Update rigid body. Mass-splitting: pre-multiply by rigidRefCount so that
+		// accumulateRigidDeltas' sum-then-average (count=1 per write, N writes -> ratio=1/N)
+		// recovers the correct total impulse. Pairs with the denominator scaling in the helper.
 		if(!rigidId.isStaticBody())
 		{
 			const float4 velMultiplierXYZ_invMassW = constraint.velMultiplierXYZ_invMassW[offset];
@@ -1658,25 +1773,28 @@ extern "C" __global__ void cloth_solveRigidClothAttachmentTGSLaunch(
 			}
 			else
 			{
-				rigidDeltaVel[workIndex] = make_float4(deltaLinVel.x, deltaLinVel.y, deltaLinVel.z, 1.0f);
-				rigidDeltaVel[workIndex + numAttachments] = make_float4(deltaAngVel.x, deltaAngVel.y, deltaAngVel.z, 0.0f);
+				const PxReal refN = static_cast<PxReal>(constraint.rigidBodyReferenceCount[offset]);
+				rigidDeltaVel[workIndex] = make_float4(deltaLinVel.x * refN, deltaLinVel.y * refN, deltaLinVel.z * refN, 1.0f);
+				rigidDeltaVel[workIndex + numAttachments] = make_float4(deltaAngVel.x * refN, deltaAngVel.y * refN, deltaAngVel.z * refN, 0.0f);
 			}
 		}
 
-		// Update cloth
+		// Update cloth. refCount-inflated write; finalize undoes the inflation
+		// via /.w. Does NOT bump .w (the pre-count owns that channel).
 		if(!deltaImpulse.isZero())
 		{
-			const PxVec3 deltaPos = -deltaImpulse;
+			const PxVec3 deltaPos = -deltaImpulse * dt;
 
 			if(elemIsVertex)
 			{
-				AtomicAdd(cloth.mDeltaPos[elemIdx], deltaPos * clothAccumDelta.w, 1.0f);
+				if(clothAccumDelta.w > 0.0f)
+					AtomicAdd(cloth.mDeltaPos[elemIdx], deltaPos * clothAccumDelta.w);
 			}
 			else
 			{
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.x], deltaPos * barycentric.x * triInvMass.x, 1.0f);
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.y], deltaPos * barycentric.y * triInvMass.y, 1.0f);
-				AtomicAdd(cloth.mDeltaPos[triVertIdx.z], deltaPos * barycentric.z * triInvMass.z, 1.0f);
+				const float4 bw = make_float4(barycentric.x*triInvMass.x,
+					barycentric.y*triInvMass.y, barycentric.z*triInvMass.z, 0.0f);
+				updateTriPositionDeltaNoCount(cloth.mDeltaPos, triVertIdx, deltaPos, bw);
 			}
 		}
 	}

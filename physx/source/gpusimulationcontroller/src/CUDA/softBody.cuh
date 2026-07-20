@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -31,6 +31,9 @@
 
 #include "foundation/PxVecMath.h"
 #include "atomic.cuh"
+
+namespace physx
+{
 
 /**
 TODO, remove. Already has been removed from softbody/softbody, softbody/femcloth and softbody/particle attachments.
@@ -102,49 +105,6 @@ static __device__ void updateTetraPosDelta(const float4& invMasses, const float4
 	}
 }
 
-static __device__ void updateTetPositionDelta(float4* outputDeltaPositions, const uint4& tetVertIndices,
-	const PxVec3& deltaPosition, const float4& invMassBary, const PxReal constraintWeight)
-{
-	//testing inverse mass and barycentric product for > 0, assuming that barycentric coordinates where clamped on construction.
-	if (invMassBary.x > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[tetVertIndices.x], deltaPosition*invMassBary.x, constraintWeight);
-	}
-
-	if (invMassBary.y > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[tetVertIndices.y], deltaPosition*invMassBary.y, constraintWeight);
-	}
-
-	if (invMassBary.z > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[tetVertIndices.z], deltaPosition*invMassBary.z, constraintWeight);
-	}
-
-	if (invMassBary.w > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[tetVertIndices.w], deltaPosition*invMassBary.w, constraintWeight);
-	}
-}
-
-static __device__ void updateTriPositionDelta(float4* outputDeltaPositions, const uint4& triVertIndices,
-	const PxVec3& deltaPosition, const float4& invMassBary, const PxReal constraintWeight)
-{
-	//testing inverse mass and barycentric product for > 0, assuming that barycentric coordinates where clamped on construction.
-	if (invMassBary.x > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[triVertIndices.x], deltaPosition*invMassBary.x, constraintWeight);
-	}
-
-	if (invMassBary.y > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[triVertIndices.y], deltaPosition*invMassBary.y, constraintWeight);
-	}
-
-	if (invMassBary.z > 0.0f)
-	{
-		AtomicAdd(outputDeltaPositions[triVertIndices.z], deltaPosition*invMassBary.z, constraintWeight);
-	}
-}
+} // namespace physx
 
 #endif

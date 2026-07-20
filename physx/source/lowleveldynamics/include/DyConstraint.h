@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -31,7 +31,7 @@
 
 #include "foundation/PxVec3.h"
 #include "foundation/PxTransform.h"
-#include "PxvConfig.h"
+#include "PxPhysXConfig.h"
 #include "PxvDynamics.h"
 #include "PxConstraint.h"
 #include "DyConstraintWriteBack.h"
@@ -48,20 +48,6 @@ namespace Dy
     #pragma warning(push)
 	#pragma warning( disable : 4324 ) // Padding was added at the end of a structure because of a __declspec(align) value.
 #endif
-// Joint type for AVBD solver (matches PxJointConcreteType values)
-enum ConstraintJointType : PxU8
-{
-	eCONSTRAINT_JOINT_UNKNOWN = 0,
-	eCONSTRAINT_JOINT_SPHERICAL,
-	eCONSTRAINT_JOINT_REVOLUTE,
-	eCONSTRAINT_JOINT_PRISMATIC,
-	eCONSTRAINT_JOINT_FIXED,
-	eCONSTRAINT_JOINT_DISTANCE,
-	eCONSTRAINT_JOINT_D6,
-	eCONSTRAINT_JOINT_GEAR,
-	eCONSTRAINT_JOINT_RACK_AND_PINION
-};
-
 PX_ALIGN_PREFIX(16)
 struct Constraint
 {
@@ -70,8 +56,7 @@ public:
 	PxReal					linBreakForce;
 	PxReal					angBreakForce;
 	PxU16					constantBlockSize;
-	PxU8					flags;          // Reduced from PxU16 to PxU8
-	ConstraintJointType		jointType;      // Type of joint for AVBD solver
+	PxU16					flags;
 
 	PxConstraintSolverPrep	solverPrep;
 	void*					constantBlock;

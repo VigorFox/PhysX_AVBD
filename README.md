@@ -2,7 +2,9 @@
 
 > 🔬 **Research Fork**: Experimental AVBD (Augmented Variable Block Descent) constraint solver integrated into NVIDIA PhysX SDK.
 
-Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved. BSD-3-Clause License.
+Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved. BSD-3-Clause License.
+
+Upstream baseline: **NVIDIA PhysX 5.9.0** (`110.1-omni-and-physx-5.9.0`, `517a0073715120e114ee055b63b26c95e00d9039`).
 
 ## ⚠️ Project Status
 
@@ -31,6 +33,14 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 **For research and evaluation only. Not production-ready.**
 
 ## Recent Progress
+
+### PhysX 5.9 Alignment (2026-07)
+
+- Merged the official PhysX 5.9.0 baseline and regenerated the Windows CPU-only checked solution with the 5.9 `/MD` runtime layout.
+- Aligned AVBD with the 5.9 allocator, pinnable bitmap, threshold stream, island-edge traversal, D6 angular-drive slots, and constraint metadata APIs.
+- Restored the upstream 16-bit low-level constraint flags. AVBD joint concrete types now use a solver-side table instead of consuming flag bits or changing the shared `Dy::Constraint` layout.
+- Synchronized AVBD articulation write-back with both 5.9 motion-velocity buffers, preventing driven and falling articulations from being put to sleep using stale velocity state.
+- The post-migration checked gates pass: standalone `118/118`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
 
 ### Moving Triangle-Mesh Contact Stability (2026-07)
 
@@ -107,10 +117,11 @@ The PhysX AVBD soft-body path is still in an early prototype stage.
 
 ### Current Validation Snapshot
 
+- ✅ Upstream baseline and checked binaries are PhysX 5.9.0; Windows CPU-only outputs use `win.x86_64.vc143.md`.
 - ✅ Standalone full suite passes: `118 PASSED / 0 FAILED`.
 - ✅ Checked builds pass for `SnippetJoint`, `SnippetAvbdArticulation`, `SnippetArticulationRC`, and `SnippetDeformableMesh`.
 - ✅ The default AVBD moving-triangle-mesh rigid-stack gate passes 7200 headless frames with finite state and zero settled sunk boxes; the TGS reference also passes.
-- ✅ Focused articulation Test 3 passes `2/2`, Test 16 passes `9/9`, and Test 17 passes `1/1`; `SnippetArticulationRC` passes its 3600-frame AVBD/TGS cycle gates and a 10000-frame AVBD extension without a stall, non-finite state, or `Illegal BroadPhaseUpdateData`.
+- ✅ Focused articulation Test 3 passes `2/2`, Test 16 passes `9/9`, and Test 17 passes `1/1`; `SnippetArticulationRC` passes its 3600-frame cycle gate and a 10000-frame AVBD extension with 18 samples and 2.4% maximum relative drift, without a stall, non-finite state, or `Illegal BroadPhaseUpdateData`.
 - ✅ Friction reads per-material coefficients; Coulomb cone and augmented-Lagrangian behavior remain validated.
 - ✅ The strengthened full articulation suite passes `31/31`; focused Test 11 passes `30/30` under both default and forced-sequential execution with finite geometry and bounded joint-anchor error.
 - ⚠️ `SnippetJoint` produces a bounded, clean headless smoke result, but the required one-sphere-per-chain impact launcher is not currently present, so the formal impact gate remains pending.
@@ -209,7 +220,7 @@ AVBD is a position-based constraint solver using:
 
 ```bash
 cd physx
-./generate_projects.bat  # Windows
+./generate_projects.bat vc17win64-cpu-only  # Windows
 ./generate_projects.sh   # Linux
 ```
 

@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -67,7 +67,7 @@ struct JointConnectionHandler : public PvdClient
 	PvdDataStream*		getDataStream()
 	{
 		return NULL;
-	}	
+	}
 
 	void onPvdConnected()
 	{
@@ -77,7 +77,7 @@ struct JointConnectionHandler : public PvdClient
 			mConnected = true;
 			Ext::Pvd::sendClassDescriptions(*stream);	
 			stream->release();
-		}		
+		}
 	}
 
 	bool isConnected() const
@@ -181,7 +181,7 @@ void PxCloseExtensions()
 
 #if PX_SUPPORT_PVD
 	if(gPvdHandler.mConnected)
-	{	
+	{
 		PX_ASSERT(gPvdHandler.mPvd);
 		gPvdHandler.mPvd->removeClient(&gPvdHandler);
 		gPvdHandler.mPvd = NULL;

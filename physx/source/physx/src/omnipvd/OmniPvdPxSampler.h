@@ -22,7 +22,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Copyright (c) 2008-2025 NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
@@ -54,11 +54,15 @@ namespace physx
 	class PxRigidDynamic;
 	class PxArticulationMimicJoint;
 
+	class PxDeformableBody;
 	class PxDeformableMaterial;
+	class PxDeformableSurface;
 	class PxDeformableSurfaceMaterial;
+	class PxDeformableVolume;
 	class PxDeformableVolumeMaterial;
 	class PxPBDMaterial;
 	class PxDiffuseParticleParams;
+	class PxParticleBuffer;
 
 	struct OmniPvdPxCoreRegistrationData;
 
@@ -69,6 +73,7 @@ void streamActorName(const physx::PxActor & a, const char* name);
 void streamSceneName(const physx::PxScene & s, const char* name);
 void streamArticulationName(const physx::PxArticulationReducedCoordinate & art, const char* name);
 void streamArticulationJointName(const physx::PxArticulationJointReducedCoordinate& joint, const char* name);
+void streamParticleBufferName(const physx::PxParticleBuffer& pb, const char* name);
 
 void streamShapeMaterials(const physx::PxShape&, physx::PxMaterial* const * mats, physx::PxU32 nbrMaterials);
 
@@ -81,10 +86,16 @@ void streamDiffuseParticleParamsAttributes(const physx::PxDiffuseParticleParams&
 
 void streamArticulationMimicJoint(const physx::PxArticulationMimicJoint& mj);
 
+void streamShapeUpdateGeometry(const physx::PxShape& shape);
+
+void streamDeformableVolumeAttributes(const physx::PxDeformableVolume& dv);
+void streamDeformableSurfaceAttributes(const physx::PxDeformableSurface& ds);
+
 enum OmniPvdSharedMeshEnum {
 	eOmniPvdTriMesh     = 0,
 	eOmniPvdConvexMesh  = 1,
 	eOmniPvdHeightField = 2,
+	eOmniPvdTetraMesh   = 3,
 };
 
 class OmniPvdWriter;
