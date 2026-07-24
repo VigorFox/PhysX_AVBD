@@ -2,12 +2,35 @@
 // Keep body-vs-static rules aligned with the PhysX DyAvbd* path.
 #include "avbd_articulation.h"
 #include "avbd_d6_core.h"
+#include "avbd_island_rows.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 namespace AvbdRef {
+
+namespace {
+bool gContactIslandPcgSuiteProbeEnabled = false;
+bool gCanonicalRigidContactAuthoringSuiteProbeEnabled = false;
+}
+
+void setContactIslandPcgSuiteProbeEnabled(bool enabled) {
+  gContactIslandPcgSuiteProbeEnabled = enabled;
+}
+
+bool isContactIslandPcgSuiteProbeEnabled() {
+  return gContactIslandPcgSuiteProbeEnabled;
+}
+
+void setCanonicalRigidContactAuthoringSuiteProbeEnabled(bool enabled) {
+  gCanonicalRigidContactAuthoringSuiteProbeEnabled = enabled;
+}
+
+bool isCanonicalRigidContactAuthoringSuiteProbeEnabled() {
+  return gCanonicalRigidContactAuthoringSuiteProbeEnabled;
+}
 
 // =============================================================================
 // Factory methods  all create D6Joint entries in the unified d6Joints vector
@@ -315,6 +338,53 @@ void Solver::addContact(uint32_t bodyA, uint32_t bodyB, Vec3 normal, Vec3 rA,
   contacts.push_back(c);
 }
 
+static void canonicalizeSharedContactOrientation(
+    Contact &contact, const std::vector<Body> &bodies) {
+  if (contact.bodyB >= bodies.size())
+    return;
+  const bool dynamicA = contact.bodyA < bodies.size() &&
+                        bodies[contact.bodyA].mass > 0.0f;
+  const bool dynamicB = bodies[contact.bodyB].mass > 0.0f;
+  const bool keepOrientation =
+      (dynamicA && !dynamicB) ||
+      (dynamicA && dynamicB && contact.bodyA < contact.bodyB) ||
+      (!dynamicA && !dynamicB && contact.bodyA < contact.bodyB);
+  if (keepOrientation)
+    return;
+  std::swap(contact.bodyA, contact.bodyB);
+  std::swap(contact.rA, contact.rB);
+  contact.normal = -contact.normal;
+  // With the deterministic tangent basis used by computeConstraint, n -> -n
+  // maps t1 -> -t1 and t2 -> t2. Swapping relative displacement therefore
+  // leaves row 1 unchanged and negates row 2 exactly.
+  contact.lambda[2] = -contact.lambda[2];
+  contact.C0[2] = -contact.C0[2];
+}
+
+static bool sharedContactLess(const Contact &a, const Contact &b) {
+  if (a.bodyA != b.bodyA)
+    return a.bodyA < b.bodyA;
+  if (a.bodyB != b.bodyB)
+    return a.bodyB < b.bodyB;
+  const auto vecLess = [](const Vec3 &x, const Vec3 &y) {
+    if (x.x != y.x)
+      return x.x < y.x;
+    if (x.y != y.y)
+      return x.y < y.y;
+    return x.z < y.z;
+  };
+  if (a.rA.x != b.rA.x || a.rA.y != b.rA.y || a.rA.z != b.rA.z)
+    return vecLess(a.rA, b.rA);
+  if (a.rB.x != b.rB.x || a.rB.y != b.rB.y || a.rB.z != b.rB.z)
+    return vecLess(a.rB, b.rB);
+  if (a.normal.x != b.normal.x || a.normal.y != b.normal.y ||
+      a.normal.z != b.normal.z)
+    return vecLess(a.normal, b.normal);
+  if (a.depth != b.depth)
+    return a.depth < b.depth;
+  return a.friction < b.friction;
+}
+
 // =============================================================================
 // Contact constraint computation
 // =============================================================================
@@ -347,7 +417,8 @@ void Solver::computeConstraint(Contact &c) {
   if (!bStatic)
     dpB = Vec6(pB->position - pB->initialPosition, pB->deltaWInitial());
 
-  c.C[0] = c.C0[0] * (1.0f - alpha) + dot(c.JA, dpA) + dot(c.JB, dpB);
+  c.C[0] =
+      c.C0[0] * (1.0f - alpha) + dot(c.JA, dpA) + dot(c.JB, dpB);
   c.C[1] = c.C0[1] * (1.0f - alpha) + dot(c.JAt1, dpA) + dot(c.JBt1, dpB);
   c.C[2] = c.C0[2] * (1.0f - alpha) + dot(c.JAt2, dpA) + dot(c.JBt2, dpB);
 
@@ -653,10 +724,40 @@ void Solver::sequentialDynDynFrictionPass(float dt) {
     if (!isBodyVsStaticContact(c.bodyA, c.bodyB))
       numDyn++;
   }
+  if (enableDynDynFrictionDiagnostics) {
+    dynDynFrictionLastStats.invocationCount++;
+    dynDynFrictionLastStats.dynamicContactCount =
+        std::max(dynDynFrictionLastStats.dynamicContactCount, numDyn);
+  }
   if (numDyn <= kDynDyn6x6FrictionMaxIslandContacts)
     return;
 
   const float invDt = 1.0f / dt;
+  if (enableDynDynFrictionDiagnostics)
+    dynDynFrictionLastStats.activeInvocationCount++;
+  const auto sampleMomentum = [&]() {
+    Vec3 linear;
+    Vec3 angular;
+    for (const Body &body : bodies) {
+      if (body.mass <= 0.0f)
+        continue;
+      const Vec3 velocity =
+          (body.position - body.inertialPosition) * invDt;
+      const Vec3 angularVelocity = body.deltaWInertial() * invDt;
+      const Vec3 localAngularVelocity =
+          body.rotation.conjugate().rotate(angularVelocity);
+      const Vec3 spinAngularMomentum = body.rotation.rotate(
+          body.inertiaTensor * localAngularVelocity);
+      const Vec3 bodyLinearMomentum = velocity * body.mass;
+      linear += bodyLinearMomentum;
+      angular += body.position.cross(bodyLinearMomentum) +
+                 spinAngularMomentum;
+    }
+    return std::pair<Vec3, Vec3>(linear, angular);
+  };
+  std::pair<Vec3, Vec3> momentumBefore;
+  if (enableDynDynFrictionDiagnostics)
+    momentumBefore = sampleMomentum();
   for (auto &c : contacts) {
     if (isBodyVsStaticContact(c.bodyA, c.bodyB) || c.friction <= 0.0f)
       continue;
@@ -671,11 +772,17 @@ void Solver::sequentialDynDynFrictionPass(float dt) {
     const Vec3 rA = bA.rotation.rotate(c.rA);
     const Vec3 rB = bB.rotation.rotate(c.rB);
     const Vec3 vA =
-        (bA.position - bA.inertialPosition) * invDt + bA.deltaWInertial().cross(rA);
+        (bA.position - bA.inertialPosition) * invDt +
+        bA.deltaWInertial().cross(rA);
     const Vec3 vB =
-        (bB.position - bB.inertialPosition) * invDt + bB.deltaWInertial().cross(rB);
+        (bB.position - bB.inertialPosition) * invDt +
+        bB.deltaWInertial().cross(rB);
     const Vec3 relV = vA - vB;
     const float jmax = std::fabs(c.lambda[0]) * c.friction * dt;
+    if (enableDynDynFrictionDiagnostics) {
+      dynDynFrictionLastStats.maxNormalImpulseLimit =
+          std::max(dynDynFrictionLastStats.maxNormalImpulseLimit, jmax);
+    }
     if (jmax <= 0.0f)
       continue;
 
@@ -699,22 +806,37 @@ void Solver::sequentialDynDynFrictionPass(float dt) {
         continue;
       float j = -vn / kEff;
       j = std::max(-jmax, std::min(jmax, j));
+      if (enableDynDynFrictionDiagnostics && std::fabs(j) > 1e-12f) {
+        dynDynFrictionLastStats.tangentImpulseCount++;
+        dynDynFrictionLastStats.totalAbsTangentImpulse += std::fabs(j);
+      }
       const Vec3 impulse = t * j;
       if (bA.mass > 0.0f) {
         bA.position += impulse * bA.invMass * dt;
         const Vec3 dTheta = bA.invInertiaWorld * rCrossT_A * j * dt;
         Quat dq(0, dTheta.x, dTheta.y, dTheta.z);
-        bA.rotation =
-            (bA.rotation - dq * bA.rotation * 0.5f).normalized();
+        bA.rotation = useFrictionAngularImpulseSignProbe
+                          ? (bA.rotation + dq * bA.rotation * 0.5f).normalized()
+                          : (bA.rotation - dq * bA.rotation * 0.5f).normalized();
       }
       if (bB.mass > 0.0f) {
         bB.position -= impulse * bB.invMass * dt;
         const Vec3 dTheta = bB.invInertiaWorld * rCrossT_B * (-j) * dt;
         Quat dq(0, dTheta.x, dTheta.y, dTheta.z);
-        bB.rotation =
-            (bB.rotation - dq * bB.rotation * 0.5f).normalized();
+        bB.rotation = useFrictionAngularImpulseSignProbe
+                          ? (bB.rotation + dq * bB.rotation * 0.5f).normalized()
+                          : (bB.rotation - dq * bB.rotation * 0.5f).normalized();
       }
     }
+  }
+  if (enableDynDynFrictionDiagnostics) {
+    const std::pair<Vec3, Vec3> momentumAfter = sampleMomentum();
+    dynDynFrictionLastStats.maxLinearMomentumDelta =
+        std::max(dynDynFrictionLastStats.maxLinearMomentumDelta,
+                 (momentumAfter.first - momentumBefore.first).length());
+    dynDynFrictionLastStats.maxAngularMomentumDelta =
+        std::max(dynDynFrictionLastStats.maxAngularMomentumDelta,
+                 (momentumAfter.second - momentumBefore.second).length());
   }
 }
 
@@ -746,6 +868,721 @@ void Solver::warmstart() {
             PENALTY_MIN, std::min(PENALTY_MAX, sc.penTangent[ti] * gamma));
       }
     }
+  }
+}
+
+bool Solver::solveFixedD6IslandPcgProbe(float dt) {
+  IslandBodyMap bodyMap;
+  bodyMap.bodyToSlot.assign(bodies.size(), -1);
+  for (const D6Joint &joint : d6Joints) {
+    if (!isFixedD6RowSet(joint))
+      continue;
+    const uint32_t endpoints[2] = {joint.bodyA, joint.bodyB};
+    for (uint32_t bodyId : endpoints) {
+      if (bodyId >= bodies.size() || bodies[bodyId].mass <= 0.0f ||
+          bodyMap.bodyToSlot[bodyId] >= 0)
+        continue;
+      bodyMap.bodyToSlot[bodyId] =
+          static_cast<int32_t>(bodyMap.slotToBody.size());
+      bodyMap.slotToBody.push_back(bodyId);
+    }
+  }
+  if (bodyMap.slotToBody.empty()) {
+    islandPcgLastStats = IslandPcgStats();
+    islandPcgLastStats.converged = true;
+    return true;
+  }
+
+  const float dt2 = dt * dt;
+  std::vector<Mat66> inertialBlocks(bodyMap.slotToBody.size());
+  std::vector<Vec6> inertialGradient(bodyMap.slotToBody.size());
+  for (size_t slot = 0; slot < bodyMap.slotToBody.size(); ++slot) {
+    const Body &body = bodies[bodyMap.slotToBody[slot]];
+    inertialBlocks[slot] = body.getMassMatrix() / dt2;
+    const Vec6 displacement(body.position - body.inertialPosition,
+                            body.deltaWInertial());
+    inertialGradient[slot] = inertialBlocks[slot] * displacement;
+  }
+
+  IslandPcgSystem system;
+  system.initialize(inertialBlocks, inertialGradient);
+  uint32_t totalRows = 0;
+  for (uint32_t jointIndex = 0; jointIndex < d6Joints.size(); ++jointIndex) {
+    if (!isFixedD6RowSet(d6Joints[jointIndex]))
+      continue;
+    uint32_t emittedRows = 0;
+    if (!emitFixedD6IslandRows(d6Joints[jointIndex], jointIndex, bodies,
+                               bodyMap, dt, system, emittedRows)) {
+      islandPcgLastStats = IslandPcgStats();
+      islandPcgLastStats.breakdown = true;
+      return false;
+    }
+    totalRows += emittedRows;
+  }
+  if (totalRows == 0) {
+    islandPcgLastStats = IslandPcgStats();
+    islandPcgLastStats.converged = true;
+    return true;
+  }
+
+  std::vector<Vec6> delta;
+  islandPcgLastStats = system.solvePcg(
+      delta, 1e-7, static_cast<int>(bodyMap.slotToBody.size()) * 6);
+  if (!islandPcgLastStats.converged || islandPcgLastStats.breakdown ||
+      !islandPcgLastStats.finite || delta.size() != bodyMap.slotToBody.size())
+    return false;
+
+  for (size_t slot = 0; slot < bodyMap.slotToBody.size(); ++slot) {
+    Body &body = bodies[bodyMap.slotToBody[slot]];
+    body.position -= delta[slot].linear();
+    const Vec3 angular = delta[slot].angular();
+    const Quat dq(0.0f, angular.x, angular.y, angular.z);
+    body.rotation =
+        (body.rotation - dq * body.rotation * 0.5f).normalized();
+  }
+  return true;
+}
+
+static void updateFixedD6IslandPcgProbeDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt);
+static void updateRevoluteD6IslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay);
+static void updatePrismaticD6IslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay);
+static void updateLinearXVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay);
+static void updateSingleAxisAngularVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay, int axisIndex);
+static void updateSlerpVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay);
+
+bool Solver::solveContactIslandPcgProbe(float dt) {
+  contactIslandPcgLastStats = IslandPcgStats();
+  if (contacts.empty()) {
+    contactIslandPcgLastStats.converged = true;
+    return true;
+  }
+
+  // Give the shared objective one canonical dynamic-contact orientation.
+  // Algebraically equivalent endpoint swaps otherwise retain opposite row
+  // directions, which is enough to seed divergent floating-point trajectories
+  // in a marginal stack. Preserve the world tangent force and the corresponding
+  // C0 coordinates while moving the lower body id to endpoint A.
+  for (Contact &contact : contacts)
+    canonicalizeSharedContactOrientation(contact, bodies);
+
+  IslandBodyMap bodyMap;
+  bodyMap.bodyToSlot.assign(bodies.size(), -1);
+  std::vector<uint8_t> bodyParticipates(bodies.size(), 0);
+  for (const Contact &contact : contacts) {
+    const uint32_t endpoints[2] = {contact.bodyA, contact.bodyB};
+    for (uint32_t bodyId : endpoints) {
+      if (bodyId < bodies.size() && bodies[bodyId].mass > 0.0f)
+        bodyParticipates[bodyId] = 1;
+    }
+  }
+  // A mixed island objective must be closed over every supported D6 row it
+  // owns.  Include both endpoints before slot construction; otherwise a
+  // contact correction can silently discard the joint reaction on a body
+  // outside the narrow-phase participant set.
+  for (const D6Joint &joint : d6Joints) {
+    if (!isSphericalD6RowSet(joint) && !isFixedD6RowSet(joint) &&
+        !isRevoluteD6RowSet(joint) && !isPrismaticD6RowSet(joint) &&
+        !isSupportedLinearXVelocityDriveD6RowSet(joint) &&
+        !isSupportedSingleAxisAngularVelocityDriveD6RowSet(joint) &&
+        !isSupportedSlerpVelocityDriveD6RowSet(joint))
+      continue;
+    const uint32_t endpoints[2] = {joint.bodyA, joint.bodyB};
+    for (uint32_t bodyId : endpoints) {
+      if (bodyId < bodies.size() && bodies[bodyId].mass > 0.0f)
+        bodyParticipates[bodyId] = 1;
+    }
+  }
+  // Keep island slots independent of contact traversal and endpoint order.
+  for (uint32_t bodyId = 0; bodyId < bodies.size(); ++bodyId) {
+    if (!bodyParticipates[bodyId])
+      continue;
+    bodyMap.bodyToSlot[bodyId] =
+        static_cast<int32_t>(bodyMap.slotToBody.size());
+    bodyMap.slotToBody.push_back(bodyId);
+  }
+  if (bodyMap.slotToBody.empty()) {
+    contactIslandPcgLastStats.converged = true;
+    return true;
+  }
+
+  const float dt2 = dt * dt;
+  std::vector<Mat66> inertialBlocks(bodyMap.slotToBody.size());
+  std::vector<Vec6> inertialGradient(bodyMap.slotToBody.size());
+  for (size_t slot = 0; slot < bodyMap.slotToBody.size(); ++slot) {
+    const Body &body = bodies[bodyMap.slotToBody[slot]];
+    inertialBlocks[slot] = body.getMassMatrix() / dt2;
+    const Vec6 displacement(body.position - body.inertialPosition,
+                            body.deltaWInertial());
+    inertialGradient[slot] = inertialBlocks[slot] * displacement;
+  }
+
+  IslandPcgSystem system;
+  system.initialize(inertialBlocks, inertialGradient);
+  uint32_t totalRows = 0;
+  for (uint32_t jointIndex = 0; jointIndex < d6Joints.size(); ++jointIndex) {
+    const D6Joint &joint = d6Joints[jointIndex];
+    if (!isSphericalD6RowSet(joint) && !isFixedD6RowSet(joint) &&
+        !isRevoluteD6RowSet(joint) && !isPrismaticD6RowSet(joint) &&
+        !isSupportedLinearXVelocityDriveD6RowSet(joint) &&
+        !isSupportedSingleAxisAngularVelocityDriveD6RowSet(joint) &&
+        !isSupportedSlerpVelocityDriveD6RowSet(joint))
+      continue;
+    uint32_t emittedRows = 0;
+    bool emitted = false;
+    if (isSphericalD6RowSet(joint)) {
+      emitted = emitSphericalD6IslandRows(
+          joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+    } else if (isFixedD6RowSet(joint)) {
+      emitted = emitFixedD6IslandRows(
+          joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+    } else if (isRevoluteD6RowSet(joint)) {
+      emitted = emitRevoluteD6IslandRows(
+          joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+    } else if (isPrismaticD6RowSet(joint)) {
+      emitted = emitPrismaticD6IslandRows(
+          joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+    } else if (isSupportedLinearXVelocityDriveD6RowSet(joint)) {
+      const size_t firstRow = system.rows().size();
+      emitted = emitLinearXVelocityDriveIslandRow(
+          joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+      if (emitted && emittedRows == 1 && firstRow < system.rows().size()) {
+        const IslandPcgRow &row = system.rows()[firstRow];
+        ++linearDriveIslandLastStats.emittedRowCount;
+        if (isLinearXAccelerationVelocityDriveD6RowSet(joint))
+          ++linearDriveIslandLastStats.accelerationRowCount;
+        if (row.activeMode == 4)
+          ++linearDriveIslandLastStats.saturatedRowCount;
+        else
+          ++linearDriveIslandLastStats.unsaturatedRowCount;
+        linearDriveIslandLastStats.maxAbsForce =
+            std::max(linearDriveIslandLastStats.maxAbsForce,
+                     std::fabs(row.force));
+        linearDriveIslandLastStats.maxForceLimit =
+            std::max(linearDriveIslandLastStats.maxForceLimit,
+                     joint.driveLinearForce.x);
+      }
+    } else {
+      const size_t firstRow = system.rows().size();
+      const int angularAxisIndex =
+          getSupportedSingleAxisAngularVelocityDriveIndex(joint);
+      if (angularAxisIndex >= 0) {
+        emitted = emitSingleAxisAngularVelocityDriveIslandRow(
+            joint, jointIndex, bodies, bodyMap, dt, angularAxisIndex,
+            system, emittedRows);
+        angularDriveIslandLastStats.maxTorqueLimit =
+            std::max(angularDriveIslandLastStats.maxTorqueLimit,
+                     (&joint.driveAngularForce.x)[angularAxisIndex]);
+      } else {
+        emitted = emitSlerpVelocityDriveIslandRows(
+            joint, jointIndex, bodies, bodyMap, dt, system, emittedRows);
+        angularDriveIslandLastStats.maxTorqueLimit =
+            std::max(angularDriveIslandLastStats.maxTorqueLimit,
+                     joint.driveAngularForce.z);
+      }
+      if (emitted && firstRow + emittedRows <= system.rows().size()) {
+        angularDriveIslandLastStats.emittedRowCount += emittedRows;
+        if (joint.driveAccelerationFlags != 0)
+          angularDriveIslandLastStats.accelerationRowCount += emittedRows;
+        for (size_t rowIndex = firstRow;
+             rowIndex < firstRow + emittedRows; ++rowIndex) {
+          const IslandPcgRow &row = system.rows()[rowIndex];
+          if (row.activeMode == 4)
+            ++angularDriveIslandLastStats.saturatedRowCount;
+          else
+            ++angularDriveIslandLastStats.unsaturatedRowCount;
+          angularDriveIslandLastStats.maxAbsTorque =
+              std::max(angularDriveIslandLastStats.maxAbsTorque,
+                       std::fabs(row.force));
+        }
+      }
+    }
+    if (!emitted) {
+      contactIslandPcgLastStats.breakdown = true;
+      return false;
+    }
+    totalRows += emittedRows;
+  }
+  std::vector<FrozenContactIslandRowSet> frozenRows(contacts.size());
+  struct ContactOrderKey {
+    uint32_t body0;
+    uint32_t body1;
+    Vec3 anchor0;
+    Vec3 anchor1;
+    Vec3 normal0;
+    float depth;
+    float friction;
+    uint32_t contactIndex;
+  };
+  std::vector<ContactOrderKey> contactOrder;
+  contactOrder.reserve(contacts.size());
+  for (uint32_t contactIndex = 0; contactIndex < contacts.size();
+       ++contactIndex) {
+    const Contact &contact = contacts[contactIndex];
+    const bool dynamicPair = contact.bodyB < bodies.size();
+    const bool aFirst = !dynamicPair || contact.bodyA < contact.bodyB;
+    ContactOrderKey key;
+    key.body0 = aFirst ? contact.bodyA : contact.bodyB;
+    key.body1 = dynamicPair
+                    ? (aFirst ? contact.bodyB : contact.bodyA)
+                    : UINT32_MAX;
+    key.anchor0 = aFirst ? contact.rA : contact.rB;
+    key.anchor1 = aFirst ? contact.rB : contact.rA;
+    key.normal0 = aFirst ? contact.normal : -contact.normal;
+    key.depth = contact.depth;
+    key.friction = contact.friction;
+    key.contactIndex = contactIndex;
+    contactOrder.push_back(key);
+  }
+  const auto vecLess = [](const Vec3 &a, const Vec3 &b) {
+    if (a.x != b.x)
+      return a.x < b.x;
+    if (a.y != b.y)
+      return a.y < b.y;
+    return a.z < b.z;
+  };
+  std::sort(contactOrder.begin(), contactOrder.end(),
+            [&vecLess](const ContactOrderKey &a,
+                       const ContactOrderKey &b) {
+              if (a.body0 != b.body0)
+                return a.body0 < b.body0;
+              if (a.body1 != b.body1)
+                return a.body1 < b.body1;
+              if (a.anchor0.x != b.anchor0.x ||
+                  a.anchor0.y != b.anchor0.y ||
+                  a.anchor0.z != b.anchor0.z)
+                return vecLess(a.anchor0, b.anchor0);
+              if (a.anchor1.x != b.anchor1.x ||
+                  a.anchor1.y != b.anchor1.y ||
+                  a.anchor1.z != b.anchor1.z)
+                return vecLess(a.anchor1, b.anchor1);
+              if (a.normal0.x != b.normal0.x ||
+                  a.normal0.y != b.normal0.y ||
+                  a.normal0.z != b.normal0.z)
+                return vecLess(a.normal0, b.normal0);
+              if (a.depth != b.depth)
+                return a.depth < b.depth;
+              return a.friction < b.friction;
+            });
+  for (const ContactOrderKey &key : contactOrder) {
+    const uint32_t contactIndex = key.contactIndex;
+    Contact &contact = contacts[contactIndex];
+    if (isBodyVsStaticContact(contact.bodyA, contact.bodyB))
+      computeConstraintBodyStatic(contact);
+    else
+      computeConstraint(contact);
+
+    FrozenContactIslandRowSet &rowSet = frozenRows[contactIndex];
+    rowSet.penalty[0] = contact.penalty[0];
+    rowSet.force[0] =
+        std::max(contact.fmin[0],
+                 std::min(contact.fmax[0],
+                          rowSet.penalty[0] * contact.C[0] +
+                              contact.lambda[0]));
+    rowSet.active[0] = rowSet.force[0] < 0.0f;
+    rowSet.activeMode[0] = 1;
+
+    const float tangentBound =
+        std::fabs(rowSet.force[0]) * contact.friction;
+    rowSet.tangentForceBound = tangentBound;
+    if (rowSet.active[0] && tangentBound > 0.0f) {
+      rowSet.active[1] = rowSet.active[2] = true;
+      rowSet.penalty[1] = contact.penalty[1];
+      rowSet.penalty[2] = contact.penalty[2];
+      rowSet.force[1] =
+          rowSet.penalty[1] * contact.C[1] + contact.lambda[1];
+      rowSet.force[2] =
+          rowSet.penalty[2] * contact.C[2] + contact.lambda[2];
+      const float tangentMagnitude =
+          std::sqrt(rowSet.force[1] * rowSet.force[1] +
+                    rowSet.force[2] * rowSet.force[2]);
+      if (tangentMagnitude > tangentBound) {
+        const float scale = tangentBound / tangentMagnitude;
+        rowSet.force[1] *= scale;
+        rowSet.force[2] *= scale;
+      }
+      rowSet.activeMode[1] = rowSet.activeMode[2] = 2;
+    }
+
+    uint32_t emittedRows = 0;
+    if (!emitFrozenContactIslandRows(contact, contactIndex, bodies, bodyMap,
+                                     rowSet, system, emittedRows)) {
+      contactIslandPcgLastStats.breakdown = true;
+      return false;
+    }
+    totalRows += emittedRows;
+  }
+  if (totalRows == 0) {
+    contactIslandPcgLastStats.converged = true;
+    return true;
+  }
+
+  std::vector<Vec6> delta;
+  contactIslandPcgLastStats = system.solvePcg(
+      delta, 1e-7, static_cast<int>(bodyMap.slotToBody.size()) * 12);
+  if (!contactIslandPcgLastStats.converged ||
+      contactIslandPcgLastStats.breakdown ||
+      !contactIslandPcgLastStats.finite ||
+      delta.size() != bodyMap.slotToBody.size())
+    return false;
+
+  for (size_t slot = 0; slot < bodyMap.slotToBody.size(); ++slot) {
+    Body &body = bodies[bodyMap.slotToBody[slot]];
+    body.position -= delta[slot].linear();
+    const Vec3 angular = delta[slot].angular();
+    const Quat dq(0.0f, angular.x, angular.y, angular.z);
+    body.rotation =
+        (body.rotation - dq * body.rotation * 0.5f).normalized();
+  }
+
+  for (uint32_t contactIndex = 0; contactIndex < contacts.size();
+       ++contactIndex) {
+    Contact &contact = contacts[contactIndex];
+    if (isBodyVsStaticContact(contact.bodyA, contact.bodyB))
+      computeConstraintBodyStatic(contact);
+    else
+      computeConstraint(contact);
+    const FrozenContactIslandRowSet &rowSet = frozenRows[contactIndex];
+
+    const float normalRaw =
+        contact.lambda[0] + rowSet.penalty[0] * contact.C[0];
+    contact.lambda[0] =
+        std::max(contact.fmin[0], std::min(contact.fmax[0], normalRaw));
+    if (contact.lambda[0] > contact.fmin[0] &&
+        contact.lambda[0] < contact.fmax[0]) {
+      contact.penalty[0] = std::min(
+          contact.penalty[0] + beta * std::fabs(contact.C[0]), PENALTY_MAX);
+    }
+
+    if (rowSet.active[1]) {
+      float tangent[2] = {
+          contact.lambda[1] + rowSet.penalty[1] * contact.C[1],
+          contact.lambda[2] + rowSet.penalty[2] * contact.C[2]};
+      const float tangentBound =
+          std::fabs(contact.lambda[0]) * contact.friction;
+      const float tangentMagnitude =
+          std::sqrt(tangent[0] * tangent[0] + tangent[1] * tangent[1]);
+      const bool saturated = tangentMagnitude > tangentBound;
+      if (saturated && tangentMagnitude > 0.0f) {
+        const float scale = tangentBound / tangentMagnitude;
+        tangent[0] *= scale;
+        tangent[1] *= scale;
+      }
+      contact.lambda[1] = tangent[0];
+      contact.lambda[2] = tangent[1];
+      if (!saturated) {
+        for (int tangentIndex = 1; tangentIndex < 3; ++tangentIndex) {
+          contact.penalty[tangentIndex] =
+              std::min(contact.penalty[tangentIndex] +
+                           beta * std::fabs(contact.C[tangentIndex]),
+                       PENALTY_MAX);
+        }
+      }
+    } else {
+      contact.lambda[1] = contact.lambda[2] = 0.0f;
+    }
+  }
+  return true;
+}
+
+static void updateFixedD6IslandPcgProbeDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt) {
+  const bool dynamicA = joint.bodyA < bodies.size() &&
+                        bodies[joint.bodyA].mass > 0.0f;
+  const bool dynamicB = joint.bodyB < bodies.size() &&
+                        bodies[joint.bodyB].mass > 0.0f;
+  const Body *bodyA = dynamicA ? &bodies[joint.bodyA] : nullptr;
+  const Body *bodyB = dynamicB ? &bodies[joint.bodyB] : nullptr;
+  const Quat rotationA = bodyA ? bodyA->rotation : Quat();
+  const Quat rotationB = bodyB ? bodyB->rotation : Quat();
+  const Vec3 worldAnchorA =
+      bodyA ? bodyA->position + rotationA.rotate(joint.anchorA)
+            : joint.anchorA;
+  const Vec3 worldAnchorB =
+      bodyB ? bodyB->position + rotationB.rotate(joint.anchorB)
+            : joint.anchorB;
+  const Vec3 error = worldAnchorA - worldAnchorB;
+  const float massA = bodyA ? bodyA->mass : 0.0f;
+  const float massB = bodyB ? bodyB->mass : 0.0f;
+  const float penalty =
+      std::max(joint.rho, std::max(massA, massB) / (dt * dt));
+  joint.lambdaLinear += error * penalty;
+  for (int axis = 0; axis < 3; ++axis) {
+    (&joint.lambdaAngular.x)[axis] +=
+        penalty * computeAngularError(rotationA, rotationB,
+                                      joint.localFrameA, joint.localFrameB,
+                                      axis);
+  }
+}
+
+static void updateRevoluteD6IslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay) {
+  const Body *endpointA =
+      joint.bodyA < bodies.size() ? &bodies[joint.bodyA] : nullptr;
+  const Body *endpointB =
+      joint.bodyB < bodies.size() ? &bodies[joint.bodyB] : nullptr;
+  const Quat rotationA = endpointA ? endpointA->rotation : Quat();
+  const Quat rotationB = endpointB ? endpointB->rotation : Quat();
+  const Vec3 worldAnchorA =
+      endpointA ? endpointA->position + rotationA.rotate(joint.anchorA)
+                : joint.anchorA;
+  const Vec3 worldAnchorB =
+      endpointB ? endpointB->position + rotationB.rotate(joint.anchorB)
+                : joint.anchorB;
+  const float rhoDual = d6ComputeRhoDual(
+      joint.bodyA, joint.bodyB, joint.rho, bodies, dt * dt);
+  joint.lambdaLinear =
+      joint.lambdaLinear * lambdaDecay +
+      (worldAnchorA - worldAnchorB) * rhoDual;
+
+  const Quat frameA =
+      (endpointA ? rotationA * joint.localFrameA : joint.localFrameA)
+          .normalized();
+  const Quat frameB =
+      (endpointB ? rotationB * joint.localFrameB : joint.localFrameB)
+          .normalized();
+  const Vec3 twistA = frameA.rotate(Vec3(1.0f, 0.0f, 0.0f));
+  const Vec3 twistB = frameB.rotate(Vec3(1.0f, 0.0f, 0.0f));
+  Vec3 midAxis, perpendicular1, perpendicular2;
+  if (buildRevoluteMidAxisBasis(twistA, twistB, midAxis, perpendicular1,
+                                 perpendicular2)) {
+    const Vec3 axisViolation = twistA.cross(twistB);
+    joint.lambdaAngular.y =
+        joint.lambdaAngular.y * lambdaDecay +
+        axisViolation.dot(perpendicular1) * rhoDual;
+    joint.lambdaAngular.z =
+        joint.lambdaAngular.z * lambdaDecay +
+        axisViolation.dot(perpendicular2) * rhoDual;
+  }
+
+  if (joint.getAngularMotion(0) == 1) {
+    const float angularError =
+        computeRevoluteSymmetricTwistError(frameA, frameB);
+    const float violation = computeAngularLimitViolation(
+        angularError, joint.angularLimitLower[0],
+        joint.angularLimitUpper[0]);
+    float lambda = joint.lambdaLimitAngular[0] * lambdaDecay +
+                   violation * rhoDual;
+    if (joint.angularLimitLower[0] < joint.angularLimitUpper[0]) {
+      if (violation > 0.0f || joint.lambdaLimitAngular[0] > 0.0f)
+        lambda = std::max(0.0f, lambda);
+      else if (violation < 0.0f || joint.lambdaLimitAngular[0] < 0.0f)
+        lambda = std::min(0.0f, lambda);
+      else
+        lambda = 0.0f;
+    }
+    joint.lambdaLimitAngular[0] = lambda;
+  }
+}
+
+static void updatePrismaticD6IslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay) {
+  const Body *endpointA =
+      joint.bodyA < bodies.size() ? &bodies[joint.bodyA] : nullptr;
+  const Body *endpointB =
+      joint.bodyB < bodies.size() ? &bodies[joint.bodyB] : nullptr;
+  const Quat rotationA = endpointA ? endpointA->rotation : Quat();
+  const Quat rotationB = endpointB ? endpointB->rotation : Quat();
+  const Vec3 worldAnchorA =
+      endpointA ? endpointA->position + rotationA.rotate(joint.anchorA)
+                : joint.anchorA;
+  const Vec3 worldAnchorB =
+      endpointB ? endpointB->position + rotationB.rotate(joint.anchorB)
+                : joint.anchorB;
+  const Vec3 linearError = worldAnchorA - worldAnchorB;
+  const Quat frameA =
+      (endpointA ? rotationA * joint.localFrameA : joint.localFrameA)
+          .normalized();
+  const Quat frameB =
+      (endpointB ? rotationB * joint.localFrameB : joint.localFrameB)
+          .normalized();
+  const Quat midFrame = computeD6SymmetricMidFrame(frameA, frameB);
+  const Vec3 localAxes[3] = {Vec3(1.0f, 0.0f, 0.0f),
+                             Vec3(0.0f, 1.0f, 0.0f),
+                             Vec3(0.0f, 0.0f, 1.0f)};
+  const Vec3 axes[3] = {midFrame.rotate(localAxes[0]),
+                        midFrame.rotate(localAxes[1]),
+                        midFrame.rotate(localAxes[2])};
+  const float rhoDual = d6ComputeRhoDual(
+      joint.bodyA, joint.bodyB, joint.rho, bodies, dt * dt);
+  for (int axis = 1; axis < 3; ++axis) {
+    (&joint.lambdaLinear.x)[axis] =
+        (&joint.lambdaLinear.x)[axis] * lambdaDecay +
+        linearError.dot(axes[axis]) * rhoDual;
+  }
+
+  if (joint.getLinearMotion(0) == 1) {
+    const float distance = -linearError.dot(axes[0]);
+    const float violation = computeAngularLimitViolation(
+        distance, joint.linearLimitLower[0], joint.linearLimitUpper[0]);
+    float lambda = joint.lambdaLimitLinear[0] * lambdaDecay +
+                   violation * rhoDual;
+    if (joint.linearLimitLower[0] < joint.linearLimitUpper[0]) {
+      const float signReference =
+          std::fabs(violation) > 1e-6f
+              ? violation
+              : (std::fabs(joint.lambdaLimitLinear[0]) > 1e-6f
+                     ? joint.lambdaLimitLinear[0]
+                     : 0.0f);
+      if (signReference > 0.0f)
+        lambda = std::max(0.0f, lambda);
+      else if (signReference < 0.0f)
+        lambda = std::min(0.0f, lambda);
+      else
+        lambda = 0.0f;
+    }
+    joint.lambdaLimitLinear[0] = lambda;
+  }
+
+  const Vec3 angularError = computeD6SymmetricAngularError(frameA, frameB);
+  joint.lambdaAngular =
+      joint.lambdaAngular * lambdaDecay + angularError * rhoDual;
+}
+
+static void updateLinearXVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay) {
+  if (isLinearXAccelerationVelocityDriveD6RowSet(joint)) {
+    // The effective-mass-scaled acceleration objective is physical in the
+    // primal row.  A separate AL drive dual is not response-scaled and would
+    // reintroduce endpoint-mass dependence across contact-PCG iterations.
+    joint.lambdaDriveLinear.x = 0.0f;
+    return;
+  }
+  const Body *endpointA =
+      joint.bodyA < bodies.size() ? &bodies[joint.bodyA] : nullptr;
+  const Body *endpointB =
+      joint.bodyB < bodies.size() ? &bodies[joint.bodyB] : nullptr;
+  const bool dynamicA = endpointA && endpointA->mass > 0.0f;
+  const bool dynamicB = endpointB && endpointB->mass > 0.0f;
+  const Quat rotationA = endpointA ? endpointA->rotation : Quat();
+  const Quat rotationB = endpointB ? endpointB->rotation : Quat();
+  const Quat frameA =
+      (endpointA ? rotationA * joint.localFrameA : joint.localFrameA)
+          .normalized();
+  const Vec3 axis = frameA.rotate(Vec3(1.0f, 0.0f, 0.0f));
+  const Vec3 rA =
+      dynamicA ? rotationA.rotate(joint.anchorA) : Vec3();
+  const Vec3 rB =
+      dynamicB ? rotationB.rotate(joint.anchorB) : Vec3();
+  const Vec3 displacementA =
+      dynamicA
+          ? (endpointA->position + rotationA.rotate(joint.anchorA)) -
+                (endpointA->initialPosition +
+                 endpointA->initialRotation.rotate(joint.anchorA))
+          : Vec3();
+  const Vec3 displacementB =
+      dynamicB
+          ? (endpointB->position + rotationB.rotate(joint.anchorB)) -
+                (endpointB->initialPosition +
+                 endpointB->initialRotation.rotate(joint.anchorB))
+          : Vec3();
+  const float violation =
+      (displacementB - displacementA).dot(axis) -
+      joint.driveLinearVelocity.x * dt;
+  const float drivePenalty = computeLinearXVelocityDrivePenalty(
+      joint, endpointA, endpointB, rA, rB, axis, dt);
+  const float rhoDual = std::min(
+      drivePenalty,
+      d6ComputeRhoDual(joint.bodyA, joint.bodyB, joint.rho, bodies,
+                       dt * dt));
+  const float forceLimit = joint.driveLinearForce.x;
+  joint.lambdaDriveLinear.x = updateClampedLinearDriveDual(
+      joint.lambdaDriveLinear.x, violation, rhoDual, forceLimit,
+      lambdaDecay);
+}
+
+static void updateSingleAxisAngularVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay, int axisIndex) {
+  const Body *endpointA =
+      joint.bodyA < bodies.size() ? &bodies[joint.bodyA] : nullptr;
+  const Body *endpointB =
+      joint.bodyB < bodies.size() ? &bodies[joint.bodyB] : nullptr;
+  const Quat rotationA = endpointA ? endpointA->rotation : Quat();
+  const Quat rotationB = endpointB ? endpointB->rotation : Quat();
+  const Quat frameA =
+      (endpointA ? rotationA * joint.localFrameA : joint.localFrameA)
+          .normalized();
+  const Vec3 localAxes[3] = {Vec3(1.0f, 0.0f, 0.0f),
+                             Vec3(0.0f, 1.0f, 0.0f),
+                             Vec3(0.0f, 0.0f, 1.0f)};
+  const Vec3 axis = frameA.rotate(localAxes[axisIndex]);
+  const Vec3 deltaA =
+      endpointA && endpointA->mass > 0.0f
+          ? computeWorldRotationDelta(rotationA,
+                                      endpointA->initialRotation)
+          : Vec3();
+  const Vec3 deltaB =
+      endpointB && endpointB->mass > 0.0f
+          ? computeWorldRotationDelta(rotationB,
+                                      endpointB->initialRotation)
+          : Vec3();
+  const float violation =
+      (deltaB - deltaA).dot(axis) +
+      (&joint.driveAngularVelocity.x)[axisIndex] * dt;
+  const float drivePenalty = computeAngularAxisVelocityDrivePenalty(
+      joint, endpointA, endpointB, axis, axisIndex,
+      joint.driveAccelerationFlags != 0, dt);
+  const float rhoDual = std::min(
+      drivePenalty,
+      d6ComputeRhoDual(joint.bodyA, joint.bodyB, joint.rho, bodies,
+                       dt * dt));
+  float &lambda = (&joint.lambdaDriveAngular.x)[axisIndex];
+  lambda = updateClampedLinearDriveDual(
+      lambda, violation, rhoDual,
+      (&joint.driveAngularForce.x)[axisIndex], lambdaDecay);
+}
+
+static void updateSlerpVelocityDriveIslandPcgDual(
+    D6Joint &joint, const std::vector<Body> &bodies, float dt,
+    float lambdaDecay) {
+  const Body *endpointA =
+      joint.bodyA < bodies.size() ? &bodies[joint.bodyA] : nullptr;
+  const Body *endpointB =
+      joint.bodyB < bodies.size() ? &bodies[joint.bodyB] : nullptr;
+  const Quat rotationA = endpointA ? endpointA->rotation : Quat();
+  const Quat rotationB = endpointB ? endpointB->rotation : Quat();
+  const Quat frameA =
+      (endpointA ? rotationA * joint.localFrameA : joint.localFrameA)
+          .normalized();
+  const Vec3 deltaA =
+      endpointA && endpointA->mass > 0.0f
+          ? computeWorldRotationDelta(rotationA,
+                                      endpointA->initialRotation)
+          : Vec3();
+  const Vec3 deltaB =
+      endpointB && endpointB->mass > 0.0f
+          ? computeWorldRotationDelta(rotationB,
+                                      endpointB->initialRotation)
+          : Vec3();
+  const Vec3 violation =
+      deltaB - deltaA - frameA.rotate(joint.driveAngularVelocity) * dt;
+  const Vec3 worldAxes[3] = {Vec3(1.0f, 0.0f, 0.0f),
+                             Vec3(0.0f, 1.0f, 0.0f),
+                             Vec3(0.0f, 0.0f, 1.0f)};
+  const float baseRhoDual = d6ComputeRhoDual(
+      joint.bodyA, joint.bodyB, joint.rho, bodies, dt * dt);
+  for (int axisIndex = 0; axisIndex < 3; ++axisIndex) {
+    const float drivePenalty = computeSlerpVelocityDrivePenalty(
+        joint, endpointA, endpointB, worldAxes[axisIndex], dt);
+    const float rhoDual = std::min(drivePenalty, baseRhoDual);
+    float &lambda = (&joint.lambdaDriveAngular.x)[axisIndex];
+    lambda = updateClampedLinearDriveDual(
+        lambda, (&violation.x)[axisIndex], rhoDual,
+        joint.driveAngularForce.z, lambdaDecay);
   }
 }
 
@@ -866,8 +1703,41 @@ void Solver::step(float dt_) {
   dt = dt_;
   float invDt = 1.0f / dt;
   float dt2 = dt * dt;
+  dynDynFrictionLastStats = DynDynFrictionPassStats();
+  contactIslandPcgRoutedLastStep = false;
+  linearDriveIslandLastStats = LinearDriveIslandStats();
+  angularDriveIslandLastStats = AngularDriveIslandStats();
+
+  if (useContactIslandPcgProbe) {
+    for (Contact &contact : contacts)
+      canonicalizeSharedContactOrientation(contact, bodies);
+    std::sort(contacts.begin(), contacts.end(), sharedContactLess);
+  }
 
   warmstart();
+
+  // Never solve a partial mixed objective.  Until the island emitter covers
+  // every rigid constraint family, route only contact-only plus the verified
+  // fixed/pure-spherical/undriven-revolute/prismatic and isolated force- or
+  // acceleration-mode linear-X, single-axis angular, and isolated SLERP
+  // velocity-drive D6 families through the shared PCG path.
+  // Unsupported rows fall back as a
+  // whole so a later contact solve cannot erase their per-body correction.
+  const bool routeContactIslandPcg =
+      useContactIslandPcgProbe && !contacts.empty() && gearJoints.empty() &&
+      articulations.empty() && softBodies.empty() && softContacts.empty() &&
+      std::all_of(d6Joints.begin(), d6Joints.end(),
+                  [](const D6Joint &joint) {
+                    return isSphericalD6RowSet(joint) ||
+                           isFixedD6RowSet(joint) ||
+                           isRevoluteD6RowSet(joint) ||
+                           isPrismaticD6RowSet(joint) ||
+                           isSupportedLinearXVelocityDriveD6RowSet(joint) ||
+                           isSupportedSingleAxisAngularVelocityDriveD6RowSet(
+                               joint) ||
+                           isSupportedSlerpVelocityDriveD6RowSet(joint);
+                  });
+  contactIslandPcgRoutedLastStep = routeContactIslandPcg;
 
   // Step 1: Build adjacency list from joints
   uint32_t nBodies = (uint32_t)bodies.size();
@@ -1157,7 +2027,8 @@ void Solver::step(float dt_) {
     }
   }
 
-  const bool sequentialStatic = isSequentialBodyStaticIsland();
+  const bool sequentialStatic =
+      !routeContactIslandPcg && isSequentialBodyStaticIsland();
   const bool allBodyVsStatic =
       !contacts.empty() &&
       std::all_of(contacts.begin(), contacts.end(), [this](const Contact &c) {
@@ -1248,6 +2119,8 @@ void Solver::step(float dt_) {
 
       // ---- Contact contributions ----
       for (auto &c : contacts) {
+        if (routeContactIslandPcg)
+          continue;
         bool isA = (c.bodyA == bi);
         bool isB = (c.bodyB == bi);
         if (!isA && !isB)
@@ -1275,6 +2148,15 @@ void Solver::step(float dt_) {
 
       // ---- D6 Joint contributions (unified) ----
       for (const auto &jnt : d6Joints) {
+        if (routeContactIslandPcg &&
+            (isSphericalD6RowSet(jnt) || isFixedD6RowSet(jnt) ||
+             isRevoluteD6RowSet(jnt) || isPrismaticD6RowSet(jnt) ||
+             isSupportedLinearXVelocityDriveD6RowSet(jnt) ||
+             isSupportedSingleAxisAngularVelocityDriveD6RowSet(jnt) ||
+             isSupportedSlerpVelocityDriveD6RowSet(jnt)))
+          continue;
+        if (useIslandPcgProbe && isFixedD6RowSet(jnt))
+          continue;
         addD6Contribution(jnt, bi, bodies, dt, lhs, rhs);
       }
 
@@ -1370,7 +2252,14 @@ void Solver::step(float dt_) {
     }
     } // !sequentialStatic
 
-    sequentialDynDynFrictionPass(dt);
+    if (useIslandPcgProbe && !solveFixedD6IslandPcgProbe(dt))
+      return;
+
+    if (routeContactIslandPcg && !solveContactIslandPcgProbe(dt))
+      return;
+
+    if (enableSequentialDynDynFriction && !routeContactIslandPcg)
+      sequentialDynDynFrictionPass(dt);
 
     // ---- Body-level 6x6 solve for soft bodies (mirrors PhysX) ----
     for (uint32_t si = 0; si < (uint32_t)softBodies.size(); si++)
@@ -1671,6 +2560,8 @@ void Solver::step(float dt_) {
     // ---- Dual update ----
     // Contact dual (body-vs-static: computeConstraintBodyStatic + all 3 rows)
     for (auto &c : contacts) {
+      if (routeContactIslandPcg)
+        continue;
       if (isBodyVsStaticContact(c.bodyA, c.bodyB))
         computeConstraintBodyStatic(c);
       else
@@ -1689,7 +2580,44 @@ void Solver::step(float dt_) {
     {
       const float lambdaDecay = 0.99f;
       for (auto &jnt : d6Joints) {
-        updateD6Dual(jnt, bodies, dt, lambdaDecay);
+        if (useIslandPcgProbe && isFixedD6RowSet(jnt))
+          updateFixedD6IslandPcgProbeDual(jnt, bodies, dt);
+        else if (routeContactIslandPcg && isRevoluteD6RowSet(jnt))
+          updateRevoluteD6IslandPcgDual(jnt, bodies, dt, lambdaDecay);
+        else if (routeContactIslandPcg && isPrismaticD6RowSet(jnt))
+          updatePrismaticD6IslandPcgDual(jnt, bodies, dt, lambdaDecay);
+        else if (routeContactIslandPcg &&
+                 isSupportedLinearXVelocityDriveD6RowSet(jnt)) {
+          updateLinearXVelocityDriveIslandPcgDual(jnt, bodies, dt,
+                                                  lambdaDecay);
+          linearDriveIslandLastStats.maxAbsDual =
+              std::max(linearDriveIslandLastStats.maxAbsDual,
+                       std::fabs(jnt.lambdaDriveLinear.x));
+        }
+        else if (routeContactIslandPcg &&
+                 isSupportedSingleAxisAngularVelocityDriveD6RowSet(jnt)) {
+          const int angularAxisIndex =
+              getSupportedSingleAxisAngularVelocityDriveIndex(jnt);
+          updateSingleAxisAngularVelocityDriveIslandPcgDual(
+              jnt, bodies, dt, lambdaDecay, angularAxisIndex);
+          angularDriveIslandLastStats.maxAbsDual =
+              std::max(angularDriveIslandLastStats.maxAbsDual,
+                       std::fabs(
+                           (&jnt.lambdaDriveAngular.x)[angularAxisIndex]));
+        }
+        else if (routeContactIslandPcg &&
+                 isSupportedSlerpVelocityDriveD6RowSet(jnt)) {
+          updateSlerpVelocityDriveIslandPcgDual(jnt, bodies, dt,
+                                                lambdaDecay);
+          angularDriveIslandLastStats.maxAbsDual =
+              std::max(
+                  angularDriveIslandLastStats.maxAbsDual,
+                  std::max(std::fabs(jnt.lambdaDriveAngular.x),
+                           std::max(std::fabs(jnt.lambdaDriveAngular.y),
+                                    std::fabs(jnt.lambdaDriveAngular.z))));
+        }
+        else
+          updateD6Dual(jnt, bodies, dt, lambdaDecay);
       }
     }
 
@@ -1944,7 +2872,8 @@ void Solver::step(float dt_) {
   } // end iteration loop
 
   applyBodyStaticDepenetrationSweeps(4);
-  applyLowIslandDynDynFrictionSweeps(2);
+  if (!routeContactIslandPcg)
+    applyLowIslandDynDynFrictionSweeps(2);
 
   // =========================================================================
   // Post-solve motor drives (matches PhysX Stage 5b)
@@ -2059,6 +2988,8 @@ void Solver::step(float dt_) {
       body.angularVelocity = body.angularVelocity * (body.maxAngularVelocity / angSpeed);
     }
   }
+
+  projectD6BodyStaticLockedLinearVelocities(bodies, d6Joints);
 
   // Update soft particle velocities
   for (auto &sp : softParticles) {

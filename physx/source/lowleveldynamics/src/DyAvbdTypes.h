@@ -162,6 +162,15 @@ struct AvbdDeterminismFlags {
  * @brief AVBD solver configuration parameters
  */
 struct AvbdSolverConfig {
+  /**
+   * Scene length scale from PxTolerancesScale.
+   *
+   * Every solver threshold with length dimensions must be expressed relative
+   * to this value so geometrically equivalent scenes do not select different
+   * AVBD control paths merely because their units differ.
+   */
+  physx::PxReal lengthScale;
+
   //-------------------------------------------------------------------------
   // Iteration control
   //-------------------------------------------------------------------------
@@ -296,7 +305,7 @@ struct AvbdSolverConfig {
   //-------------------------------------------------------------------------
 
   AvbdSolverConfig()
-      : outerIterations(1), innerIterations(4), initialRho(1e4f),
+      : lengthScale(1.0f), outerIterations(1), innerIterations(4), initialRho(1e4f),
         rhoScale(2.0f), maxRho(1e8f), defaultCompliance(1e-6f),
         contactCompliance(1e-4f), jointCompliance(1e-8f), contactDamping(0.5f),
         damping(0.5f), angularDamping(0.95f), rotationThreshold(0.001f),
@@ -521,6 +530,37 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
         linearAngular(i, j) += invCompliance * gradPos[i] * gradRot[j];
         angularLinear(i, j) += invCompliance * gradRot[i] * gradPos[j];
         angularAngular(i, j) += invCompliance * gradRot[i] * gradRot[j];
+      }
+    }
+  }
+
+  /**
+   * Add a contact row whose linear and angular response are scaled locally.
+   *
+   * The geometric-mean cross scale keeps the local Hessian symmetric and
+   * positive semidefinite.  A zero scale removes only that response component,
+   * which is the contact-modification infinite-mass/inertia contract.
+   */
+  PX_FORCE_INLINE void addResponseScaledConstraintContribution(
+      const physx::PxVec3 &gradPos, const physx::PxVec3 &gradRot,
+      physx::PxReal invCompliance, physx::PxReal linearScale,
+      physx::PxReal angularScale) {
+    const physx::PxReal nonnegativeLinear =
+        physx::PxMax(0.0f, linearScale);
+    const physx::PxReal nonnegativeAngular =
+        physx::PxMax(0.0f, angularScale);
+    const physx::PxReal crossScale =
+        physx::PxSqrt(nonnegativeLinear * nonnegativeAngular);
+    for (physx::PxU32 i = 0; i < 3; ++i) {
+      for (physx::PxU32 j = 0; j < 3; ++j) {
+        linearLinear(i, j) +=
+            invCompliance * nonnegativeLinear * gradPos[i] * gradPos[j];
+        linearAngular(i, j) +=
+            invCompliance * crossScale * gradPos[i] * gradRot[j];
+        angularLinear(i, j) +=
+            invCompliance * crossScale * gradRot[i] * gradPos[j];
+        angularAngular(i, j) +=
+            invCompliance * nonnegativeAngular * gradRot[i] * gradRot[j];
       }
     }
   }

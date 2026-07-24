@@ -1,6 +1,7 @@
 #pragma once
 #include "avbd_articulation.h"
 #include "avbd_body_static_semantics.h"
+#include "avbd_island_pcg.h"
 #include "avbd_softbody.h"
 #include "avbd_types.h"
 #include <vector>
@@ -14,6 +15,46 @@ static constexpr float PENALTY_MAX = 1e9f;
 enum class BodyStaticContactSolve {
   Aggregated6x6,       //!< PhysX default: per-body 6x6 normals; dual tangents
   SequentialPerContact //!< Standalone alias: normals-only primal pass + dual
+};
+
+/** Process-wide test harness switch, set before any Solver is constructed. */
+void setContactIslandPcgSuiteProbeEnabled(bool enabled);
+bool isContactIslandPcgSuiteProbeEnabled();
+void setCanonicalRigidContactAuthoringSuiteProbeEnabled(bool enabled);
+bool isCanonicalRigidContactAuthoringSuiteProbeEnabled();
+
+/** Read-only diagnostics for the large dynamic-contact friction stage. */
+struct DynDynFrictionPassStats {
+  uint32_t dynamicContactCount = 0;
+  uint32_t invocationCount = 0;
+  uint32_t activeInvocationCount = 0;
+  uint32_t tangentImpulseCount = 0;
+  float maxNormalImpulseLimit = 0.0f;
+  float totalAbsTangentImpulse = 0.0f;
+  float maxLinearMomentumDelta = 0.0f;
+  float maxAngularMomentumDelta = 0.0f;
+};
+
+/** Read-only diagnostics for routed force-mode linear-drive rows. */
+struct LinearDriveIslandStats {
+  uint32_t emittedRowCount = 0;
+  uint32_t accelerationRowCount = 0;
+  uint32_t unsaturatedRowCount = 0;
+  uint32_t saturatedRowCount = 0;
+  float maxAbsForce = 0.0f;
+  float maxForceLimit = 0.0f;
+  float maxAbsDual = 0.0f;
+};
+
+/** Read-only diagnostics for routed TWIST velocity-drive rows. */
+struct AngularDriveIslandStats {
+  uint32_t emittedRowCount = 0;
+  uint32_t accelerationRowCount = 0;
+  uint32_t unsaturatedRowCount = 0;
+  uint32_t saturatedRowCount = 0;
+  float maxAbsTorque = 0.0f;
+  float maxTorqueLimit = 0.0f;
+  float maxAbsDual = 0.0f;
 };
 
 struct Solver {
@@ -37,6 +78,26 @@ struct Solver {
   int aaWindowSize = 3;                // AA window size (m)
   bool useChebyshev = false;           // Chebyshev semi-iterative position relaxation
   float chebyshevSpectralRadius = 0.92f; // estimated spectral radius
+  /** Probe-only routing; default off until frame-level gates accept it. */
+  bool useIslandPcgProbe = false;
+  IslandPcgStats islandPcgLastStats;
+  /** Probe control; true preserves the production large-contact path. */
+  bool enableSequentialDynDynFriction = true;
+  /** Probe-only physical sign for angular impulse integration. */
+  bool useFrictionAngularImpulseSignProbe = false;
+  /** Probe-only statistics; disabled to avoid default runtime overhead. */
+  bool enableDynDynFrictionDiagnostics = false;
+  DynDynFrictionPassStats dynDynFrictionLastStats;
+  /** Probe-only shared normal + 2D tangent contact-island objective. */
+  bool useContactIslandPcgProbe = isContactIslandPcgSuiteProbeEnabled();
+  /** Canonical same-world-point authoring for rigid test contacts only. */
+  bool useCanonicalRigidContactAuthoringProbe =
+      isCanonicalRigidContactAuthoringSuiteProbeEnabled();
+  IslandPcgStats contactIslandPcgLastStats;
+  /** True only when the current step used the complete shared contact island. */
+  bool contactIslandPcgRoutedLastStep = false;
+  LinearDriveIslandStats linearDriveIslandLastStats;
+  AngularDriveIslandStats angularDriveIslandLastStats;
 
   BodyStaticContactSolve bodyStaticContactSolve =
       BodyStaticContactSolve::Aggregated6x6;
@@ -136,6 +197,8 @@ private:
   void applyBodyStaticDepenetrationSweeps(uint32_t sweeps);
   void applyLowIslandDynDynFrictionSweeps(uint32_t sweeps);
   void sequentialDynDynFrictionPass(float dt);
+  bool solveFixedD6IslandPcgProbe(float dt);
+  bool solveContactIslandPcgProbe(float dt);
   float contactGeomViolation(const Contact &c) const;
 };
 

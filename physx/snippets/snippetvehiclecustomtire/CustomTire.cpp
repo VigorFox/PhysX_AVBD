@@ -34,12 +34,27 @@
 namespace snippetvehicle
 {
 
+static CustomTireDiagnostics gCustomTireDiagnostics = {};
+
+void resetCustomTireDiagnostics()
+{
+	gCustomTireDiagnostics = CustomTireDiagnostics();
+}
+
+const CustomTireDiagnostics& getCustomTireDiagnostics()
+{
+	return gCustomTireDiagnostics;
+}
+
 void CustomTireGripUpdate(
 	bool isWheelOnGround,
 	PxF32 unfilteredLoad, PxF32 restLoad, PxF32 maxNormalizedLoad,
 	PxF32 friction,
 	PxVehicleTireGripState& trGripState)
 {
+	gCustomTireDiagnostics.gripCalls++;
+	if(isWheelOnGround)
+		gCustomTireDiagnostics.onGroundCalls++;
 	trGripState.setToDefault();
 
 	//If the wheel is not touching the ground then carry on with zero grip state.
@@ -69,6 +84,7 @@ void CustomTireSlipsUpdate(
 	PxVehicleTireSlipState& tireSlipState,
 	PxF32& effectiveRollingRadius)
 {
+	gCustomTireDiagnostics.slipCalls++;
 	typedef MFTireConfig::Float TFloat;
 
 	TFloat longSlipTmp, tanLatSlipTmp, effectiveRollingRadiusTmp;
@@ -84,6 +100,14 @@ void CustomTireSlipsUpdate(
 	//       Furthermore, to be consistent with the default PhysX states, the angle is returned.
 
 	effectiveRollingRadius = PxF32(effectiveRollingRadiusTmp);
+	if(!PxIsFinite(tireSlipState.slips[
+			PxVehicleTireDirectionModes::eLONGITUDINAL]) ||
+		!PxIsFinite(tireSlipState.slips[
+			PxVehicleTireDirectionModes::eLATERAL]) ||
+		!PxIsFinite(effectiveRollingRadius))
+	{
+		gCustomTireDiagnostics.nonFiniteCount++;
+	}
 }
 
 void CustomTireForcesUpdate(
@@ -100,6 +124,7 @@ void CustomTireForcesUpdate(
 	PxF32 effectiveRollingRadius,
 	PxVehicleTireForce& tireForce)
 {
+	gCustomTireDiagnostics.forceCalls++;
 	typedef MFTireConfig::Float TFloat;
 
 	PxF32 wheelTorque;
@@ -181,6 +206,24 @@ void CustomTireForcesUpdate(
 
 	tireForce.aligningMoment = tireAlignMoment;
 	tireForce.wheelTorque = wheelTorque;
+	if(!PxIsFinite(tireLongForce) || !PxIsFinite(tireLatForce) ||
+		!PxIsFinite(tireAlignMoment) || !PxIsFinite(wheelTorque))
+	{
+		gCustomTireDiagnostics.nonFiniteCount++;
+	}
+	else
+	{
+		if(PxAbs(tireLongForce) > 1e-4f)
+			gCustomTireDiagnostics.nonZeroLongForceCalls++;
+		if(PxAbs(tireLatForce) > 1e-4f)
+			gCustomTireDiagnostics.nonZeroLatForceCalls++;
+		gCustomTireDiagnostics.maxLongForce = PxMax(
+			gCustomTireDiagnostics.maxLongForce, PxAbs(tireLongForce));
+		gCustomTireDiagnostics.maxLatForce = PxMax(
+			gCustomTireDiagnostics.maxLatForce, PxAbs(tireLatForce));
+		gCustomTireDiagnostics.maxWheelTorque = PxMax(
+			gCustomTireDiagnostics.maxWheelTorque, PxAbs(wheelTorque));
+	}
 }
 
 }//namespace snippetvehicle

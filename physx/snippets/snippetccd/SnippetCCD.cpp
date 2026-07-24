@@ -41,9 +41,12 @@
 #include <ctype.h>
 #include "PxPhysicsAPI.h"
 #include "extensions/PxRaycastCCD.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
+#include <cstdio>
+#include <string>
 #ifdef RENDER_SNIPPET
 	#include "../snippetrender/SnippetRender.h"
 #endif
@@ -51,7 +54,7 @@
 using namespace physx;
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
@@ -60,6 +63,40 @@ static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
 static RaycastCCDManager*		gRaycastCCD	= NULL;
 static PxReal					stackZ = 10.0f;
+
+enum HeadlessCCDCase
+{
+	HEADLESS_LINEAR_CCD,
+	HEADLESS_SPECULATIVE_CCD,
+	HEADLESS_NO_CCD
+};
+
+struct HeadlessCCDMetrics
+{
+	PxU32 completedFrames;
+	PxU32 fetchFailures;
+	PxU32 nonFinite;
+	PxU32 crossedWall;
+	PxU32 responseSamples;
+	PxU32 ccdPairs;
+	PxReal minSphereZ;
+	PxReal finalSphereZ;
+	PxReal finalVelocityZ;
+	PxU32 cleanupComplete;
+
+	HeadlessCCDMetrics()
+	: completedFrames(0), fetchFailures(0), nonFinite(0), crossedWall(0),
+	  responseSamples(0), ccdPairs(0), minSphereZ(PX_MAX_F32),
+	  finalSphereZ(0.0f), finalVelocityZ(0.0f), cleanupComplete(0)
+	{
+	}
+};
+
+static Snippets::HeadlessOptions gHeadlessOptions;
+static HeadlessCCDCase gHeadlessCase = HEADLESS_LINEAR_CCD;
+static HeadlessCCDMetrics gHeadlessMetrics;
+static PxRigidDynamic* gHeadlessSphere = NULL;
+static PxRigidStatic* gHeadlessWall = NULL;
 
 enum CCDAlgorithm
 {
@@ -90,6 +127,73 @@ static PxU32		gScenario		= 0;
 static PX_FORCE_INLINE CCDAlgorithm getCCDAlgorithm()
 {
 	return CCDAlgorithm(gScenario);
+}
+
+static const char* getHeadlessCaseName()
+{
+	switch(gHeadlessCase)
+	{
+	case HEADLESS_LINEAR_CCD:
+		return "linear";
+	case HEADLESS_SPECULATIVE_CCD:
+		return "speculative";
+	case HEADLESS_NO_CCD:
+		return "no-ccd";
+	default:
+		return "unknown";
+	}
+}
+
+static bool parseHeadlessCase(const char* value, HeadlessCCDCase& result)
+{
+	if(Snippets::equalsIgnoreCase(value, "linear"))
+	{
+		result = HEADLESS_LINEAR_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "speculative"))
+	{
+		result = HEADLESS_SPECULATIVE_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "no-ccd"))
+	{
+		result = HEADLESS_NO_CCD;
+		return true;
+	}
+	return false;
+}
+
+static bool parseHeadlessOptions(
+	int argc, const char* const* argv, std::string& error)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.frames = 12;
+	defaults.caseName = "linear";
+	defaults.solverType = PxSolverType::eAVBD;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+		return false;
+	for(int i = 1; i < argc; ++i)
+	{
+		if(!Snippets::isCommonHeadlessOption(argv[i]))
+		{
+			error = std::string("unknown option: ") +
+				(argv[i] ? argv[i] : "<null>");
+			return false;
+		}
+	}
+	if(!parseHeadlessCase(gHeadlessOptions.caseName.c_str(), gHeadlessCase))
+	{
+		error = "unsupported --case (expected linear, speculative, or no-ccd)";
+		return false;
+	}
+	if(gHeadlessOptions.frames < 4 || gHeadlessOptions.frames > 120)
+	{
+		error = "--frames must be in [4, 120]";
+		return false;
+	}
+	return true;
 }
 
 static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geometry, const PxVec3& velocity=PxVec3(0), bool enableLinearCCD = false, bool enableSpeculativeCCD = false)
@@ -175,8 +279,53 @@ static void registerForRaycastCCD(PxRigidDynamic* actor)
 	}
 }
 
+static void initHeadlessScene()
+{
+	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
+	sceneDesc.gravity = PxVec3(0.0f);
+	sceneDesc.cpuDispatcher = gDispatcher;
+	sceneDesc.filterShader = PxDefaultSimulationFilterShader;
+	sceneDesc.solverType = gHeadlessOptions.solverType;
+	if(gHeadlessCase == HEADLESS_LINEAR_CCD)
+	{
+		sceneDesc.flags |= PxSceneFlag::eENABLE_CCD;
+		sceneDesc.filterShader = ccdFilterShader;
+	}
+	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return;
+
+	gHeadlessWall = PxCreateStatic(
+		*gPhysics, PxTransform(PxVec3(0.0f)),
+		PxBoxGeometry(4.0f, 4.0f, 0.1f), *gMaterial);
+	gHeadlessSphere = PxCreateDynamic(
+		*gPhysics, PxTransform(PxVec3(0.0f, 0.0f, 20.0f)),
+		PxSphereGeometry(0.5f), *gMaterial, 10.0f);
+	if(!gHeadlessWall || !gHeadlessSphere)
+		return;
+
+	gHeadlessSphere->setLinearDamping(0.0f);
+	gHeadlessSphere->setAngularDamping(0.0f);
+	gHeadlessSphere->setLinearVelocity(PxVec3(0.0f, 0.0f, -1000.0f));
+	gHeadlessSphere->setSleepThreshold(0.0f);
+	if(gHeadlessCase == HEADLESS_LINEAR_CCD)
+		gHeadlessSphere->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_CCD, true);
+	else if(gHeadlessCase == HEADLESS_SPECULATIVE_CCD)
+		gHeadlessSphere->setRigidBodyFlag(
+			PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+
+	gScene->addActor(*gHeadlessWall);
+	gScene->addActor(*gHeadlessSphere);
+}
+
 static void initScene()
 {
+	if(gHeadlessOptions.headless)
+	{
+		initHeadlessScene();
+		return;
+	}
+
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
 	sceneDesc.cpuDispatcher = gDispatcher;
@@ -286,30 +435,46 @@ void renderText()
 
 void initPhysics(bool /*interactive*/)
 {
-	printf("CCD snippet. Use these keys:\n");
-	printf(" P        - enable/disable pause\n");
-	printf(" O        - step simulation for one frame\n");
-	printf(" R        - reset scene\n");
-	printf(" F1 to F4 - select scenes with different CCD algorithms\n");
-	printf("    F1	  - Using linear CCD\n");
-	printf("    F2    - Using speculative/angular CCD\n");
-	printf("    F3    - Using full CCD (linear+angular)\n");
-	printf("    F4	  - Using raycast CCD\n");
-	printf("    F5	  - Using no CCD\n");
-	printf("\n");
+	if(!gHeadlessOptions.headless)
+	{
+		printf("CCD snippet. Use these keys:\n");
+		printf(" P        - enable/disable pause\n");
+		printf(" O        - step simulation for one frame\n");
+		printf(" R        - reset scene\n");
+		printf(" F1 to F4 - select scenes with different CCD algorithms\n");
+		printf("    F1	  - Using linear CCD\n");
+		printf("    F2    - Using speculative/angular CCD\n");
+		printf("    F3    - Using full CCD (linear+angular)\n");
+		printf("    F4	  - Using raycast CCD\n");
+		printf("    F5	  - Using no CCD\n");
+		printf("\n");
+	}
 
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(!gHeadlessOptions.headless)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(
+			PVD_HOST, 5425, 10);
+		gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	}
 
 	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
 
-	const PxU32 numCores = SnippetUtils::getNbPhysicalCores();
-	gDispatcher = PxDefaultCpuDispatcherCreate(numCores == 0 ? 0 : numCores - 1);
+	if(gHeadlessOptions.headless)
+		gDispatcher = PxDefaultCpuDispatcherCreate(
+			gHeadlessOptions.dispatcherThreads);
+	else
+	{
+		const PxU32 numCores = SnippetUtils::getNbPhysicalCores();
+		gDispatcher = PxDefaultCpuDispatcherCreate(
+			numCores == 0 ? 0 : numCores - 1);
+	}
 
-	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.25f);
+	gMaterial = gHeadlessOptions.headless ?
+		gPhysics->createMaterial(0.0f, 0.0f, 0.0f) :
+		gPhysics->createMaterial(0.5f, 0.5f, 0.25f);
 
 	initScene();
 }
@@ -320,8 +485,35 @@ void stepPhysics(bool /*interactive*/)
 		return;
 	gOneFrame = false;
 
-	gScene->simulate(1.0f/60.0f);
-	gScene->fetchResults(true);
+	const PxReal dt = gHeadlessOptions.headless ?
+		gHeadlessOptions.dt : 1.0f/60.0f;
+	gScene->simulate(dt);
+	const bool fetched = gScene->fetchResults(true);
+	if(gHeadlessOptions.headless)
+	{
+		if(!fetched)
+			++gHeadlessMetrics.fetchFailures;
+		if(gHeadlessSphere)
+		{
+			const PxTransform pose = gHeadlessSphere->getGlobalPose();
+			const PxVec3 velocity = gHeadlessSphere->getLinearVelocity();
+			if(!pose.isFinite() || !velocity.isFinite())
+				++gHeadlessMetrics.nonFinite;
+			gHeadlessMetrics.minSphereZ =
+				PxMin(gHeadlessMetrics.minSphereZ, pose.p.z);
+			gHeadlessMetrics.finalSphereZ = pose.p.z;
+			gHeadlessMetrics.finalVelocityZ = velocity.z;
+			if(pose.p.z < -0.6f)
+				++gHeadlessMetrics.crossedWall;
+			if(velocity.z > -100.0f)
+				++gHeadlessMetrics.responseSamples;
+		}
+		PxSimulationStatistics stats;
+		gScene->getSimulationStatistics(stats);
+		gHeadlessMetrics.ccdPairs +=
+			stats.nbCCDPairs[PxGeometryType::eSPHERE][PxGeometryType::eBOX];
+		++gHeadlessMetrics.completedFrames;
+	}
 
 	// Simply call this after fetchResults to perform CCD raycasts.
 	if(gRaycastCCD)
@@ -332,6 +524,8 @@ static void releaseScene()
 {
 	PX_RELEASE(gScene);
 	PX_DELETE(gRaycastCCD);
+	gHeadlessSphere = NULL;
+	gHeadlessWall = NULL;
 }
 
 void cleanupPhysics(bool /*interactive*/)
@@ -347,6 +541,9 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
+	gHeadlessMetrics.cleanupComplete =
+		!gScene && !gRaycastCCD && !gDispatcher && !gPhysics &&
+		!gPvd && !gFoundation ? 1u : 0u;
 	
 	printf("SnippetCCD done.\n");
 }
@@ -379,8 +576,122 @@ void keyPress(unsigned char key, const PxTransform& /*camera*/)
 	}
 }
 
-int snippetMain(int, const char*const*)
+static int runHeadless()
 {
+	std::printf(
+		"[AVBD_GATE_CONFIG] schema=1 snippet=SnippetCCD solver=%s case=%s "
+		"execution=%s frames=%u dt=%.9g dispatcherThreads=%u seed=%u\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		getHeadlessCaseName(),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, double(gHeadlessOptions.dt),
+		gHeadlessOptions.dispatcherThreads, gHeadlessOptions.seed);
+
+	initPhysics(false);
+	const bool initialized =
+		gFoundation && gPhysics && gDispatcher && gMaterial && gScene &&
+		gHeadlessSphere && gHeadlessWall;
+	if(initialized)
+	{
+		for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
+			stepPhysics(false);
+	}
+
+	const char* reason = "none";
+	bool passed = true;
+	if(!initialized)
+	{
+		passed = false;
+		reason = "initialization_failed";
+	}
+	else if(gHeadlessMetrics.completedFrames != gHeadlessOptions.frames ||
+		gHeadlessMetrics.fetchFailures != 0)
+	{
+		passed = false;
+		reason = "incomplete_simulation";
+	}
+	else if(gHeadlessMetrics.nonFinite != 0 ||
+		gErrorCallback.getFatalCount() != 0)
+	{
+		passed = false;
+		reason = "runtime_error";
+	}
+	else if(gHeadlessCase == HEADLESS_NO_CCD)
+	{
+		if(gHeadlessMetrics.crossedWall == 0 ||
+			gHeadlessMetrics.minSphereZ > -5.0f)
+		{
+			passed = false;
+			reason = "negative_control_did_not_tunnel";
+		}
+	}
+	else if(gHeadlessMetrics.crossedWall != 0 ||
+		gHeadlessMetrics.minSphereZ < -0.6f)
+	{
+		passed = false;
+		reason = "complete_tunneling";
+	}
+	else if(gHeadlessMetrics.responseSamples == 0)
+	{
+		passed = false;
+		reason = "missing_impact_response";
+	}
+	else if(gHeadlessCase == HEADLESS_LINEAR_CCD &&
+		gHeadlessMetrics.ccdPairs == 0)
+	{
+		passed = false;
+		reason = "missing_ccd_pair";
+	}
+
+	cleanupPhysics(false);
+	if(!gHeadlessMetrics.cleanupComplete && passed)
+	{
+		passed = false;
+		reason = "cleanup_incomplete";
+	}
+	std::printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetCCD solver=%s case=%s "
+		"execution=%s frames=%u completedFrames=%u status=%s reason=%s "
+		"validation=GATED sphereRadius=0.5 wallHalfThickness=0.1 "
+		"initialZ=20 initialVelocityZ=-1000 crossedWall=%u "
+		"responseSamples=%u ccdPairs=%u minSphereZ=%.9g "
+		"finalSphereZ=%.9g finalVelocityZ=%.9g nonFinite=%u "
+		"fetchFailures=%u fatalErrors=%u cleanupComplete=%u pvd=0\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		getHeadlessCaseName(),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, gHeadlessMetrics.completedFrames,
+		passed ? "PASS" : "FAIL", reason,
+		gHeadlessMetrics.crossedWall, gHeadlessMetrics.responseSamples,
+		gHeadlessMetrics.ccdPairs, double(gHeadlessMetrics.minSphereZ),
+		double(gHeadlessMetrics.finalSphereZ),
+		double(gHeadlessMetrics.finalVelocityZ),
+		gHeadlessMetrics.nonFinite, gHeadlessMetrics.fetchFailures,
+		gErrorCallback.getFatalCount(), gHeadlessMetrics.cleanupComplete);
+	return passed ? Snippets::eHEADLESS_PASS :
+		Snippets::eHEADLESS_GATE_FAILED;
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	std::string error;
+	if(!parseHeadlessOptions(argc, argv, error))
+	{
+		std::fprintf(stderr,
+			"[AVBD_GATE_CONFIG_ERROR] snippet=SnippetCCD reason=%s\n",
+			error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(!Snippets::applyExecutionEnvironment(gHeadlessOptions))
+	{
+		std::fprintf(stderr,
+			"[AVBD_GATE_CONFIG_ERROR] snippet=SnippetCCD "
+			"reason=execution_environment_failed\n");
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(gHeadlessOptions.headless)
+		return runHeadless();
+
 #ifdef RENDER_SNIPPET
 	extern void renderLoop();
 	renderLoop();

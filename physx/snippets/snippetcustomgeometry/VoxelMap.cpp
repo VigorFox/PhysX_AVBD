@@ -194,6 +194,21 @@ void VoxelMap::getVoxelRegion(const PxBounds3& b, int& sx, int& sy, int& sz, int
 
 IMPLEMENT_CUSTOM_GEOMETRY_TYPE(VoxelMap)
 
+void VoxelMap::resetContactStats()
+{
+	m_generateCalls = 0;
+	m_generatedContacts = 0;
+	m_nonFiniteGeneratedContacts = 0;
+}
+
+void VoxelMap::recordGeneratedContact(const PxContactPoint& point) const
+{
+	++m_generatedContacts;
+	if(!point.point.isFinite() || !point.normal.isFinite() ||
+		!PxIsFinite(point.separation))
+		++m_nonFiniteGeneratedContacts;
+}
+
 PxBounds3 VoxelMap::getLocalBounds(const PxGeometry&) const
 {
 	return PxBounds3::centerExtents(PxVec3(0), extents());
@@ -203,6 +218,7 @@ bool VoxelMap::generateContacts(const PxGeometry& /*geom0*/, const PxGeometry& g
 	const PxReal contactDistance, const PxReal meshContactMargin, const PxReal toleranceLength,
 	PxContactBuffer& contactBuffer) const
 {
+	++m_generateCalls;
 	PxBoxGeometry voxelGeom(voxelSize() * 0.5f);
 	PxGeometry* pGeom0 = &voxelGeom;
 
@@ -213,15 +229,20 @@ bool VoxelMap::generateContacts(const PxGeometry& /*geom0*/, const PxGeometry& g
 	struct ContactRecorder : immediate::PxContactRecorder
 	{
 		PxContactBuffer* contactBuffer;
-		ContactRecorder(PxContactBuffer& _contactBuffer) : contactBuffer(&_contactBuffer) {}
+		const VoxelMap* voxelMap;
+		ContactRecorder(PxContactBuffer& _contactBuffer, const VoxelMap& map)
+			: contactBuffer(&_contactBuffer), voxelMap(&map) {}
 		virtual bool recordContacts(const PxContactPoint* contactPoints, PxU32 nbContacts, PxU32 /*index*/)
 		{
 			for (PxU32 i = 0; i < nbContacts; ++i)
+			{
+				voxelMap->recordGeneratedContact(contactPoints[i]);
 				contactBuffer->contact(contactPoints[i]);
+			}
 			return true;
 		}
 	}
-	contactRecorder(contactBuffer);
+	contactRecorder(contactBuffer, *this);
 
 	PxCache contactCache;
 

@@ -77,6 +77,16 @@ struct VoxelMap : physx::PxCustomGeometry::Callbacks, physx::PxUserAllocated
 
 	void getVoxelRegion(const physx::PxBounds3& b, int& sx, int& sy, int& sz, int& ex, int& ey, int& ez) const;
 
+	void resetContactStats();
+	void recordGeneratedContact(
+		const physx::PxContactPoint& point) const;
+	physx::PxU32 generateCalls() const { return m_generateCalls; }
+	physx::PxU32 generatedContacts() const { return m_generatedContacts; }
+	physx::PxU32 nonFiniteGeneratedContacts() const
+	{
+		return m_nonFiniteGeneratedContacts;
+	}
+
 	// physx::PxCustomGeometry::Callbacks overrides
 
 	DECLARE_CUSTOM_GEOMETRY_TYPE
@@ -103,6 +113,9 @@ private:
 	int m_dimensions[3];
 	physx::PxVec3 m_voxelSize;
 	physx::PxArray<physx::PxU64> m_packs;
+	mutable physx::PxU32 m_generateCalls = 0;
+	mutable physx::PxU32 m_generatedContacts = 0;
+	mutable physx::PxU32 m_nonFiniteGeneratedContacts = 0;
 };
 
 #endif

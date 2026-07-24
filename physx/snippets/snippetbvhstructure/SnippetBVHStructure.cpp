@@ -45,7 +45,9 @@
 // ****************************************************************************
 
 #include <ctype.h>
+#include <cfloat>
 #include "PxPhysicsAPI.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
@@ -53,17 +55,26 @@
 using namespace physx;
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
 static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
+static Snippets::HeadlessOptions gHeadlessOptions;
+static PxRigidDynamic*			gLargeSpheres[10];
+static PxU32					gLargeSphereCount = 0;
+static PxU32					gBvhCreated = 0;
+static PxU32					gTotalShapeBounds = 0;
+static bool						gSolverReadbackMatched = false;
+static PxU32					gCleanupComplete = 0;
 
-static void createLargeSphere(const PxTransform& t, PxU32 density, PxReal largeRadius, PxReal radius, bool useAggregate)
+static bool createLargeSphere(const PxTransform& t, PxU32 density, PxReal largeRadius, PxReal radius, bool useAggregate)
 {
 	PxRigidDynamic* body = gPhysics->createRigidDynamic(t);
+	if(!body)
+		return false;
 
 	// generate the sphere shapes
 	const float gStep = PxPi/float(density);
@@ -89,6 +100,7 @@ static void createLargeSphere(const PxTransform& t, PxU32 density, PxReal largeR
 	// get the bounds from the actor, this can be done through a helper function in PhysX extensions
 	PxU32 numBounds = 0;
 	PxBounds3* bounds = PxRigidActorExt::getRigidActorShapeLocalBoundsList(*body, numBounds);
+	gTotalShapeBounds += numBounds;
 
 	printf("Creating BVH structure for large compound actor...\n");
 
@@ -103,6 +115,12 @@ static void createLargeSphere(const PxTransform& t, PxU32 density, PxReal largeR
 
 	// release the memory allocated within extensions, the bounds are not required anymore
 	gAllocator.deallocate(bounds);
+	if(!bvh)
+	{
+		body->release();
+		return false;
+	}
+	gBvhCreated++;
 
 	if(useAggregate)
 		printf("Adding actor + BVH structure to aggregate...\n");
@@ -125,24 +143,44 @@ static void createLargeSphere(const PxTransform& t, PxU32 density, PxReal largeR
 
 	// bvh can be released at this point, the precomputed BVH structure was copied to the SDK pruners.
 	bvh->release();
+	if(gLargeSphereCount < 10)
+		gLargeSpheres[gLargeSphereCount++] = body;
+	return true;
 }
 
-void initPhysics(bool /*interactive*/)
+static bool initPhysicsInternal(bool headless)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if(!gFoundation)
+		return false;
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(!headless)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+		if(gPvd && transport)
+			gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	}
 
 	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+		return false;
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
-	gDispatcher = PxDefaultCpuDispatcherCreate(2);
+	if(headless)
+		sceneDesc.solverType = gHeadlessOptions.solverType;
+	gDispatcher = PxDefaultCpuDispatcherCreate(
+		headless ? gHeadlessOptions.dispatcherThreads : 2);
+	if(!gDispatcher)
+		return false;
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return false;
+	gSolverReadbackMatched =
+		!headless || gScene->getSolverType() == sceneDesc.solverType;
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
@@ -157,20 +195,39 @@ void initPhysics(bool /*interactive*/)
 	gScene->addActor(*groundPlane);
 
 	for(PxU32 i = 0; i < 10; i++)
-		createLargeSphere(PxTransform(PxVec3(200.0f*i, .0f, 100.0f)), 50, 30.0f, 1.0f, false);
+	{
+		if(!createLargeSphere(
+			PxTransform(PxVec3(200.0f*i, .0f, 100.0f)),
+			50, 30.0f, 1.0f, false))
+			return false;
+	}
+	return true;
+}
+
+void initPhysics(bool /*interactive*/)
+{
+	initPhysicsInternal(false);
+}
+
+static bool stepPhysicsInternal()
+{
+	if(!gHeadlessOptions.headless)
+		printf("Simulating...\n");
+	gScene->simulate(gHeadlessOptions.headless ?
+		gHeadlessOptions.dt : 1.0f/60.0f);
+	return gScene->fetchResults(true);
 }
 
 void stepPhysics(bool /*interactive*/)
 {
-	printf("Simulating...\n");
-	gScene->simulate(1.0f/60.0f);
-	gScene->fetchResults(true);
+	stepPhysicsInternal();
 }
 
 void cleanupPhysics(bool /*interactive*/)
 {
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
+	PX_RELEASE(gMaterial);
 	PX_RELEASE(gPhysics);
 	if(gPvd)
 	{
@@ -179,6 +236,7 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
+	gCleanupComplete = 1;
 
 	printf("SnippetBVH done.\n");
 }
@@ -187,8 +245,125 @@ void keyPress(unsigned char , const PxTransform& )
 {
 }
 
-int snippetMain(int, const char*const*)
+static PxU32 queryLargeSpheres()
 {
+	PxU32 hits = 0;
+	for(PxU32 i=0; i<gLargeSphereCount; ++i)
+	{
+		const PxTransform pose = gLargeSpheres[i]->getGlobalPose();
+		const PxVec3 direction = pose.rotate(PxVec3(0.0f, 0.0f, 1.0f));
+		const PxVec3 origin = pose.p - direction * 45.0f;
+		PxRaycastBuffer hit;
+		if(gScene->raycast(origin, direction, 90.0f, hit) &&
+		   hit.hasBlock && hit.block.actor == gLargeSpheres[i])
+			hits++;
+	}
+	return hits;
+}
+
+static int runHeadless()
+{
+	gErrorCallback.reset();
+	gCleanupComplete = 0;
+	gLargeSphereCount = 0;
+	gBvhCreated = 0;
+	gTotalShapeBounds = 0;
+	for(PxU32 i=0; i<10; ++i)
+		gLargeSpheres[i] = NULL;
+	if(!initPhysicsInternal(true))
+	{
+		cleanupPhysics(false);
+		return Snippets::eHEADLESS_GATE_FAILED;
+	}
+	const PxU32 initialDynamicActors =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	PxU32 totalShapes = 0;
+	for(PxU32 i=0; i<gLargeSphereCount; ++i)
+		totalShapes += gLargeSpheres[i]->getNbShapes();
+	const PxU32 queryHitsBefore = queryLargeSpheres();
+	PxU32 completedFrames = 0;
+	PxU32 nonFinite = 0;
+	PxU32 fetchFailures = 0;
+	PxReal maxSpeed = 0.0f;
+	PxReal maxAngularSpeed = 0.0f;
+	PxReal maxDisplacement = 0.0f;
+	for(PxU32 frame=0; frame<gHeadlessOptions.frames; ++frame)
+	{
+		if(!stepPhysicsInternal())
+		{
+			fetchFailures++;
+			break;
+		}
+		completedFrames++;
+		for(PxU32 i=0; i<gLargeSphereCount; ++i)
+		{
+			PxRigidDynamic* body = gLargeSpheres[i];
+			if(!body->getGlobalPose().isFinite() ||
+			   !body->getLinearVelocity().isFinite() ||
+			   !body->getAngularVelocity().isFinite())
+			{
+				nonFinite++;
+				continue;
+			}
+			maxSpeed = PxMax(maxSpeed, body->getLinearVelocity().magnitude());
+			maxAngularSpeed = PxMax(
+				maxAngularSpeed, body->getAngularVelocity().magnitude());
+			const PxVec3 initialPosition(200.0f * PxReal(i), 0.0f, 100.0f);
+			maxDisplacement = PxMax(
+				maxDisplacement,
+				(body->getGlobalPose().p - initialPosition).magnitude());
+		}
+		if(nonFinite)
+			break;
+	}
+	const PxU32 queryHitsAfter = queryLargeSpheres();
+	const bool passed =
+		gLargeSphereCount == 10 && gBvhCreated == 10 &&
+		gTotalShapeBounds == 25000 && totalShapes == 25000 &&
+		initialDynamicActors == 10 &&
+		queryHitsBefore == 10 && queryHitsAfter == 10 &&
+		completedFrames == gHeadlessOptions.frames &&
+		maxSpeed > 0.0f && maxSpeed < 50.0f &&
+		maxAngularSpeed >= 0.0f && maxAngularSpeed < 50.0f &&
+		maxDisplacement > 0.0f && maxDisplacement < 50.0f &&
+		nonFinite == 0 && fetchFailures == 0 &&
+		gSolverReadbackMatched && gErrorCallback.getFatalCount() == 0;
+	const PxU32 fatalErrors = gErrorCallback.getFatalCount();
+	cleanupPhysics(false);
+	printf("[AVBD_GATE] schema=1 snippet=SnippetBVHStructure solver=%s "
+		"case=bvh-compounds execution=%s frames=%u compounds=%u "
+		"bvhCreated=%u shapeBounds=%u totalShapes=%u dynamicActors=%u "
+		"queryHitsBefore=%u queryHitsAfter=%u completedFrames=%u "
+		"maxSpeed=%.9g maxAngularSpeed=%.9g maxDisplacement=%.9g nonFinite=%u "
+		"fetchFailures=%u fatalErrors=%u cleanupComplete=%u pvd=0 "
+		"status=%s reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, gLargeSphereCount, gBvhCreated,
+		gTotalShapeBounds, totalShapes, initialDynamicActors,
+		queryHitsBefore, queryHitsAfter, completedFrames, maxSpeed,
+		maxAngularSpeed, maxDisplacement, nonFinite, fetchFailures, fatalErrors,
+		gCleanupComplete, passed ? "PASS" : "FAIL",
+		passed ? "none" : "bvh_query_or_dynamics");
+	return passed ? Snippets::eHEADLESS_PASS :
+		Snippets::eHEADLESS_GATE_FAILED;
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.frames = 60;
+	defaults.caseName = "bvh-compounds";
+	std::string error;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+	{
+		printf("[AVBD_GATE_CONFIG_ERROR] snippet=SnippetBVHStructure "
+			"reason=%s\n", error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(gHeadlessOptions.headless)
+		return runHeadless();
 	static const PxU32 frameCount = 50;
 	initPhysics(false);
 	for(PxU32 i=0; i<frameCount; i++)

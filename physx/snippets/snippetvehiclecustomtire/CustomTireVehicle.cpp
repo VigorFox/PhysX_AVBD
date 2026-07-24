@@ -444,6 +444,13 @@ void CustomTireVehicle::destroy()
 
 void CustomTireVehicle::initComponentSequence(const bool addPhysXBeginEndComponents)
 {
+	if(!mUseCustomTire)
+	{
+		DirectDriveVehicle::initComponentSequence(
+			addPhysXBeginEndComponents);
+		return;
+	}
+
 	//Wake up the associated PxRigidBody if it is asleep and the vehicle commands signal an
 	//intent to change state. 
 	//Read from the physx actor and write the state (position, velocity etc) to the vehicle.

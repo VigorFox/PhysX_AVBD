@@ -27,9 +27,11 @@
 #include "DyAvbdSolver.h"
 #include "DyAvbdJointProjection.h"
 #include "DyAvbdKinematicShell.h"
+#include "CmConeLimitHelper.h"
 #include "common/PxProfileZone.h"
 #include "foundation/PxArray.h"
 #include "foundation/PxAssert.h"
+#include "PxConstraintDesc.h"
 #include "PxAvbdParallelFor.h"
 
 #include <algorithm>
@@ -53,6 +55,50 @@ namespace physx {
 namespace Dy {
 
 namespace {
+static bool computeEllipticalConeConstraint(
+    const AvbdD6JointConstraint &joint, const physx::PxQuat &rotA,
+    const physx::PxQuat &rotB, physx::PxVec3 &worldAxis,
+    physx::PxReal &violation) {
+  const physx::PxU32 ellipticalConeFlags =
+      AvbdD6JointConstraint::eD6_LEGACY_CONE_LIMIT_ACTIVE |
+      AvbdD6JointConstraint::eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE;
+  if ((joint.sourceFlags & ellipticalConeFlags) == 0 ||
+      joint.coneAngleLimit <= 0.0f || joint.coneAngleLimitZ <= 0.0f)
+    return false;
+
+  physx::PxQuat worldFrameA = rotA * joint.localFrameA;
+  physx::PxQuat worldFrameB = rotB * joint.localFrameB;
+  worldFrameA.normalize();
+  worldFrameB.normalize();
+  physx::PxQuat relative =
+      worldFrameA.getConjugate() * worldFrameB;
+  relative.normalize();
+  if (relative.w < 0.0f)
+    relative = -relative;
+
+  physx::PxQuat swing, twist;
+  physx::PxSeparateSwingTwist(relative, swing, twist);
+  if (swing.w < 0.0f)
+    swing = -swing;
+
+  physx::Cm::ConeLimitHelperTanLess helper(
+      joint.coneAngleLimit, joint.coneAngleLimitZ);
+  physx::PxVec3 localAxis;
+  physx::PxReal signedInsideError = 0.0f;
+  helper.getLimit(swing, localAxis, signedInsideError);
+  worldAxis = worldFrameA.rotate(localAxis);
+  const physx::PxReal axisMagnitude = worldAxis.magnitude();
+  if (!worldAxis.isFinite() || !PxIsFinite(signedInsideError) ||
+      axisMagnitude <= 1e-6f)
+    return false;
+  worldAxis *= 1.0f / axisMagnitude;
+  // ConeLimitHelperTanLess returns a positive error inside the cone and a
+  // negative error outside.  AVBD's existing unilateral cone convention
+  // uses a positive outward violation.
+  violation = -signedInsideError;
+  return PxIsFinite(violation);
+}
+
 static physx::PxReal computeRotationDeltaMagnitude(const physx::PxQuat& current,
                                                    const physx::PxQuat& previous) {
   physx::PxQuat deltaQ = current * previous.getConjugate();
@@ -60,6 +106,67 @@ static physx::PxReal computeRotationDeltaMagnitude(const physx::PxQuat& current,
     deltaQ = -deltaQ;
   return 2.0f * physx::PxSqrt(deltaQ.x * deltaQ.x + deltaQ.y * deltaQ.y +
                               deltaQ.z * deltaQ.z);
+}
+
+static physx::PxVec3 computeGeneric1DRotationDelta(
+    const physx::PxQuat &current, const physx::PxQuat &reference) {
+  physx::PxQuat delta = current * reference.getConjugate();
+  if (delta.w < 0.0f)
+    delta = -delta;
+
+  const physx::PxVec3 imaginary(delta.x, delta.y, delta.z);
+  const physx::PxReal sinHalfSquared = imaginary.magnitudeSquared();
+  if (sinHalfSquared <= 1e-20f)
+    return imaginary * 2.0f;
+
+  const physx::PxReal sinHalf = physx::PxSqrt(sinHalfSquared);
+  const physx::PxReal angle = 2.0f * physx::PxAtan2(
+      sinHalf, physx::PxClamp(delta.w, 0.0f, 1.0f));
+  return imaginary * (angle / sinHalf);
+}
+
+static physx::PxReal computeGeneric1DViolation(
+    const AvbdD6JointConstraint &joint, const AvbdSolverBody *bodies,
+    physx::PxU32 numBodies, physx::PxReal dt) {
+  physx::PxReal violation =
+      joint.genericGeometricError - joint.genericVelocityTarget * dt;
+  const physx::PxU32 bodyA = joint.header.bodyIndexA;
+  const physx::PxU32 bodyB = joint.header.bodyIndexB;
+
+  if (bodyA < numBodies) {
+    violation += joint.genericLinearA.dot(
+        bodies[bodyA].position - joint.genericReferencePositionA);
+    violation += joint.genericAngularA.dot(computeGeneric1DRotationDelta(
+        bodies[bodyA].rotation, joint.genericReferenceRotationA));
+  }
+  if (bodyB < numBodies) {
+    violation += joint.genericLinearB.dot(
+        bodies[bodyB].position - joint.genericReferencePositionB);
+    violation += joint.genericAngularB.dot(computeGeneric1DRotationDelta(
+        bodies[bodyB].rotation, joint.genericReferenceRotationB));
+  }
+  return violation;
+}
+
+static physx::PxReal computeGeneric1DEffectiveMass(
+    const AvbdD6JointConstraint &joint, const AvbdSolverBody *bodies,
+    physx::PxU32 numBodies) {
+  physx::PxReal unitResponse = 0.0f;
+  const physx::PxU32 bodyA = joint.header.bodyIndexA;
+  const physx::PxU32 bodyB = joint.header.bodyIndexB;
+  if (bodyA < numBodies) {
+    unitResponse +=
+        bodies[bodyA].invMass * joint.genericLinearA.magnitudeSquared();
+    unitResponse += joint.genericAngularA.dot(
+        bodies[bodyA].invInertiaWorld * joint.genericAngularA);
+  }
+  if (bodyB < numBodies) {
+    unitResponse +=
+        bodies[bodyB].invMass * joint.genericLinearB.magnitudeSquared();
+    unitResponse += joint.genericAngularB.dot(
+        bodies[bodyB].invInertiaWorld * joint.genericAngularB);
+  }
+  return unitResponse > 1e-10f ? 1.0f / unitResponse : 0.0f;
 }
 
 static void computeMaxPoseDeltas(const AvbdSolverBody* bodies,
@@ -109,6 +216,2158 @@ static physx::PxReal computeAngularDriveRecipResponse(
     unitResponse += (bodyB->invInertiaWorld * worldAxis).dot(worldAxis);
   return unitResponse > 1e-8f ? (1.0f / unitResponse) : 0.0f;
 }
+
+static bool isPassiveCenteredGearVelocityProjectionSupported(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, const AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, const AvbdGearJointConstraint *gearJoints,
+    physx::PxU32 numGear, physx::PxU32 numSoftParticles,
+    physx::PxU32 numSoftBodies, physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 2 || numContacts != 0 || !d6Joints ||
+      numD6 != 2 || !gearJoints || numGear != 1 ||
+      numSoftParticles != 0 || numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdGearJointConstraint &gear = gearJoints[0];
+  const physx::PxU32 gearA = gear.header.bodyIndexA;
+  const physx::PxU32 gearB = gear.header.bodyIndexB;
+  if (gearA >= numBodies || gearB >= numBodies || gearA == gearB ||
+      bodies[gearA].invMass <= 0.0f || bodies[gearB].invMass <= 0.0f ||
+      !physx::PxIsFinite(gear.gearRatio) ||
+      physx::PxAbs(gear.gearRatio) <= 1e-6f ||
+      !gear.gearAxis0.isFinite() || !gear.gearAxis1.isFinite() ||
+      gear.gearAxis0.magnitudeSquared() <= 1e-8f ||
+      gear.gearAxis1.magnitudeSquared() <= 1e-8f)
+    return false;
+
+  bool ownsBody[2] = {false, false};
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    const AvbdD6JointConstraint &joint = d6Joints[i];
+    const bool aDynamic =
+        joint.header.bodyIndexA < numBodies &&
+        bodies[joint.header.bodyIndexA].invMass > 0.0f;
+    const bool bDynamic =
+        joint.header.bodyIndexB < numBodies &&
+        bodies[joint.header.bodyIndexB].invMass > 0.0f;
+    if (joint.header.type != AvbdConstraintType::eJOINT_REVOLUTE ||
+        aDynamic == bDynamic || joint.linearMotion != 0u ||
+        joint.angularMotion != 0x2u || joint.driveFlags != 0u ||
+        joint.motorEnabled != 0u)
+      return false;
+
+    const physx::PxU32 dynamicIndex =
+        aDynamic ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+    if (dynamicIndex >= 2 || ownsBody[dynamicIndex])
+      return false;
+    ownsBody[dynamicIndex] = true;
+
+    const physx::PxVec3 &dynamicAnchor =
+        aDynamic ? joint.anchorA : joint.anchorB;
+    const physx::PxQuat &dynamicFrame =
+        aDynamic ? joint.localFrameA : joint.localFrameB;
+    if (dynamicAnchor.magnitudeSquared() > 1e-8f)
+      return false;
+
+    physx::PxVec3 hingeAxis =
+        dynamicFrame.rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+    physx::PxVec3 gearAxis =
+        dynamicIndex == gearA ? gear.gearAxis0 : gear.gearAxis1;
+    if (hingeAxis.normalize() <= 1e-6f ||
+        gearAxis.normalize() <= 1e-6f ||
+        physx::PxAbs(hingeAxis.dot(gearAxis)) < 0.9999f)
+      return false;
+  }
+
+  return ownsBody[gearA] && ownsBody[gearB];
+}
+
+static void projectPassiveCenteredGearVelocity(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdGearJointConstraint &gear,
+    const physx::PxArray<physx::PxVec3> &angularVelAtSolveStart) {
+  const physx::PxU32 bodyAIndex = gear.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = gear.header.bodyIndexB;
+  if (bodyAIndex >= numBodies || bodyBIndex >= numBodies ||
+      angularVelAtSolveStart.size() != numBodies)
+    return;
+
+  AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  AvbdSolverBody &bodyB = bodies[bodyBIndex];
+  physx::PxVec3 axisA = bodyA.rotation.rotate(gear.gearAxis0);
+  physx::PxVec3 axisB = bodyB.rotation.rotate(gear.gearAxis1);
+  if (axisA.normalize() <= 1e-6f || axisB.normalize() <= 1e-6f)
+    return;
+
+  const physx::PxVec3 jacobianA = axisA * gear.gearRatio;
+  const physx::PxVec3 jacobianB = axisB;
+  const physx::PxVec3 responseA =
+      bodyA.invInertiaWorld.transform(jacobianA);
+  const physx::PxVec3 responseB =
+      bodyB.invInertiaWorld.transform(jacobianB);
+  const physx::PxReal denominator =
+      jacobianA.dot(responseA) + jacobianB.dot(responseB);
+  if (!physx::PxIsFinite(denominator) || denominator <= 1e-10f)
+    return;
+
+  // This scoped path requires each revolute free axis to be a principal
+  // inertia direction.  Otherwise an exact gear impulse also changes locked
+  // swing components and must be solved together with the complete D6 row set.
+  const physx::PxReal responseScaleA =
+      physx::PxMax(responseA.magnitude(), 1e-8f);
+  const physx::PxReal responseScaleB =
+      physx::PxMax(responseB.magnitude(), 1e-8f);
+  if (responseA.cross(axisA).magnitude() > responseScaleA * 1e-4f ||
+      responseB.cross(axisB).magnitude() > responseScaleB * 1e-4f)
+    return;
+
+  const physx::PxVec3 &rawA = angularVelAtSolveStart[bodyAIndex];
+  const physx::PxVec3 &rawB = angularVelAtSolveStart[bodyBIndex];
+  const physx::PxReal residual =
+      jacobianA.dot(rawA) + jacobianB.dot(rawB);
+  const physx::PxReal lambda = -residual / denominator;
+  if (!physx::PxIsFinite(lambda))
+    return;
+
+  const physx::PxVec3 expectedA = rawA + responseA * lambda;
+  const physx::PxVec3 expectedB = rawB + responseB * lambda;
+  physx::PxVec3 candidateA =
+      bodyA.angularVelocity +
+      axisA * (expectedA.dot(axisA) - bodyA.angularVelocity.dot(axisA));
+  physx::PxVec3 candidateB =
+      bodyB.angularVelocity +
+      axisB * (expectedB.dot(axisB) - bodyB.angularVelocity.dot(axisB));
+  if (!candidateA.isFinite() || !candidateB.isFinite())
+    return;
+
+  // Preserve authored angular-velocity caps.  A capped coupled projection
+  // requires an active-set solve and is intentionally outside this predicate.
+  if ((bodyA.maxAngularVelocitySq > 0.0f &&
+       candidateA.magnitudeSquared() > bodyA.maxAngularVelocitySq) ||
+      (bodyB.maxAngularVelocitySq > 0.0f &&
+       candidateB.magnitudeSquared() > bodyB.maxAngularVelocitySq))
+    return;
+
+  bodyA.angularVelocity = candidateA;
+  bodyB.angularVelocity = candidateB;
+}
+
+static bool isSinglePassiveGenericHard1DVelocityProjectionSupported(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, const AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts, physx::PxU32 &genericIndex) {
+  genericIndex = PX_MAX_U32;
+  if (!bodies || numBodies == 0 || numContacts != 0 || !d6Joints ||
+      numD6 == 0 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    if ((d6Joints[i].sourceFlags &
+         (AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
+          AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) == 0)
+      continue;
+    if (genericIndex != PX_MAX_U32)
+      return false;
+    genericIndex = i;
+  }
+  if (genericIndex == PX_MAX_U32)
+    return false;
+
+  const AvbdD6JointConstraint &generic = d6Joints[genericIndex];
+  if (generic.header.type != AvbdConstraintType::eJOINT_CUSTOM_1D ||
+      !generic.genericLinearA.isFinite() ||
+      !generic.genericAngularA.isFinite() ||
+      !generic.genericLinearB.isFinite() ||
+      !generic.genericAngularB.isFinite() ||
+      !physx::PxIsFinite(generic.genericVelocityTarget) ||
+      generic.genericMinImpulse >= 0.0f ||
+      generic.genericMaxImpulse <= 0.0f)
+    return false;
+
+  const physx::PxU32 endpoint[2] = {generic.header.bodyIndexA,
+                                    generic.header.bodyIndexB};
+  if (endpoint[0] < numBodies && endpoint[1] < numBodies &&
+      endpoint[0] == endpoint[1])
+    return false;
+  const physx::PxVec3 linearJ[2] = {generic.genericLinearA,
+                                    generic.genericLinearB};
+  const physx::PxVec3 angularJ[2] = {generic.genericAngularA,
+                                     generic.genericAngularB};
+  bool ownsDynamicEndpoint = false;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    if (bodies[endpoint[side]].invMass <= 0.0f)
+      return false;
+    ownsDynamicEndpoint = true;
+
+    const bool hasLinear = linearJ[side].magnitudeSquared() > 1e-10f;
+    const bool hasAngular = angularJ[side].magnitudeSquared() > 1e-10f;
+    // A general spatial row needs a coupled velocity active-set solve.
+    // This accepted subdomain has at most one response kind per endpoint.
+    if (hasLinear && hasAngular)
+      return false;
+    if (hasAngular) {
+      const physx::PxVec3 response =
+          bodies[endpoint[side]].invInertiaWorld * angularJ[side];
+      const physx::PxReal scale =
+          physx::PxMax(response.magnitude(), 1e-8f);
+      if (response.cross(angularJ[side]).magnitude() > scale * 1e-4f)
+        return false;
+    }
+  }
+  if (!ownsDynamicEndpoint)
+    return false;
+
+  // Any accompanying D6 row must be a centered, passive world attachment.
+  // The generic Jacobian may only occupy DOFs that attachment leaves FREE.
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    if (i == genericIndex)
+      continue;
+    const AvbdD6JointConstraint &joint = d6Joints[i];
+    const bool aDynamic = joint.header.bodyIndexA < numBodies;
+    const bool bDynamic = joint.header.bodyIndexB < numBodies;
+    if (aDynamic == bDynamic || joint.driveFlags != 0u ||
+        joint.motorEnabled != 0u)
+      return false;
+    const physx::PxU32 dynamicIndex =
+        aDynamic ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+    physx::PxU32 side = PX_MAX_U32;
+    if (dynamicIndex == endpoint[0])
+      side = 0;
+    else if (dynamicIndex == endpoint[1])
+      side = 1;
+    if (side == PX_MAX_U32)
+      return false;
+
+    const physx::PxVec3 &dynamicAnchor =
+        aDynamic ? joint.anchorA : joint.anchorB;
+    if (dynamicAnchor.magnitudeSquared() > 1e-8f)
+      return false;
+    const physx::PxQuat &localFrame =
+        aDynamic ? joint.localFrameA : joint.localFrameB;
+    const physx::PxQuat worldFrame =
+        bodies[dynamicIndex].rotation * localFrame;
+    for (physx::PxU32 axisIndex = 0; axisIndex < 3; ++axisIndex) {
+      physx::PxVec3 localAxis(0.0f);
+      localAxis[axisIndex] = 1.0f;
+      physx::PxVec3 worldAxis = worldFrame.rotate(localAxis);
+      if (joint.getLinearMotion(axisIndex) != 2 &&
+          physx::PxAbs(linearJ[side].dot(worldAxis)) > 1e-5f)
+        return false;
+      if (joint.getAngularMotion(axisIndex) != 2 &&
+          physx::PxAbs(angularJ[side].dot(worldAxis)) > 1e-5f)
+        return false;
+    }
+  }
+  return true;
+}
+
+static void projectSinglePassiveGenericHard1DVelocity(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint &generic,
+    const physx::PxArray<physx::PxVec3> &linearVelAtSolveStart,
+    const physx::PxArray<physx::PxVec3> &angularVelAtSolveStart) {
+  if (linearVelAtSolveStart.size() != numBodies ||
+      angularVelAtSolveStart.size() != numBodies)
+    return;
+
+  const physx::PxU32 endpoint[2] = {generic.header.bodyIndexA,
+                                    generic.header.bodyIndexB};
+  const physx::PxVec3 linearJ[2] = {generic.genericLinearA,
+                                    generic.genericLinearB};
+  const physx::PxVec3 angularJ[2] = {generic.genericAngularA,
+                                     generic.genericAngularB};
+  physx::PxVec3 linearResponse[2] = {physx::PxVec3(0.0f),
+                                     physx::PxVec3(0.0f)};
+  physx::PxVec3 angularResponse[2] = {physx::PxVec3(0.0f),
+                                      physx::PxVec3(0.0f)};
+  physx::PxReal denominator = 0.0f;
+  physx::PxReal startSpeed = 0.0f;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    AvbdSolverBody &body = bodies[endpoint[side]];
+    linearResponse[side] = linearJ[side] * body.invMass;
+    angularResponse[side] =
+        body.invInertiaWorld.transform(angularJ[side]);
+    denominator += linearJ[side].dot(linearResponse[side]) +
+                   angularJ[side].dot(angularResponse[side]);
+    startSpeed +=
+        linearJ[side].dot(linearVelAtSolveStart[endpoint[side]]) +
+        angularJ[side].dot(angularVelAtSolveStart[endpoint[side]]);
+  }
+  if (!physx::PxIsFinite(denominator) || denominator <= 1e-10f)
+    return;
+
+  physx::PxReal velocityTarget = generic.genericVelocityTarget;
+  if ((generic.sourceFlags &
+       AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW) != 0) {
+    const physx::PxReal bounceVelocity =
+        -generic.genericRestitution * startSpeed;
+    if (-startSpeed > generic.genericBounceThreshold &&
+        bounceVelocity * generic.genericGeometricError <= 0.0f)
+      velocityTarget = bounceVelocity;
+  }
+  const physx::PxReal residual = startSpeed - velocityTarget;
+  const physx::PxReal impulse = physx::PxClamp(
+      -residual / denominator, generic.genericMinImpulse,
+      generic.genericMaxImpulse);
+  if (!physx::PxIsFinite(impulse))
+    return;
+
+  physx::PxVec3 candidateLinear[2];
+  physx::PxVec3 candidateAngular[2];
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    AvbdSolverBody &body = bodies[endpoint[side]];
+    const physx::PxVec3 expectedLinear =
+        linearVelAtSolveStart[endpoint[side]] +
+        linearResponse[side] * impulse;
+    const physx::PxVec3 expectedAngular =
+        angularVelAtSolveStart[endpoint[side]] +
+        angularResponse[side] * impulse;
+    candidateLinear[side] = body.linearVelocity;
+    candidateAngular[side] = body.angularVelocity;
+    if (linearJ[side].magnitudeSquared() > 1e-10f) {
+      physx::PxVec3 axis = linearJ[side].getNormalized();
+      candidateLinear[side] +=
+          axis * (expectedLinear.dot(axis) -
+                  candidateLinear[side].dot(axis));
+    }
+    if (angularJ[side].magnitudeSquared() > 1e-10f) {
+      physx::PxVec3 axis = angularJ[side].getNormalized();
+      candidateAngular[side] +=
+          axis * (expectedAngular.dot(axis) -
+                  candidateAngular[side].dot(axis));
+    }
+    if (!candidateLinear[side].isFinite() ||
+        !candidateAngular[side].isFinite())
+      return;
+    if ((body.maxLinearVelocitySq > 0.0f &&
+         candidateLinear[side].magnitudeSquared() >
+             body.maxLinearVelocitySq) ||
+        (body.maxAngularVelocitySq > 0.0f &&
+         candidateAngular[side].magnitudeSquared() >
+             body.maxAngularVelocitySq))
+      return;
+  }
+
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    bodies[endpoint[side]].linearVelocity = candidateLinear[side];
+    bodies[endpoint[side]].angularVelocity = candidateAngular[side];
+  }
+
+  const bool outputForce =
+      (generic.genericRowFlags &
+       static_cast<physx::PxU32>(Px1DConstraintFlag::eOUTPUT_FORCE)) != 0;
+  generic.writebackLinearImpulse =
+      outputForce ? generic.genericLinearA * impulse : physx::PxVec3(0.0f);
+  generic.writebackAngularImpulse =
+      outputForce ? generic.genericAngularAWriteback * impulse
+                  : physx::PxVec3(0.0f);
+  generic.writebackLinearImpulseValid = 1;
+  generic.writebackAngularImpulseValid = 1;
+}
+
+static void projectArticulationMimicHard1D(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint &mimic, physx::PxReal dt) {
+  const physx::PxReal effectiveMass =
+      computeGeneric1DEffectiveMass(mimic, bodies, numBodies);
+  if (effectiveMass <= 0.0f || !physx::PxIsFinite(effectiveMass))
+    return;
+  const physx::PxReal unitResponse = 1.0f / effectiveMass;
+  const physx::PxReal positionMultiplier =
+      -computeGeneric1DViolation(mimic, bodies, numBodies, dt) /
+      unitResponse;
+  if (!physx::PxIsFinite(positionMultiplier))
+    return;
+
+  const physx::PxU32 endpoint[2] = {mimic.header.bodyIndexA,
+                                    mimic.header.bodyIndexB};
+  const physx::PxVec3 linearJ[2] = {mimic.genericLinearA,
+                                    mimic.genericLinearB};
+  const physx::PxVec3 angularJ[2] = {mimic.genericAngularA,
+                                     mimic.genericAngularB};
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies ||
+        bodies[endpoint[side]].invMass <= 0.0f)
+      continue;
+    AvbdSolverBody &body = bodies[endpoint[side]];
+    body.position +=
+        linearJ[side] * (body.invMass * positionMultiplier);
+    const physx::PxVec3 rotationDelta =
+        body.invInertiaWorld * angularJ[side] * positionMultiplier;
+    const physx::PxReal angle = rotationDelta.magnitude();
+    if (angle > 1e-10f && physx::PxIsFinite(angle)) {
+      const physx::PxQuat deltaRotation(
+          angle, rotationDelta * (1.0f / angle));
+      body.rotation = (deltaRotation * body.rotation).getNormalized();
+    }
+  }
+  physx::PxReal velocityResidual = -mimic.genericVelocityTarget;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    velocityResidual +=
+        linearJ[side].dot(bodies[endpoint[side]].linearVelocity) +
+        angularJ[side].dot(bodies[endpoint[side]].angularVelocity);
+  }
+  const physx::PxReal velocityImpulse =
+      -velocityResidual / unitResponse;
+  if (!physx::PxIsFinite(velocityImpulse))
+    return;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies ||
+        bodies[endpoint[side]].invMass <= 0.0f)
+      continue;
+    AvbdSolverBody &body = bodies[endpoint[side]];
+    body.linearVelocity +=
+        linearJ[side] * (body.invMass * velocityImpulse);
+    body.angularVelocity +=
+        body.invInertiaWorld * angularJ[side] * velocityImpulse;
+  }
+}
+
+static void projectArticulationMimicVelocity1D(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint &mimic) {
+  const physx::PxReal effectiveMass =
+      computeGeneric1DEffectiveMass(mimic, bodies, numBodies);
+  if (effectiveMass <= 0.0f || !physx::PxIsFinite(effectiveMass))
+    return;
+  const physx::PxReal unitResponse = 1.0f / effectiveMass;
+  const physx::PxU32 endpoint[2] = {mimic.header.bodyIndexA,
+                                    mimic.header.bodyIndexB};
+  const physx::PxVec3 linearJ[2] = {mimic.genericLinearA,
+                                    mimic.genericLinearB};
+  const physx::PxVec3 angularJ[2] = {mimic.genericAngularA,
+                                     mimic.genericAngularB};
+  physx::PxReal velocityResidual = -mimic.genericVelocityTarget;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies)
+      continue;
+    velocityResidual +=
+        linearJ[side].dot(bodies[endpoint[side]].linearVelocity) +
+        angularJ[side].dot(bodies[endpoint[side]].angularVelocity);
+  }
+  const physx::PxReal velocityImpulse =
+      -velocityResidual / unitResponse;
+  if (!physx::PxIsFinite(velocityImpulse))
+    return;
+  for (physx::PxU32 side = 0; side < 2; ++side) {
+    if (endpoint[side] >= numBodies ||
+        bodies[endpoint[side]].invMass <= 0.0f)
+      continue;
+    AvbdSolverBody &body = bodies[endpoint[side]];
+    body.linearVelocity +=
+        linearJ[side] * (body.invMass * velocityImpulse);
+    body.angularVelocity +=
+        body.invInertiaWorld * angularJ[side] * velocityImpulse;
+  }
+}
+
+// Matches joint::computeJacobianAxes in ExtConstraintHelper.h.  These rows are
+// the world-space derivatives of imag(qa^-1*qb) with respect to wB-wA.  A
+// SLERP spring uses them when stiffness is non-zero; only velocity-only SLERP
+// keeps the fixed world X/Y/Z rows.
+static void computeSlerpJacobianAxes(physx::PxVec3 rows[3],
+                                     const physx::PxQuat &qa,
+                                     const physx::PxQuat &qb) {
+  const physx::PxReal wa = qa.w;
+  const physx::PxReal wb = qb.w;
+  const physx::PxVec3 va(qa.x, qa.y, qa.z);
+  const physx::PxVec3 vb(qb.x, qb.y, qb.z);
+  const physx::PxVec3 c = vb * wa + va * wb;
+  const physx::PxReal d0 = wa * wb;
+  const physx::PxReal d1 = va.dot(vb);
+  const physx::PxReal d = d0 - d1;
+
+  rows[0] =
+      (va * vb.x + vb * va.x + physx::PxVec3(d, c.z, -c.y)) * 0.5f;
+  rows[1] =
+      (va * vb.y + vb * va.y + physx::PxVec3(-c.z, d, c.x)) * 0.5f;
+  rows[2] =
+      (va * vb.z + vb * va.z + physx::PxVec3(c.y, -c.x, d)) * 0.5f;
+
+  if ((d0 + d1) == 0.0f) {
+    rows[0].x += PX_EPS_F32;
+    rows[1].y += PX_EPS_F32;
+    rows[2].z += PX_EPS_F32;
+  }
+}
+
+struct CoupledIslandRow {
+  AvbdVec6 jacobianA;
+  AvbdVec6 jacobianB;
+  physx::PxU32 bodyA;
+  physx::PxU32 bodyB;
+  physx::PxReal penalty;
+  physx::PxReal force;
+};
+
+static bool findCoupledSpatialTendonRows(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, const AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts,
+    physx::PxArray<physx::PxU32> &rowIndices) {
+  rowIndices.clear();
+  if (!bodies || numBodies < 2 || numContacts != 0 || !d6Joints ||
+      numD6 == 0 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    const AvbdD6JointConstraint &joint = d6Joints[i];
+    if ((joint.sourceFlags &
+         AvbdD6JointConstraint::eARTICULATION_SPATIAL_TENDON_ROW) == 0)
+      continue;
+    const physx::PxU32 bodyA = joint.header.bodyIndexA;
+    const physx::PxU32 bodyB = joint.header.bodyIndexB;
+    const physx::PxReal jacobianMagnitudeSquaredA =
+        joint.genericLinearA.magnitudeSquared() +
+        joint.genericAngularA.magnitudeSquared();
+    const physx::PxReal jacobianMagnitudeSquaredB =
+        joint.genericLinearB.magnitudeSquared() +
+        joint.genericAngularB.magnitudeSquared();
+    if (bodyA >= numBodies || bodyB >= numBodies ||
+        bodyA == bodyB || bodies[bodyA].invMass <= 0.0f ||
+        bodies[bodyB].invMass <= 0.0f ||
+        !PxIsFinite(joint.header.rho) ||
+        joint.header.rho < 0.0f ||
+        !PxIsFinite(joint.header.damping) ||
+        joint.header.damping < 0.0f ||
+        !PxIsFinite(joint.genericTendonLimitStiffness) ||
+        joint.genericTendonLimitStiffness < 0.0f ||
+        (joint.header.rho <= 0.0f &&
+         joint.genericTendonLimitStiffness <= 0.0f) ||
+        jacobianMagnitudeSquaredA <= 1e-12f ||
+        jacobianMagnitudeSquaredB <= 1e-12f ||
+        !joint.genericLinearA.isFinite() ||
+        !joint.genericAngularA.isFinite() ||
+        !joint.genericLinearB.isFinite() ||
+        !joint.genericAngularB.isFinite())
+      return false;
+    rowIndices.pushBack(i);
+  }
+  return !rowIndices.empty();
+}
+
+static AvbdVec6 multiplyBlock(const AvbdBlock6x6 &block,
+                              const AvbdVec6 &value) {
+  return AvbdVec6(block.linearLinear * value.linear +
+                      block.linearAngular * value.angular,
+                  block.angularLinear * value.linear +
+                      block.angularAngular * value.angular);
+}
+
+static void addScaled(AvbdVec6 &target, const AvbdVec6 &value,
+                      physx::PxReal scale) {
+  target.linear += value.linear * scale;
+  target.angular += value.angular * scale;
+}
+
+static double dotVectors(const physx::PxArray<AvbdVec6> &a,
+                         const physx::PxArray<AvbdVec6> &b) {
+  double result = 0.0;
+  for (physx::PxU32 i = 0; i < a.size(); ++i)
+    result += static_cast<double>(a[i].linear.x) * b[i].linear.x +
+              static_cast<double>(a[i].linear.y) * b[i].linear.y +
+              static_cast<double>(a[i].linear.z) * b[i].linear.z +
+              static_cast<double>(a[i].angular.x) * b[i].angular.x +
+              static_cast<double>(a[i].angular.y) * b[i].angular.y +
+              static_cast<double>(a[i].angular.z) * b[i].angular.z;
+  return result;
+}
+
+static void addCoupledRow(const CoupledIslandRow &row,
+                          physx::PxArray<CoupledIslandRow> &rows,
+                          physx::PxArray<AvbdVec6> &gradient,
+                          physx::PxArray<AvbdBlock6x6> &preconditioner) {
+  rows.pushBack(row);
+  if (row.bodyA != PX_MAX_U32) {
+    addScaled(gradient[row.bodyA], row.jacobianA, row.force);
+    preconditioner[row.bodyA].addConstraintContribution(
+        row.jacobianA.linear, row.jacobianA.angular, row.penalty);
+  }
+  if (row.bodyB != PX_MAX_U32) {
+    addScaled(gradient[row.bodyB], row.jacobianB, row.force);
+    preconditioner[row.bodyB].addConstraintContribution(
+        row.jacobianB.linear, row.jacobianB.angular, row.penalty);
+  }
+}
+
+static void applyCoupledOperator(
+    const physx::PxArray<AvbdBlock6x6> &inertialBlocks,
+    const physx::PxArray<CoupledIslandRow> &rows,
+    const physx::PxArray<AvbdVec6> &input,
+    physx::PxArray<AvbdVec6> &output) {
+  output.resize(input.size());
+  for (physx::PxU32 i = 0; i < input.size(); ++i)
+    output[i] = multiplyBlock(inertialBlocks[i], input[i]);
+  for (physx::PxU32 i = 0; i < rows.size(); ++i) {
+    const CoupledIslandRow &row = rows[i];
+    physx::PxReal projection = 0.0f;
+    if (row.bodyA != PX_MAX_U32)
+      projection += row.jacobianA.dot(input[row.bodyA]);
+    if (row.bodyB != PX_MAX_U32)
+      projection += row.jacobianB.dot(input[row.bodyB]);
+    const physx::PxReal scale = row.penalty * projection;
+    if (row.bodyA != PX_MAX_U32)
+      addScaled(output[row.bodyA], row.jacobianA, scale);
+    if (row.bodyB != PX_MAX_U32)
+      addScaled(output[row.bodyB], row.jacobianB, scale);
+  }
+}
+
+static bool areFrictionlessBodyVsStaticContactsSupported(
+    const AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxU32 numBodies) {
+  if (numContacts != 0 && !contacts)
+    return false;
+  for (physx::PxU32 i = 0; i < numContacts; ++i) {
+    const AvbdContactConstraint &contact = contacts[i];
+    if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                               contact.header.bodyIndexB, numBodies) ||
+        contact.friction > 0.0f || contact.staticFriction > 0.0f ||
+        hasDeformableStaticAnchor(contact))
+      return false;
+  }
+  return true;
+}
+
+static bool areTorqueFreeBodyVsStaticContactsSupported(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdContactConstraint *contacts, physx::PxU32 numContacts) {
+  if (!bodies ||
+      !areFrictionlessBodyVsStaticContactsSupported(
+          contacts, numContacts, numBodies))
+    return false;
+  for (physx::PxU32 i = 0; i < numContacts; ++i) {
+    const AvbdContactConstraint &contact = contacts[i];
+    const bool dynamicA = contact.header.bodyIndexA < numBodies;
+    const physx::PxU32 bodyIndex =
+        dynamicA ? contact.header.bodyIndexA : contact.header.bodyIndexB;
+    if (bodyIndex >= numBodies)
+      return false;
+    const physx::PxVec3 localPoint =
+        dynamicA ? contact.contactPointA : contact.contactPointB;
+    const physx::PxVec3 momentArm =
+        bodies[bodyIndex].rotation.rotate(localPoint);
+    if (momentArm.cross(contact.contactNormal).magnitudeSquared() > 1e-10f)
+      return false;
+  }
+  return true;
+}
+
+static bool addFrictionlessBodyVsStaticContactRows(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    const AvbdSolverConfig &config, physx::PxReal invDt2,
+    physx::PxArray<CoupledIslandRow> &rows,
+    physx::PxArray<AvbdVec6> &gradient,
+    physx::PxArray<AvbdBlock6x6> &preconditioner) {
+  if (!areFrictionlessBodyVsStaticContactsSupported(
+          contacts, numContacts, numBodies))
+    return false;
+
+  for (physx::PxU32 i = 0; i < numContacts; ++i) {
+    const AvbdContactConstraint &contact = contacts[i];
+    const bool dynamicA = contact.header.bodyIndexA < numBodies;
+    const physx::PxU32 bodyIndex =
+        dynamicA ? contact.header.bodyIndexA : contact.header.bodyIndexB;
+    if (bodyIndex >= numBodies || bodies[bodyIndex].invMass <= 0.0f)
+      return false;
+
+    AvbdSolverBody &body = bodies[bodyIndex];
+    const physx::PxVec3 localPoint =
+        dynamicA ? contact.contactPointA : contact.contactPointB;
+    const physx::PxVec3 r = body.rotation.rotate(localPoint);
+    const physx::PxVec3 worldDynamic = body.position + r;
+    const physx::PxVec3 worldStatic =
+        dynamicA ? contact.contactPointB : contact.contactPointA;
+    physx::PxReal violation =
+        (dynamicA ? worldDynamic - worldStatic : worldStatic - worldDynamic)
+            .dot(contact.contactNormal) +
+        contact.penetrationDepth;
+    violation -= config.avbdAlpha * contact.C0;
+    const physx::PxReal massInvDt2 =
+        (1.0f / body.invMass) * invDt2;
+    const physx::PxReal penalty = physx::PxMax(
+        contact.header.penalty,
+        AvbdConstants::AVBD_CONTACT_BOOST_FRACTION * massInvDt2);
+    const physx::PxReal force =
+        physx::PxMin(0.0f, penalty * violation + contact.header.lambda);
+    const physx::PxReal sign = dynamicA ? 1.0f : -1.0f;
+    const physx::PxVec3 contactAxis = contact.contactNormal * sign;
+    CoupledIslandRow row;
+    row.bodyA = bodyIndex;
+    row.bodyB = PX_MAX_U32;
+    row.jacobianA =
+        AvbdVec6(contactAxis, r.cross(contact.contactNormal) * sign);
+    row.jacobianB = AvbdVec6();
+    row.penalty = penalty;
+    row.force = force;
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+  return true;
+}
+
+static bool isCoupledFixedD6IslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 2 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  if (joint.header.type != AvbdConstraintType::eJOINT_FIXED ||
+      joint.header.bodyIndexA >= numBodies ||
+      joint.header.bodyIndexB >= numBodies ||
+      joint.header.bodyIndexA == joint.header.bodyIndexB ||
+      bodies[joint.header.bodyIndexA].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexB].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexA].lockFlags != 0 ||
+      bodies[joint.header.bodyIndexB].lockFlags != 0 ||
+      bodies[joint.header.bodyIndexA].linearDamping != 0.0f ||
+      bodies[joint.header.bodyIndexB].linearDamping != 0.0f ||
+      bodies[joint.header.bodyIndexA].angularDampingBody != 0.0f ||
+      bodies[joint.header.bodyIndexB].angularDampingBody != 0.0f ||
+      joint.linearMotion != 0 || joint.angularMotion != 0 ||
+      joint.driveFlags != 0 || joint.driveAccelerationFlags != 0 ||
+      joint.motorEnabled != 0 || joint.coneAngleLimit > 0.0f ||
+      !(joint.header.rho > 0.0f) || !PxIsFinite(joint.header.rho) ||
+      !joint.anchorA.isFinite() || !joint.anchorB.isFinite() ||
+      !joint.localFrameA.isFinite() || !joint.localFrameB.isFinite())
+    return false;
+  return true;
+}
+
+static bool isCoupledSphericalConeIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 2 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const physx::PxU32 bodyA = joint.header.bodyIndexA;
+  const physx::PxU32 bodyB = joint.header.bodyIndexB;
+  if (joint.header.type != AvbdConstraintType::eJOINT_SPHERICAL ||
+      bodyA >= numBodies || bodyB >= numBodies || bodyA == bodyB ||
+      bodies[bodyA].invMass <= 0.0f || bodies[bodyB].invMass <= 0.0f ||
+      bodies[bodyA].lockFlags != 0 || bodies[bodyB].lockFlags != 0 ||
+      bodies[bodyA].linearDamping != 0.0f ||
+      bodies[bodyB].linearDamping != 0.0f ||
+      bodies[bodyA].angularDampingBody != 0.0f ||
+      bodies[bodyB].angularDampingBody != 0.0f ||
+      joint.linearMotion != 0 || joint.angularMotion != 0x2Au ||
+      joint.driveFlags != 0 || joint.driveAccelerationFlags != 0 ||
+      joint.motorEnabled != 0 ||
+      (joint.sourceFlags & AvbdD6JointConstraint::
+           eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE) == 0 ||
+      joint.coneAngleLimit <= 0.0f || joint.coneAngleLimitZ <= 0.0f ||
+      !(joint.header.rho > 0.0f) || !PxIsFinite(joint.header.rho) ||
+      !joint.anchorA.isFinite() || !joint.anchorB.isFinite() ||
+      joint.anchorA.magnitudeSquared() > 1e-12f ||
+      joint.anchorB.magnitudeSquared() > 1e-12f ||
+      !joint.localFrameA.isFinite() || !joint.localFrameB.isFinite())
+    return false;
+  return true;
+}
+
+// Solve all six bilateral rows of one native PxFixedJoint against both
+// dynamic endpoints in a single frozen Newton system.  Per-body block descent
+// omits the off-diagonal J_A^T J_B blocks and can therefore inject a common
+// translation into a free island under equal-and-opposite loads.
+static bool solveCoupledFixedD6Island(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint &joint, physx::PxReal invDt2) {
+  const physx::PxU32 bodyAIndex = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = joint.header.bodyIndexB;
+  AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  AvbdSolverBody &bodyB = bodies[bodyBIndex];
+
+  physx::PxArray<AvbdBlock6x6> inertialBlocks(numBodies);
+  physx::PxArray<AvbdBlock6x6> preconditioner(numBodies);
+  physx::PxArray<AvbdVec6> gradient(numBodies);
+  physx::PxArray<CoupledIslandRow> rows;
+  rows.reserve(6);
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    AvbdSolverBody &body = bodies[i];
+    inertialBlocks[i].initializeDiagonal(body.invMass, body.invInertiaWorld,
+                                         invDt2);
+    preconditioner[i] = inertialBlocks[i];
+    const physx::PxReal mass = 1.0f / body.invMass;
+    const physx::PxVec3 linear =
+        (body.position - body.inertialPosition) * (mass * invDt2);
+    physx::PxQuat deltaQ =
+        body.rotation * body.inertialRotation.getConjugate();
+    if (deltaQ.w < 0.0f)
+      deltaQ = -deltaQ;
+    const physx::PxVec3 rotationError(deltaQ.x * 2.0f, deltaQ.y * 2.0f,
+                                      deltaQ.z * 2.0f);
+    const physx::PxVec3 angular =
+        (body.invInertiaWorld.getInverse() * rotationError) * invDt2;
+    gradient[i] = AvbdVec6(linear, angular);
+  }
+
+  const physx::PxReal massA = 1.0f / bodyA.invMass;
+  const physx::PxReal massB = 1.0f / bodyB.invMass;
+  const physx::PxReal penalty =
+      physx::PxMax(joint.header.rho, physx::PxMax(massA, massB) * invDt2);
+  const physx::PxVec3 rA = bodyA.rotation.rotate(joint.anchorA);
+  const physx::PxVec3 rB = bodyB.rotation.rotate(joint.anchorB);
+  const physx::PxVec3 linearViolation =
+      bodyA.position + rA - bodyB.position - rB;
+  const physx::PxVec3 worldAxes[3] = {
+      physx::PxVec3(1.0f, 0.0f, 0.0f),
+      physx::PxVec3(0.0f, 1.0f, 0.0f),
+      physx::PxVec3(0.0f, 0.0f, 1.0f)};
+  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA = AvbdVec6(worldAxes[axis], rA.cross(worldAxes[axis]));
+    row.jacobianB =
+        AvbdVec6(-worldAxes[axis], -rB.cross(worldAxes[axis]));
+    row.penalty = penalty;
+    row.force = penalty * linearViolation.dot(worldAxes[axis]) +
+                joint.lambdaLinear[axis];
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxQuat worldFrameA = bodyA.rotation * joint.localFrameA;
+  const physx::PxReal frameMagnitude = worldFrameA.magnitudeSquared();
+  if (!(frameMagnitude > 1e-8f) || !PxIsFinite(frameMagnitude))
+    return false;
+  worldFrameA *= 1.0f / physx::PxSqrt(frameMagnitude);
+  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+    physx::PxVec3 localAxis(0.0f);
+    localAxis[axis] = 1.0f;
+    const physx::PxVec3 worldAxis = worldFrameA.rotate(localAxis);
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA = AvbdVec6(physx::PxVec3(0.0f), worldAxis);
+    row.jacobianB = AvbdVec6(physx::PxVec3(0.0f), -worldAxis);
+    row.penalty = penalty;
+    row.force =
+        penalty *
+            joint.computeAngularError(bodyA.rotation, bodyB.rotation, axis) +
+        joint.lambdaAngular[axis];
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxArray<AvbdLDLT> preconditionerLdlt(numBodies);
+  physx::PxArray<AvbdVec6> residual = gradient;
+  physx::PxArray<AvbdVec6> preconditioned(numBodies);
+  physx::PxArray<AvbdVec6> direction(numBodies);
+  physx::PxArray<AvbdVec6> operatorDirection;
+  physx::PxArray<AvbdVec6> solution(numBodies);
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (!preconditionerLdlt[i].decomposeWithRegularization(preconditioner[i]))
+      return false;
+    preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    direction[i] = preconditioned[i];
+    solution[i] = AvbdVec6();
+  }
+  double residualProduct = dotVectors(residual, preconditioned);
+  if (!(residualProduct >= 0.0) || !std::isfinite(residualProduct))
+    return false;
+  const double initialResidual = std::sqrt(residualProduct);
+  const double targetResidual = 1e-8 * std::max(1.0, initialResidual);
+  bool converged = initialResidual <= targetResidual;
+  const physx::PxU32 maxIterations = numBodies * 12u;
+  for (physx::PxU32 iteration = 0;
+       iteration < maxIterations && !converged; ++iteration) {
+    applyCoupledOperator(inertialBlocks, rows, direction, operatorDirection);
+    const double denominator = dotVectors(direction, operatorDirection);
+    if (!(denominator > 1e-30) || !std::isfinite(denominator))
+      return false;
+    const physx::PxReal alpha =
+        static_cast<physx::PxReal>(residualProduct / denominator);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      addScaled(solution[i], direction[i], alpha);
+      addScaled(residual[i], operatorDirection[i], -alpha);
+      preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    }
+    const double nextProduct = dotVectors(residual, preconditioned);
+    if (!(nextProduct >= 0.0) || !std::isfinite(nextProduct))
+      return false;
+    converged = physx::PxSqrt(nextProduct) <= targetResidual;
+    if (!converged) {
+      if (!(residualProduct > 1e-30))
+        return false;
+      const physx::PxReal beta =
+          static_cast<physx::PxReal>(nextProduct / residualProduct);
+      for (physx::PxU32 i = 0; i < numBodies; ++i)
+        direction[i] = preconditioned[i] + direction[i] * beta;
+    }
+    residualProduct = nextProduct;
+  }
+  if (!converged)
+    return false;
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    bodies[i].position -= solution[i].linear;
+    if (solution[i].angular.magnitudeSquared() > 1e-12f) {
+      const physx::PxQuat delta(solution[i].angular.x,
+                               solution[i].angular.y,
+                               solution[i].angular.z, 0.0f);
+      bodies[i].rotation =
+          (bodies[i].rotation - delta * bodies[i].rotation * 0.5f)
+              .getNormalized();
+    }
+  }
+  return true;
+}
+
+// Solve the three spherical anchor rows and its active cone inequality against
+// both dynamic endpoints in one frozen Newton system.  The cone row is an
+// internal equal-and-opposite angular constraint; per-body block descent drops
+// its off-diagonal block and can rotate both endpoints in the same direction.
+static bool solveCoupledSphericalConeIsland(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint &joint, physx::PxReal invDt2) {
+  const physx::PxU32 bodyAIndex = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = joint.header.bodyIndexB;
+  AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  AvbdSolverBody &bodyB = bodies[bodyBIndex];
+
+  physx::PxArray<AvbdBlock6x6> inertialBlocks(numBodies);
+  physx::PxArray<AvbdBlock6x6> preconditioner(numBodies);
+  physx::PxArray<AvbdVec6> gradient(numBodies);
+  physx::PxArray<CoupledIslandRow> rows;
+  rows.reserve(4);
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    AvbdSolverBody &body = bodies[i];
+    inertialBlocks[i].initializeDiagonal(body.invMass, body.invInertiaWorld,
+                                         invDt2);
+    preconditioner[i] = inertialBlocks[i];
+    const physx::PxReal mass = 1.0f / body.invMass;
+    const physx::PxVec3 linear =
+        (body.position - body.inertialPosition) * (mass * invDt2);
+    physx::PxQuat deltaQ =
+        body.rotation * body.inertialRotation.getConjugate();
+    if (deltaQ.w < 0.0f)
+      deltaQ = -deltaQ;
+    const physx::PxVec3 rotationError(deltaQ.x * 2.0f,
+                                      deltaQ.y * 2.0f,
+                                      deltaQ.z * 2.0f);
+    const physx::PxVec3 angular =
+        (body.invInertiaWorld.getInverse() * rotationError) * invDt2;
+    gradient[i] = AvbdVec6(linear, angular);
+  }
+
+  const physx::PxReal massA = 1.0f / bodyA.invMass;
+  const physx::PxReal massB = 1.0f / bodyB.invMass;
+  const physx::PxReal penalty =
+      physx::PxMax(joint.header.rho,
+                   physx::PxMax(massA, massB) * invDt2);
+  const physx::PxVec3 rA = bodyA.rotation.rotate(joint.anchorA);
+  const physx::PxVec3 rB = bodyB.rotation.rotate(joint.anchorB);
+  const physx::PxVec3 linearViolation =
+      bodyA.position + rA - bodyB.position - rB;
+  const physx::PxVec3 worldAxes[3] = {
+      physx::PxVec3(1.0f, 0.0f, 0.0f),
+      physx::PxVec3(0.0f, 1.0f, 0.0f),
+      physx::PxVec3(0.0f, 0.0f, 1.0f)};
+  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA =
+        AvbdVec6(worldAxes[axis], rA.cross(worldAxes[axis]));
+    row.jacobianB =
+        AvbdVec6(-worldAxes[axis], -rB.cross(worldAxes[axis]));
+    row.penalty = penalty;
+    row.force = penalty * linearViolation.dot(worldAxes[axis]) +
+                joint.lambdaLinear[axis];
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxVec3 coneAxis(0.0f);
+  physx::PxReal coneViolation = 0.0f;
+  if (!computeEllipticalConeConstraint(
+          joint, bodyA.rotation, bodyB.rotation, coneAxis,
+          coneViolation))
+    return false;
+  const physx::PxReal coneForce =
+      penalty * coneViolation - joint.coneLambda;
+  if (coneForce > 0.0f &&
+      coneAxis.magnitudeSquared() > 1e-12f) {
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA =
+        AvbdVec6(physx::PxVec3(0.0f), -coneAxis);
+    row.jacobianB =
+        AvbdVec6(physx::PxVec3(0.0f), coneAxis);
+    row.penalty = penalty;
+    row.force = coneForce;
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxArray<AvbdLDLT> preconditionerLdlt(numBodies);
+  physx::PxArray<AvbdVec6> residual = gradient;
+  physx::PxArray<AvbdVec6> preconditioned(numBodies);
+  physx::PxArray<AvbdVec6> direction(numBodies);
+  physx::PxArray<AvbdVec6> operatorDirection;
+  physx::PxArray<AvbdVec6> solution(numBodies);
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (!preconditionerLdlt[i].decomposeWithRegularization(
+            preconditioner[i]))
+      return false;
+    preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    direction[i] = preconditioned[i];
+    solution[i] = AvbdVec6();
+  }
+  double residualProduct = dotVectors(residual, preconditioned);
+  if (!(residualProduct >= 0.0) || !std::isfinite(residualProduct))
+    return false;
+  const double initialResidual = std::sqrt(residualProduct);
+  const double targetResidual =
+      1e-8 * std::max(1.0, initialResidual);
+  bool converged = initialResidual <= targetResidual;
+  const physx::PxU32 maxIterations = numBodies * 12u;
+  for (physx::PxU32 iteration = 0;
+       iteration < maxIterations && !converged; ++iteration) {
+    applyCoupledOperator(inertialBlocks, rows, direction,
+                         operatorDirection);
+    const double denominator =
+        dotVectors(direction, operatorDirection);
+    if (!(denominator > 1e-30) || !std::isfinite(denominator))
+      return false;
+    const physx::PxReal alpha =
+        static_cast<physx::PxReal>(residualProduct / denominator);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      addScaled(solution[i], direction[i], alpha);
+      addScaled(residual[i], operatorDirection[i], -alpha);
+      preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    }
+    const double nextProduct = dotVectors(residual, preconditioned);
+    if (!(nextProduct >= 0.0) || !std::isfinite(nextProduct))
+      return false;
+    converged = physx::PxSqrt(nextProduct) <= targetResidual;
+    if (!converged) {
+      if (!(residualProduct > 1e-30))
+        return false;
+      const physx::PxReal beta =
+          static_cast<physx::PxReal>(nextProduct / residualProduct);
+      for (physx::PxU32 i = 0; i < numBodies; ++i)
+        direction[i] =
+            preconditioned[i] + direction[i] * beta;
+    }
+    residualProduct = nextProduct;
+  }
+  if (!converged)
+    return false;
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    bodies[i].position -= solution[i].linear;
+    if (solution[i].angular.magnitudeSquared() > 1e-12f) {
+      const physx::PxQuat delta(solution[i].angular.x,
+                               solution[i].angular.y,
+                               solution[i].angular.z, 0.0f);
+      bodies[i].rotation =
+          (bodies[i].rotation -
+           delta * bodies[i].rotation * 0.5f)
+              .getNormalized();
+    }
+  }
+  return true;
+}
+
+// Project the velocity counterpart of the same six fixed-joint rows.  This is
+// one bilateral impulse solve, with no speed threshold and no common-mode
+// momentum correction: J M^-1 J^T impulse = -J velocity.
+static bool projectCoupledFixedD6Velocity(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdD6JointConstraint &joint) {
+  const physx::PxU32 bodyAIndex = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = joint.header.bodyIndexB;
+  if (!bodies || bodyAIndex >= numBodies || bodyBIndex >= numBodies)
+    return false;
+  AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  AvbdSolverBody &bodyB = bodies[bodyBIndex];
+
+  const physx::PxVec3 rA = bodyA.rotation.rotate(joint.anchorA);
+  const physx::PxVec3 rB = bodyB.rotation.rotate(joint.anchorB);
+  physx::PxQuat worldFrameA = bodyA.rotation * joint.localFrameA;
+  const physx::PxReal frameMagnitude = worldFrameA.magnitudeSquared();
+  if (!(frameMagnitude > 1e-8f) || !PxIsFinite(frameMagnitude))
+    return false;
+  worldFrameA *= 1.0f / physx::PxSqrt(frameMagnitude);
+
+  AvbdVec6 jacobianA[6];
+  AvbdVec6 jacobianB[6];
+  const physx::PxVec3 worldAxes[3] = {
+      physx::PxVec3(1.0f, 0.0f, 0.0f),
+      physx::PxVec3(0.0f, 1.0f, 0.0f),
+      physx::PxVec3(0.0f, 0.0f, 1.0f)};
+  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+    jacobianA[axis] =
+        AvbdVec6(worldAxes[axis], rA.cross(worldAxes[axis]));
+    jacobianB[axis] =
+        AvbdVec6(-worldAxes[axis], -rB.cross(worldAxes[axis]));
+    physx::PxVec3 localAxis(0.0f);
+    localAxis[axis] = 1.0f;
+    const physx::PxVec3 angularAxis = worldFrameA.rotate(localAxis);
+    jacobianA[3 + axis] =
+        AvbdVec6(physx::PxVec3(0.0f), angularAxis);
+    jacobianB[3 + axis] =
+        AvbdVec6(physx::PxVec3(0.0f), -angularAxis);
+  }
+
+  const AvbdVec6 velocityA(bodyA.linearVelocity, bodyA.angularVelocity);
+  const AvbdVec6 velocityB(bodyB.linearVelocity, bodyB.angularVelocity);
+  AvbdVec6 residual;
+  for (physx::PxU32 row = 0; row < 6; ++row) {
+    const physx::PxReal value =
+        jacobianA[row].dot(velocityA) + jacobianB[row].dot(velocityB);
+    if (row < 3)
+      residual.linear[row] = value;
+    else
+      residual.angular[row - 3] = value;
+  }
+
+  AvbdBlock6x6 response;
+  response.setZero();
+  const auto setResponse = [&response](physx::PxU32 row,
+                                       physx::PxU32 column,
+                                       physx::PxReal value) {
+    if (row < 3 && column < 3)
+      response.linearLinear(row, column) = value;
+    else if (row < 3)
+      response.linearAngular(row, column - 3) = value;
+    else if (column < 3)
+      response.angularLinear(row - 3, column) = value;
+    else
+      response.angularAngular(row - 3, column - 3) = value;
+  };
+  for (physx::PxU32 row = 0; row < 6; ++row) {
+    for (physx::PxU32 column = 0; column < 6; ++column) {
+      const AvbdVec6 responseA(
+          jacobianA[column].linear * bodyA.invMass,
+          bodyA.invInertiaWorld * jacobianA[column].angular);
+      const AvbdVec6 responseB(
+          jacobianB[column].linear * bodyB.invMass,
+          bodyB.invInertiaWorld * jacobianB[column].angular);
+      setResponse(row, column,
+                  jacobianA[row].dot(responseA) +
+                      jacobianB[row].dot(responseB));
+    }
+  }
+
+  AvbdLDLT responseLdlt;
+  if (!responseLdlt.decomposeWithRegularization(response))
+    return false;
+  const AvbdVec6 impulse = responseLdlt.solve(-residual);
+  if (!impulse.linear.isFinite() || !impulse.angular.isFinite())
+    return false;
+
+  AvbdVec6 bodyImpulseA;
+  AvbdVec6 bodyImpulseB;
+  for (physx::PxU32 row = 0; row < 6; ++row) {
+    const physx::PxReal rowImpulse =
+        row < 3 ? impulse.linear[row] : impulse.angular[row - 3];
+    addScaled(bodyImpulseA, jacobianA[row], rowImpulse);
+    addScaled(bodyImpulseB, jacobianB[row], rowImpulse);
+  }
+  bodyA.linearVelocity += bodyImpulseA.linear * bodyA.invMass;
+  bodyA.angularVelocity +=
+      bodyA.invInertiaWorld * bodyImpulseA.angular;
+  bodyB.linearVelocity += bodyImpulseB.linear * bodyB.invMass;
+  bodyB.angularVelocity +=
+      bodyB.invInertiaWorld * bodyImpulseB.angular;
+  return true;
+}
+
+static bool solveCoupledSpatialTendonRow(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdD6JointConstraint &joint, physx::PxReal dt,
+    physx::PxReal invDt2) {
+  if (!bodies || dt <= 0.0f)
+    return false;
+
+  const physx::PxU32 bodyA = joint.header.bodyIndexA;
+  const physx::PxU32 bodyB = joint.header.bodyIndexB;
+  if (bodyA >= numBodies || bodyB >= numBodies || bodyA == bodyB)
+    return false;
+
+  AvbdSolverBody &endpointA = bodies[bodyA];
+  AvbdSolverBody &endpointB = bodies[bodyB];
+  const AvbdVec6 jacobianA(
+      joint.genericLinearA, joint.genericAngularA);
+  const AvbdVec6 jacobianB(
+      joint.genericLinearB, joint.genericAngularB);
+  const physx::PxReal jacobianMagnitudeA = physx::PxSqrt(
+      jacobianA.linear.magnitudeSquared() +
+      jacobianA.angular.magnitudeSquared());
+  const physx::PxReal jacobianMagnitudeB = physx::PxSqrt(
+      jacobianB.linear.magnitudeSquared() +
+      jacobianB.angular.magnitudeSquared());
+  if (!(jacobianMagnitudeA > 1e-6f) ||
+      !(jacobianMagnitudeB > 1e-6f))
+    return false;
+  const AvbdVec6 directionA(
+      jacobianA.linear / jacobianMagnitudeA,
+      jacobianA.angular / jacobianMagnitudeA);
+  const AvbdVec6 directionB(
+      jacobianB.linear / jacobianMagnitudeB,
+      jacobianB.angular / jacobianMagnitudeB);
+
+  auto computeInertialTerm =
+      [invDt2](const AvbdSolverBody &body,
+               const AvbdVec6 &direction,
+               physx::PxReal &hessian,
+               physx::PxReal &gradient) -> bool {
+    if (body.invMass <= 0.0f)
+      return false;
+    const physx::PxReal mass = 1.0f / body.invMass;
+    hessian =
+        mass * direction.linear.magnitudeSquared() * invDt2;
+    gradient =
+        mass * (body.position - body.inertialPosition)
+                   .dot(direction.linear) *
+        invDt2;
+    physx::PxQuat deltaQ =
+        body.rotation * body.inertialRotation.getConjugate();
+    if (deltaQ.w < 0.0f)
+      deltaQ = -deltaQ;
+    const physx::PxVec3 rotationError(deltaQ.x * 2.0f, deltaQ.y * 2.0f,
+                                      deltaQ.z * 2.0f);
+    const physx::PxMat33 inertia = body.invInertiaWorld.getInverse();
+    const physx::PxReal angularHessian =
+        direction.angular.dot(inertia * direction.angular) *
+        invDt2;
+    hessian += angularHessian;
+    gradient += angularHessian *
+                rotationError.dot(direction.angular);
+    return hessian > 1e-8f && PxIsFinite(hessian) &&
+           PxIsFinite(gradient);
+  };
+
+  physx::PxReal inertialHessianA = 0.0f;
+  physx::PxReal inertialHessianB = 0.0f;
+  physx::PxReal gradientA = 0.0f;
+  physx::PxReal gradientB = 0.0f;
+  if (!computeInertialTerm(endpointA, directionA, inertialHessianA,
+                           gradientA) ||
+      !computeInertialTerm(endpointB, directionB, inertialHessianB,
+                           gradientB))
+    return false;
+
+  const physx::PxReal violation =
+      computeGeneric1DViolation(joint, bodies, numBodies, dt);
+  const physx::PxReal velocity =
+      (violation - joint.genericGeometricError) / dt;
+  physx::PxReal penalty =
+      joint.header.rho + joint.header.damping / dt;
+  physx::PxReal unclampedForce =
+      joint.header.rho * violation + joint.header.damping * velocity;
+  if (joint.genericTendonLimitStiffness > 0.0f) {
+    physx::PxReal limitViolation = 0.0f;
+    if (violation < joint.genericTendonLowLimit)
+      limitViolation = violation - joint.genericTendonLowLimit;
+    else if (violation > joint.genericTendonHighLimit)
+      limitViolation = violation - joint.genericTendonHighLimit;
+    if (limitViolation != 0.0f) {
+      penalty +=
+          joint.genericTendonLimitStiffness +
+          joint.header.damping / dt;
+      unclampedForce +=
+          joint.genericTendonLimitStiffness * limitViolation;
+    }
+  }
+  const physx::PxReal appliedImpulse = physx::PxClamp(
+      -unclampedForce * dt, joint.genericMinImpulse,
+      joint.genericMaxImpulse);
+  const physx::PxReal force = -appliedImpulse / dt;
+  gradientA += jacobianMagnitudeA * force;
+  gradientB += jacobianMagnitudeB * force;
+
+  const physx::PxReal hessianAA =
+      inertialHessianA +
+      penalty * jacobianMagnitudeA * jacobianMagnitudeA;
+  const physx::PxReal hessianBB =
+      inertialHessianB +
+      penalty * jacobianMagnitudeB * jacobianMagnitudeB;
+  const physx::PxReal hessianAB =
+      penalty * jacobianMagnitudeA * jacobianMagnitudeB;
+  const physx::PxReal determinant =
+      hessianAA * hessianBB - hessianAB * hessianAB;
+  if (!(determinant > 1e-12f) || !PxIsFinite(determinant))
+    return false;
+  const physx::PxReal solutionA =
+      (gradientA * hessianBB - gradientB * hessianAB) / determinant;
+  const physx::PxReal solutionB =
+      (hessianAA * gradientB - hessianAB * gradientA) / determinant;
+  if (!PxIsFinite(solutionA) || !PxIsFinite(solutionB))
+    return false;
+
+  endpointA.position -= directionA.linear * solutionA;
+  endpointB.position -= directionB.linear * solutionB;
+  const physx::PxVec3 angularSolutionA =
+      directionA.angular * solutionA;
+  const physx::PxVec3 angularSolutionB =
+      directionB.angular * solutionB;
+  if (angularSolutionA.magnitudeSquared() > 1e-12f) {
+    const physx::PxQuat delta(angularSolutionA.x, angularSolutionA.y,
+                              angularSolutionA.z, 0.0f);
+    endpointA.rotation =
+        (endpointA.rotation - delta * endpointA.rotation * 0.5f)
+            .getNormalized();
+  }
+  if (angularSolutionB.magnitudeSquared() > 1e-12f) {
+    const physx::PxQuat delta(angularSolutionB.x, angularSolutionB.y,
+                              angularSolutionB.z, 0.0f);
+    endpointB.rotation =
+        (endpointB.rotation - delta * endpointB.rotation * 0.5f)
+            .getNormalized();
+  }
+  return true;
+}
+
+static bool isCoupledLinearDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+    physx::PxU32 numGear, physx::PxU32 numSoftParticles,
+    physx::PxU32 numSoftBodies, physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 2 || !d6Joints || numD6 != 1 ||
+      (numContacts != 0 && !contacts) || numGear != 0 ||
+      numSoftParticles != 0 || numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  if (joint.header.bodyIndexA >= numBodies ||
+      joint.header.bodyIndexB >= numBodies ||
+      joint.header.bodyIndexA == joint.header.bodyIndexB ||
+      bodies[joint.header.bodyIndexA].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexB].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexA].lockFlags != 0 ||
+      bodies[joint.header.bodyIndexB].lockFlags != 0 ||
+      bodies[joint.header.bodyIndexA].linearDamping != 0.0f ||
+      bodies[joint.header.bodyIndexB].linearDamping != 0.0f ||
+      joint.driveFlags != 0x1u ||
+      (joint.driveAccelerationFlags != 0 &&
+       joint.driveAccelerationFlags != 0x1u) ||
+      joint.linearStiffness.x != 0.0f || joint.linearDamping.x <= 0.0f ||
+      joint.getLinearMotion(0) != 2 || joint.getLinearMotion(1) != 2 ||
+      joint.getLinearMotion(2) != 2 || joint.getAngularMotion(0) != 2 ||
+      joint.getAngularMotion(1) != 2 || joint.getAngularMotion(2) != 2 ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0)
+    return false;
+
+  return areFrictionlessBodyVsStaticContactsSupported(
+      contacts, numContacts, numBodies);
+}
+
+static bool isLinearPositionDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 1 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const bool dynamicA = joint.header.bodyIndexA < numBodies;
+  const bool dynamicB = joint.header.bodyIndexB < numBodies;
+  const physx::PxU32 dynamicIndex =
+      dynamicA ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+  if (dynamicA == dynamicB || dynamicIndex >= numBodies ||
+      bodies[dynamicIndex].invMass <= 0.0f ||
+      bodies[dynamicIndex].linearDamping != 0.0f ||
+      joint.driveFlags != 0x1u || joint.driveAccelerationFlags != 0 ||
+      joint.linearStiffness.x <= 0.0f || joint.linearDamping.x <= 0.0f ||
+      joint.getLinearMotion(0) != 2 || joint.getLinearMotion(1) != 0 ||
+      joint.getLinearMotion(2) != 0 || joint.angularMotion != 0 ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveLinearPosition.isFinite() ||
+      !joint.driveLinearVelocity.isFinite() ||
+      !(joint.driveLinearForce.x > 0.0f) ||
+      !PxIsFinite(joint.driveLinearForce.x))
+    return false;
+  return true;
+}
+
+static bool isAngularAxisVelocityDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 1 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const bool dynamicA = joint.header.bodyIndexA < numBodies;
+  const bool dynamicB = joint.header.bodyIndexB < numBodies;
+  const physx::PxU32 dynamicIndex =
+      dynamicA ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+  const physx::PxU32 driveIndex = joint.driveFlags == (1u << 3)
+                                         ? 0u
+                                         : (joint.driveFlags == (1u << 4)
+                                                ? 1u
+                                                : (joint.driveFlags == (1u << 5)
+                                                       ? 2u
+                                                       : PX_MAX_U32));
+  if (dynamicA == dynamicB || dynamicIndex >= numBodies ||
+      driveIndex == PX_MAX_U32 ||
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0)
+    return false;
+  if (bodies[dynamicIndex].invMass <= 0.0f ||
+      bodies[dynamicIndex].linearDamping != 0.0f ||
+      bodies[dynamicIndex].angularDampingBody != 0.0f ||
+      joint.driveAccelerationFlags != 0 ||
+      joint.angularStiffness[driveIndex] != 0.0f ||
+      joint.angularDamping[driveIndex] <= 0.0f ||
+      joint.linearMotion != 0x2au || joint.angularMotion != 0x2au ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveAngularVelocity.isFinite() ||
+      !(joint.driveAngularForce[driveIndex] > 0.0f) ||
+      !PxIsFinite(joint.driveAngularForce[driveIndex]))
+    return false;
+  return true;
+}
+
+static bool isAngularAxisPositionDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 1 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const bool dynamicA = joint.header.bodyIndexA < numBodies;
+  const bool dynamicB = joint.header.bodyIndexB < numBodies;
+  const physx::PxU32 dynamicIndex =
+      dynamicA ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+  const physx::PxU32 driveIndex =
+      joint.driveFlags == (1u << 3)
+          ? 0u
+          : (joint.driveFlags == (1u << 4)
+                 ? 1u
+                 : (joint.driveFlags == (1u << 5) ? 2u : PX_MAX_U32));
+  const physx::PxReal targetMagnitude =
+      joint.driveAngularPosition.magnitudeSquared();
+  if (dynamicA == dynamicB || dynamicIndex >= numBodies ||
+      driveIndex == PX_MAX_U32 ||
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0)
+    return false;
+  if (bodies[dynamicIndex].invMass <= 0.0f ||
+      bodies[dynamicIndex].linearDamping != 0.0f ||
+      bodies[dynamicIndex].angularDampingBody != 0.0f ||
+      joint.driveAccelerationFlags != 0 ||
+      joint.driveOutputForceFlags != 0 || joint.linearMotion != 0 ||
+      joint.getAngularMotion(driveIndex) != 2 ||
+      joint.getAngularMotion((driveIndex + 1) % 3) != 0 ||
+      joint.getAngularMotion((driveIndex + 2) % 3) != 0 ||
+      joint.angularStiffness[driveIndex] <= 0.0f ||
+      joint.angularDamping[driveIndex] <= 0.0f ||
+      joint.angularStiffness[(driveIndex + 1) % 3] != 0.0f ||
+      joint.angularStiffness[(driveIndex + 2) % 3] != 0.0f ||
+      joint.angularDamping[(driveIndex + 1) % 3] != 0.0f ||
+      joint.angularDamping[(driveIndex + 2) % 3] != 0.0f ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveAngularPosition.isFinite() ||
+      !joint.driveAngularVelocity.isFinite() ||
+      physx::PxAbs(targetMagnitude - 1.0f) > 1e-4f ||
+      (driveIndex != 0 &&
+       physx::PxAbs(joint.driveAngularPosition.x) > 1e-6f) ||
+      (driveIndex != 1 &&
+       physx::PxAbs(joint.driveAngularPosition.y) > 1e-6f) ||
+      (driveIndex != 2 &&
+       physx::PxAbs(joint.driveAngularPosition.z) > 1e-6f) ||
+      joint.driveAngularVelocity.magnitudeSquared() > 1e-12f ||
+      joint.anchorA.magnitudeSquared() > 1e-12f ||
+      joint.anchorB.magnitudeSquared() > 1e-12f ||
+      !(joint.driveAngularForce[driveIndex] > 0.0f) ||
+      !PxIsFinite(joint.driveAngularForce[driveIndex]))
+    return false;
+  return true;
+}
+
+static bool isSlerpVelocityDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 1 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const bool dynamicA = joint.header.bodyIndexA < numBodies;
+  const bool dynamicB = joint.header.bodyIndexB < numBodies;
+  const physx::PxU32 dynamicIndex =
+      dynamicA ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+  if (dynamicA == dynamicB || dynamicIndex >= numBodies ||
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) == 0 ||
+      joint.driveFlags != (1u << 5))
+    return false;
+  if (bodies[dynamicIndex].invMass <= 0.0f ||
+      bodies[dynamicIndex].linearDamping != 0.0f ||
+      bodies[dynamicIndex].angularDampingBody != 0.0f ||
+      joint.driveAccelerationFlags != 0 ||
+      joint.angularStiffness.z != 0.0f ||
+      joint.angularDamping.z <= 0.0f || joint.linearMotion != 0x2au ||
+      joint.angularMotion != 0x2au ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveAngularVelocity.isFinite() ||
+      !(joint.driveAngularForce.z > 0.0f) ||
+      !PxIsFinite(joint.driveAngularForce.z))
+    return false;
+  return true;
+}
+
+static bool isSlerpPositionDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
+    physx::PxU32 numD6, physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 1 || numContacts != 0 || !d6Joints ||
+      numD6 != 1 || numGear != 0 || numSoftParticles != 0 ||
+      numSoftBodies != 0 || numSoftContacts != 0)
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  const bool dynamicA = joint.header.bodyIndexA < numBodies;
+  const bool dynamicB = joint.header.bodyIndexB < numBodies;
+  const physx::PxU32 dynamicIndex =
+      dynamicA ? joint.header.bodyIndexA : joint.header.bodyIndexB;
+  const physx::PxReal targetMagnitude =
+      joint.driveAngularPosition.magnitudeSquared();
+  if (dynamicA == dynamicB || dynamicIndex >= numBodies ||
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) == 0 ||
+      joint.driveFlags != (1u << 5))
+    return false;
+  if (bodies[dynamicIndex].invMass <= 0.0f ||
+      bodies[dynamicIndex].linearDamping != 0.0f ||
+      bodies[dynamicIndex].angularDampingBody != 0.0f ||
+      joint.driveAccelerationFlags != 0 ||
+      joint.driveOutputForceFlags != 0 || joint.linearMotion != 0 ||
+      joint.angularMotion != 0x2au ||
+      joint.angularStiffness.x != 0.0f ||
+      joint.angularStiffness.y != 0.0f ||
+      joint.angularStiffness.z <= 0.0f ||
+      joint.angularDamping.x != 0.0f ||
+      joint.angularDamping.y != 0.0f ||
+      joint.angularDamping.z <= 0.0f ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveAngularPosition.isFinite() ||
+      !joint.driveAngularVelocity.isFinite() ||
+      physx::PxAbs(targetMagnitude - 1.0f) > 1e-4f ||
+      joint.driveAngularVelocity.magnitudeSquared() > 1e-12f ||
+      joint.anchorA.magnitudeSquared() > 1e-12f ||
+      joint.anchorB.magnitudeSquared() > 1e-12f ||
+      !(joint.driveAngularForce.z > 0.0f) ||
+      !PxIsFinite(joint.driveAngularForce.z))
+    return false;
+  return true;
+}
+
+static bool isCoupledAngularPositionDriveIslandSupported(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
+    physx::PxU32 numGear,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftContacts) {
+  if (!bodies || numBodies != 2 || !d6Joints || numD6 != 1 ||
+      numGear != 0 || numSoftParticles != 0 || numSoftBodies != 0 ||
+      numSoftContacts != 0 ||
+      !areTorqueFreeBodyVsStaticContactsSupported(
+          bodies, numBodies, contacts, numContacts))
+    return false;
+
+  const AvbdD6JointConstraint &joint = d6Joints[0];
+  if (joint.header.bodyIndexA >= numBodies ||
+      joint.header.bodyIndexB >= numBodies ||
+      joint.header.bodyIndexA == joint.header.bodyIndexB ||
+      bodies[joint.header.bodyIndexA].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexB].invMass <= 0.0f ||
+      bodies[joint.header.bodyIndexA].linearDamping != 0.0f ||
+      bodies[joint.header.bodyIndexB].linearDamping != 0.0f ||
+      bodies[joint.header.bodyIndexA].angularDampingBody != 0.0f ||
+      bodies[joint.header.bodyIndexB].angularDampingBody != 0.0f ||
+      joint.driveAccelerationFlags != 0 ||
+      joint.driveOutputForceFlags != 0 || joint.linearMotion != 0 ||
+      joint.anchorA.magnitudeSquared() > 1e-12f ||
+      joint.anchorB.magnitudeSquared() > 1e-12f ||
+      joint.motorEnabled != 0 || joint.coneAngleLimit > 0.0f ||
+      (joint.sourceFlags &
+       AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES) == 0 ||
+      !joint.driveAngularPosition.isFinite() ||
+      !joint.driveAngularVelocity.isFinite() ||
+      physx::PxAbs(joint.driveAngularPosition.magnitudeSquared() - 1.0f) >
+          1e-4f ||
+      joint.driveAngularVelocity.magnitudeSquared() > 1e-12f)
+    return false;
+
+  const bool slerp =
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
+  if (slerp) {
+    return joint.driveFlags == (1u << 5) &&
+           joint.angularMotion == 0x2au &&
+           joint.angularStiffness.x == 0.0f &&
+           joint.angularStiffness.y == 0.0f &&
+           joint.angularStiffness.z > 0.0f &&
+           joint.angularDamping.x == 0.0f &&
+           joint.angularDamping.y == 0.0f &&
+           joint.angularDamping.z > 0.0f &&
+           joint.driveAngularForce.z > 0.0f &&
+           PxIsFinite(joint.driveAngularForce.z);
+  }
+
+  const physx::PxU32 driveIndex =
+      joint.driveFlags == (1u << 3)
+          ? 0u
+          : (joint.driveFlags == (1u << 4)
+                 ? 1u
+                 : (joint.driveFlags == (1u << 5) ? 2u : PX_MAX_U32));
+  if (driveIndex == PX_MAX_U32 ||
+      joint.getAngularMotion(driveIndex) != 2 ||
+      joint.getAngularMotion((driveIndex + 1) % 3) != 0 ||
+      joint.getAngularMotion((driveIndex + 2) % 3) != 0 ||
+      joint.angularStiffness[driveIndex] <= 0.0f ||
+      joint.angularDamping[driveIndex] <= 0.0f ||
+      joint.angularStiffness[(driveIndex + 1) % 3] != 0.0f ||
+      joint.angularStiffness[(driveIndex + 2) % 3] != 0.0f ||
+      joint.angularDamping[(driveIndex + 1) % 3] != 0.0f ||
+      joint.angularDamping[(driveIndex + 2) % 3] != 0.0f ||
+      !(joint.driveAngularForce[driveIndex] > 0.0f) ||
+      !PxIsFinite(joint.driveAngularForce[driveIndex]))
+    return false;
+  if ((driveIndex != 0 &&
+       physx::PxAbs(joint.driveAngularPosition.x) > 1e-6f) ||
+      (driveIndex != 1 &&
+       physx::PxAbs(joint.driveAngularPosition.y) > 1e-6f) ||
+      (driveIndex != 2 &&
+       physx::PxAbs(joint.driveAngularPosition.z) > 1e-6f))
+    return false;
+  return true;
+}
+
+static bool solveCoupledAngularPositionDriveIsland(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdD6JointConstraint &joint, physx::PxReal dt,
+    physx::PxReal invDt2, const AvbdSolverConfig &config) {
+  const physx::PxU32 bodyAIndex = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = joint.header.bodyIndexB;
+  AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  AvbdSolverBody &bodyB = bodies[bodyBIndex];
+  physx::PxArray<AvbdBlock6x6> inertialBlocks(numBodies);
+  physx::PxArray<AvbdBlock6x6> preconditioner(numBodies);
+  physx::PxArray<AvbdVec6> gradient(numBodies);
+  physx::PxArray<CoupledIslandRow> rows;
+  rows.reserve(numContacts + 9);
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    AvbdSolverBody &body = bodies[i];
+    inertialBlocks[i].initializeDiagonal(body.invMass, body.invInertiaWorld,
+                                         invDt2);
+    preconditioner[i] = inertialBlocks[i];
+    const physx::PxReal mass = 1.0f / body.invMass;
+    const physx::PxVec3 linear =
+        (body.position - body.inertialPosition) * (mass * invDt2);
+    physx::PxQuat deltaQ =
+        body.rotation * body.inertialRotation.getConjugate();
+    if (deltaQ.w < 0.0f)
+      deltaQ = -deltaQ;
+    const physx::PxVec3 rotationError(deltaQ.x * 2.0f, deltaQ.y * 2.0f,
+                                      deltaQ.z * 2.0f);
+    const physx::PxVec3 angular =
+        (body.invInertiaWorld.getInverse() * rotationError) * invDt2;
+    gradient[i] = AvbdVec6(linear, angular);
+  }
+
+  if (!addFrictionlessBodyVsStaticContactRows(
+          bodies, numBodies, contacts, numContacts, config, invDt2,
+          rows, gradient, preconditioner))
+    return false;
+
+  const physx::PxReal massA = 1.0f / bodyA.invMass;
+  const physx::PxReal massB = 1.0f / bodyB.invMass;
+  const physx::PxReal hardPenalty =
+      physx::PxMax(joint.header.rho, physx::PxMax(massA, massB) * invDt2);
+  const physx::PxVec3 linearViolation = bodyA.position - bodyB.position;
+  const physx::PxVec3 worldAxes[3] = {
+      physx::PxVec3(1.0f, 0.0f, 0.0f),
+      physx::PxVec3(0.0f, 1.0f, 0.0f),
+      physx::PxVec3(0.0f, 0.0f, 1.0f)};
+  for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA = AvbdVec6(worldAxes[axis], physx::PxVec3(0.0f));
+    row.jacobianB = AvbdVec6(-worldAxes[axis], physx::PxVec3(0.0f));
+    row.penalty = hardPenalty;
+    row.force = hardPenalty * linearViolation.dot(worldAxes[axis]) +
+                joint.lambdaLinear[axis];
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxQuat worldFrameA = bodyA.rotation * joint.localFrameA;
+  physx::PxQuat worldFrameB = bodyB.rotation * joint.localFrameB;
+  const physx::PxReal frameAMagnitude = worldFrameA.magnitudeSquared();
+  const physx::PxReal frameBMagnitude = worldFrameB.magnitudeSquared();
+  if (!(frameAMagnitude > 1e-8f) || !(frameBMagnitude > 1e-8f) ||
+      !PxIsFinite(frameAMagnitude) || !PxIsFinite(frameBMagnitude))
+    return false;
+  worldFrameA *= 1.0f / physx::PxSqrt(frameAMagnitude);
+  worldFrameB *= 1.0f / physx::PxSqrt(frameBMagnitude);
+
+  const bool slerp =
+      (joint.sourceFlags & AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
+  const physx::PxU32 driveIndex =
+      slerp ? PX_MAX_U32
+            : (joint.driveFlags == (1u << 3)
+                   ? 0u
+                   : (joint.driveFlags == (1u << 4) ? 1u : 2u));
+  if (!slerp && driveIndex == 0) {
+    const physx::PxVec3 worldTwistA =
+        worldFrameA.rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+    const physx::PxVec3 worldTwistB =
+        worldFrameB.rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+    const physx::PxVec3 axisViolation = worldTwistA.cross(worldTwistB);
+    physx::PxVec3 perp1 =
+        physx::PxAbs(worldTwistA.x) < 0.9f
+            ? worldTwistA.cross(physx::PxVec3(1.0f, 0.0f, 0.0f))
+            : worldTwistA.cross(physx::PxVec3(0.0f, 1.0f, 0.0f));
+    const physx::PxReal perp1Length = perp1.magnitude();
+    if (!(perp1Length > 1e-6f) || !PxIsFinite(perp1Length))
+      return false;
+    perp1 *= 1.0f / perp1Length;
+    physx::PxVec3 perp2 = worldTwistA.cross(perp1);
+    const physx::PxReal perp2Length = perp2.magnitude();
+    if (!(perp2Length > 1e-6f) || !PxIsFinite(perp2Length))
+      return false;
+    perp2 *= 1.0f / perp2Length;
+    const physx::PxVec3 perpendicularAxes[2] = {perp1, perp2};
+    for (physx::PxU32 rowIndex = 0; rowIndex < 2; ++rowIndex) {
+      CoupledIslandRow row;
+      row.bodyA = bodyAIndex;
+      row.bodyB = bodyBIndex;
+      row.jacobianA =
+          AvbdVec6(physx::PxVec3(0.0f), -perpendicularAxes[rowIndex]);
+      row.jacobianB =
+          AvbdVec6(physx::PxVec3(0.0f), perpendicularAxes[rowIndex]);
+      row.penalty = hardPenalty;
+      row.force =
+          hardPenalty * axisViolation.dot(perpendicularAxes[rowIndex]) +
+          joint.lambdaAngular[rowIndex + 1];
+      addCoupledRow(row, rows, gradient, preconditioner);
+    }
+  } else if (!slerp) {
+    for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+      if (axis == driveIndex)
+        continue;
+      physx::PxVec3 localAxis(0.0f);
+      localAxis[axis] = 1.0f;
+      const physx::PxVec3 worldAxis = worldFrameA.rotate(localAxis);
+      CoupledIslandRow row;
+      row.bodyA = bodyAIndex;
+      row.bodyB = bodyBIndex;
+      row.jacobianA = AvbdVec6(physx::PxVec3(0.0f), worldAxis);
+      row.jacobianB = AvbdVec6(physx::PxVec3(0.0f), -worldAxis);
+      row.penalty = hardPenalty;
+      row.force =
+          hardPenalty *
+              joint.computeAngularError(bodyA.rotation, bodyB.rotation, axis) +
+          joint.lambdaAngular[axis];
+      addCoupledRow(row, rows, gradient, preconditioner);
+    }
+  }
+
+  physx::PxQuat displacementA =
+      bodyA.rotation * bodyA.prevRotation.getConjugate();
+  physx::PxQuat displacementB =
+      bodyB.rotation * bodyB.prevRotation.getConjugate();
+  if (displacementA.w < 0.0f)
+    displacementA = -displacementA;
+  if (displacementB.w < 0.0f)
+    displacementB = -displacementB;
+  const physx::PxVec3 relativeAngularDisplacement =
+      physx::PxVec3(displacementB.x - displacementA.x,
+                    displacementB.y - displacementA.y,
+                    displacementB.z - displacementA.z) *
+      2.0f;
+
+  physx::PxQuat currentRelative =
+      worldFrameA.getConjugate() * worldFrameB;
+  currentRelative.normalize();
+  physx::PxQuat targetRelative = joint.driveAngularPosition;
+  if (currentRelative.dot(targetRelative) < 0.0f)
+    targetRelative = -targetRelative;
+  if (slerp) {
+    const physx::PxQuat delta =
+        targetRelative.getConjugate() * currentRelative;
+    physx::PxVec3 driveAxes[3];
+    computeSlerpJacobianAxes(driveAxes, worldFrameA * targetRelative,
+                             worldFrameB);
+    const physx::PxReal stiffness = joint.angularStiffness.z;
+    const physx::PxReal damping = joint.angularDamping.z;
+    const physx::PxReal limit = joint.driveAngularForce.z;
+    for (physx::PxU32 rowIndex = 0; rowIndex < 3; ++rowIndex) {
+      const physx::PxReal velocityError =
+          relativeAngularDisplacement.dot(driveAxes[rowIndex]);
+      const physx::PxReal rawTorque =
+          stiffness * (&delta.x)[rowIndex] +
+          (damping / dt) * velocityError;
+      const physx::PxReal driveTorque =
+          physx::PxClamp(rawTorque, -limit, limit);
+      CoupledIslandRow row;
+      row.bodyA = bodyAIndex;
+      row.bodyB = bodyBIndex;
+      row.jacobianA =
+          AvbdVec6(physx::PxVec3(0.0f), -driveAxes[rowIndex]);
+      row.jacobianB =
+          AvbdVec6(physx::PxVec3(0.0f), driveAxes[rowIndex]);
+      row.penalty =
+          physx::PxAbs(rawTorque) >= limit ? 0.0f
+                                           : stiffness + damping / dt;
+      row.force = driveTorque;
+      addCoupledRow(row, rows, gradient, preconditioner);
+    }
+  } else {
+    physx::PxVec3 localAxis(0.0f);
+    localAxis[driveIndex] = 1.0f;
+    const physx::PxVec3 worldAxis = worldFrameA.rotate(localAxis);
+    const physx::PxQuat delta =
+        currentRelative * targetRelative.getConjugate();
+    physx::PxReal positionResidual = 0.0f;
+    physx::PxReal positionTangent = 0.0f;
+    if (driveIndex == 0) {
+      positionResidual = 2.0f * delta.x;
+      positionTangent = physx::PxAbs(delta.w);
+    } else if (driveIndex == 1) {
+      positionResidual = -delta.getBasisVector0().z;
+      positionTangent =
+          physx::PxAbs(1.0f - 2.0f * delta.y * delta.y);
+    } else {
+      positionResidual = delta.getBasisVector0().y;
+      positionTangent =
+          physx::PxAbs(1.0f - 2.0f * delta.z * delta.z);
+    }
+    const physx::PxReal stiffness = joint.angularStiffness[driveIndex];
+    const physx::PxReal damping = joint.angularDamping[driveIndex];
+    const physx::PxReal limit = joint.driveAngularForce[driveIndex];
+    const physx::PxReal velocityError =
+        relativeAngularDisplacement.dot(worldAxis);
+    const physx::PxReal rawTorque =
+        stiffness * positionResidual + (damping / dt) * velocityError;
+    CoupledIslandRow row;
+    row.bodyA = bodyAIndex;
+    row.bodyB = bodyBIndex;
+    row.jacobianA = AvbdVec6(physx::PxVec3(0.0f), -worldAxis);
+    row.jacobianB = AvbdVec6(physx::PxVec3(0.0f), worldAxis);
+    row.penalty =
+        physx::PxAbs(rawTorque) >= limit
+            ? 0.0f
+            : stiffness * positionTangent + damping / dt;
+    row.force = physx::PxClamp(rawTorque, -limit, limit);
+    addCoupledRow(row, rows, gradient, preconditioner);
+  }
+
+  physx::PxArray<AvbdLDLT> preconditionerLdlt(numBodies);
+  physx::PxArray<AvbdVec6> residual = gradient;
+  physx::PxArray<AvbdVec6> preconditioned(numBodies);
+  physx::PxArray<AvbdVec6> direction(numBodies);
+  physx::PxArray<AvbdVec6> operatorDirection;
+  physx::PxArray<AvbdVec6> solution(numBodies);
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (!preconditionerLdlt[i].decomposeWithRegularization(preconditioner[i]))
+      return false;
+    preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    direction[i] = preconditioned[i];
+    solution[i] = AvbdVec6();
+  }
+  double residualProduct = dotVectors(residual, preconditioned);
+  if (!(residualProduct >= 0.0) || !std::isfinite(residualProduct))
+    return false;
+  const double initialResidual = std::sqrt(residualProduct);
+  const double targetResidual = 1e-8 * std::max(1.0, initialResidual);
+  bool converged = initialResidual <= targetResidual;
+  const physx::PxU32 maxIterations = numBodies * 12u;
+  for (physx::PxU32 iteration = 0;
+       iteration < maxIterations && !converged; ++iteration) {
+    applyCoupledOperator(inertialBlocks, rows, direction, operatorDirection);
+    const double denominator = dotVectors(direction, operatorDirection);
+    if (!(denominator > 1e-30) || !std::isfinite(denominator))
+      return false;
+    const physx::PxReal alpha =
+        static_cast<physx::PxReal>(residualProduct / denominator);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      addScaled(solution[i], direction[i], alpha);
+      addScaled(residual[i], operatorDirection[i], -alpha);
+      preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    }
+    const double nextProduct = dotVectors(residual, preconditioned);
+    if (!(nextProduct >= 0.0) || !std::isfinite(nextProduct))
+      return false;
+    converged = physx::PxSqrt(nextProduct) <= targetResidual;
+    if (!converged) {
+      if (!(residualProduct > 1e-30))
+        return false;
+      const physx::PxReal beta =
+          static_cast<physx::PxReal>(nextProduct / residualProduct);
+      for (physx::PxU32 i = 0; i < numBodies; ++i)
+        direction[i] = preconditioned[i] + direction[i] * beta;
+    }
+    residualProduct = nextProduct;
+  }
+  if (!converged)
+    return false;
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    bodies[i].position -= solution[i].linear;
+    if (solution[i].angular.magnitudeSquared() > 1e-12f) {
+      const physx::PxQuat delta(solution[i].angular.x,
+                               solution[i].angular.y,
+                               solution[i].angular.z, 0.0f);
+      bodies[i].rotation =
+          (bodies[i].rotation - delta * bodies[i].rotation * 0.5f)
+              .getNormalized();
+    }
+  }
+  return true;
+}
+
+static bool solveCoupledLinearDriveIsland(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    AvbdD6JointConstraint &joint, physx::PxReal dt, physx::PxReal invDt2,
+    const AvbdSolverConfig &config) {
+  physx::PxArray<AvbdBlock6x6> inertialBlocks(numBodies);
+  physx::PxArray<AvbdBlock6x6> preconditioner(numBodies);
+  physx::PxArray<AvbdVec6> gradient(numBodies);
+  physx::PxArray<CoupledIslandRow> rows;
+  rows.reserve(numContacts + 1);
+
+  const physx::PxU32 bodyAIndex = joint.header.bodyIndexA;
+  const physx::PxU32 bodyBIndex = joint.header.bodyIndexB;
+  const AvbdSolverBody &bodyA = bodies[bodyAIndex];
+  const AvbdSolverBody &bodyB = bodies[bodyBIndex];
+  physx::PxQuat frameA = bodyA.rotation * joint.localFrameA;
+  const physx::PxReal frameMagnitude = frameA.magnitudeSquared();
+  if (!(frameMagnitude > 1e-8f) || !PxIsFinite(frameMagnitude))
+    return false;
+  frameA *= 1.0f / physx::PxSqrt(frameMagnitude);
+  const physx::PxVec3 axis =
+      frameA.rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+  physx::PxVec3 supportNormal(0.0f);
+  for (physx::PxU32 i = 0; i < numContacts; ++i) {
+    if (physx::PxAbs(contacts[i].contactNormal.dot(axis)) > 1e-5f)
+      return false;
+    if (i == 0) {
+      supportNormal = contacts[i].contactNormal;
+      supportNormal.normalize();
+    } else if (physx::PxAbs(
+                   contacts[i].contactNormal.dot(supportNormal)) < 0.9999f) {
+      return false;
+    }
+  }
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    AvbdSolverBody &body = bodies[i];
+    inertialBlocks[i].initializeDiagonal(body.invMass, body.invInertiaWorld,
+                                         invDt2);
+    preconditioner[i] = inertialBlocks[i];
+    const physx::PxReal mass = 1.0f / body.invMass;
+    const physx::PxVec3 linear =
+        (body.position - body.inertialPosition) * (mass * invDt2);
+    physx::PxQuat deltaQ =
+        body.rotation * body.inertialRotation.getConjugate();
+    if (deltaQ.w < 0.0f)
+      deltaQ = -deltaQ;
+    const physx::PxVec3 rotationError(deltaQ.x * 2.0f, deltaQ.y * 2.0f,
+                                      deltaQ.z * 2.0f);
+    const physx::PxVec3 angular =
+        (body.invInertiaWorld.getInverse() * rotationError) * invDt2;
+    gradient[i] = AvbdVec6(linear, angular);
+  }
+
+  if (!addFrictionlessBodyVsStaticContactRows(
+          bodies, numBodies, contacts, numContacts, config, invDt2,
+          rows, gradient, preconditioner))
+    return false;
+
+  const physx::PxVec3 rA = bodyA.rotation.rotate(joint.anchorA);
+  const physx::PxVec3 rB = bodyB.rotation.rotate(joint.anchorB);
+  const physx::PxVec3 previousRA =
+      bodyA.prevRotation.rotate(joint.anchorA);
+  const physx::PxVec3 previousRB =
+      bodyB.prevRotation.rotate(joint.anchorB);
+  const physx::PxVec3 displacementA =
+      (bodyA.position + rA) - (bodyA.prevPosition + previousRA);
+  const physx::PxVec3 displacementB =
+      (bodyB.position + rB) - (bodyB.prevPosition + previousRB);
+  const physx::PxReal violation =
+      (displacementB - displacementA).dot(axis) -
+      joint.driveLinearVelocity.x * dt;
+  physx::PxReal penalty = joint.linearDamping.x / dt;
+  if (joint.driveAccelerationFlags == 0x1u) {
+    // PhysX acceleration drives scale the force-mode spring coefficient by
+    // the reciprocal unit response of the complete row.  This preserves the
+    // implicit damping response across endpoint masses while retaining the
+    // authored force-valued limit.  The island Hessian supplies the
+    // 1/(1 + dt*damping) denominator; applying it here again would count the
+    // implicit response twice.
+    const physx::PxVec3 angularA = rA.cross(axis);
+    const physx::PxVec3 angularB = rB.cross(axis);
+    const physx::PxReal unitResponse =
+        bodyA.invMass + bodyB.invMass +
+        angularA.dot(bodyA.invInertiaWorld * angularA) +
+        angularB.dot(bodyB.invInertiaWorld * angularB);
+    if (!(unitResponse > 1e-8f) || !PxIsFinite(unitResponse))
+      return false;
+    penalty /= unitResponse;
+  }
+  const physx::PxReal limit = joint.driveLinearForce.x;
+  const physx::PxReal rawForce = penalty * violation;
+  const physx::PxReal force =
+      physx::PxClamp(rawForce, -limit, limit);
+  const bool saturated = physx::PxAbs(rawForce) >= limit;
+  CoupledIslandRow driveRow;
+  driveRow.bodyA = bodyAIndex;
+  driveRow.bodyB = bodyBIndex;
+  driveRow.jacobianA = AvbdVec6(-axis, -rA.cross(axis));
+  driveRow.jacobianB = AvbdVec6(axis, rB.cross(axis));
+  driveRow.penalty = saturated ? 0.0f : penalty;
+  driveRow.force = force;
+  addCoupledRow(driveRow, rows, gradient, preconditioner);
+
+  physx::PxArray<AvbdLDLT> preconditionerLdlt(numBodies);
+  physx::PxArray<AvbdVec6> residual = gradient;
+  physx::PxArray<AvbdVec6> preconditioned(numBodies);
+  physx::PxArray<AvbdVec6> direction(numBodies);
+  physx::PxArray<AvbdVec6> operatorDirection;
+  physx::PxArray<AvbdVec6> solution(numBodies);
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (!preconditionerLdlt[i].decomposeWithRegularization(preconditioner[i]))
+      return false;
+    preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    direction[i] = preconditioned[i];
+    solution[i] = AvbdVec6();
+  }
+  double residualProduct = dotVectors(residual, preconditioned);
+  if (!(residualProduct >= 0.0) || !std::isfinite(residualProduct))
+    return false;
+  const double initialResidual = std::sqrt(residualProduct);
+  const double targetResidual =
+      1e-8 * std::max(1.0, initialResidual);
+  bool converged = initialResidual <= targetResidual;
+  const physx::PxU32 maxIterations = numBodies * 12u;
+  for (physx::PxU32 iteration = 0;
+       iteration < maxIterations && !converged; ++iteration) {
+    applyCoupledOperator(inertialBlocks, rows, direction, operatorDirection);
+    const double denominator = dotVectors(direction, operatorDirection);
+    if (!(denominator > 1e-30) || !std::isfinite(denominator))
+      return false;
+    const physx::PxReal alpha =
+        static_cast<physx::PxReal>(residualProduct / denominator);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      addScaled(solution[i], direction[i], alpha);
+      addScaled(residual[i], operatorDirection[i], -alpha);
+      preconditioned[i] = preconditionerLdlt[i].solve(residual[i]);
+    }
+    const double nextProduct = dotVectors(residual, preconditioned);
+    if (!(nextProduct >= 0.0) || !std::isfinite(nextProduct))
+      return false;
+    converged = physx::PxSqrt(nextProduct) <= targetResidual;
+    if (!converged) {
+      if (!(residualProduct > 1e-30))
+        return false;
+      const physx::PxReal beta =
+          static_cast<physx::PxReal>(nextProduct / residualProduct);
+      for (physx::PxU32 i = 0; i < numBodies; ++i)
+        direction[i] = preconditioned[i] + direction[i] * beta;
+    }
+    residualProduct = nextProduct;
+  }
+  if (!converged)
+    return false;
+
+  // The drive is translation invariant and every accepted external contact
+  // normal is orthogonal to its axis. Project only the accumulated roundoff
+  // in the mass-weighted translational Newton step (or its support-tangent
+  // subspace); this is the exact summed linear equation, not an additional
+  // physical constraint.
+  physx::PxReal totalMass = 0.0f;
+  physx::PxVec3 expectedWeightedDelta(0.0f);
+  physx::PxVec3 solvedWeightedDelta(0.0f);
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    const physx::PxReal mass = 1.0f / bodies[i].invMass;
+    totalMass += mass;
+    expectedWeightedDelta +=
+        (bodies[i].position - bodies[i].inertialPosition) * mass;
+    solvedWeightedDelta += solution[i].linear * mass;
+  }
+  if (!(totalMass > 0.0f) || !PxIsFinite(totalMass))
+    return false;
+  physx::PxVec3 translationRoundoff =
+      solvedWeightedDelta - expectedWeightedDelta;
+  if (numContacts > 0)
+    translationRoundoff -=
+        supportNormal * translationRoundoff.dot(supportNormal);
+  const physx::PxVec3 commonRoundoff = translationRoundoff / totalMass;
+  for (physx::PxU32 i = 0; i < numBodies; ++i)
+    solution[i].linear -= commonRoundoff;
+
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    bodies[i].position -= solution[i].linear;
+    if (solution[i].angular.magnitudeSquared() > 1e-12f) {
+      const physx::PxQuat delta(solution[i].angular.x,
+                               solution[i].angular.y,
+                               solution[i].angular.z, 0.0f);
+      bodies[i].rotation =
+          (bodies[i].rotation - delta * bodies[i].rotation * 0.5f)
+              .getNormalized();
+    }
+  }
+  return true;
+}
 } // namespace
 
 
@@ -148,8 +2407,6 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
   if (body.invMass <= 0.0f)
     return;
-
-  PX_UNUSED(dt);
 
   const physx::PxU32 bodyIndex = body.nodeIndex;
 
@@ -247,6 +2504,120 @@ void AvbdSolver::solveLocalSystemWithJoints(
         continue;
 
       const bool isBodyA = (bodyAIdx == bodyIndex);
+
+      const bool genericHard1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW) != 0;
+      const bool genericAccelerationDamping1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::
+               eGENERIC_ACCELERATION_DAMPING_1D_ROW) != 0;
+      const bool genericForceSpring1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW) != 0;
+      const bool compliantMimic1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::
+               eARTICULATION_COMPLIANT_MIMIC_ROW) != 0;
+      const bool fixedTendon1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::eARTICULATION_FIXED_TENDON_ROW) != 0;
+      const bool spatialTendon1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::eARTICULATION_SPATIAL_TENDON_ROW) != 0;
+      const bool coupledSpatialTendon1D =
+          (jnt.sourceFlags &
+           AvbdD6JointConstraint::eCOUPLED_SPATIAL_TENDON_ACTIVE) != 0;
+      const bool compliantTendon1D =
+          fixedTendon1D || spatialTendon1D;
+      if (coupledSpatialTendon1D)
+        continue;
+      if (genericHard1D || genericAccelerationDamping1D ||
+          genericForceSpring1D || compliantMimic1D ||
+          compliantTendon1D) {
+        const physx::PxReal effectiveMass =
+            computeGeneric1DEffectiveMass(jnt, bodies, numBodies);
+        if (effectiveMass <= 0.0f || dt <= 0.0f)
+          continue;
+
+        const physx::PxReal C =
+            computeGeneric1DViolation(jnt, bodies, numBodies, dt);
+        physx::PxReal pen = 0.0f;
+        physx::PxReal unclampedForce = 0.0f;
+        if (genericAccelerationDamping1D) {
+          // For an acceleration spring, PhysX's implicit velocity update is
+          // mass independent: dv = -v*(d*dt)/(1+d*dt).  Expressing that in
+          // AVBD's position Hessian requires scaling the physical damping by
+          // the row effective mass.
+          pen = effectiveMass * jnt.header.damping / dt;
+          unclampedForce = pen * C;
+        } else if (genericForceSpring1D || compliantMimic1D ||
+                   compliantTendon1D) {
+          // Backward-Euler linearization of k*C + d*Cdot with respect to
+          // the current position iterate.  genericGeometricError is C at the
+          // start-of-step reference pose, so this uses the displacement
+          // produced by this step rather than mixing the previous interval's
+          // body velocity with a current-position damping Hessian.  A changed
+          // public tendon offset is deliberately part of both values: the
+          // reduced-coordinate tendon path damps joint motion, not an
+          // externally authored offset velocity.
+          physx::PxReal stiffness = jnt.header.rho;
+          physx::PxReal damping = jnt.header.damping;
+          if (compliantMimic1D) {
+            stiffness = jnt.genericNaturalFrequency *
+                        jnt.genericNaturalFrequency * effectiveMass;
+            damping = 2.0f * jnt.genericNaturalFrequency *
+                      jnt.genericDampingRatio * effectiveMass;
+          }
+          const physx::PxReal velocity =
+              (C - jnt.genericGeometricError) / dt;
+          pen = stiffness + damping / dt;
+          unclampedForce = stiffness * C + damping * velocity;
+          if (compliantTendon1D &&
+              jnt.genericTendonLimitStiffness > 0.0f) {
+            physx::PxReal limitViolation = 0.0f;
+            if (C < jnt.genericTendonLowLimit)
+              limitViolation = C - jnt.genericTendonLowLimit;
+            else if (C > jnt.genericTendonHighLimit)
+              limitViolation = C - jnt.genericTendonHighLimit;
+            if (limitViolation != 0.0f) {
+              // Tendon limit springs are additive to the rest-length spring.
+              // PhysX uses the authored damping in the limit spring's implicit
+              // response, but computeTendonImpulse applies the tendon-speed
+              // damping force only to the rest-length spring.
+              pen +=
+                  jnt.genericTendonLimitStiffness + damping / dt;
+              unclampedForce +=
+                  jnt.genericTendonLimitStiffness * limitViolation;
+            }
+          }
+        } else {
+          pen = physx::PxMax(jnt.header.rho, effectiveMass * invDt2);
+          unclampedForce = pen * C + jnt.lambdaLinear.x;
+        }
+        const physx::PxReal appliedImpulse = physx::PxClamp(
+            -unclampedForce * dt, jnt.genericMinImpulse,
+            jnt.genericMaxImpulse);
+        const bool bilateral =
+            jnt.genericMinImpulse < 0.0f && jnt.genericMaxImpulse > 0.0f;
+        if (!bilateral && physx::PxAbs(appliedImpulse) <= 1e-12f)
+          continue;
+
+        const physx::PxReal force = -appliedImpulse / dt;
+        const physx::PxVec3 &linearJacobian =
+            isBodyA ? jnt.genericLinearA : jnt.genericLinearB;
+        const physx::PxVec3 &angularJacobian =
+            isBodyA ? jnt.genericAngularA : jnt.genericAngularB;
+        A.addConstraintContribution(linearJacobian, angularJacobian, pen);
+        gLinear += linearJacobian * force;
+        gAngular += angularJacobian * force;
+        hasLinearCoupling |=
+            linearJacobian.magnitudeSquared() > 1e-12f &&
+            angularJacobian.magnitudeSquared() > 1e-12f;
+        ++numTouching;
+        continue;
+      }
+
       const bool otherIsStatic =
           isBodyA ? (bodyBIdx == 0xFFFFFFFF || bodyBIdx >= numBodies)
                   : (bodyAIdx == 0xFFFFFFFF || bodyAIdx >= numBodies);
@@ -296,12 +2667,14 @@ void AvbdSolver::solveLocalSystemWithJoints(
         physx::PxVec3 posError = worldAnchorA - worldAnchorB;
 
         // Compute joint-frame axes in world space
-        physx::PxQuat rotA_lin = isBodyA ? body.rotation
-            : (otherIsStatic ? physx::PxQuat(physx::PxIdentity)
-                             : bodies[bodyAIdx].rotation);
+        const bool bodyAIsStatic =
+            (bodyAIdx == 0xFFFFFFFF || bodyAIdx >= numBodies);
+        physx::PxQuat rotA_lin =
+            bodyAIsStatic
+                ? physx::PxQuat(physx::PxIdentity)
+                : (isBodyA ? body.rotation : bodies[bodyAIdx].rotation);
         physx::PxQuat jointFrameA_lin =
-            (otherIsStatic && isBodyA) ? jnt.localFrameA
-                                       : rotA_lin * jnt.localFrameA;
+            bodyAIsStatic ? jnt.localFrameA : rotA_lin * jnt.localFrameA;
         {
           physx::PxReal qm2 = jointFrameA_lin.magnitudeSquared();
           if (qm2 > 1e-8f && PxIsFinite(qm2))
@@ -477,6 +2850,11 @@ void AvbdSolver::solveLocalSystemWithJoints(
         } else {
           // Generic per-axis angular constraint handling
           for (int axis = 0; axis < 3; ++axis) {
+            if ((jnt.sourceFlags &
+                 AvbdD6JointConstraint::
+                     eD6_LEGACY_CONE_LIMIT_ACTIVE) != 0 &&
+                axis >= 1)
+              continue;
             physx::PxU32 motion = jnt.getAngularMotion(axis);
             if (motion == 2) // FREE
               continue;
@@ -524,9 +2902,10 @@ void AvbdSolver::solveLocalSystemWithJoints(
         }
       }
 
-      // --- Cone limit (single angular inequality, for spherical joints) ---
-      // Uses the same geometric approach as the reference spherical solver:
-      // a single cone constraint based on the angle between the joint X-axes.
+      // --- Cone limit (single angular inequality) ---
+      // Public D6 legacy swing limits and native spherical limits both use
+      // ConeLimitHelperTanLess so unequal Y/Z limits preserve the same
+      // elliptical geometry as their Extensions solver preps.
       if (jnt.coneAngleLimit > 0.0f) {
         physx::PxQuat rotA_cone, rotB_cone;
         if (isBodyA) {
@@ -539,32 +2918,38 @@ void AvbdSolver::solveLocalSystemWithJoints(
           rotB_cone = body.rotation;
         }
 
-        // Cone axis = X-axis of each body's joint frame
-        physx::PxVec3 worldAxisA = (rotA_cone * jnt.localFrameA).rotate(
-            physx::PxVec3(1.0f, 0.0f, 0.0f));
-        physx::PxVec3 worldAxisB = (rotB_cone * jnt.localFrameB).rotate(
-            physx::PxVec3(1.0f, 0.0f, 0.0f));
-
-        physx::PxReal dotAB = physx::PxClamp(worldAxisA.dot(worldAxisB),
-                                              -1.0f, 1.0f);
-        physx::PxReal coneAngle = physx::PxAcos(dotAB);
-        physx::PxReal coneViolation = coneAngle - jnt.coneAngleLimit;
+        physx::PxVec3 corrAxis(0.0f);
+        physx::PxReal coneViolation = 0.0f;
+        const bool ellipticalCone = computeEllipticalConeConstraint(
+            jnt, rotA_cone, rotB_cone, corrAxis, coneViolation);
+        if (!ellipticalCone) {
+          const physx::PxVec3 worldAxisA =
+              (rotA_cone * jnt.localFrameA)
+                  .rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+          const physx::PxVec3 worldAxisB =
+              (rotB_cone * jnt.localFrameB)
+                  .rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+          const physx::PxReal dotAB = physx::PxClamp(
+              worldAxisA.dot(worldAxisB), -1.0f, 1.0f);
+          const physx::PxReal coneAngle = physx::PxAcos(dotAB);
+          coneViolation = coneAngle - jnt.coneAngleLimit;
+          corrAxis = worldAxisA.cross(worldAxisB);
+          const physx::PxReal corrAxisMag = corrAxis.magnitude();
+          if (corrAxisMag > 1e-6f)
+            corrAxis *= 1.0f / corrAxisMag;
+          else
+            corrAxis = physx::PxVec3(0.0f);
+        }
 
         // coneLambda <= 0 (unilateral): force = pen * violation - coneLambda
         physx::PxReal forceMag = pen * coneViolation - jnt.coneLambda;
 
-        if (forceMag > 0.0f) {
-          physx::PxVec3 corrAxis = worldAxisA.cross(worldAxisB);
-          physx::PxReal corrAxisMag = corrAxis.magnitude();
-          if (corrAxisMag > 1e-6f) {
-            corrAxis *= (1.0f / corrAxisMag);
+        if (forceMag > 0.0f && corrAxis.magnitudeSquared() > 1e-12f) {
+          physx::PxVec3 gradPos(0.0f);
+          physx::PxVec3 gradRot = -corrAxis * signJ;
 
-            physx::PxVec3 gradPos(0.0f);
-            physx::PxVec3 gradRot = -corrAxis * signJ;
-
-            A.addConstraintContribution(gradPos, gradRot, pen);
-            gAngular += gradRot * forceMag;
-          }
+          A.addConstraintContribution(gradPos, gradRot, pen);
+          gAngular += gradRot * forceMag;
         }
       }
 
@@ -578,7 +2963,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
       {
         // Joint frame A in world space
         physx::PxQuat jointFrameA =
-            otherIsStatic && isBodyA
+            otherIsStatic && !isBodyA
                 ? jnt.localFrameA
                 : (isBodyA ? body.rotation * jnt.localFrameA
                            : (otherIsStatic ? jnt.localFrameA
@@ -640,20 +3025,72 @@ void AvbdSolver::solveLocalSystemWithJoints(
             const physx::PxVec3 rBWorld = bodyBRef
               ? bodyBRef->rotation.rotate(jnt.anchorB)
               : physx::PxVec3(0.0f);
-            physx::PxReal rho_drive = damping / dt2;
-            if (jnt.isLinearAccelerationDrive(a)) {
+            const bool isAccelerationDrive =
+                jnt.isLinearAccelerationDrive(a);
+            const physx::PxReal stiffness = (&jnt.linearStiffness.x)[a];
+            const bool usePhysicalVelocityObjective =
+                stiffness <= 0.0f && (bodyARef == nullptr || bodyBRef == nullptr);
+            const bool usePositionObjective =
+                a == 0 &&
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                                       eLINEAR_POSITION_DRIVE_ACTIVE) != 0;
+            // In the verified exactly-one-dynamic, stiffness-zero subset,
+            // PxD6JointDrive::damping is a force-per-velocity coefficient.
+            // With C = (dxB-dxA)-targetVelocity*dt, its position objective
+            // therefore uses damping/dt.  Wider dynamic-dynamic and spring
+            // families retain the legacy AL path until they have independent
+            // mixed-island and articulation gates.
+            const physx::PxReal positionError =
+                ((bodyBRef ? bodyBRef->position + rBWorld : jnt.anchorB) -
+                 (bodyARef ? bodyARef->position + rAWorld : jnt.anchorA))
+                    .dot(wAxis) -
+                (&jnt.driveLinearPosition.x)[a];
+            physx::PxReal rho_drive =
+                usePositionObjective
+                    ? stiffness + damping / dt
+                    : (usePhysicalVelocityObjective ? damping / dt
+                                                    : damping / dt2);
+            if (isAccelerationDrive && usePhysicalVelocityObjective) {
               const physx::PxReal driveScale =
                 computeLinearDriveRecipResponse(bodyARef, bodyBRef,
                                rAWorld, rBWorld, wAxis);
-              const physx::PxReal stiffness = (&jnt.linearStiffness.x)[a];
-              const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+              rho_drive *= driveScale;
+            } else if (isAccelerationDrive) {
+              const physx::PxReal driveScale =
+                computeLinearDriveRecipResponse(bodyARef, bodyBRef,
+                               rAWorld, rBWorld, wAxis);
+              const physx::PxReal dampingOnly =
+                  physx::PxMax(0.0f, damping - stiffness);
               const physx::PxReal implicitScale =
-                1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
+                  1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
               rho_drive *= driveScale * implicitScale;
             }
-            physx::PxReal lam = (&jnt.lambdaDriveLinear.x)[a];
+            const physx::PxReal authoredLimit =
+                (&jnt.driveLinearForce.x)[a];
+            const bool limitsAreForces =
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                                       eD6_DRIVE_LIMITS_ARE_FORCES) != 0;
+            const physx::PxReal maxForce = limitsAreForces
+                ? authoredLimit
+                : physx::PxMin(PX_MAX_F32, authoredLimit / dt);
+            const bool usePhysicalObjective =
+                usePhysicalVelocityObjective || usePositionObjective;
+            const physx::PxReal lambda = usePhysicalObjective
+                ? 0.0f
+                : (&jnt.lambdaDriveLinear.x)[a];
+            const physx::PxReal rawForce =
+                usePositionObjective
+                    ? stiffness * positionError + (damping / dt) * C
+                    : rho_drive * C + lambda;
+            const physx::PxReal driveForce = usePhysicalObjective
+                ? physx::PxClamp(rawForce, -maxForce, maxForce)
+                : rawForce;
+            const bool saturated = usePhysicalObjective &&
+                physx::PxAbs(rawForce) >= maxForce;
             physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
-            physx::PxReal f = signAL * (rho_drive * C + lam);
+            physx::PxReal f = signAL * driveForce;
+            if (saturated)
+              rho_drive = 0.0f;
 
             // Full 6D Jacobian Jd = (wAxis, rArm x wAxis), matching
             // standalone.  The drive force acts at the anchor point, so
@@ -689,7 +3126,9 @@ void AvbdSolver::solveLocalSystemWithJoints(
           physx::PxVec3 dThetaThis(dqThis.x, dqThis.y, dqThis.z);
           dThetaThis *= 2.0f;
 
-          physx::PxVec3 dThetaOther(0.0f);
+          physx::PxVec3 dThetaOther =
+              isBodyA ? jnt.externalAngularStepB
+                      : jnt.externalAngularStepA;
           if (otherBody) {
             physx::PxQuat dqOther =
                 otherBody->rotation * otherBody->prevRotation.getConjugate();
@@ -718,24 +3157,98 @@ void AvbdSolver::solveLocalSystemWithJoints(
             physx::PxReal damping =
                 jnt.angularDamping.z; // SLERP uses Z damping slot
             if (damping > 0.0f) {
-              physx::PxReal rho_drive = damping / dt2;
-              if (jnt.isAngularAccelerationDrive(2)) {
-                const physx::PxReal driveScale =
-                    computeAngularDriveRecipResponse(bodyARef, bodyBRef,
-                                                     physx::PxVec3(1.0f, 0.0f, 0.0f));
+              const bool usePhysicalSlerpVelocityObjective =
+                  (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+              const bool usePhysicalSlerpPositionObjective =
+                  (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eSLERP_POSITION_DRIVE_ACTIVE) != 0;
+              if (usePhysicalSlerpPositionObjective) {
+                physx::PxQuat worldFrameA =
+                    bodyARef ? bodyARef->rotation * jnt.localFrameA
+                             : jnt.localFrameA;
+                physx::PxQuat worldFrameB =
+                    bodyBRef ? bodyBRef->rotation * jnt.localFrameB
+                             : jnt.localFrameB;
+                worldFrameA.normalize();
+                worldFrameB.normalize();
+                physx::PxQuat currentRelative =
+                    worldFrameA.getConjugate() * worldFrameB;
+                currentRelative.normalize();
+                physx::PxQuat targetRelative = jnt.driveAngularPosition;
+                if (currentRelative.dot(targetRelative) < 0.0f)
+                  targetRelative = -targetRelative;
+                const physx::PxQuat delta =
+                    targetRelative.getConjugate() * currentRelative;
+                physx::PxVec3 rows[3];
+                computeSlerpJacobianAxes(rows, worldFrameA * targetRelative,
+                                         worldFrameB);
                 const physx::PxReal stiffness = jnt.angularStiffness.z;
-                const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
-                const physx::PxReal implicitScale =
-                    1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
-                rho_drive *= driveScale * implicitScale;
-              }
-              for (int k = 0; k < 3; ++k) {
-                physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
-                physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[k];
-                physx::PxReal f = signAL * (rho_drive * C + lam);
+                for (int row = 0; row < 3; ++row) {
+                  const physx::PxReal C = relDW.dot(rows[row]);
+                  const physx::PxReal rawTorque =
+                      stiffness * (&delta.x)[row] + (damping / dt) * C;
+                  const physx::PxReal driveTorque = physx::PxClamp(
+                      rawTorque, -jnt.driveAngularForce.z,
+                      jnt.driveAngularForce.z);
+                  const bool saturated =
+                      physx::PxAbs(rawTorque) >= jnt.driveAngularForce.z;
+                  const physx::PxReal rowTangent =
+                      saturated ? 0.0f : stiffness + damping / dt;
+                  for (int k = 0; k < 3; ++k)
+                    for (int l = 0; l < 3; ++l)
+                      A.angularAngular(k, l) +=
+                          rowTangent * (&rows[row].x)[k] *
+                          (&rows[row].x)[l];
+                  gAngular += rows[row] * (signAL * driveTorque);
+                }
+              } else {
+                physx::PxReal rho_drive =
+                    usePhysicalSlerpVelocityObjective ? damping / dt
+                                                      : damping / dt2;
+                if (jnt.isAngularAccelerationDrive(2)) {
+                  const physx::PxReal driveScale =
+                      computeAngularDriveRecipResponse(
+                          bodyARef, bodyBRef,
+                          physx::PxVec3(1.0f, 0.0f, 0.0f));
+                  const physx::PxReal stiffness = jnt.angularStiffness.z;
+                  const physx::PxReal dampingOnly =
+                      physx::PxMax(0.0f, damping - stiffness);
+                  const physx::PxReal implicitScale =
+                      1.0f /
+                      (1.0f + dt * (dt * stiffness + dampingOnly));
+                  rho_drive *= driveScale * implicitScale;
+                }
+                const physx::PxReal targetScale =
+                    usePhysicalSlerpVelocityObjective &&
+                            mConfig.angularDamping > 1e-6f
+                        ? 1.0f / mConfig.angularDamping
+                        : 1.0f;
+                for (int k = 0; k < 3; ++k) {
+                  physx::PxReal C =
+                      (&relDW.x)[k] -
+                      targetScale * (&worldAngTarget.x)[k];
+                  const physx::PxReal lam =
+                      usePhysicalSlerpVelocityObjective
+                          ? 0.0f
+                          : (&jnt.lambdaDriveAngular.x)[k];
+                  const physx::PxReal rawTorque = rho_drive * C + lam;
+                  const physx::PxReal driveTorque =
+                      usePhysicalSlerpVelocityObjective
+                          ? physx::PxClamp(rawTorque,
+                                           -jnt.driveAngularForce.z,
+                                           jnt.driveAngularForce.z)
+                          : rawTorque;
+                  const bool saturated =
+                      usePhysicalSlerpVelocityObjective &&
+                      physx::PxAbs(rawTorque) >=
+                          jnt.driveAngularForce.z;
+                  physx::PxReal f = signAL * driveTorque;
 
-                A.angularAngular(k, k) += rho_drive;
-                (&gAngular.x)[k] += f;
+                  if (!saturated)
+                    A.angularAngular(k, k) += rho_drive;
+                  (&gAngular.x)[k] += f;
+                }
               }
             }
           } else {
@@ -773,7 +3286,68 @@ void AvbdSolver::solveLocalSystemWithJoints(
               physx::PxReal targetOmega_dt = -worldAngTarget.dot(wAxis);
               physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
 
-              physx::PxReal rho_drive = damping / dt2;
+              const bool usePhysicalAngularAxisVelocityObjective =
+                  (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
+                      0;
+              const bool usePhysicalAngularPositionObjective =
+                  (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eANGULAR_AXIS_POSITION_DRIVE_ACTIVE) != 0;
+              physx::PxReal positionResidual = 0.0f;
+              physx::PxReal positionTangent = 0.0f;
+              if (usePhysicalAngularPositionObjective) {
+                physx::PxQuat worldFrameA =
+                    bodyARef ? bodyARef->rotation * jnt.localFrameA
+                             : jnt.localFrameA;
+                physx::PxQuat worldFrameB =
+                    bodyBRef ? bodyBRef->rotation * jnt.localFrameB
+                             : jnt.localFrameB;
+                worldFrameA.normalize();
+                worldFrameB.normalize();
+                physx::PxQuat currentRelative =
+                    worldFrameA.getConjugate() * worldFrameB;
+                currentRelative.normalize();
+                physx::PxQuat targetRelative = jnt.driveAngularPosition;
+                if (currentRelative.dot(targetRelative) < 0.0f)
+                  targetRelative = -targetRelative;
+                const physx::PxQuat delta =
+                    currentRelative * targetRelative.getConjugate();
+
+                if (axes[a].dampIdx == 0) {
+                  // ExtD6Joint emits geometricError=-2*delta.x for TWIST.
+                  // AVBD's gradient uses current-target, so this is the
+                  // opposite sign. Its local derivative is delta.w.
+                  positionResidual = 2.0f * delta.x;
+                  positionTangent = physx::PxAbs(delta.w);
+                } else if (axes[a].dampIdx == 1) {
+                  // ExtD6Joint emits delta.getBasisVector0().z for SWING1.
+                  // The AVBD gradient again uses the opposite sign. In the
+                  // predicate-approved isolated SWING1 row this is a
+                  // full-angle sine residual with a cosine tangent.
+                  positionResidual = -delta.getBasisVector0().z;
+                  positionTangent = physx::PxAbs(
+                      1.0f - 2.0f * delta.y * delta.y);
+                } else {
+                  // ExtD6Joint emits -delta.getBasisVector0().y for SWING2.
+                  // AVBD uses its opposite gradient. In the predicate-approved
+                  // isolated SWING2 row this is again a full-angle sine with
+                  // the corresponding cosine tangent.
+                  positionResidual = delta.getBasisVector0().y;
+                  positionTangent = physx::PxAbs(
+                      1.0f - 2.0f * delta.z * delta.z);
+                }
+              }
+              // In the scoped force-mode TWIST/SWING1/SWING2 subset, damping
+              // has the physical units torque/(angular velocity).  C is an
+              // angular displacement over the step, so damping/dt maps C back
+              // to a torque.  The wider angular family retains its existing AL
+              // objective until SLERP and spring semantics are gated.
+              physx::PxReal rho_drive =
+                  usePhysicalAngularPositionObjective
+                      ? stiffness * positionTangent + damping / dt
+                      : (usePhysicalAngularAxisVelocityObjective
+                             ? damping / dt
+                             : damping / dt2);
               if (isAccelerationDrive) {
                 const physx::PxReal driveScale =
                   computeAngularDriveRecipResponse(bodyARef, bodyBRef, wAxis);
@@ -781,8 +3355,30 @@ void AvbdSolver::solveLocalSystemWithJoints(
                   1.0f / (1.0f + dt * effectiveRate);
                 rho_drive = driveScale * implicitScale * effectiveRate;
               }
-              physx::PxReal lam = (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx];
-              physx::PxReal f = signAL * (rho_drive * C + lam);
+              const bool usePhysicalAngularObjective =
+                  usePhysicalAngularAxisVelocityObjective ||
+                  usePhysicalAngularPositionObjective;
+              const physx::PxReal lambda =
+                  usePhysicalAngularObjective
+                      ? 0.0f
+                      : (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx];
+              const physx::PxReal rawTorque =
+                  usePhysicalAngularPositionObjective
+                      ? stiffness * positionResidual + (damping / dt) * C
+                      : rho_drive * C + lambda;
+              const physx::PxReal driveTorque =
+                  usePhysicalAngularObjective
+                      ? physx::PxClamp(rawTorque,
+                                       -jnt.driveAngularForce[axes[a].dampIdx],
+                                       jnt.driveAngularForce[axes[a].dampIdx])
+                      : rawTorque;
+              const bool saturated =
+                  usePhysicalAngularObjective &&
+                  physx::PxAbs(rawTorque) >=
+                      jnt.driveAngularForce[axes[a].dampIdx];
+              physx::PxReal f = signAL * driveTorque;
+              if (saturated)
+                rho_drive = 0.0f;
 
               // Hessian: -_drive - (wAxis - wAxis) on angular block
               for (int k = 0; k < 3; ++k)
@@ -1208,6 +3804,117 @@ void AvbdSolver::solveWithJoints(
   const physx::PxReal invDt = 1.0f / dt;
   const physx::PxReal invDt2 = invDt * invDt;
 
+  for (physx::PxU32 i = 0; i < numD6; ++i)
+    d6Joints[i].sourceFlags &=
+        ~(AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::eLINEAR_POSITION_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::
+              eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::
+              eANGULAR_AXIS_POSITION_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::eSLERP_VELOCITY_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::eSLERP_POSITION_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::
+              eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE |
+          AvbdD6JointConstraint::eCOUPLED_SPATIAL_TENDON_ACTIVE);
+  const bool linearPositionDriveIsland =
+      isLinearPositionDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  if (linearPositionDriveIsland)
+    d6Joints[0].sourceFlags |=
+        AvbdD6JointConstraint::eLINEAR_POSITION_DRIVE_ACTIVE;
+  const bool angularAxisVelocityDriveIsland =
+      isAngularAxisVelocityDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  if (angularAxisVelocityDriveIsland)
+    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
+        eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE;
+  const bool angularAxisPositionDriveIsland =
+      isAngularAxisPositionDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  if (angularAxisPositionDriveIsland)
+    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
+        eANGULAR_AXIS_POSITION_DRIVE_ACTIVE;
+  const bool slerpVelocityDriveIsland =
+      isSlerpVelocityDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  if (slerpVelocityDriveIsland)
+    d6Joints[0].sourceFlags |=
+        AvbdD6JointConstraint::eSLERP_VELOCITY_DRIVE_ACTIVE;
+  const bool slerpPositionDriveIsland =
+      isSlerpPositionDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  if (slerpPositionDriveIsland)
+    d6Joints[0].sourceFlags |=
+        AvbdD6JointConstraint::eSLERP_POSITION_DRIVE_ACTIVE;
+  bool coupledAngularPositionDriveIsland =
+      isCoupledAngularPositionDriveIslandSupported(
+          bodies, numBodies, contacts, numContacts, d6Joints, numD6,
+          numGear, numSoftParticles, numSoftBodies, numSoftContacts);
+  if (coupledAngularPositionDriveIsland)
+    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
+        eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE;
+  bool coupledLinearDriveIsland = isCoupledLinearDriveIslandSupported(
+      bodies, numBodies, contacts, numContacts, d6Joints, numD6, numGear,
+      numSoftParticles, numSoftBodies, numSoftContacts);
+  if (coupledLinearDriveIsland)
+    d6Joints[0].sourceFlags |=
+        AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE;
+  bool coupledFixedD6Island = isCoupledFixedD6IslandSupported(
+      bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+      numSoftParticles, numSoftBodies, numSoftContacts);
+  bool coupledSphericalConeIsland =
+      isCoupledSphericalConeIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  physx::PxArray<physx::PxU32> coupledSpatialTendonRowIndices;
+  bool coupledSpatialTendonIsland = findCoupledSpatialTendonRows(
+      bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+      numSoftParticles, numSoftBodies, numSoftContacts,
+      coupledSpatialTendonRowIndices);
+  if (coupledSpatialTendonIsland) {
+    for (physx::PxU32 row = 0;
+         row < coupledSpatialTendonRowIndices.size(); ++row)
+      d6Joints[coupledSpatialTendonRowIndices[row]].sourceFlags |=
+          AvbdD6JointConstraint::
+              eCOUPLED_SPATIAL_TENDON_ACTIVE;
+  }
+  const bool passiveCenteredGearVelocityProjectionIsland =
+      isPassiveCenteredGearVelocityProjectionSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, gearJoints,
+          numGear, numSoftParticles, numSoftBodies, numSoftContacts);
+  physx::PxU32 passiveGenericHard1DIndex = PX_MAX_U32;
+  const bool passiveGenericHard1DVelocityProjectionIsland =
+      isSinglePassiveGenericHard1DVelocityProjectionSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts,
+          passiveGenericHard1DIndex);
+  physx::PxVec3 coupledExpectedMomentum(0.0f);
+  physx::PxVec3 coupledExpectedAngularMomentum(0.0f);
+  if (coupledLinearDriveIsland) {
+    physx::PxReal totalMass = 0.0f;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      const physx::PxReal mass = 1.0f / bodies[i].invMass;
+      totalMass += mass;
+      coupledExpectedMomentum += bodies[i].linearVelocity * mass;
+    }
+    coupledExpectedMomentum =
+        (coupledExpectedMomentum + gravity * (totalMass * dt)) *
+        mConfig.velocityDamping;
+  }
+  if (coupledAngularPositionDriveIsland ||
+      coupledSphericalConeIsland) {
+    for (physx::PxU32 i = 0; i < numBodies; ++i)
+      coupledExpectedAngularMomentum +=
+          bodies[i].invInertiaWorld.getInverse() *
+          bodies[i].angularVelocity;
+    coupledExpectedAngularMomentum *= mConfig.velocityDamping;
+  }
   physx::PxArray<bool> touchesKinematicShell(numBodies);
   for (physx::PxU32 i = 0; i < numBodies; ++i)
     touchesKinematicShell[i] = false;
@@ -1268,6 +3975,22 @@ void AvbdSolver::solveWithJoints(
     linearVelAtSolveStart.resize(numBodies);
     for (physx::PxU32 i = 0; i < numBodies; ++i)
       linearVelAtSolveStart[i] = bodies[i].linearVelocity;
+  }
+  physx::PxArray<physx::PxVec3> angularVelAtSolveStart;
+  if (passiveCenteredGearVelocityProjectionIsland) {
+    angularVelAtSolveStart.resize(numBodies);
+    for (physx::PxU32 i = 0; i < numBodies; ++i)
+      angularVelAtSolveStart[i] = bodies[i].angularVelocity;
+  }
+  physx::PxArray<physx::PxVec3> genericLinearVelAtSolveStart;
+  physx::PxArray<physx::PxVec3> genericAngularVelAtSolveStart;
+  if (passiveGenericHard1DVelocityProjectionIsland) {
+    genericLinearVelAtSolveStart.resize(numBodies);
+    genericAngularVelAtSolveStart.resize(numBodies);
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      genericLinearVelAtSolveStart[i] = bodies[i].linearVelocity;
+      genericAngularVelAtSolveStart[i] = bodies[i].angularVelocity;
+    }
   }
 
 #if AVBD_JOINT_DEBUG
@@ -1497,8 +4220,8 @@ void AvbdSolver::solveWithJoints(
                        contacts[c].penetrationDepth;
 
       // Depth-adaptive C0 clamping (same as solve() path)
-      const physx::PxReal c0Threshold = 0.05f;
-      const physx::PxReal c0MaxDepth  = 0.20f;
+      const physx::PxReal c0Threshold = 0.05f * mConfig.lengthScale;
+      const physx::PxReal c0MaxDepth = 0.20f * mConfig.lengthScale;
       if (rawC0 < -c0Threshold) {
         physx::PxReal t = PxClamp(
             (c0MaxDepth + rawC0) / (c0MaxDepth - c0Threshold), 0.0f, 1.0f);
@@ -1609,7 +4332,16 @@ void AvbdSolver::solveWithJoints(
     PX_PROFILE_ZONE("AVBD.solveIterations", 0);
 
     // Chebyshev semi-iterative state
-    const bool useChebyshev = (mConfig.chebyshevRho > 0.0f && mConfig.chebyshevRho < 1.0f);
+    // A component-clamped SLERP drive is non-smooth at each row limit.
+    // Chebyshev extrapolation assumes a smooth stationary iteration and can
+    // repeatedly overshoot that active set, losing drive authority at coarse
+    // timesteps.  Keep the scoped physical SLERP island on plain block descent.
+    const bool useChebyshev =
+        !slerpVelocityDriveIsland && !coupledFixedD6Island &&
+        !coupledSphericalConeIsland &&
+        !coupledSpatialTendonIsland &&
+        mConfig.chebyshevRho > 0.0f &&
+        mConfig.chebyshevRho < 1.0f;
     physx::PxReal chebyOmega = 1.0f;
     physx::PxArray<physx::PxVec3> chebyPrevPos, chebyPrevPrevPos;
     physx::PxArray<physx::PxQuat> chebyPrevRot, chebyPrevPrevRot;
@@ -1702,7 +4434,9 @@ void AvbdSolver::solveWithJoints(
       physx::PxMin(jointIterations,
                    physx::PxU32(hasJointConstraints ? 8 : 4));
     const physx::PxReal rotationTolerance =
-      physx::PxMax(4.0f * mConfig.positionTolerance, 1e-4f);
+      physx::PxMax(4.0f * mConfig.positionTolerance /
+                       physx::PxMax(mConfig.lengthScale, 1e-6f),
+                   1e-4f);
     physx::PxU32 consecutiveConvergedIterations = 0;
     physx::PxArray<physx::PxVec3> earlyStopPrevPos;
     physx::PxArray<physx::PxQuat> earlyStopPrevRot;
@@ -1731,6 +4465,37 @@ void AvbdSolver::solveWithJoints(
       // --- Primal step: block descent over bodies ---
       {
         PX_PROFILE_ZONE("AVBD.blockDescentWithJoints", 0);
+
+        bool coupledSolved = false;
+        if (coupledFixedD6Island) {
+          coupledSolved = solveCoupledFixedD6Island(
+              bodies, numBodies, d6Joints[0], invDt2);
+          if (!coupledSolved)
+            coupledFixedD6Island = false;
+        } else if (coupledSphericalConeIsland) {
+          coupledSolved = solveCoupledSphericalConeIsland(
+              bodies, numBodies, d6Joints[0], invDt2);
+          if (!coupledSolved)
+            coupledSphericalConeIsland = false;
+        } else if (coupledLinearDriveIsland) {
+          coupledSolved = solveCoupledLinearDriveIsland(
+              bodies, numBodies, contacts, numContacts, d6Joints[0], dt,
+              invDt2, mConfig);
+          if (!coupledSolved) {
+            coupledLinearDriveIsland = false;
+            d6Joints[0].sourceFlags &=
+                ~AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE;
+          }
+        } else if (coupledAngularPositionDriveIsland) {
+          coupledSolved = solveCoupledAngularPositionDriveIsland(
+              bodies, numBodies, contacts, numContacts, d6Joints[0], dt,
+              invDt2, mConfig);
+          if (!coupledSolved) {
+            coupledAngularPositionDriveIsland = false;
+            d6Joints[0].sourceFlags &= ~AvbdD6JointConstraint::
+                eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE;
+          }
+        }
 
         // Deterministic body ordering (same as blockDescentIteration)
         const bool useDeterministicOrder =
@@ -1765,11 +4530,37 @@ void AvbdSolver::solveWithJoints(
                                      softContacts, numSoftContacts);
         };
 
-        if (useParallel) {
+        if (coupledSolved) {
+          // Both endpoints were updated from one frozen island objective.
+        } else if (useParallel) {
           avbdParallelFor(0u, numBodies, solveBody);
         } else {
           for (physx::PxU32 idx = 0; idx < numBodies; ++idx)
             solveBody(idx);
+        }
+
+        if (coupledSpatialTendonIsland) {
+          bool tendonSolved = true;
+          for (physx::PxU32 row = 0;
+               row < coupledSpatialTendonRowIndices.size();
+               ++row) {
+            const physx::PxU32 rowIndex =
+                coupledSpatialTendonRowIndices[row];
+            tendonSolved =
+                solveCoupledSpatialTendonRow(
+                    bodies, numBodies, d6Joints[rowIndex], dt,
+                    invDt2) &&
+                tendonSolved;
+          }
+          if (!tendonSolved) {
+            coupledSpatialTendonIsland = false;
+            for (physx::PxU32 row = 0;
+                 row < coupledSpatialTendonRowIndices.size();
+                 ++row)
+              d6Joints[coupledSpatialTendonRowIndices[row]].sourceFlags &=
+                  ~AvbdD6JointConstraint::
+                      eCOUPLED_SPATIAL_TENDON_ACTIVE;
+          }
         }
 
         // --- Body-level 6x6 solve for soft bodies (Newton-style) ---
@@ -1941,6 +4732,101 @@ void AvbdSolver::solveWithJoints(
           // D6 joints
           for (physx::PxU32 j = 0; j < numD6; ++j) {
             AvbdD6JointConstraint &jnt = d6Joints[j];
+            jnt.writebackLinearImpulse = physx::PxVec3(0.0f);
+            jnt.writebackLinearImpulseValid = 0;
+            jnt.writebackAngularImpulse = physx::PxVec3(0.0f);
+            jnt.writebackAngularImpulseValid = 0;
+
+            if ((jnt.sourceFlags &
+                 (AvbdD6JointConstraint::eARTICULATION_FIXED_TENDON_ROW |
+                  AvbdD6JointConstraint::eARTICULATION_SPATIAL_TENDON_ROW |
+                  AvbdD6JointConstraint::
+                      eARTICULATION_COMPLIANT_MIMIC_ROW |
+                  AvbdD6JointConstraint::
+                      eGENERIC_ACCELERATION_DAMPING_1D_ROW |
+                  AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) !=
+                0) {
+              jnt.lambdaLinear = physx::PxVec3(0.0f);
+              jnt.lambdaAngular = physx::PxVec3(0.0f);
+              continue;
+            }
+
+            if ((jnt.sourceFlags &
+                 AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW) != 0) {
+              if (dt <= 0.0f)
+                continue;
+              const physx::PxReal C =
+                  computeGeneric1DViolation(jnt, bodies, numBodies, dt);
+              const physx::PxReal velocity =
+                  (C - jnt.genericGeometricError) / dt;
+              const physx::PxReal totalForce =
+                  jnt.header.rho * C + jnt.header.damping * velocity;
+              const physx::PxReal appliedImpulse = physx::PxClamp(
+                  -totalForce * dt, jnt.genericMinImpulse,
+                  jnt.genericMaxImpulse);
+              const bool outputForce =
+                  (jnt.genericRowFlags &
+                   static_cast<physx::PxU32>(
+                       Px1DConstraintFlag::eOUTPUT_FORCE)) != 0;
+              jnt.writebackLinearImpulse =
+                  outputForce ? jnt.genericLinearA * appliedImpulse
+                              : physx::PxVec3(0.0f);
+              jnt.writebackAngularImpulse =
+                  outputForce
+                      ? jnt.genericAngularAWriteback * appliedImpulse
+                      : physx::PxVec3(0.0f);
+              jnt.writebackLinearImpulseValid = 1;
+              jnt.writebackAngularImpulseValid = 1;
+              jnt.lambdaLinear = physx::PxVec3(0.0f);
+              jnt.lambdaAngular = physx::PxVec3(0.0f);
+              continue;
+            }
+
+            if ((jnt.sourceFlags &
+                 AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW) != 0) {
+              const physx::PxReal effectiveMass =
+                  computeGeneric1DEffectiveMass(jnt, bodies, numBodies);
+              if (effectiveMass <= 0.0f || dt <= 0.0f)
+                continue;
+
+              const physx::PxReal Mh2 = effectiveMass * invDt2;
+              const physx::PxReal rho = jnt.header.rho;
+              const physx::PxReal rhoDual =
+                  physx::PxMin(Mh2, rho * rho / (rho + Mh2));
+              const physx::PxReal C =
+                  computeGeneric1DViolation(jnt, bodies, numBodies, dt);
+              const physx::PxReal pen = physx::PxMax(rho, Mh2);
+              const physx::PxReal totalForce =
+                  pen * C + jnt.lambdaLinear.x;
+              const physx::PxReal appliedImpulse = physx::PxClamp(
+                  -totalForce * dt, jnt.genericMinImpulse,
+                  jnt.genericMaxImpulse);
+
+              const bool outputForce =
+                  (jnt.genericRowFlags &
+                   static_cast<physx::PxU32>(
+                       Px1DConstraintFlag::eOUTPUT_FORCE)) != 0;
+              jnt.writebackLinearImpulse =
+                  outputForce ? jnt.genericLinearA * appliedImpulse
+                              : physx::PxVec3(0.0f);
+              jnt.writebackAngularImpulse =
+                  outputForce
+                      ? jnt.genericAngularAWriteback * appliedImpulse
+                              : physx::PxVec3(0.0f);
+              jnt.writebackLinearImpulseValid = 1;
+              jnt.writebackAngularImpulseValid = 1;
+
+              const physx::PxReal newLambda =
+                  jnt.lambdaLinear.x * lambdaDecay + C * rhoDual;
+              const physx::PxReal clampedDualImpulse = physx::PxClamp(
+                  -newLambda * dt, jnt.genericMinImpulse,
+                  jnt.genericMaxImpulse);
+              jnt.lambdaLinear =
+                  physx::PxVec3(-clampedDualImpulse / dt, 0.0f, 0.0f);
+              jnt.lambdaAngular = physx::PxVec3(0.0f);
+              continue;
+            }
+
             physx::PxReal rhoDual = computeRhoDual(
                 jnt.header.bodyIndexA, jnt.header.bodyIndexB, jnt.header.rho);
             if (rhoDual <= 0.0f)
@@ -1979,6 +4865,21 @@ void AvbdSolver::solveWithJoints(
             }
 
             const bool linAllLocked = (jnt.linearMotion == 0);
+            bool hasLockedLinearRow = false;
+            bool hasUnsupportedLinearRow = false;
+            for (int axis = 0; axis < 3; ++axis) {
+              hasLockedLinearRow |= (jnt.getLinearMotion(axis) == 0);
+              hasUnsupportedLinearRow |= (jnt.getLinearMotion(axis) == 1) ||
+                                         jnt.isLinearDriveEnabled(axis);
+            }
+            const physx::PxReal mA =
+                getBodyMass(jnt.header.bodyIndexA);
+            const physx::PxReal mB =
+                getBodyMass(jnt.header.bodyIndexB);
+            const physx::PxReal pen = physx::PxMax(
+                jnt.header.rho, physx::PxMax(mA, mB) * invDt2);
+            physx::PxVec3 actor0LinearForce(0.0f);
+            physx::PxVec3 actor0PositionDriveForce(0.0f);
             physx::PxVec3 linearAxes[3];
             if (linAllLocked) {
               linearAxes[0] = physx::PxVec3(1.0f, 0.0f, 0.0f);
@@ -1998,6 +4899,12 @@ void AvbdSolver::solveWithJoints(
               physx::PxReal Ck = posViol.dot(linearAxes[axis]);
 
               if (motion == 0) { // LOCKED
+                // Match the primal row force f = pen*C + lambda, using the
+                // pre-update solver multiplier.  The row convention is
+                // C=xA-xB, so actor0's public reaction is -axis*f.
+                const physx::PxReal totalForce =
+                    pen * Ck + jnt.lambdaLinear[axis];
+                actor0LinearForce -= linearAxes[axis] * totalForce;
                 jnt.lambdaLinear[axis] = jnt.lambdaLinear[axis] * lambdaDecay +
                                          Ck * rhoDual;
               } else if (motion == 1) { // LIMITED
@@ -2030,6 +4937,41 @@ void AvbdSolver::solveWithJoints(
               }
             }
 
+            const bool positionDriveActive =
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                                       eLINEAR_POSITION_DRIVE_ACTIVE) != 0;
+            if (positionDriveActive) {
+              const physx::PxVec3 axis = linearAxes[0];
+              const physx::PxVec3 dxA =
+                  aStatic ? physx::PxVec3(0.0f)
+                          : (bodies[jnt.header.bodyIndexA].position -
+                             bodies[jnt.header.bodyIndexA].prevPosition);
+              const physx::PxVec3 dxB =
+                  bStatic ? physx::PxVec3(0.0f)
+                          : (bodies[jnt.header.bodyIndexB].position -
+                             bodies[jnt.header.bodyIndexB].prevPosition);
+              const physx::PxReal positionError =
+                  (wB - wA).dot(axis) - jnt.driveLinearPosition.x;
+              const physx::PxReal velocityError =
+                  (dxB - dxA).dot(axis) / dt -
+                  jnt.driveLinearVelocity.x;
+              const physx::PxReal driveForce = physx::PxClamp(
+                  jnt.linearStiffness.x * positionError +
+                      jnt.linearDamping.x * velocityError,
+                  -jnt.driveLinearForce.x, jnt.driveLinearForce.x);
+              actor0PositionDriveForce = axis * driveForce;
+              if ((jnt.driveOutputForceFlags & 0x1u) != 0)
+                actor0LinearForce += actor0PositionDriveForce;
+            }
+
+            if ((hasLockedLinearRow && !hasUnsupportedLinearRow) ||
+                positionDriveActive) {
+              // ConstraintWriteback stores impulses; Sc::ConstraintSim turns
+              // them back into public force by multiplying by 1/dt.
+              jnt.writebackLinearImpulse = actor0LinearForce * dt;
+              jnt.writebackLinearImpulseValid = 1;
+            }
+
             // Detect revolute pattern for cross-product axis alignment
             const physx::PxU32 twistMotion_d = jnt.getAngularMotion(0);
             const physx::PxU32 swing1Motion_d = jnt.getAngularMotion(1);
@@ -2037,6 +4979,7 @@ void AvbdSolver::solveWithJoints(
             const bool isRevolutePattern_d =
                 (twistMotion_d != 0) && (swing1Motion_d == 0) &&
                 (swing2Motion_d == 0);
+            physx::PxVec3 actor0AngularTorque(0.0f);
 
             if (isRevolutePattern_d) {
               // Cross-product axis alignment dual
@@ -2062,6 +5005,12 @@ void AvbdSolver::solveWithJoints(
               physx::PxReal err1 = axisViol.dot(perp1);
               physx::PxReal err2 = axisViol.dot(perp2);
 
+              const physx::PxReal totalTorque1 =
+                  pen * err1 + jnt.lambdaAngular[1];
+              const physx::PxReal totalTorque2 =
+                  pen * err2 + jnt.lambdaAngular[2];
+              actor0AngularTorque +=
+                  perp1 * totalTorque1 + perp2 * totalTorque2;
               jnt.lambdaAngular[1] =
                   jnt.lambdaAngular[1] * lambdaDecay + err1 * rhoDual;
               jnt.lambdaAngular[2] =
@@ -2090,6 +5039,11 @@ void AvbdSolver::solveWithJoints(
             } else {
               // Generic per-axis dual
               for (int axis = 0; axis < 3; ++axis) {
+                if ((jnt.sourceFlags &
+                     AvbdD6JointConstraint::
+                         eD6_LEGACY_CONE_LIMIT_ACTIVE) != 0 &&
+                    axis >= 1)
+                  continue;
                 physx::PxU32 motion = jnt.getAngularMotion(axis);
                 if (motion == 2) // FREE
                   continue;
@@ -2097,6 +5051,15 @@ void AvbdSolver::solveWithJoints(
                 if (motion == 0) { // LOCKED
                   physx::PxReal angErr =
                       jnt.computeAngularError(rotA, rotB, axis);
+                  physx::PxVec3 localAxis(0.0f);
+                  localAxis[axis] = 1.0f;
+                  const physx::PxVec3 worldAxis =
+                      jointFrameA_dual.rotate(localAxis);
+                  const physx::PxReal totalTorque =
+                      pen * angErr + jnt.lambdaAngular[axis];
+                  // C = rotation(A)-rotation(B); actor0/A's public torque is
+                  // the negative world row force in this AVBD convention.
+                  actor0AngularTorque -= worldAxis * totalTorque;
                   jnt.lambdaAngular[axis] =
                       jnt.lambdaAngular[axis] * lambdaDecay + angErr * rhoDual;
                 } else if (motion == 1) { // LIMITED
@@ -2125,16 +5088,139 @@ void AvbdSolver::solveWithJoints(
               }
             }
 
+            if (positionDriveActive && jnt.angularMotion == 0) {
+              // The finite linear drive acts at the dynamic endpoint's
+              // anchor.  All angular rows are locked in this scoped island,
+              // so their public reaction is the opposite lever-arm torque.
+              // PxConstraint reports linear rows about bodyAWorldOffset;
+              // eOUTPUT_FORCE must therefore not add another COM moment.
+              const physx::PxVec3 dynamicArm =
+                  aStatic
+                      ? bodies[jnt.header.bodyIndexB].rotation.rotate(
+                            jnt.anchorB)
+                      : bodies[jnt.header.bodyIndexA].rotation.rotate(
+                            jnt.anchorA);
+              actor0AngularTorque =
+                  -dynamicArm.cross(actor0PositionDriveForce);
+            }
+
+            const bool angularAxisVelocityDriveActive =
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
+                0;
+            const bool slerpVelocityDriveActive =
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                         eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+            if (angularAxisVelocityDriveActive ||
+                slerpVelocityDriveActive) {
+              physx::PxVec3 dThetaA = aStatic
+                                          ? jnt.externalAngularStepA
+                                          : physx::PxVec3(0.0f);
+              physx::PxVec3 dThetaB = bStatic
+                                          ? jnt.externalAngularStepB
+                                          : physx::PxVec3(0.0f);
+              if (!aStatic) {
+                physx::PxQuat dqA =
+                    bodies[jnt.header.bodyIndexA].rotation *
+                    bodies[jnt.header.bodyIndexA]
+                        .prevRotation.getConjugate();
+                if (dqA.w < 0.0f)
+                  dqA = -dqA;
+                dThetaA =
+                    physx::PxVec3(dqA.x, dqA.y, dqA.z) * 2.0f;
+              }
+              if (!bStatic) {
+                physx::PxQuat dqB =
+                    bodies[jnt.header.bodyIndexB].rotation *
+                    bodies[jnt.header.bodyIndexB]
+                        .prevRotation.getConjugate();
+                if (dqB.w < 0.0f)
+                  dqB = -dqB;
+                dThetaB =
+                    physx::PxVec3(dqB.x, dqB.y, dqB.z) * 2.0f;
+              }
+              const physx::PxVec3 worldAngularTarget =
+                  jointFrameA_dual.rotate(jnt.driveAngularVelocity) * dt;
+              if (slerpVelocityDriveActive) {
+                // TGS emits SLERP as three fixed world rows.  The shared
+                // scalar limit clamps each row independently and actor0's
+                // public torque is their aggregate, independent of which
+                // endpoint owns the dynamic body.
+                const physx::PxReal targetScale =
+                    mConfig.angularDamping > 1e-6f
+                        ? 1.0f / mConfig.angularDamping
+                        : 1.0f;
+                const physx::PxVec3 residual =
+                    (dThetaB - dThetaA) - worldAngularTarget * targetScale;
+                const physx::PxReal scale = jnt.angularDamping.z / dt;
+                physx::PxVec3 driveTorque(0.0f);
+                for (int k = 0; k < 3; ++k)
+                  (&driveTorque.x)[k] = physx::PxClamp(
+                      scale * (&residual.x)[k],
+                      -jnt.driveAngularForce.z,
+                      jnt.driveAngularForce.z);
+                if ((jnt.driveOutputForceFlags & (1u << 5)) != 0)
+                  actor0AngularTorque += driveTorque;
+              } else {
+                const physx::PxU32 driveIndex =
+                    jnt.driveFlags == (1u << 3)
+                        ? 0u
+                        : (jnt.driveFlags == (1u << 4) ? 1u : 2u);
+                physx::PxVec3 localDriveAxis(0.0f);
+                localDriveAxis[driveIndex] = 1.0f;
+                const physx::PxVec3 worldDriveAxis =
+                    jointFrameA_dual.rotate(localDriveAxis);
+                // TWIST/SWING use wA-wB=target.  With the solver's
+                // relDW=dThetaB-dThetaA convention this is
+                // C=relDW+target*dt.  Positive physical torque acts on actor0
+                // along the actor-A authored drive axis, independent of which
+                // endpoint is the dynamic body.
+                const physx::PxReal C =
+                    (dThetaB - dThetaA).dot(worldDriveAxis) +
+                    worldAngularTarget.dot(worldDriveAxis);
+                const physx::PxReal driveTorque = physx::PxClamp(
+                    (jnt.angularDamping[driveIndex] / dt) * C,
+                    -jnt.driveAngularForce[driveIndex],
+                    jnt.driveAngularForce[driveIndex]);
+                if ((jnt.driveOutputForceFlags &
+                     (1u << (3u + driveIndex))) != 0)
+                  actor0AngularTorque += worldDriveAxis * driveTorque;
+              }
+            }
+
+            const bool passiveNativeReaction =
+                (jnt.sourceFlags & AvbdD6JointConstraint::
+                     eNATIVE_PASSIVE_REACTION_ACTIVE) != 0;
+            if ((jnt.angularMotion == 0 &&
+                 (jnt.driveFlags & 0x38u) == 0) ||
+                passiveNativeReaction ||
+                angularAxisVelocityDriveActive ||
+                slerpVelocityDriveActive) {
+              jnt.writebackAngularImpulse = actor0AngularTorque * dt;
+              jnt.writebackAngularImpulseValid = 1;
+            }
+
             // --- Cone limit dual update ---
             if (jnt.coneAngleLimit > 0.0f) {
-              physx::PxVec3 worldAxisA = (rotA * jnt.localFrameA).rotate(
-                  physx::PxVec3(1.0f, 0.0f, 0.0f));
-              physx::PxVec3 worldAxisB = (rotB * jnt.localFrameB).rotate(
-                  physx::PxVec3(1.0f, 0.0f, 0.0f));
-              physx::PxReal dotAB = physx::PxClamp(worldAxisA.dot(worldAxisB),
-                                                    -1.0f, 1.0f);
-              physx::PxReal coneAngle = physx::PxAcos(dotAB);
-              physx::PxReal coneViol = coneAngle - jnt.coneAngleLimit;
+              physx::PxVec3 coneAxis(0.0f);
+              physx::PxReal coneViol = 0.0f;
+              const bool ellipticalCone =
+                  computeEllipticalConeConstraint(
+                      jnt, rotA, rotB, coneAxis, coneViol);
+              PX_UNUSED(coneAxis);
+              if (!ellipticalCone) {
+                const physx::PxVec3 worldAxisA =
+                    (rotA * jnt.localFrameA)
+                        .rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+                const physx::PxVec3 worldAxisB =
+                    (rotB * jnt.localFrameB)
+                        .rotate(physx::PxVec3(1.0f, 0.0f, 0.0f));
+                const physx::PxReal dotAB = physx::PxClamp(
+                    worldAxisA.dot(worldAxisB), -1.0f, 1.0f);
+                const physx::PxReal coneAngle =
+                    physx::PxAcos(dotAB);
+                coneViol = coneAngle - jnt.coneAngleLimit;
+              }
 
               // Unilateral: coneLambda -= violation * rhoDual, clamped to <= 0
               jnt.coneLambda -= coneViol * rhoDual;
@@ -2157,11 +5243,11 @@ void AvbdSolver::solveWithJoints(
             // Linear velocity drive dual
             if ((jnt.driveFlags & 0x7) != 0) {
               // Body displacements from start-of-step
-              physx::PxVec3 dxA =
+              const physx::PxVec3 dxA =
                   aStatic ? physx::PxVec3(0.0f)
                           : (bodies[jnt.header.bodyIndexA].position -
                              bodies[jnt.header.bodyIndexA].prevPosition);
-              physx::PxVec3 dxB =
+              const physx::PxVec3 dxB =
                   bStatic ? physx::PxVec3(0.0f)
                           : (bodies[jnt.header.bodyIndexB].position -
                              bodies[jnt.header.bodyIndexB].prevPosition);
@@ -2169,43 +5255,63 @@ void AvbdSolver::solveWithJoints(
               for (int a = 0; a < 3; ++a) {
                 if ((jnt.driveFlags & (1 << a)) == 0)
                   continue;
-                physx::PxReal damping = (&jnt.linearDamping.x)[a];
+                const physx::PxReal stiffness =
+                    (&jnt.linearStiffness.x)[a];
+                const bool usePhysicalVelocityObjective =
+                    stiffness <= 0.0f &&
+                    ((aStatic || bStatic) ||
+                     (jnt.sourceFlags & AvbdD6JointConstraint::
+                                            eCOUPLED_LINEAR_DRIVE_ACTIVE) !=
+                          0);
+                const bool usePositionObjective =
+                    a == 0 &&
+                    (jnt.sourceFlags & AvbdD6JointConstraint::
+                                           eLINEAR_POSITION_DRIVE_ACTIVE) != 0;
+                if (usePhysicalVelocityObjective || usePositionObjective) {
+                  // The scoped force/acceleration objective carries its mass
+                  // distinction in the primal penalty, not in an AL dual.
+                  (&jnt.lambdaDriveLinear.x)[a] = 0.0f;
+                  continue;
+                }
+
+                const physx::PxReal damping = (&jnt.linearDamping.x)[a];
                 if (damping <= 0.0f)
                   continue;
 
                 physx::PxVec3 localAxis(0.0f);
                 (&localAxis.x)[a] = 1.0f;
-                physx::PxVec3 wAxis = jointFrameA.rotate(localAxis);
-
-                // Drive velocity is in joint local space, rotate to world
-                // space
-                physx::PxVec3 worldTarget =
+                const physx::PxVec3 wAxis = jointFrameA.rotate(localAxis);
+                const physx::PxVec3 worldTarget =
                     jointFrameA.rotate(jnt.driveLinearVelocity) * dt;
-                physx::PxReal C =
-                    (dxB.dot(wAxis) - dxA.dot(wAxis)) - worldTarget.dot(wAxis);
+                const physx::PxReal C =
+                    (dxB.dot(wAxis) - dxA.dot(wAxis)) -
+                    worldTarget.dot(wAxis);
                 const physx::PxVec3 rAWorld =
-                  aStatic ? physx::PxVec3(0.0f)
-                      : bodies[jnt.header.bodyIndexA].rotation.rotate(
-                          jnt.anchorA);
+                    aStatic ? physx::PxVec3(0.0f)
+                            : bodies[jnt.header.bodyIndexA].rotation.rotate(
+                                  jnt.anchorA);
                 const physx::PxVec3 rBWorld =
-                  bStatic ? physx::PxVec3(0.0f)
-                      : bodies[jnt.header.bodyIndexB].rotation.rotate(
-                          jnt.anchorB);
+                    bStatic ? physx::PxVec3(0.0f)
+                            : bodies[jnt.header.bodyIndexB].rotation.rotate(
+                                  jnt.anchorB);
                 const AvbdSolverBody *bodyARef =
-                  aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
+                    aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
                 const AvbdSolverBody *bodyBRef =
-                  bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
-                physx::PxReal rhoDualDrive = physx::PxMin(damping / dt2, rhoDual);
+                    bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
+                physx::PxReal rhoDualDrive =
+                    physx::PxMin(damping / dt2, rhoDual);
                 if (jnt.isLinearAccelerationDrive(a)) {
                   const physx::PxReal driveScale =
-                    computeLinearDriveRecipResponse(bodyARef, bodyBRef,
-                                   rAWorld, rBWorld, wAxis);
-                  const physx::PxReal stiffness = (&jnt.linearStiffness.x)[a];
-                  const physx::PxReal dampingOnly = physx::PxMax(0.0f, damping - stiffness);
+                      computeLinearDriveRecipResponse(
+                          bodyARef, bodyBRef, rAWorld, rBWorld, wAxis);
+                  const physx::PxReal dampingOnly =
+                      physx::PxMax(0.0f, damping - stiffness);
                   const physx::PxReal implicitScale =
-                    1.0f / (1.0f + dt * (dt * stiffness + dampingOnly));
-                  rhoDualDrive = physx::PxMin((damping * driveScale * implicitScale) / dt2,
-                                rhoDual);
+                      1.0f /
+                      (1.0f + dt * (dt * stiffness + dampingOnly));
+                  rhoDualDrive = physx::PxMin(
+                      (damping * driveScale * implicitScale) / dt2,
+                      rhoDual);
                 }
                 (&jnt.lambdaDriveLinear.x)[a] =
                     (&jnt.lambdaDriveLinear.x)[a] * lambdaDecay +
@@ -2216,7 +5322,12 @@ void AvbdSolver::solveWithJoints(
             // Angular velocity drive dual
             if ((jnt.driveFlags & 0x38) != 0) {
               // Angular displacements from start-of-step
-              physx::PxVec3 dThetaA(0.0f), dThetaB(0.0f);
+              physx::PxVec3 dThetaA = aStatic
+                                          ? jnt.externalAngularStepA
+                                          : physx::PxVec3(0.0f);
+              physx::PxVec3 dThetaB = bStatic
+                                          ? jnt.externalAngularStepB
+                                          : physx::PxVec3(0.0f);
               if (!aStatic) {
                 physx::PxQuat dqA =
                     bodies[jnt.header.bodyIndexA].rotation *
@@ -2242,13 +5353,30 @@ void AvbdSolver::solveWithJoints(
                   (jnt.sourceFlags &
                    AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
               if (slerpDrive) {
-                physx::PxReal damping =
+                const bool usePhysicalSlerpVelocityObjective =
+                    (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+                const bool usePhysicalSlerpPositionObjective =
+                    (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eSLERP_POSITION_DRIVE_ACTIVE) != 0;
+                const bool useCoupledAngularPositionObjective =
+                    (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE) != 0;
+                if (usePhysicalSlerpVelocityObjective ||
+                    usePhysicalSlerpPositionObjective ||
+                    useCoupledAngularPositionObjective) {
+                  // The force-mode objective is solved directly in the
+                  // primal path.  An AL multiplier would bypass its authored
+                  // per-row torque limit on later iterations.
+                  jnt.lambdaDriveAngular = physx::PxVec3(0.0f);
+                } else {
+                  physx::PxReal damping =
                     jnt.angularDamping.z; // SLERP uses Z damping slot
-                if (damping > 0.0f) {
-                  const AvbdSolverBody *bodyARef =
-                    aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
-                  const AvbdSolverBody *bodyBRef =
-                    bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
+                  if (damping > 0.0f) {
+                    const AvbdSolverBody *bodyARef =
+                      aStatic ? nullptr : &bodies[jnt.header.bodyIndexA];
+                    const AvbdSolverBody *bodyBRef =
+                      bStatic ? nullptr : &bodies[jnt.header.bodyIndexB];
                     physx::PxReal rhoDualDrive = physx::PxMin(damping / dt2, rhoDual);
                     if (jnt.isAngularAccelerationDrive(2)) {
                     const physx::PxReal driveScale =
@@ -2261,11 +5389,12 @@ void AvbdSolver::solveWithJoints(
                     rhoDualDrive = physx::PxMin((damping * driveScale * implicitScale) / dt2,
                                   rhoDual);
                     }
-                  for (int k = 0; k < 3; ++k) {
-                    physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
-                    (&jnt.lambdaDriveAngular.x)[k] =
-                        (&jnt.lambdaDriveAngular.x)[k] * lambdaDecay +
-                        rhoDualDrive * C;
+                    for (int k = 0; k < 3; ++k) {
+                      physx::PxReal C = (&relDW.x)[k] - (&worldAngTarget.x)[k];
+                      (&jnt.lambdaDriveAngular.x)[k] =
+                          (&jnt.lambdaDriveAngular.x)[k] * lambdaDecay +
+                          rhoDualDrive * C;
+                    }
                   }
                 }
               } else {
@@ -2283,6 +5412,25 @@ void AvbdSolver::solveWithJoints(
                 for (int a = 0; a < 3; ++a) {
                   if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
                     continue;
+                  const bool usePhysicalAngularAxisVelocityObjective =
+                      (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
+                          0;
+                  const bool usePhysicalAngularPositionObjective =
+                      (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eANGULAR_AXIS_POSITION_DRIVE_ACTIVE) != 0;
+                  const bool useCoupledAngularPositionObjective =
+                      (jnt.sourceFlags & AvbdD6JointConstraint::
+                           eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE) != 0;
+                  if (usePhysicalAngularAxisVelocityObjective ||
+                      usePhysicalAngularPositionObjective ||
+                      useCoupledAngularPositionObjective) {
+                    // The physical force-mode objective is solved directly
+                    // in the primal path; carrying an AL multiplier would
+                    // add non-physical torque on top of the authored limit.
+                    (&jnt.lambdaDriveAngular.x)[axes[a].dampIdx] = 0.0f;
+                    continue;
+                  }
                   const physx::PxReal damping =
                       (&jnt.angularDamping.x)[axes[a].dampIdx];
                   const physx::PxReal stiffness =
@@ -2398,6 +5546,119 @@ void AvbdSolver::solveWithJoints(
       hasKinematicShellContacts ? &shellLinearVelAtSolveStart : nullptr,
       d6Joints, numD6, /*applyVelocityDamping=*/true, softParticles,
       numSoftParticles);
+
+  if (coupledFixedD6Island) {
+    PX_PROFILE_ZONE("AVBD.projectCoupledFixedD6Velocity", 0);
+    projectCoupledFixedD6Velocity(
+        bodies, numBodies, d6Joints[0]);
+  }
+
+  if (passiveCenteredGearVelocityProjectionIsland) {
+    PX_PROFILE_ZONE("AVBD.projectPassiveCenteredGearVelocity", 0);
+    projectPassiveCenteredGearVelocity(
+        bodies, numBodies, gearJoints[0], angularVelAtSolveStart);
+  }
+  if (passiveGenericHard1DVelocityProjectionIsland &&
+      passiveGenericHard1DIndex < numD6) {
+    PX_PROFILE_ZONE("AVBD.projectPassiveGenericHard1DVelocity", 0);
+    projectSinglePassiveGenericHard1DVelocity(
+        bodies, numBodies, d6Joints[passiveGenericHard1DIndex],
+        genericLinearVelAtSolveStart, genericAngularVelAtSolveStart);
+  }
+  if (coupledLinearDriveIsland) {
+    physx::PxReal totalMass = 0.0f;
+    physx::PxVec3 finalMomentum(0.0f);
+    bool velocityLimitActive = false;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      const physx::PxReal mass = 1.0f / bodies[i].invMass;
+      totalMass += mass;
+      finalMomentum += bodies[i].linearVelocity * mass;
+      const physx::PxReal maxSpeedSquared = bodies[i].maxLinearVelocitySq;
+      velocityLimitActive |=
+          maxSpeedSquared > 0.0f &&
+          bodies[i].linearVelocity.magnitudeSquared() >=
+              maxSpeedSquared * (1.0f - 1e-5f);
+    }
+    if (!velocityLimitActive) {
+      // Close only the translation-invariant equation after the shared
+      // velocity finalize. The target includes gravity and global damping;
+      // per-body damping is excluded by the ownership predicate, and an
+      // active authored velocity cap suppresses this numerical projection.
+      physx::PxVec3 momentumError =
+          finalMomentum - coupledExpectedMomentum;
+      if (numContacts > 0) {
+        physx::PxVec3 supportNormal = contacts[0].contactNormal;
+        supportNormal.normalize();
+        momentumError -= supportNormal * momentumError.dot(supportNormal);
+      }
+      const physx::PxVec3 commonVelocity = momentumError / totalMass;
+      for (physx::PxU32 i = 0; i < numBodies; ++i) {
+        bodies[i].linearVelocity -= commonVelocity;
+        bodies[i].position -= commonVelocity * dt;
+      }
+    }
+  }
+
+  if (coupledAngularPositionDriveIsland ||
+      coupledSphericalConeIsland) {
+    physx::PxMat33 totalInertia(physx::PxZero);
+    physx::PxVec3 finalAngularMomentum(0.0f);
+    bool velocityLimitActive = false;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      const physx::PxMat33 inertia =
+          bodies[i].invInertiaWorld.getInverse();
+      totalInertia += inertia;
+      finalAngularMomentum += inertia * bodies[i].angularVelocity;
+      const physx::PxReal maxSpeedSquared =
+          bodies[i].maxAngularVelocitySq;
+      velocityLimitActive |=
+          maxSpeedSquared > 0.0f &&
+          bodies[i].angularVelocity.magnitudeSquared() >=
+              maxSpeedSquared * (1.0f - 1e-5f);
+    }
+    if (!velocityLimitActive) {
+      // An internal centered angular row cannot change island angular
+      // momentum.  Remove only the shared world-angular mode after velocity
+      // finalize; applying the same correction to both endpoints preserves
+      // their relative angular velocity and either the D6 target or the
+      // spherical cone state.
+      const physx::PxVec3 angularMomentumError =
+          finalAngularMomentum - coupledExpectedAngularMomentum;
+      const physx::PxVec3 commonAngularVelocity =
+          totalInertia.getInverse() * angularMomentumError;
+      const physx::PxReal correctionSpeed =
+          commonAngularVelocity.magnitude();
+      for (physx::PxU32 i = 0; i < numBodies; ++i)
+        bodies[i].angularVelocity -= commonAngularVelocity;
+      if (correctionSpeed > 1e-10f && PxIsFinite(correctionSpeed)) {
+        const physx::PxQuat correction(
+            -correctionSpeed * dt,
+            commonAngularVelocity * (1.0f / correctionSpeed));
+        for (physx::PxU32 i = 0; i < numBodies; ++i)
+          bodies[i].rotation =
+              (correction * bodies[i].rotation).getNormalized();
+      }
+    }
+  }
+
+  // Mimic velocity iterations are hard even when the position equation is
+  // compliant. Run them after all drive conservation projections so later
+  // post-processing cannot undo the velocity derivative. Hard mimic rows also
+  // close qA + ratio*qB + offset exactly.
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    if ((d6Joints[i].sourceFlags &
+         AvbdD6JointConstraint::eARTICULATION_MIMIC_ROW) != 0) {
+      PX_PROFILE_ZONE("AVBD.projectArticulationMimicHard1D", 0);
+      projectArticulationMimicHard1D(
+          bodies, numBodies, d6Joints[i], dt);
+    } else if ((d6Joints[i].sourceFlags &
+                AvbdD6JointConstraint::
+                    eARTICULATION_COMPLIANT_MIMIC_ROW) != 0) {
+      PX_PROFILE_ZONE("AVBD.projectArticulationMimicVelocity1D", 0);
+      projectArticulationMimicVelocity1D(
+          bodies, numBodies, d6Joints[i]);
+    }
+  }
 
 #if AVBD_JOINT_DEBUG
   if (doDebug) {

@@ -30,10 +30,12 @@
 // This snippet demonstrates the use of Reduced Coordinates articulations.
 // ****************************************************************************
 
-#include <ctype.h>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include "PxPhysicsAPI.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetutils/SnippetUtils.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
@@ -41,13 +43,14 @@
 using namespace physx;
 
 static PxDefaultAllocator						gAllocator;
-static PxDefaultErrorCallback					gErrorCallback;
+static Snippets::TrackingErrorCallback		gErrorCallback;
 static PxFoundation*							gFoundation		= NULL;
 static PxPhysics*								gPhysics		= NULL;
 static PxDefaultCpuDispatcher*					gDispatcher		= NULL;
 static PxScene*									gScene			= NULL;
 static PxMaterial*								gMaterial		= NULL;
 static PxPvd*									gPvd			= NULL;
+static PxPvdTransport*							gPvdTransport	= NULL;
 static PxArticulationReducedCoordinate*			gArticulation	= NULL;
 static PxArticulationJointReducedCoordinate*	gDriveJoint		= NULL;
 static PxSolverType::Enum						gSolverType		= PxSolverType::eAVBD;
@@ -56,54 +59,97 @@ static PxArticulationLink*						gTopLink		= NULL;
 static PxArticulationLink*						gDriveLink		= NULL;
 static PxD6Joint*								gLoopJoints[8]	= {};
 static PxU32									gLoopJointCount	= 0;
+static Snippets::HeadlessOptions				gHeadlessOptions;
+static bool									gExtensionsInitialized = false;
+static bool									gInitializationFailed = false;
+static bool									gRuntimeInvariantFailed = false;
+static bool									gCleanupFailed = false;
 
-static void trackLoopJoint(PxD6Joint* joint)
-{
-	PX_ASSERT(gLoopJointCount < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]));
-	if(gLoopJointCount < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]))
-		gLoopJoints[gLoopJointCount++] = joint;
-}
+static void resetScissorState();
+void cleanupPhysics(bool interactive);
 
-static const char* getSolverTypeName(PxSolverType::Enum solverType)
+static bool failInitialization()
 {
-	switch(solverType)
-	{
-	case PxSolverType::ePGS:	return "pgs";
-	case PxSolverType::eTGS:	return "tgs";
-	case PxSolverType::eAVBD:	return "avbd";
-	default:					return "unknown";
-	}
-}
-
-static bool tryParseSolverType(const char* value, PxSolverType::Enum& solverType)
-{
-	if(!value || !value[0])
-		return false;
-	if(_stricmp(value, "pgs") == 0)		{ solverType = PxSolverType::ePGS;  return true; }
-	if(_stricmp(value, "tgs") == 0)		{ solverType = PxSolverType::eTGS;  return true; }
-	if(_stricmp(value, "avbd") == 0)	{ solverType = PxSolverType::eAVBD; return true; }
+	gInitializationFailed = true;
 	return false;
 }
 
-static PxSolverType::Enum getRequestedSolverType(int argc, const char*const* argv)
+static bool trackLoopJoint(PxD6Joint* joint)
 {
-	for(int i = 1; i < argc; ++i)
+	PX_ASSERT(gLoopJointCount < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]));
+	if(!joint || gLoopJointCount >= sizeof(gLoopJoints) / sizeof(gLoopJoints[0]))
 	{
-		if(!argv[i])
-			continue;
-		static const char prefix[] = "--solver=";
-		if(std::strncmp(argv[i], prefix, sizeof(prefix) - 1) == 0)
-		{
-			PxSolverType::Enum solverType = PxSolverType::eAVBD;
-			if(tryParseSolverType(argv[i] + sizeof(prefix) - 1, solverType))
-				return solverType;
-		}
+		PX_RELEASE(joint);
+		return failInitialization();
 	}
-	const char* value = std::getenv("PHYSX_SNIPPET_SOLVER");
-	PxSolverType::Enum solverType = PxSolverType::eAVBD;
-	if(tryParseSolverType(value, solverType))
-		return solverType;
-	return PxSolverType::eAVBD;
+
+	gLoopJoints[gLoopJointCount++] = joint;
+	joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
+	joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
+	joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
+	return true;
+}
+
+static PxArticulationLink* createLinkWithShape(PxArticulationLink* parent,
+	const PxTransform& pose, const PxGeometry& geometry, PxReal density)
+{
+	if(!gArticulation || !gMaterial)
+	{
+		failInitialization();
+		return NULL;
+	}
+
+	PxArticulationLink* link = gArticulation->createLink(parent, pose);
+	if(!link)
+	{
+		failInitialization();
+		return NULL;
+	}
+	PxShape* shape = PxRigidActorExt::createExclusiveShape(
+		*link, geometry, *gMaterial);
+	if(!shape || !PxRigidBodyExt::updateMassAndInertia(*link, density))
+	{
+		failInitialization();
+		return NULL;
+	}
+	return link;
+}
+
+static PxArticulationJointReducedCoordinate* getInboundJointChecked(
+	PxArticulationLink* link)
+{
+	PxArticulationJointReducedCoordinate* joint =
+		link ? link->getInboundJoint() : NULL;
+	if(!joint)
+		failInitialization();
+	return joint;
+}
+
+static bool createFallingBox(const PxTransform& pose, const PxVec3& halfExt,
+	PxReal density, PxShape*& shape)
+{
+	shape = NULL;
+	if(!gPhysics || !gScene || !gMaterial)
+		return failInitialization();
+
+	PxRigidDynamic* actor = gPhysics->createRigidDynamic(pose);
+	if(!actor)
+		return failInitialization();
+	shape = PxRigidActorExt::createExclusiveShape(
+		*actor, PxBoxGeometry(halfExt), *gMaterial);
+	if(!shape || !PxRigidBodyExt::updateMassAndInertia(*actor, density))
+	{
+		PX_RELEASE(actor);
+		shape = NULL;
+		return failInitialization();
+	}
+	if(!gScene->addActor(*actor))
+	{
+		PX_RELEASE(actor);
+		shape = NULL;
+		return failInitialization();
+	}
+	return true;
 }
 
 static PxFilterFlags scissorFilter(	PxFilterObjectAttributes attributes0, PxFilterData filterData0,
@@ -135,31 +181,42 @@ static void createScissorLift()
 	const PxQuat rightRot(angle, PxVec3(1.f, 0.f, 0.f));
 
 	//(1) Create base...
-	PxArticulationLink* base = gArticulation->createLink(NULL, PxTransform(PxVec3(0.f, 0.25f, 0.f)));
-	PxRigidActorExt::createExclusiveShape(*base, PxBoxGeometry(0.5f, 0.25f, 1.5f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*base, 3.f);
+	PxArticulationLink* base = createLinkWithShape(NULL,
+		PxTransform(PxVec3(0.f, 0.25f, 0.f)),
+		PxBoxGeometry(0.5f, 0.25f, 1.5f), 3.f);
+	if(!base)
+		return;
 	gBaseLink = base;
 
 	//Now create the slider and fixed joints...
 
 	gArticulation->setSolverIterationCounts(10);
 
-	PxArticulationLink* leftRoot = gArticulation->createLink(base, PxTransform(PxVec3(0.f, 0.55f, -0.9f)));
-	PxRigidActorExt::createExclusiveShape(*leftRoot, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*leftRoot, 1.f);
+	PxArticulationLink* leftRoot = createLinkWithShape(base,
+		PxTransform(PxVec3(0.f, 0.55f, -0.9f)),
+		PxBoxGeometry(0.5f, 0.05f, 0.05f), 1.f);
+	if(!leftRoot)
+		return;
 
-	PxArticulationLink* rightRoot = gArticulation->createLink(base, PxTransform(PxVec3(0.f, 0.55f, 0.9f)));
-	PxRigidActorExt::createExclusiveShape(*rightRoot, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*rightRoot, 1.f);
+	PxArticulationLink* rightRoot = createLinkWithShape(base,
+		PxTransform(PxVec3(0.f, 0.55f, 0.9f)),
+		PxBoxGeometry(0.5f, 0.05f, 0.05f), 1.f);
+	if(!rightRoot)
+		return;
 	gDriveLink = rightRoot;
 
-	PxArticulationJointReducedCoordinate* joint = leftRoot->getInboundJoint();
+	PxArticulationJointReducedCoordinate* joint =
+		getInboundJointChecked(leftRoot);
+	if(!joint)
+		return;
 	joint->setJointType(PxArticulationJointType::eFIX);
 	joint->setParentPose(PxTransform(PxVec3(0.f, 0.25f, -0.9f)));
 	joint->setChildPose(PxTransform(PxVec3(0.f, -0.05f, 0.f)));
 
 	//Set up the drive joint...	
-	gDriveJoint = rightRoot->getInboundJoint();
+	gDriveJoint = getInboundJointChecked(rightRoot);
+	if(!gDriveJoint)
+		return;
 	gDriveJoint->setJointType(PxArticulationJointType::ePRISMATIC);
 	gDriveJoint->setMotion(PxArticulationAxis::eZ, PxArticulationMotion::eLIMITED);
 	gDriveJoint->setLimitParams(PxArticulationAxis::eZ, PxArticulationLimit(-1.4f, 0.2f));
@@ -177,13 +234,17 @@ static void createScissorLift()
 	for (PxU32 i = 0; i < linkHeight; ++i)
 	{
 		const PxVec3 pos(0.5f, 0.55f + 0.1f*(1 + i), 0.f);
-		PxArticulationLink* leftLink = gArticulation->createLink(currLeft, PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), leftRot));
-		PxRigidActorExt::createExclusiveShape(*leftLink, PxBoxGeometry(0.05f, 0.05f, 1.f), *gMaterial);
-		PxRigidBodyExt::updateMassAndInertia(*leftLink, 1.f);
+		PxArticulationLink* leftLink = createLinkWithShape(currLeft,
+			PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), leftRot),
+			PxBoxGeometry(0.05f, 0.05f, 1.f), 1.f);
+		if(!leftLink)
+			return;
 
 		const PxVec3 leftAnchorLocation = pos + PxVec3(0.f, sinAng*(2 * i), -0.9f);
 
-		joint = leftLink->getInboundJoint();
+		joint = getInboundJointChecked(leftLink);
+		if(!joint)
+			return;
 		joint->setParentPose(PxTransform(currLeft->getGlobalPose().transformInv(leftAnchorLocation), leftParentRot));
 		joint->setChildPose(PxTransform(PxVec3(0.f, 0.f, -1.f), rightRot));
 		joint->setJointType(PxArticulationJointType::eREVOLUTE);
@@ -194,13 +255,17 @@ static void createScissorLift()
 		joint->setLimitParams(PxArticulationAxis::eTWIST, PxArticulationLimit(-PxPi, angle));
 
 
-		PxArticulationLink* rightLink = gArticulation->createLink(currRight, PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), rightRot));
-		PxRigidActorExt::createExclusiveShape(*rightLink, PxBoxGeometry(0.05f, 0.05f, 1.f), *gMaterial);
-		PxRigidBodyExt::updateMassAndInertia(*rightLink, 1.f);
+		PxArticulationLink* rightLink = createLinkWithShape(currRight,
+			PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), rightRot),
+			PxBoxGeometry(0.05f, 0.05f, 1.f), 1.f);
+		if(!rightLink)
+			return;
 
 		const PxVec3 rightAnchorLocation = pos + PxVec3(0.f, sinAng*(2 * i), 0.9f);
 
-		joint = rightLink->getInboundJoint();
+		joint = getInboundJointChecked(rightLink);
+		if(!joint)
+			return;
 		joint->setJointType(PxArticulationJointType::eREVOLUTE);
 		joint->setParentPose(PxTransform(currRight->getGlobalPose().transformInv(rightAnchorLocation), rightParentRot));
 		joint->setChildPose(PxTransform(PxVec3(0.f, 0.f, 1.f), leftRot));
@@ -210,33 +275,39 @@ static void createScissorLift()
 		rightParentRot = rightRot;
 
 		PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, leftLink, PxTransform(PxIdentity), rightLink, PxTransform(PxIdentity));
-		trackLoopJoint(d6joint);
-
-		d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
-		d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
-		d6joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
+		if(!trackLoopJoint(d6joint))
+			return;
 
 		currLeft = rightLink;
 		currRight = leftLink;
 	}
 
 	
-	PxArticulationLink* leftTop = gArticulation->createLink(currLeft, currLeft->getGlobalPose().transform(PxTransform(PxVec3(-0.5f, 0.f, -1.0f), leftParentRot)));
-	PxRigidActorExt::createExclusiveShape(*leftTop, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*leftTop, 1.f);
+	PxArticulationLink* leftTop = createLinkWithShape(currLeft,
+		currLeft->getGlobalPose().transform(PxTransform(
+			PxVec3(-0.5f, 0.f, -1.0f), leftParentRot)),
+		PxBoxGeometry(0.5f, 0.05f, 0.05f), 1.f);
+	if(!leftTop)
+		return;
 
-	PxArticulationLink* rightTop = gArticulation->createLink(currRight, currRight->getGlobalPose().transform(PxTransform(PxVec3(-0.5f, 0.f, 1.0f), rightParentRot)));
-	PxRigidActorExt::createExclusiveShape(*rightTop, PxCapsuleGeometry(0.05f, 0.8f), *gMaterial);
-	//PxRigidActorExt::createExclusiveShape(*rightTop, PxBoxGeometry(0.5f, 0.05f, 0.05f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*rightTop, 1.f);
+	PxArticulationLink* rightTop = createLinkWithShape(currRight,
+		currRight->getGlobalPose().transform(PxTransform(
+			PxVec3(-0.5f, 0.f, 1.0f), rightParentRot)),
+		PxCapsuleGeometry(0.05f, 0.8f), 1.f);
+	if(!rightTop)
+		return;
 
-	joint = leftTop->getInboundJoint();
+	joint = getInboundJointChecked(leftTop);
+	if(!joint)
+		return;
 	joint->setParentPose(PxTransform(PxVec3(0.f, 0.f, -1.f), currLeft->getGlobalPose().q.getConjugate()));
 	joint->setChildPose(PxTransform(PxVec3(0.5f, 0.f, 0.f), leftTop->getGlobalPose().q.getConjugate()));
 	joint->setJointType(PxArticulationJointType::eREVOLUTE);
 	joint->setMotion(PxArticulationAxis::eTWIST, PxArticulationMotion::eFREE);
 
-	joint = rightTop->getInboundJoint();
+	joint = getInboundJointChecked(rightTop);
+	if(!joint)
+		return;
 	joint->setParentPose(PxTransform(PxVec3(0.f, 0.f, 1.f), currRight->getGlobalPose().q.getConjugate()));
 	joint->setChildPose(PxTransform(PxVec3(0.5f, 0.f, 0.f), rightTop->getGlobalPose().q.getConjugate()));
 	joint->setJointType(PxArticulationJointType::eREVOLUTE);
@@ -252,13 +323,17 @@ static void createScissorLift()
 	for (PxU32 i = 0; i < linkHeight; ++i)
 	{
 		const PxVec3 pos(-0.5f, 0.55f + 0.1f*(1 + i), 0.f);
-		PxArticulationLink* leftLink = gArticulation->createLink(currLeft, PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), leftRot));
-		PxRigidActorExt::createExclusiveShape(*leftLink, PxBoxGeometry(0.05f, 0.05f, 1.f), *gMaterial);
-		PxRigidBodyExt::updateMassAndInertia(*leftLink, 1.f);
+		PxArticulationLink* leftLink = createLinkWithShape(currLeft,
+			PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), leftRot),
+			PxBoxGeometry(0.05f, 0.05f, 1.f), 1.f);
+		if(!leftLink)
+			return;
 
 		const PxVec3 leftAnchorLocation = pos + PxVec3(0.f, sinAng*(2 * i), -0.9f);
 
-		joint = leftLink->getInboundJoint();
+		joint = getInboundJointChecked(leftLink);
+		if(!joint)
+			return;
 		joint->setJointType(PxArticulationJointType::eREVOLUTE);
 		joint->setParentPose(PxTransform(currLeft->getGlobalPose().transformInv(leftAnchorLocation), leftParentRot));
 		joint->setChildPose(PxTransform(PxVec3(0.f, 0.f, -1.f), rightRot));
@@ -268,16 +343,20 @@ static void createScissorLift()
 		joint->setMotion(PxArticulationAxis::eTWIST, PxArticulationMotion::eLIMITED);
 		joint->setLimitParams(PxArticulationAxis::eTWIST, PxArticulationLimit(-PxPi, angle));
 
-		PxArticulationLink* rightLink = gArticulation->createLink(currRight, PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), rightRot));
-		PxRigidActorExt::createExclusiveShape(*rightLink, PxBoxGeometry(0.05f, 0.05f, 1.f), *gMaterial);
-		PxRigidBodyExt::updateMassAndInertia(*rightLink, 1.f);
+		PxArticulationLink* rightLink = createLinkWithShape(currRight,
+			PxTransform(pos + PxVec3(0.f, sinAng*(2 * i + 1), 0.f), rightRot),
+			PxBoxGeometry(0.05f, 0.05f, 1.f), 1.f);
+		if(!rightLink)
+			return;
 
 		const PxVec3 rightAnchorLocation = pos + PxVec3(0.f, sinAng*(2 * i), 0.9f);
 
 		/*joint = PxD6JointCreate(getPhysics(), currRight, PxTransform(currRight->getGlobalPose().transformInv(rightAnchorLocation)),
 		rightLink, PxTransform(PxVec3(0.f, 0.f, 1.f)));*/
 
-		joint = rightLink->getInboundJoint();
+		joint = getInboundJointChecked(rightLink);
+		if(!joint)
+			return;
 		joint->setParentPose(PxTransform(currRight->getGlobalPose().transformInv(rightAnchorLocation), rightParentRot));
 		joint->setJointType(PxArticulationJointType::eREVOLUTE);
 		joint->setChildPose(PxTransform(PxVec3(0.f, 0.f, 1.f), leftRot));
@@ -287,49 +366,52 @@ static void createScissorLift()
 		rightParentRot = rightRot;
 
 		PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, leftLink, PxTransform(PxIdentity), rightLink, PxTransform(PxIdentity));
-		trackLoopJoint(d6joint);
-
-		d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
-		d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
-		d6joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
+		if(!trackLoopJoint(d6joint))
+			return;
 
 		currLeft = rightLink;
 		currRight = leftLink;
 	}
 
 	PxD6Joint* d6joint = PxD6JointCreate(*gPhysics, currLeft, PxTransform(PxVec3(0.f, 0.f, -1.f)), leftTop, PxTransform(PxVec3(-0.5f, 0.f, 0.f)));
-	trackLoopJoint(d6joint);
-
-	d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
-	d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
-	d6joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
+	if(!trackLoopJoint(d6joint))
+		return;
 
 	d6joint = PxD6JointCreate(*gPhysics, currRight, PxTransform(PxVec3(0.f, 0.f, 1.f)), rightTop, PxTransform(PxVec3(-0.5f, 0.f, 0.f)));
-	trackLoopJoint(d6joint);
-
-	d6joint->setMotion(PxD6Axis::eTWIST, PxD6Motion::eFREE);
-	d6joint->setMotion(PxD6Axis::eSWING1, PxD6Motion::eFREE);
-	d6joint->setMotion(PxD6Axis::eSWING2, PxD6Motion::eFREE);
+	if(!trackLoopJoint(d6joint))
+		return;
 
 
 	const PxTransform topPose(PxVec3(0.f, leftTop->getGlobalPose().p.y + 0.15f, 0.f));
 
-	PxArticulationLink* top = gArticulation->createLink(leftTop, topPose);
-	PxRigidActorExt::createExclusiveShape(*top, PxBoxGeometry(0.5f, 0.1f, 1.5f), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*top, 1.f);
+	PxArticulationLink* top = createLinkWithShape(leftTop, topPose,
+		PxBoxGeometry(0.5f, 0.1f, 1.5f), 1.f);
+	if(!top)
+		return;
 	gTopLink = top;
 
-	joint = top->getInboundJoint();
+	joint = getInboundJointChecked(top);
+	if(!joint)
+		return;
 	joint->setJointType(PxArticulationJointType::eFIX);
 	joint->setParentPose(PxTransform(PxVec3(0.f, 0.0f, 0.f)));
 	joint->setChildPose(PxTransform(PxVec3(0.f, -0.15f, -0.9f)));
 
-	gScene->addArticulation(*gArticulation);
+	if(!gScene->addArticulation(*gArticulation))
+	{
+		failInitialization();
+		return;
+	}
 
 	for (PxU32 i = 0; i < gArticulation->getNbLinks(); ++i)
 	{
-		PxArticulationLink* link;
-		gArticulation->getLinks(&link, 1, i);
+		PxArticulationLink* link = NULL;
+		if(gArticulation->getLinks(&link, 1, i) != 1 || !link
+			|| link->getNbShapes() == 0)
+		{
+			failInitialization();
+			return;
+		}
 
 		link->setLinearDamping(0.2f);
 		link->setAngularDamping(0.2f);
@@ -341,8 +423,12 @@ static void createScissorLift()
 		{
 			for (PxU32 b = 0; b < link->getNbShapes(); ++b)
 			{
-				PxShape* shape;
-				link->getShapes(&shape, 1, b);
+				PxShape* shape = NULL;
+				if(link->getShapes(&shape, 1, b) != 1 || !shape)
+				{
+					failInitialization();
+					return;
+				}
 
 				shape->setSimulationFilterData(PxFilterData(0, 0, 1, 0));
 			}
@@ -351,106 +437,189 @@ static void createScissorLift()
 
 	const PxVec3 halfExt(0.25f);
 	const PxReal density(0.5f);
-
-	PxRigidDynamic* box0 = gPhysics->createRigidDynamic(PxTransform(PxVec3(-0.25f, 5.f, 0.5f)));
-	PxShape* shape0 = PxRigidActorExt::createExclusiveShape(*box0, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box0, density);
-	gScene->addActor(*box0);
-
-	PxRigidDynamic* box1 = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.25f, 5.f, 0.5f)));
-	PxShape* shape1 = PxRigidActorExt::createExclusiveShape(*box1, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box1, density);
-	gScene->addActor(*box1);
-
-	PxRigidDynamic* box2 = gPhysics->createRigidDynamic(PxTransform(PxVec3(-0.25f, 4.5f, 0.5f)));
-	PxShape* shape2 = PxRigidActorExt::createExclusiveShape(*box2, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box2, density);
-	gScene->addActor(*box2);
-
-	PxRigidDynamic* box3 = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.25f, 4.5f, 0.5f)));
-	PxShape* shape3 = PxRigidActorExt::createExclusiveShape(*box3, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box3, density);
-	gScene->addActor(*box3);
-
-	PxRigidDynamic* box4 = gPhysics->createRigidDynamic(PxTransform(PxVec3(-0.25f, 5.f, 0.f)));
-	PxShape* shape4 = PxRigidActorExt::createExclusiveShape(*box4, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box4, density);
-	gScene->addActor(*box4);
-
-	PxRigidDynamic* box5 = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.25f, 5.f, 0.f)));
-	PxShape* shape5 = PxRigidActorExt::createExclusiveShape(*box5, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box5, density);
-	gScene->addActor(*box5);
-
-	PxRigidDynamic* box6 = gPhysics->createRigidDynamic(PxTransform(PxVec3(-0.25f, 4.5f, 0.f)));
-	PxShape* shape6 = PxRigidActorExt::createExclusiveShape(*box6, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box6, density);
-	gScene->addActor(*box6);
-
-	PxRigidDynamic* box7 = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.25f, 4.5f, 0.f)));
-	PxShape* shape7 = PxRigidActorExt::createExclusiveShape(*box7, PxBoxGeometry(halfExt), *gMaterial);
-	PxRigidBodyExt::updateMassAndInertia(*box7, density);
-	gScene->addActor(*box7);
+	const PxVec3 boxPositions[] = {
+		PxVec3(-0.25f, 5.f, 0.5f), PxVec3(0.25f, 5.f, 0.5f),
+		PxVec3(-0.25f, 4.5f, 0.5f), PxVec3(0.25f, 4.5f, 0.5f),
+		PxVec3(-0.25f, 5.f, 0.f), PxVec3(0.25f, 5.f, 0.f),
+		PxVec3(-0.25f, 4.5f, 0.f), PxVec3(0.25f, 4.5f, 0.f)
+	};
+	PxShape* boxShapes[8] = {};
+	for(PxU32 i = 0; i < sizeof(boxPositions) / sizeof(boxPositions[0]); ++i)
+	{
+		if(!createFallingBox(PxTransform(boxPositions[i]), halfExt, density,
+			boxShapes[i]))
+			return;
+	}
 
 	const float contactOffset = 0.2f;
-	shape0->setContactOffset(contactOffset);
-	shape1->setContactOffset(contactOffset);
-	shape2->setContactOffset(contactOffset);
-	shape3->setContactOffset(contactOffset);
-	shape4->setContactOffset(contactOffset);
-	shape5->setContactOffset(contactOffset);
-	shape6->setContactOffset(contactOffset);
-	shape7->setContactOffset(contactOffset);
+	for(PxU32 i = 0; i < sizeof(boxShapes) / sizeof(boxShapes[0]); ++i)
+	{
+		if(!boxShapes[i])
+		{
+			failInitialization();
+			return;
+		}
+		boxShapes[i]->setContactOffset(contactOffset);
+	}
 }
 
-void initPhysics(bool /*interactive*/)
+static bool hasOwnedPhysicsResources()
 {
-	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	return gFoundation || gPhysics || gDispatcher || gScene || gMaterial || gPvd
+		|| gPvdTransport || gArticulation || gLoopJointCount
+		|| gExtensionsInitialized;
+}
 
-	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
-	PxInitExtensions(*gPhysics, gPvd);
+static bool validateScissorSetup()
+{
+	static const PxU32 expectedLinkCount = 18;
+	static const PxU32 expectedLoopJointCount = 8;
+	if(gInitializationFailed || !gFoundation || !gPhysics || !gDispatcher
+		|| !gScene || !gMaterial || !gArticulation || !gBaseLink || !gTopLink
+		|| !gDriveLink || !gDriveJoint
+		|| gArticulation->getScene() != gScene
+		|| gArticulation->getNbLinks() != expectedLinkCount
+		|| gLoopJointCount != expectedLoopJointCount
+		|| gDriveLink->getInboundJoint() != gDriveJoint
+		|| gDriveJoint->getJointType() != PxArticulationJointType::ePRISMATIC
+		|| gDriveJoint->getMotion(PxArticulationAxis::eZ)
+			!= PxArticulationMotion::eLIMITED)
+		return false;
+
+	for(PxU32 i = 0; i < expectedLinkCount; ++i)
+	{
+		PxArticulationLink* link = NULL;
+		if(gArticulation->getLinks(&link, 1, i) != 1 || !link
+			|| !link->getGlobalPose().isSane() || link->getNbShapes() == 0
+			|| (link != gBaseLink && !link->getInboundJoint()))
+			return false;
+	}
+	for(PxU32 i = 0; i < expectedLoopJointCount; ++i)
+	{
+		if(!gLoopJoints[i])
+			return false;
+		PxRigidActor* actor0 = NULL;
+		PxRigidActor* actor1 = NULL;
+		gLoopJoints[i]->getActors(actor0, actor1);
+		if(!actor0 || !actor1)
+			return false;
+	}
+	return true;
+}
+
+static bool initializePhysics(bool interactive)
+{
+	if(hasOwnedPhysicsResources())
+		return failInitialization();
+
+	resetScissorState();
+	gErrorCallback.reset();
+	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if(!gFoundation)
+		return failInitialization();
+
+	if(interactive)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		if(gPvd)
+		{
+			gPvdTransport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+			if(gPvdTransport)
+				gPvd->connect(*gPvdTransport, PxPvdInstrumentationFlag::eALL);
+		}
+	}
+
+	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation,
+		PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+		return failInitialization();
+	gExtensionsInitialized = PxInitExtensions(*gPhysics, gPvd);
+	if(!gExtensionsInitialized)
+		return failInitialization();
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
-	
-	PxU32 numCores = SnippetUtils::getNbPhysicalCores();
-	gDispatcher = PxDefaultCpuDispatcherCreate(numCores == 0 ? 0 : numCores - 1);
-	sceneDesc.cpuDispatcher	= gDispatcher;
-	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
 
+	const PxU32 numCores = SnippetUtils::getNbPhysicalCores();
+	const PxU32 dispatcherThreads = interactive
+		? (numCores == 0 ? 0 : numCores - 1)
+		: gHeadlessOptions.dispatcherThreads;
+	gDispatcher = PxDefaultCpuDispatcherCreate(dispatcherThreads);
+	if(!gDispatcher)
+		return failInitialization();
+	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.solverType = gSolverType;
 	sceneDesc.filterShader = scissorFilter;
 
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return failInitialization();
 
-	printf("[SnippetArticulationRCConfig] solver=%s\n",
-		getSolverTypeName(sceneDesc.solverType));
-	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if(pvdClient)
+	printf("[SnippetArticulationRCConfig] solver=%s dispatcherThreads=%u "
+		"pvd=%s\n", Snippets::getSolverTypeName(sceneDesc.solverType),
+		dispatcherThreads, gPvd ? "enabled" : "disabled");
+	if(interactive)
 	{
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
+		PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
+		if(pvdClient)
+		{
+			pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
+			pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
+			pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
+		}
 	}
 
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.f);
+	if(!gMaterial)
+		return failInitialization();
 
 	PxRigidStatic* groundPlane = PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
-	gScene->addActor(*groundPlane);
+	if(!groundPlane || groundPlane->getNbShapes() == 0)
+	{
+		PX_RELEASE(groundPlane);
+		return failInitialization();
+	}
+	if(!gScene->addActor(*groundPlane))
+	{
+		PX_RELEASE(groundPlane);
+		return failInitialization();
+	}
 
 	// TODO(AVBD): PhysX 5 removed the old solver-neutral PxArticulation layer,
 	// so AVBD currently keeps the reduced-coordinate factory name even when the
 	// articulation/joint handling behind it is maximal-coordinate oriented.
 	gArticulation = gPhysics->createArticulationReducedCoordinate();
+	if(!gArticulation)
+		return failInitialization();
 
 	createScissorLift();
+	if(!validateScissorSetup() || gErrorCallback.getFatalCount())
+		return failInitialization();
+	return true;
+}
+
+void initPhysics(bool interactive)
+{
+	if(initializePhysics(interactive))
+		return;
+
+	if(interactive)
+	{
+		std::fprintf(stderr,
+			"SnippetArticulationRC interactive initialization failed.\n");
+		cleanupPhysics(false);
+		std::exit(Snippets::eHEADLESS_CONFIG_ERROR);
+	}
 }
 
 static bool gClosing = true;
 static PxU32 gFrame = 0;
+static PxU32 gSimulateFailures = 0;
+static PxU32 gFetchFailures = 0;
+static PxU32 gFetchErrorState = 0;
+static bool gFetchPending = false;
+static PxReal gPendingDt = 0.0f;
+static PxReal gPendingDriveValue = 0.0f;
 
 struct ScissorStats
 {
@@ -506,20 +675,74 @@ struct ScissorStats
 };
 
 static ScissorStats gScissorStats;
-static bool gScissorRegressionOK = true;
+
+static bool areScissorStatsFinite()
+{
+	return PxIsFinite(gScissorStats.topYInitial)
+		&& PxIsFinite(gScissorStats.topYMin)
+		&& PxIsFinite(gScissorStats.topYMax)
+		&& PxIsFinite(gScissorStats.topYLast)
+		&& PxIsFinite(gScissorStats.baseYDriftMax)
+		&& PxIsFinite(gScissorStats.baseTiltDegMax)
+		&& PxIsFinite(gScissorStats.driveCoord)
+		&& PxIsFinite(gScissorStats.driveCoordVelocity)
+		&& PxIsFinite(gScissorStats.driveErrorMax)
+		&& PxIsFinite(gScissorStats.stallWindowCoord)
+		&& PxIsFinite(gScissorStats.stallWindowTarget)
+		&& PxIsFinite(gScissorStats.internalAnchorError)
+		&& PxIsFinite(gScissorStats.internalAnchorErrorMax)
+		&& PxIsFinite(gScissorStats.internalAngularErrorDeg)
+		&& PxIsFinite(gScissorStats.internalAngularErrorDegMax)
+		&& PxIsFinite(gScissorStats.twistLimitViolationDeg)
+		&& PxIsFinite(gScissorStats.twistLimitViolationDegMax)
+		&& PxIsFinite(gScissorStats.loopAnchorError)
+		&& PxIsFinite(gScissorStats.loopAnchorErrorMax)
+		&& PxIsFinite(gScissorStats.phaseFirstHeight)
+		&& PxIsFinite(gScissorStats.phaseReferenceHeight)
+		&& PxIsFinite(gScissorStats.phaseBaselineSpread)
+		&& PxIsFinite(gScissorStats.phaseMaxRelativeDrift)
+		&& PxIsFinite(gScissorStats.previousPhaseCoord)
+		&& PxIsFinite(gScissorStats.previousPhaseHeight);
+}
+
+static void resetScissorState()
+{
+	gInitializationFailed = false;
+	gRuntimeInvariantFailed = false;
+	gCleanupFailed = false;
+	gExtensionsInitialized = false;
+	gClosing = true;
+	gFrame = 0;
+	gSimulateFailures = 0;
+	gFetchFailures = 0;
+	gFetchErrorState = 0;
+	gFetchPending = false;
+	gPendingDt = 0.0f;
+	gPendingDriveValue = 0.0f;
+	gScissorStats = ScissorStats();
+	gBaseLink = NULL;
+	gTopLink = NULL;
+	gDriveLink = NULL;
+	gDriveJoint = NULL;
+	gLoopJointCount = 0;
+	for(PxU32 i = 0; i < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]); ++i)
+		gLoopJoints[i] = NULL;
+}
 
 static bool isArticulationStateFinite()
 {
-	if(!gArticulation || !PxIsFinite(gScissorStats.driveCoord)
-		|| !PxIsFinite(gScissorStats.driveCoordVelocity))
+	if(!gArticulation || !gDriveJoint || !PxIsFinite(gScissorStats.driveCoord)
+		|| !PxIsFinite(gScissorStats.driveCoordVelocity)
+		|| !PxIsFinite(gDriveJoint->getDriveTarget(PxArticulationAxis::eZ))
+		|| !PxIsFinite(gDriveJoint->getJointPosition(PxArticulationAxis::eZ))
+		|| !PxIsFinite(gDriveJoint->getJointVelocity(PxArticulationAxis::eZ)))
 		return false;
 
 	const PxU32 linkCount = gArticulation->getNbLinks();
 	for(PxU32 i = 0; i < linkCount; ++i)
 	{
 		PxArticulationLink* link = NULL;
-		gArticulation->getLinks(&link, 1, i);
-		if(!link)
+		if(gArticulation->getLinks(&link, 1, i) != 1 || !link)
 			return false;
 		const PxTransform pose = link->getGlobalPose();
 		if(!pose.isSane() || !link->getLinearVelocity().isFinite()
@@ -576,7 +799,7 @@ static PxReal getDriveCoordinate()
 	return parentFrame.q.getBasisVector2().dot(childFrame.p - parentFrame.p);
 }
 
-static void updateAnchorErrors(PxU32 frame)
+static bool updateAnchorErrors(PxU32 frame)
 {
 	gScissorStats.internalAnchorError = 0.0f;
 	gScissorStats.internalAnchorLink = PX_MAX_U32;
@@ -588,8 +811,17 @@ static void updateAnchorErrors(PxU32 frame)
 	for(PxU32 i = 1; i < linkCount; ++i)
 	{
 		PxArticulationLink* child = NULL;
-		gArticulation->getLinks(&child, 1, i);
+		if(gArticulation->getLinks(&child, 1, i) != 1 || !child)
+		{
+			gRuntimeInvariantFailed = true;
+			return false;
+		}
 		PxArticulationJointReducedCoordinate* joint = child->getInboundJoint();
+		if(!joint)
+		{
+			gRuntimeInvariantFailed = true;
+			return false;
+		}
 		const PxTransform parentFrame = joint->getParentArticulationLink().getGlobalPose()
 			* joint->getParentPose();
 		const PxTransform childFrame = child->getGlobalPose() * joint->getChildPose();
@@ -685,9 +917,19 @@ static void updateAnchorErrors(PxU32 frame)
 	gScissorStats.loopAnchorIndex = PX_MAX_U32;
 	for(PxU32 i = 0; i < gLoopJointCount; ++i)
 	{
+		if(!gLoopJoints[i])
+		{
+			gRuntimeInvariantFailed = true;
+			return false;
+		}
 		PxRigidActor* actor0 = NULL;
 		PxRigidActor* actor1 = NULL;
 		gLoopJoints[i]->getActors(actor0, actor1);
+		if(!actor0 || !actor1)
+		{
+			gRuntimeInvariantFailed = true;
+			return false;
+		}
 		const PxTransform frame0 = actor0->getGlobalPose()
 			* gLoopJoints[i]->getLocalPose(PxJointActorIndex::eACTOR0);
 		const PxTransform frame1 = actor1->getGlobalPose()
@@ -712,11 +954,12 @@ static void updateAnchorErrors(PxU32 frame)
 		printf("[ScissorLoopAnchor] firstFrame=%u loop=%u error=%.4f\n",
 			frame, gScissorStats.loopAnchorIndex, gScissorStats.loopAnchorError);
 	}
+	return true;
 }
 
 static void dumpScissorState(PxU32 frame)
 {
-	if(!gBaseLink || !gTopLink)
+	if(!gBaseLink || !gTopLink || !gDriveJoint)
 		return;
 	const PxTransform basePose = gBaseLink->getGlobalPose();
 	const PxTransform topPose  = gTopLink->getGlobalPose();
@@ -740,24 +983,14 @@ static void dumpScissorState(PxU32 frame)
 		jointPos, jointVel);
 }
 
-void stepPhysics(bool /*interactive*/)
+static void sampleFetchedFrame(PxReal dt, PxReal driveValue)
 {
-	const PxReal dt = 1.0f / 60.f;
-	PxReal driveValue = gDriveJoint->getDriveTarget(PxArticulationAxis::eZ);
-
-	if (gClosing && driveValue < -1.2f)
-		gClosing = false;
-	else if (!gClosing && driveValue > 0.f)
-		gClosing = true;
-
-	if (gClosing)
-		driveValue -= dt*0.25f;
-	else
-		driveValue += dt*0.25f;
-	gDriveJoint->setDriveTarget(PxArticulationAxis::eZ, driveValue);
-
-	gScene->simulate(dt);
-	gScene->fetchResults(true);
+	if(!gScene || !gArticulation || !gDriveJoint || !gBaseLink || !gTopLink
+		|| !gDriveLink)
+	{
+		gRuntimeInvariantFailed = true;
+		return;
+	}
 
 	const PxReal previousDriveCoord = gScissorStats.driveCoord;
 	gScissorStats.driveCoord = getDriveCoordinate();
@@ -770,7 +1003,8 @@ void stepPhysics(bool /*interactive*/)
 	}
 	else
 	{
-		updateAnchorErrors(gFrame);
+		if(!updateAnchorErrors(gFrame))
+			return;
 		const PxReal driveError = gScissorStats.driveCoord - driveValue;
 		gScissorStats.driveErrorMax = PxMax(gScissorStats.driveErrorMax,
 			PxAbs(driveError));
@@ -871,122 +1105,527 @@ void stepPhysics(bool /*interactive*/)
 		}
 	}
 
+	if(!areScissorStatsFinite()
+		&& gScissorStats.nonFiniteFrame == PX_MAX_U32)
+		gScissorStats.nonFiniteFrame = gFrame;
+
 	const bool snapshotFrame = (gFrame % 600) == 0 || gFrame < 5;
 	if(snapshotFrame)
 		dumpScissorState(gFrame);
 	++gFrame;
 }
 
-static bool evaluateScissorRegression()
+static bool finishPendingSimulation()
 {
-	const bool finite = gScissorStats.nonFiniteFrame == PX_MAX_U32;
-	const bool moving = gScissorStats.firstStallFrame == PX_MAX_U32;
-	const bool limitsHeld = gScissorStats.twistLimitViolationDegMax <= 5.0f;
-	const bool anchorsHeld = gScissorStats.internalAnchorErrorMax <= 0.1f
-		&& gScissorStats.internalAngularErrorDegMax <= 5.0f
-		&& gScissorStats.loopAnchorErrorMax <= 0.1f;
-	bool ok = finite && moving && limitsHeld && anchorsHeld
-		&& !gScissorStats.phaseRegressionFailed;
-
-	if(gFrame < 3000)
+	if(!gFetchPending)
+		return true;
+	if(!gScene)
 	{
-		printf("[ScissorRegression] ok=%d skipped=short-run frames=%u "
-			"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
-			"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
-			ok ? 1 : 0, gFrame, gScissorStats.nonFiniteFrame,
-			gScissorStats.firstStallFrame, gScissorStats.twistLimitViolationDegMax,
-			gScissorStats.internalAnchorErrorMax,
-			gScissorStats.internalAngularErrorDegMax,
-			gScissorStats.loopAnchorErrorMax);
-		return ok;
+		gRuntimeInvariantFailed = true;
+		++gFetchFailures;
+		return false;
 	}
 
-	const PxU32 sampleCount = gScissorStats.phaseHeightCount;
-	if(sampleCount < 5 || gScissorStats.phaseBaselineSpread > 0.10f)
-		ok = false;
+	PxU32 errorState = 0;
+	if(!gScene->fetchResults(true, &errorState))
+	{
+		++gFetchFailures;
+		gFetchErrorState |= errorState;
+		return false;
+	}
 
-	printf("[ScissorRegression] ok=%d samples=%u referenceHeight=%.4f "
-		"baselineSpread=%.3f maxRelativeDrift=%.3f firstBadSample=%u "
-		"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
-		"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
-		ok ? 1 : 0, sampleCount, gScissorStats.phaseReferenceHeight,
-		gScissorStats.phaseBaselineSpread, gScissorStats.phaseMaxRelativeDrift,
-		gScissorStats.firstBadPhaseSample, gScissorStats.nonFiniteFrame,
-		gScissorStats.firstStallFrame, gScissorStats.twistLimitViolationDegMax,
-		gScissorStats.internalAnchorErrorMax,
-		gScissorStats.internalAngularErrorDegMax,
-		gScissorStats.loopAnchorErrorMax);
-	return ok;
+	gFetchPending = false;
+	gFetchErrorState |= errorState;
+	const PxReal dt = gPendingDt;
+	const PxReal driveValue = gPendingDriveValue;
+	gPendingDt = 0.0f;
+	gPendingDriveValue = 0.0f;
+	if(!PxIsFinite(dt) || !PxIsFinite(driveValue) || dt <= 0.0f)
+	{
+		gRuntimeInvariantFailed = true;
+		return true;
+	}
+	sampleFetchedFrame(dt, driveValue);
+	return true;
 }
-	
-void cleanupPhysics(bool /*interactive*/)
+
+void stepPhysics(bool interactive)
 {
-	gScissorRegressionOK = evaluateScissorRegression();
+	if(gFetchPending)
+	{
+		finishPendingSimulation();
+		return;
+	}
+	if(!gScene || !gArticulation || !gDriveJoint || !gBaseLink || !gTopLink
+		|| !gDriveLink)
+	{
+		if(!interactive)
+			gRuntimeInvariantFailed = true;
+		return;
+	}
+
+	const PxReal dt = interactive ? (1.0f / 60.f) : gHeadlessOptions.dt;
+	PxReal driveValue = gDriveJoint->getDriveTarget(PxArticulationAxis::eZ);
+	if (gClosing && driveValue < -1.2f)
+		gClosing = false;
+	else if (!gClosing && driveValue > 0.f)
+		gClosing = true;
+
+	if(gClosing)
+		driveValue -= dt * 0.25f;
+	else
+		driveValue += dt * 0.25f;
+	gDriveJoint->setDriveTarget(PxArticulationAxis::eZ, driveValue);
+	if(!gScene->simulate(dt))
+	{
+		++gSimulateFailures;
+		return;
+	}
+
+	gFetchPending = true;
+	gPendingDt = dt;
+	gPendingDriveValue = driveValue;
+	finishPendingSimulation();
+}
+
+struct ScissorGateEvaluation
+{
+	Snippets::HeadlessExitCode exitCode;
+	const char* status;
+	const char* reason;
+	PxU32 completedFrames;
+	PxU32 oraclePassed;
+	PxU32 linkCount;
+	PxU32 loopJointCount;
+	PxU32 nonFinite;
+	PxU32 nonFiniteFrame;
+	PxU32 firstStallFrame;
+	PxReal twistLimitViolationDegMax;
+	PxU32 twistLimitViolationMaxLink;
+	PxReal internalAnchorErrorMax;
+	PxU32 internalAnchorErrorMaxLink;
+	PxU32 firstInternalAnchorBadFrame;
+	PxU32 firstInternalAnchorBadLink;
+	PxReal internalAngularErrorDegMax;
+	PxU32 internalAngularErrorMaxLink;
+	PxU32 firstInternalAngularBadFrame;
+	PxU32 firstInternalAngularBadLink;
+	PxReal loopAnchorErrorMax;
+	PxU32 loopAnchorErrorMaxIndex;
+	PxU32 firstLoopAnchorBadFrame;
+	PxU32 firstLoopAnchorBadIndex;
+	PxU32 phaseHeightCount;
+	PxU32 phaseBaselineValid;
+	PxReal phaseReferenceHeight;
+	PxReal phaseBaselineSpread;
+	PxReal phaseMaxRelativeDrift;
+	PxU32 phaseRegressionFailed;
+	PxU32 firstBadPhaseSample;
+	PxU32 topSampleValid;
+	PxReal topYInitial;
+	PxReal topYLast;
+	PxReal topYMin;
+	PxReal topYMax;
+	PxReal topYRange;
+	PxReal baseYDriftMax;
+	PxReal baseTiltDegMax;
+	PxReal driveCoord;
+	PxReal driveErrorMax;
+	PxU32 firstDriveErrorFrame;
+};
+
+static PxReal finiteMetricOrZero(PxReal value)
+{
+	return PxIsFinite(value) ? value : 0.0f;
+}
+
+static void setGateFailure(ScissorGateEvaluation& evaluation,
+	const char* reason)
+{
+	if(evaluation.exitCode != Snippets::eHEADLESS_PASS)
+		return;
+	evaluation.exitCode = Snippets::eHEADLESS_GATE_FAILED;
+	evaluation.status = "FAIL";
+	evaluation.reason = reason;
+}
+
+static void setGateError(ScissorGateEvaluation& evaluation,
+	const char* reason)
+{
+	evaluation.exitCode = Snippets::eHEADLESS_CONFIG_ERROR;
+	evaluation.status = "ERROR";
+	evaluation.reason = reason;
+	evaluation.oraclePassed = 0;
+}
+
+static ScissorGateEvaluation evaluateScissorGate(bool physicsReadable)
+{
+	ScissorGateEvaluation evaluation = {};
+	evaluation.exitCode = Snippets::eHEADLESS_PASS;
+	evaluation.status = "PASS";
+	evaluation.reason = "none";
+	evaluation.completedFrames = gFrame;
+	evaluation.linkCount = physicsReadable && gArticulation
+		? gArticulation->getNbLinks() : 0;
+	evaluation.loopJointCount = gLoopJointCount;
+	const bool statsFinite = areScissorStatsFinite();
+	evaluation.nonFinite = (gScissorStats.nonFiniteFrame != PX_MAX_U32
+		|| !statsFinite) ? 1u : 0u;
+	evaluation.nonFiniteFrame = !statsFinite
+		&& gScissorStats.nonFiniteFrame == PX_MAX_U32
+		? gFrame : gScissorStats.nonFiniteFrame;
+	evaluation.firstStallFrame = gScissorStats.firstStallFrame;
+	evaluation.twistLimitViolationDegMax = finiteMetricOrZero(
+		gScissorStats.twistLimitViolationDegMax);
+	evaluation.twistLimitViolationMaxLink =
+		gScissorStats.twistLimitViolationMaxLink;
+	evaluation.internalAnchorErrorMax = finiteMetricOrZero(
+		gScissorStats.internalAnchorErrorMax);
+	evaluation.internalAnchorErrorMaxLink =
+		gScissorStats.internalAnchorErrorMaxLink;
+	evaluation.firstInternalAnchorBadFrame =
+		gScissorStats.firstInternalAnchorBadFrame;
+	evaluation.firstInternalAnchorBadLink =
+		gScissorStats.firstInternalAnchorBadLink;
+	evaluation.internalAngularErrorDegMax = finiteMetricOrZero(
+		gScissorStats.internalAngularErrorDegMax);
+	evaluation.internalAngularErrorMaxLink =
+		gScissorStats.internalAngularErrorMaxLink;
+	evaluation.firstInternalAngularBadFrame =
+		gScissorStats.firstInternalAngularBadFrame;
+	evaluation.firstInternalAngularBadLink =
+		gScissorStats.firstInternalAngularBadLink;
+	evaluation.loopAnchorErrorMax = finiteMetricOrZero(
+		gScissorStats.loopAnchorErrorMax);
+	evaluation.loopAnchorErrorMaxIndex = gScissorStats.loopAnchorErrorMaxIndex;
+	evaluation.firstLoopAnchorBadFrame = gScissorStats.firstLoopAnchorBadFrame;
+	evaluation.firstLoopAnchorBadIndex = gScissorStats.firstLoopAnchorBadIndex;
+	evaluation.phaseHeightCount = gScissorStats.phaseHeightCount;
+	evaluation.phaseBaselineValid = gScissorStats.phaseHeightCount >= 2 ? 1u : 0u;
+	evaluation.phaseReferenceHeight = finiteMetricOrZero(
+		gScissorStats.phaseReferenceHeight);
+	evaluation.phaseBaselineSpread = evaluation.phaseBaselineValid
+		? finiteMetricOrZero(gScissorStats.phaseBaselineSpread) : 0.0f;
+	evaluation.phaseMaxRelativeDrift = finiteMetricOrZero(
+		gScissorStats.phaseMaxRelativeDrift);
+	evaluation.phaseRegressionFailed =
+		gScissorStats.phaseRegressionFailed ? 1u : 0u;
+	evaluation.firstBadPhaseSample = gScissorStats.firstBadPhaseSample;
+	evaluation.topSampleValid =
+		gScissorStats.firstReportedFrame != PX_MAX_U32 ? 1u : 0u;
+	evaluation.topYInitial = finiteMetricOrZero(gScissorStats.topYInitial);
+	evaluation.topYLast = finiteMetricOrZero(gScissorStats.topYLast);
+	evaluation.topYMin = evaluation.topSampleValid
+		? finiteMetricOrZero(gScissorStats.topYMin) : 0.0f;
+	evaluation.topYMax = evaluation.topSampleValid
+		? finiteMetricOrZero(gScissorStats.topYMax) : 0.0f;
+	evaluation.topYRange = evaluation.topSampleValid
+		? finiteMetricOrZero(evaluation.topYMax - evaluation.topYMin) : 0.0f;
+	evaluation.baseYDriftMax = finiteMetricOrZero(gScissorStats.baseYDriftMax);
+	evaluation.baseTiltDegMax = finiteMetricOrZero(gScissorStats.baseTiltDegMax);
+	evaluation.driveCoord = finiteMetricOrZero(gScissorStats.driveCoord);
+	evaluation.driveErrorMax = finiteMetricOrZero(gScissorStats.driveErrorMax);
+	evaluation.firstDriveErrorFrame = gScissorStats.firstDriveErrorFrame;
+
+	const bool finite = evaluation.nonFinite == 0;
+	const bool moving = evaluation.firstStallFrame == PX_MAX_U32;
+	const bool limitsHeld = evaluation.twistLimitViolationDegMax <= 5.0f;
+	const bool anchorsHeld = evaluation.internalAnchorErrorMax <= 0.1f
+		&& evaluation.internalAngularErrorDegMax <= 5.0f
+		&& evaluation.loopAnchorErrorMax <= 0.1f;
+	bool oraclePassed = finite && moving && limitsHeld && anchorsHeld
+		&& !evaluation.phaseRegressionFailed;
+	if(evaluation.completedFrames >= 3000
+		&& (evaluation.phaseHeightCount < 5
+			|| !evaluation.phaseBaselineValid
+			|| evaluation.phaseBaselineSpread > 0.10f))
+		oraclePassed = false;
+	evaluation.oraclePassed = oraclePassed ? 1u : 0u;
+
+	if(gInitializationFailed)
+		setGateError(evaluation, "initialization");
+	else if(gRuntimeInvariantFailed)
+		setGateError(evaluation, "runtime_invariant");
+	else if(!physicsReadable || gFetchPending || gSimulateFailures
+		|| gFetchFailures)
+		setGateError(evaluation, "lifecycle");
+	else if(evaluation.completedFrames != gHeadlessOptions.frames)
+		setGateError(evaluation, "incomplete_simulation");
+	else if(gFetchErrorState)
+		setGateFailure(evaluation, "fetch_error_state");
+	else if(!finite)
+		setGateFailure(evaluation, "non_finite");
+	else if(!moving)
+		setGateFailure(evaluation, "stall");
+	else if(!limitsHeld)
+		setGateFailure(evaluation, "twist_limit");
+	else if(evaluation.internalAnchorErrorMax > 0.1f)
+		setGateFailure(evaluation, "internal_anchor");
+	else if(evaluation.internalAngularErrorDegMax > 5.0f)
+		setGateFailure(evaluation, "revolute_swing");
+	else if(evaluation.loopAnchorErrorMax > 0.1f)
+		setGateFailure(evaluation, "loop_anchor");
+	else if(evaluation.phaseRegressionFailed)
+		setGateFailure(evaluation, "phase_regression");
+	else if(evaluation.completedFrames >= 3000
+		&& evaluation.phaseHeightCount < 5)
+		setGateFailure(evaluation, "phase_sample_count");
+	else if(evaluation.completedFrames >= 3000
+		&& (!evaluation.phaseBaselineValid
+			|| evaluation.phaseBaselineSpread > 0.10f))
+		setGateFailure(evaluation, "phase_baseline_spread");
+
+	return evaluation;
+}
+
+static void printScissorDiagnostics(const ScissorGateEvaluation& evaluation)
+{
+	if(evaluation.completedFrames < 3000)
+	{
+		printf("[ScissorRegression] ok=%u skipped=short-run frames=%u "
+			"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
+			"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
+			evaluation.oraclePassed, evaluation.completedFrames,
+			evaluation.nonFiniteFrame, evaluation.firstStallFrame,
+			double(evaluation.twistLimitViolationDegMax),
+			double(evaluation.internalAnchorErrorMax),
+			double(evaluation.internalAngularErrorDegMax),
+			double(evaluation.loopAnchorErrorMax));
+	}
+	else
+	{
+		printf("[ScissorRegression] ok=%u samples=%u referenceHeight=%.4f "
+			"baselineSpread=%.3f maxRelativeDrift=%.3f firstBadSample=%u "
+			"nonFiniteFrame=%u firstStallFrame=%u twistLimitViolationDegMax=%.3f "
+			"internalAnchorMax=%.4f revoluteSwingDegMax=%.3f loopAnchorMax=%.4f\n",
+			evaluation.oraclePassed, evaluation.phaseHeightCount,
+			double(evaluation.phaseReferenceHeight),
+			double(evaluation.phaseBaselineSpread),
+			double(evaluation.phaseMaxRelativeDrift),
+			evaluation.firstBadPhaseSample, evaluation.nonFiniteFrame,
+			evaluation.firstStallFrame,
+			double(evaluation.twistLimitViolationDegMax),
+			double(evaluation.internalAnchorErrorMax),
+			double(evaluation.internalAngularErrorDegMax),
+			double(evaluation.loopAnchorErrorMax));
+	}
+
 	printf("[ScissorDiag] frames=%u topY initial=%.4f last=%.4f min=%.4f max=%.4f "
 		"range=%.4f baseDriftYMax=%.4f baseTiltDegMax=%.3f "
 		"driveCoord=%.4f driveErrorMax=%.4f firstDriveErrorFrame=%u "
 		"firstStallFrame=%u internalAnchorMax=%.4f(link=%u) "
 		"firstInternalAnchorBadFrame=%u(link=%u) revoluteSwingDegMax=%.3f(link=%u) "
 		"firstRevoluteSwingBadFrame=%u(link=%u) twistLimitViolationDegMax=%.3f(link=%u) "
-		"loopAnchorMax=%.4f(loop=%u) "
-		"firstLoopAnchorBadFrame=%u(loop=%u) nonFiniteFrame=%u\n",
-		gFrame, gScissorStats.topYInitial, gScissorStats.topYLast,
-		gScissorStats.topYMin == PX_MAX_F32 ? 0.0f : gScissorStats.topYMin,
-		gScissorStats.topYMax == -PX_MAX_F32 ? 0.0f : gScissorStats.topYMax,
-		(gScissorStats.topYMax > -PX_MAX_F32 && gScissorStats.topYMin < PX_MAX_F32)
-			? (gScissorStats.topYMax - gScissorStats.topYMin) : 0.0f,
-		gScissorStats.baseYDriftMax, gScissorStats.baseTiltDegMax,
-		gScissorStats.driveCoord, gScissorStats.driveErrorMax,
-		gScissorStats.firstDriveErrorFrame, gScissorStats.firstStallFrame,
-		gScissorStats.internalAnchorErrorMax, gScissorStats.internalAnchorErrorMaxLink,
-		gScissorStats.firstInternalAnchorBadFrame, gScissorStats.firstInternalAnchorBadLink,
-		gScissorStats.internalAngularErrorDegMax, gScissorStats.internalAngularErrorMaxLink,
-		gScissorStats.firstInternalAngularBadFrame, gScissorStats.firstInternalAngularBadLink,
-		gScissorStats.twistLimitViolationDegMax, gScissorStats.twistLimitViolationMaxLink,
-		gScissorStats.loopAnchorErrorMax, gScissorStats.loopAnchorErrorMaxIndex,
-		gScissorStats.firstLoopAnchorBadFrame, gScissorStats.firstLoopAnchorBadIndex,
-		gScissorStats.nonFiniteFrame);
+		"loopAnchorMax=%.4f(loop=%u) firstLoopAnchorBadFrame=%u(loop=%u) "
+		"nonFiniteFrame=%u\n",
+		evaluation.completedFrames, double(evaluation.topYInitial),
+		double(evaluation.topYLast), double(evaluation.topYMin),
+		double(evaluation.topYMax), double(evaluation.topYRange),
+		double(evaluation.baseYDriftMax), double(evaluation.baseTiltDegMax),
+		double(evaluation.driveCoord), double(evaluation.driveErrorMax),
+		evaluation.firstDriveErrorFrame, evaluation.firstStallFrame,
+		double(evaluation.internalAnchorErrorMax),
+		evaluation.internalAnchorErrorMaxLink,
+		evaluation.firstInternalAnchorBadFrame,
+		evaluation.firstInternalAnchorBadLink,
+		double(evaluation.internalAngularErrorDegMax),
+		evaluation.internalAngularErrorMaxLink,
+		evaluation.firstInternalAngularBadFrame,
+		evaluation.firstInternalAngularBadLink,
+		double(evaluation.twistLimitViolationDegMax),
+		evaluation.twistLimitViolationMaxLink,
+		double(evaluation.loopAnchorErrorMax),
+		evaluation.loopAnchorErrorMaxIndex,
+		evaluation.firstLoopAnchorBadFrame,
+		evaluation.firstLoopAnchorBadIndex, evaluation.nonFiniteFrame);
+}
 
-	gArticulation->release();
+void cleanupPhysics(bool interactive)
+{
+	if(gFetchPending && !finishPendingSimulation())
+	{
+		gCleanupFailed = true;
+		if(interactive)
+			std::fprintf(stderr,
+				"SnippetArticulationRC fetch remained pending during cleanup.\n");
+		return;
+	}
+
+	if(interactive)
+	{
+		const ScissorGateEvaluation evaluation = evaluateScissorGate(true);
+		printScissorDiagnostics(evaluation);
+	}
+
+	for(PxU32 i = 0; i < sizeof(gLoopJoints) / sizeof(gLoopJoints[0]); ++i)
+		PX_RELEASE(gLoopJoints[i]);
+	gLoopJointCount = 0;
+
+	PX_RELEASE(gArticulation);
+	gDriveJoint = NULL;
+	gDriveLink = NULL;
+	gBaseLink = NULL;
+	gTopLink = NULL;
 	PX_RELEASE(gScene);
+	PX_RELEASE(gMaterial);
 	PX_RELEASE(gDispatcher);
+	if(gExtensionsInitialized)
+	{
+		PxCloseExtensions();
+		gExtensionsInitialized = false;
+	}
 	PX_RELEASE(gPhysics);
-	PxPvdTransport* transport = gPvd->getTransport();
 	PX_RELEASE(gPvd);
-	PX_RELEASE(transport);
-	PxCloseExtensions();  
+	PX_RELEASE(gPvdTransport);
 	PX_RELEASE(gFoundation);
 
-	printf("SnippetArticulation done.\n");
+	gCleanupFailed = hasOwnedPhysicsResources();
+	if(interactive)
+		printf("SnippetArticulation done.\n");
 }
 
-static bool hasHeadlessArg(int argc, const char*const* argv)
+static void finalizeAfterCleanup(ScissorGateEvaluation& evaluation,
+	PxU32 physicsErrors)
 {
-	for(PxI32 i = 1; i < argc; ++i)
+	if(gCleanupFailed)
 	{
-		if(!argv[i])
-			continue;
-		if(std::strcmp(argv[i], "--headless") == 0)
-			return true;
+		if(evaluation.exitCode != Snippets::eHEADLESS_CONFIG_ERROR)
+			setGateError(evaluation, "cleanup");
+		else
+			evaluation.oraclePassed = 0;
 	}
-	return false;
+	else if(physicsErrors)
+		setGateFailure(evaluation, "physx_error");
 }
 
-static bool isHeadlessRequested(int argc, const char*const* argv)
+static void printGateResult(const ScissorGateEvaluation& evaluation,
+	PxU32 physicsErrors, PxU32 physicsWarnings)
 {
-	if(hasHeadlessArg(argc, argv))
-		return true;
+	printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=%s solver=%s "
+		"execution=%s requestedFrames=%u completedFrames=%u dt=%.9g seed=%u "
+		"dispatcherThreads=%u capability=SUPPORTED validation=ACCEPTED status=%s "
+		"reason=%s nonFinite=%u physicsErrors=%u physicsWarnings=%u "
+		"simulateFailures=%u fetchFailures=%u fetchPending=%u fetchErrorState=%u "
+		"runtimeInvariantFailed=%u "
+		"cleanupFailed=%u oraclePass=%u linkCount=%u loopJointCount=%u "
+		"firstNonFiniteFrame=%u firstStallFrame=%u "
+		"twistLimitViolationDegMax=%.9g internalAnchorMax=%.9g "
+		"revoluteSwingDegMax=%.9g loopAnchorMax=%.9g "
+		"phaseHeightCount=%u phaseBaselineValid=%u phaseReferenceHeight=%.9g "
+		"phaseBaselineSpread=%.9g phaseMaxRelativeDrift=%.9g "
+		"phaseRegressionFailed=%u firstBadPhaseSample=%u "
+		"twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 "
+		"loopAnchorCap=0.1 phaseMinSamples=5 phaseBaselineSpreadCap=0.1 "
+		"phaseDriftCap=0.2 phaseDriftConsecutiveSamples=2 "
+		"driveCoordDiagnostic=%.9g driveErrorMaxDiagnostic=%.9g "
+		"topYInitialDiagnostic=%.9g topYLastDiagnostic=%.9g "
+		"topYMinDiagnostic=%.9g topYMaxDiagnostic=%.9g "
+		"topYRangeDiagnostic=%.9g baseYDriftMaxDiagnostic=%.9g "
+		"baseTiltDegMaxDiagnostic=%.9g pvd=0\n",
+		gHeadlessOptions.caseName.c_str(),
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, evaluation.completedFrames,
+		double(gHeadlessOptions.dt), gHeadlessOptions.seed,
+		gHeadlessOptions.dispatcherThreads, evaluation.status, evaluation.reason,
+		evaluation.nonFinite, physicsErrors, physicsWarnings, gSimulateFailures,
+		gFetchFailures, gFetchPending ? 1u : 0u, gFetchErrorState,
+		gRuntimeInvariantFailed ? 1u : 0u,
+		gCleanupFailed ? 1u : 0u, evaluation.oraclePassed,
+		evaluation.linkCount, evaluation.loopJointCount,
+		evaluation.nonFiniteFrame, evaluation.firstStallFrame,
+		double(evaluation.twistLimitViolationDegMax),
+		double(evaluation.internalAnchorErrorMax),
+		double(evaluation.internalAngularErrorDegMax),
+		double(evaluation.loopAnchorErrorMax), evaluation.phaseHeightCount,
+		evaluation.phaseBaselineValid,
+		double(evaluation.phaseReferenceHeight),
+		double(evaluation.phaseBaselineSpread),
+		double(evaluation.phaseMaxRelativeDrift),
+		evaluation.phaseRegressionFailed, evaluation.firstBadPhaseSample,
+		double(evaluation.driveCoord), double(evaluation.driveErrorMax),
+		double(evaluation.topYInitial), double(evaluation.topYLast),
+		double(evaluation.topYMin), double(evaluation.topYMax),
+		double(evaluation.topYRange), double(evaluation.baseYDriftMax),
+		double(evaluation.baseTiltDegMax));
+}
 
-	const char* value = std::getenv("PHYSX_SNIPPET_HEADLESS");
-	return value && value[0] && value[0] != '0';
+static int reportConfigurationError(const Snippets::HeadlessOptions& options,
+	const char* message)
+{
+	printf("[AVBD_GATE_ERROR] snippet=SnippetArticulationRC message=%s\n", message);
+	printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=config-error "
+		"solver=%s execution=%s requestedFrames=%u completedFrames=0 dt=%.9g "
+		"seed=%u dispatcherThreads=%u capability=SUPPORTED validation=ACCEPTED "
+		"status=ERROR reason=config nonFinite=0 physicsErrors=0 "
+		"physicsWarnings=0 simulateFailures=0 fetchFailures=0 fetchPending=0 "
+		"fetchErrorState=0 pvd=0\n",
+		Snippets::getSolverTypeName(options.solverType),
+		Snippets::getExecutionName(options.execution), options.frames,
+		double(options.dt), options.seed, options.dispatcherThreads);
+	return Snippets::eHEADLESS_CONFIG_ERROR;
 }
 
 int snippetMain(int argc, const char*const* argv)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
-	gSolverType = getRequestedSolverType(argc, argv);
+
+	Snippets::HeadlessOptions defaults;
+	defaults.caseName = "scissor-cycle";
+	defaults.frames = 3600;
+	defaults.seed = 1;
+	defaults.dispatcherThreads = 2;
+	defaults.dt = 1.0f / 60.0f;
+
+	Snippets::HeadlessOptions options;
+	std::string parseError;
+	if(!Snippets::parseCommonHeadlessOptions(argc, argv, defaults, options,
+		parseError))
+		return reportConfigurationError(options, parseError.c_str());
+
+	bool headlessOnlyOptionSeen = false;
+	for(int i = 1; i < argc; ++i)
+	{
+		const char* arg = argv[i];
+		if(!arg)
+			continue;
+		if(Snippets::isCommonHeadlessOption(arg))
+		{
+			if(std::strcmp(arg, "--headless") != 0
+				&& !Snippets::hasOptionPrefix(arg, "--solver="))
+				headlessOnlyOptionSeen = true;
+			continue;
+		}
+		return reportConfigurationError(options, "unknown_argument");
+	}
+
+#ifndef RENDER_SNIPPET
+	options.headless = true;
+#endif
+
+	if(!Snippets::equalsIgnoreCase(options.caseName.c_str(), "scissor-cycle"))
+		return reportConfigurationError(options, "invalid_--case_value");
+	options.caseName = "scissor-cycle";
+	if(!options.headless && headlessOnlyOptionSeen)
+		return reportConfigurationError(options, "gate_option_requires_--headless");
+	if(options.headless && options.frames < 3600)
+		return reportConfigurationError(options,
+			"frames_must_be_at_least_3600");
+	if(options.execution == Snippets::eHEADLESS_SEQUENTIAL
+		&& options.solverType != PxSolverType::eAVBD)
+		return reportConfigurationError(options, "sequential_requires_avbd");
+	if(PxAbs(options.dt - (1.0f / 60.0f)) > 1.0e-7f)
+		return reportConfigurationError(options, "dt_requires_60hz_calibration");
+	if(!Snippets::applyExecutionEnvironment(options))
+		return reportConfigurationError(options, "execution_environment_failed");
+
+	gHeadlessOptions = options;
+	gSolverType = options.solverType;
+
 #ifdef RENDER_SNIPPET
-	if(!isHeadlessRequested(argc, argv))
+	if(!options.headless)
 	{
 		extern void renderLoop();
 		renderLoop();
@@ -994,19 +1633,28 @@ int snippetMain(int argc, const char*const* argv)
 	}
 #endif
 
-	// Cover enough complete cycles to catch branch changes caused by an
-	// incorrectly mapped asymmetric articulation limit.
-	PxU32 frameCount = 3600;
-	if(const char* override = std::getenv("PHYSX_SNIPPET_FRAME_COUNT"))
-	{
-		const long value = std::strtol(override, nullptr, 10);
-		if(value > 0 && value < 1000000)
-			frameCount = static_cast<PxU32>(value);
-	}
+	Snippets::printHeadlessConfig("SnippetArticulationRC", gHeadlessOptions);
 	initPhysics(false);
-	for(PxU32 i=0; i<frameCount; i++)
-		stepPhysics(false);
-	cleanupPhysics(false);
+	if(!gInitializationFailed)
+	{
+		for(PxU32 i = 0; i < gHeadlessOptions.frames; ++i)
+		{
+			stepPhysics(false);
+			if(gSimulateFailures || gFetchFailures
+				|| gRuntimeInvariantFailed)
+				break;
+		}
+	}
 
-	return gScissorRegressionOK ? 0 : 1;
+	if(gFetchPending)
+		finishPendingSimulation();
+	const bool physicsReadable = !gFetchPending;
+	ScissorGateEvaluation evaluation = evaluateScissorGate(physicsReadable);
+	printScissorDiagnostics(evaluation);
+	cleanupPhysics(false);
+	const PxU32 physicsErrors = gErrorCallback.getFatalCount();
+	const PxU32 physicsWarnings = gErrorCallback.getWarningCount();
+	finalizeAfterCleanup(evaluation, physicsErrors);
+	printGateResult(evaluation, physicsErrors, physicsWarnings);
+	return static_cast<int>(evaluation.exitCode);
 }

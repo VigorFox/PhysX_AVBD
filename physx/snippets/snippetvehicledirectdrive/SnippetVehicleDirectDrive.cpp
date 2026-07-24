@@ -88,7 +88,14 @@
 #include "../snippetvehiclecommon/serialization/DirectDrivetrainSerialization.h"
 #include "../snippetvehiclecommon/SnippetVehicleHelpers.h"
 
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPVD.h"
+
+#include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <string>
 
 using namespace physx;
 using namespace snippetvehicle;
@@ -96,13 +103,16 @@ using namespace snippetvehicle;
 //PhysX management class instances.
 
 PxDefaultAllocator		gAllocator;
-PxDefaultErrorCallback	gErrorCallback;
+Snippets::TrackingErrorCallback gErrorCallback;
 PxFoundation*			gFoundation = NULL;
 PxPhysics*				gPhysics	= NULL;
 PxDefaultCpuDispatcher*	gDispatcher = NULL;
 PxScene*				gScene		= NULL;
 PxMaterial*				gMaterial	= NULL;
 PxPvd*                  gPvd        = NULL;
+Snippets::HeadlessOptions gHeadlessOptions;
+bool					gVehicleExtensionInitialized = false;
+bool					gVehicleInitialized = false;
 
 //The path to the vehicle json files to be loaded.
 const char* gVehicleDataPath = NULL;
@@ -149,38 +159,116 @@ PxU32 gCommandProgress = 0;			//The id of the current command.
 //A ground plane to drive on.
 PxRigidStatic*	gGroundPlane = NULL;
 
-void initPhysX()
+struct VehicleMetrics
+{
+	PxU32 initialized;
+	PxU32 completedFrames;
+	PxU32 fetchFailures;
+	PxU32 nonFinite;
+	PxU32 wheelCount;
+	PxU32 constraintCount;
+	PxU32 roadHitFrames;
+	PxU32 roadHitSamples;
+	PxU32 driveFrames;
+	PxU32 brakeFrames;
+	PxU32 activeConstraintFrames;
+	PxU32 activeConstraintRows;
+	PxU32 cleanupComplete;
+	PxReal initialBrakeMaxSpeed;
+	PxReal maxThrottleSpeed;
+	PxReal brakeStartSpeed;
+	PxReal minBrakeSpeed;
+	PxReal maxForwardDisplacement;
+	PxReal steerLateralDisplacement;
+	PxReal steerHeadingChange;
+	PxReal minHeight;
+	PxReal maxHeight;
+	PxTransform initialPose;
+	PxTransform steerStartPose;
+	PxReal steerStartHeading;
+	bool brakePhaseSeen;
+	bool steerPhaseSeen;
+	bool solverReadbackMatched;
+
+	VehicleMetrics()
+	: initialized(0), completedFrames(0), fetchFailures(0), nonFinite(0),
+	  wheelCount(0), constraintCount(0), roadHitFrames(0),
+	  roadHitSamples(0), driveFrames(0), brakeFrames(0),
+	  activeConstraintFrames(0), activeConstraintRows(0),
+	  cleanupComplete(0), initialBrakeMaxSpeed(0.0f),
+	  maxThrottleSpeed(0.0f), brakeStartSpeed(0.0f),
+	  minBrakeSpeed(FLT_MAX), maxForwardDisplacement(0.0f),
+	  steerLateralDisplacement(0.0f), steerHeadingChange(0.0f),
+	  minHeight(FLT_MAX), maxHeight(-FLT_MAX),
+	  initialPose(PxIdentity), steerStartPose(PxIdentity),
+	  steerStartHeading(0.0f), brakePhaseSeen(false),
+	  steerPhaseSeen(false), solverReadbackMatched(false)
+	{
+	}
+};
+
+VehicleMetrics gMetrics;
+
+bool initPhysX(bool headless)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(!gFoundation)
+		return false;
+	if(!headless)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		if(gPvd)
+		{
+			PxPvdTransport* transport =
+				PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+			if(transport)
+				gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
+		}
+	}
 	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+		return false;
 		
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = gGravity;
+	if(headless)
+		sceneDesc.solverType = gHeadlessOptions.solverType;
 	
-	PxU32 numWorkers = 1;
+	const PxU32 numWorkers =
+		headless ? gHeadlessOptions.dispatcherThreads : 1u;
 	gDispatcher = PxDefaultCpuDispatcherCreate(numWorkers);
+	if(!gDispatcher)
+		return false;
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= VehicleFilterShader;
 
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return false;
+	gMetrics.solverReadbackMatched =
+		gScene->getSolverType() == sceneDesc.solverType;
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if(pvdClient)
+	if(!headless && pvdClient)
 	{
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
 	}
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+	if(!gMaterial)
+		return false;
 
-	PxInitVehicleExtension(*gFoundation);
+	gVehicleExtensionInitialized = PxInitVehicleExtension(*gFoundation);
+	return gVehicleExtensionInitialized;
 }
 
 void cleanupPhysX()
 {
-	PxCloseVehicleExtension();
+	if(gVehicleExtensionInitialized)
+	{
+		PxCloseVehicleExtension();
+		gVehicleExtensionInitialized = false;
+	}
 
 	PX_RELEASE(gMaterial);
 	PX_RELEASE(gScene);
@@ -195,9 +283,11 @@ void cleanupPhysX()
 	PX_RELEASE(gFoundation);
 }
 
-void initGroundPlane()
+bool initGroundPlane()
 {
 	gGroundPlane = PxCreatePlane(*gPhysics, PxPlane(0, 1, 0, 0), *gMaterial);
+	if(!gGroundPlane)
+		return false;
 	for (PxU32 i = 0; i < gGroundPlane->getNbShapes(); i++)
 	{
 		PxShape* shape = NULL;
@@ -207,11 +297,12 @@ void initGroundPlane()
 		shape->setFlag(PxShapeFlag::eTRIGGER_SHAPE, false);
 	}
 	gScene->addActor(*gGroundPlane);
+	return true;
 }
 
 void cleanupGroundPlane()
 {
-	gGroundPlane->release();
+	PX_RELEASE(gGroundPlane);
 }
 
 void initMaterialFrictionTable()
@@ -241,6 +332,7 @@ bool initVehicles()
 	{
 		return false;
 	}
+	gVehicleInitialized = true;
 
 	gVehicle.mTransmissionCommandState.gear = PxVehicleDirectDriveTransmissionCommandState::eFORWARD;
 
@@ -267,17 +359,41 @@ bool initVehicles()
 
 void cleanupVehicles()
 {
-	gVehicle.destroy();
+	if(gVehicleInitialized)
+	{
+		gVehicle.destroy();
+		gVehicleInitialized = false;
+	}
+}
+
+static bool initPhysicsInternal(bool headless)
+{
+	gMetrics = VehicleMetrics();
+	gCommandTime = 0.0f;
+	gCommandProgress = 0;
+	if(!initPhysX(headless))
+		return false;
+	if(!initGroundPlane())
+		return false;
+	initMaterialFrictionTable();
+	if (!initVehicles())
+		return false;
+	gMetrics.initialized = 1;
+	gMetrics.wheelCount = gVehicle.mBaseParams.axleDescription.nbWheels;
+	for(PxU32 i = 0;
+		i < PxVehiclePhysXConstraintLimits::eNB_CONSTRAINTS_PER_VEHICLE; ++i)
+	{
+		if(gVehicle.mPhysXState.physxConstraints.constraints[i])
+			gMetrics.constraintCount++;
+	}
+	gMetrics.initialPose =
+		gVehicle.mPhysXState.physxActor.rigidBody->getGlobalPose();
+	return true;
 }
 
 bool initPhysics()
 {
-	initPhysX();
-	initGroundPlane();
-	initMaterialFrictionTable();
-	if (!initVehicles())
-		return false;
-	return true;
+	return initPhysicsInternal(false);
 }
 
 void cleanupPhysics()
@@ -285,18 +401,129 @@ void cleanupPhysics()
 	cleanupVehicles();
 	cleanupGroundPlane();
 	cleanupPhysX();
+	gMetrics.cleanupComplete =
+		!gVehicleInitialized && !gGroundPlane && !gMaterial && !gScene &&
+		!gDispatcher && !gPhysics && !gPvd && !gFoundation ? 1u : 0u;
 	printf("SnippetVehicleDirectDrive done.\n");
 }
 
-void stepPhysics()
+static PxReal getHeading(const PxTransform& pose)
+{
+	const PxVec3 forward = pose.q.rotate(PxVec3(0.0f, 0.0f, 1.0f));
+	return PxReal(std::atan2(double(forward.x), double(forward.z)));
+}
+
+static PxReal getHeadingDifference(PxReal heading, PxReal reference)
+{
+	const PxReal difference = heading - reference;
+	return PxAbs(PxReal(std::atan2(
+		std::sin(double(difference)), std::cos(double(difference)))));
+}
+
+static void collectVehicleMetrics(PxU32 commandIndex)
+{
+	const PxVehicleAxleDescription& axle =
+		gVehicle.mBaseParams.axleDescription;
+	PxU32 roadHits = 0;
+	bool driveApplied = false;
+	bool brakeApplied = false;
+	PxU32 activeRows = 0;
+	for(PxU32 i = 0; i < axle.nbWheels; ++i)
+	{
+		const PxU32 wheelId = axle.wheelIdsInAxleOrder[i];
+		const PxVehicleRoadGeometryState& road =
+			gVehicle.mBaseState.roadGeomStates[wheelId];
+		const PxVehicleWheelActuationState& actuation =
+			gVehicle.mBaseState.actuationStates[wheelId];
+		const PxVehiclePhysXConstraintState& constraint =
+			gVehicle.mPhysXState.physxConstraints.constraintStates[wheelId];
+		if(road.hitState)
+			roadHits++;
+		driveApplied = driveApplied || actuation.isDriveApplied;
+		brakeApplied = brakeApplied || actuation.isBrakeApplied;
+		if(constraint.suspActiveStatus)
+			activeRows++;
+		for(PxU32 direction = 0;
+			direction < PxVehicleTireDirectionModes::eMAX_NB_PLANAR_DIRECTIONS;
+			++direction)
+		{
+			if(constraint.tireActiveStatus[direction])
+				activeRows++;
+		}
+	}
+	gMetrics.roadHitSamples += roadHits;
+	if(roadHits == axle.nbWheels)
+		gMetrics.roadHitFrames++;
+	if(driveApplied)
+		gMetrics.driveFrames++;
+	if(brakeApplied)
+		gMetrics.brakeFrames++;
+	if(activeRows)
+		gMetrics.activeConstraintFrames++;
+	gMetrics.activeConstraintRows += activeRows;
+
+	PxRigidBody* rigidBody = gVehicle.mPhysXState.physxActor.rigidBody;
+	const PxTransform pose = rigidBody->getGlobalPose();
+	const PxVec3 linearVelocity = rigidBody->getLinearVelocity();
+	const PxVec3 angularVelocity = rigidBody->getAngularVelocity();
+	if(!pose.isFinite() || !linearVelocity.isFinite() ||
+		!angularVelocity.isFinite())
+	{
+		gMetrics.nonFinite++;
+		return;
+	}
+
+	const PxVec3 forward = pose.q.rotate(PxVec3(0.0f, 0.0f, 1.0f));
+	const PxReal longitudinalSpeed =
+		PxAbs(linearVelocity.dot(forward));
+	gMetrics.minHeight = PxMin(gMetrics.minHeight, pose.p.y);
+	gMetrics.maxHeight = PxMax(gMetrics.maxHeight, pose.p.y);
+	gMetrics.maxForwardDisplacement = PxMax(
+		gMetrics.maxForwardDisplacement,
+		pose.p.z - gMetrics.initialPose.p.z);
+	if(commandIndex == 0)
+	{
+		gMetrics.initialBrakeMaxSpeed = PxMax(
+			gMetrics.initialBrakeMaxSpeed, longitudinalSpeed);
+	}
+	if(commandIndex == 1 || commandIndex == 3 || commandIndex == 4)
+	{
+		gMetrics.maxThrottleSpeed = PxMax(
+			gMetrics.maxThrottleSpeed, longitudinalSpeed);
+	}
+	if(commandIndex == 2)
+	{
+		if(!gMetrics.brakePhaseSeen)
+		{
+			gMetrics.brakePhaseSeen = true;
+			gMetrics.brakeStartSpeed = longitudinalSpeed;
+		}
+		gMetrics.minBrakeSpeed = PxMin(
+			gMetrics.minBrakeSpeed, longitudinalSpeed);
+	}
+	if(commandIndex == 4)
+	{
+		if(!gMetrics.steerPhaseSeen)
+		{
+			gMetrics.steerPhaseSeen = true;
+			gMetrics.steerStartPose = pose;
+			gMetrics.steerStartHeading = getHeading(pose);
+		}
+		gMetrics.steerLateralDisplacement =
+			pose.p.x - gMetrics.steerStartPose.p.x;
+		gMetrics.steerHeadingChange = getHeadingDifference(
+			getHeading(pose), gMetrics.steerStartHeading);
+	}
+}
+
+static bool stepPhysicsInternal(PxReal timestep, bool collectMetrics)
 {
 	if(gNbCommands == gCommandProgress)
-		return;
-
-	const PxF32 timestep = 0.0166667f;
+		return true;
 
 	//Apply the brake, throttle and steer to the command state of the direct drive vehicle.
-	const Command& command = gCommands[gCommandProgress];
+	const PxU32 commandIndex = gCommandProgress;
+	const Command& command = gCommands[commandIndex];
 	gVehicle.mCommandState.brakes[0] = command.brake;
 	gVehicle.mCommandState.nbBrakes = 1;
 	gVehicle.mCommandState.throttle = command.throttle;
@@ -307,7 +534,17 @@ void stepPhysics()
 
 	//Forward integrate the phsyx scene by a single timestep.
 	gScene->simulate(timestep);
-	gScene->fetchResults(true);
+	if(!gScene->fetchResults(true))
+	{
+		if(collectMetrics)
+			gMetrics.fetchFailures++;
+		return false;
+	}
+	if(collectMetrics)
+	{
+		gMetrics.completedFrames++;
+		collectVehicleMetrics(commandIndex);
+	}
 
 	//Increment the time spent on the current command.
 	//Move to the next command in the list if enough time has lapsed.
@@ -317,11 +554,191 @@ void stepPhysics()
 		gCommandProgress++;
 		gCommandTime = 0.0f;
 	}
+	return true;
+}
+
+void stepPhysics()
+{
+	stepPhysicsInternal(0.0166667f, false);
+}
+
+static bool parseHeadlessOptions(
+	int argc, const char*const* argv, std::string& error)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.solverType = PxSolverType::eAVBD;
+	defaults.frames = 1400;
+	defaults.dispatcherThreads = 4;
+	defaults.dt = 0.0166667f;
+	defaults.caseName = "command-cycle";
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+		return false;
+	if(!gHeadlessOptions.headless)
+		return true;
+	if(gHeadlessOptions.caseName != "command-cycle")
+	{
+		error = "unsupported --case";
+		return false;
+	}
+
+	PxU32 vehiclePathCount = 0;
+	for(int i = 1; i < argc; ++i)
+	{
+		const char* arg = argv[i];
+		if(Snippets::isCommonHeadlessOption(arg))
+			continue;
+		if(Snippets::hasOptionPrefix(arg, "--vehicleDataPath="))
+		{
+			vehiclePathCount++;
+			gVehicleDataPath =
+				arg + std::strlen("--vehicleDataPath=");
+			if(!gVehicleDataPath[0])
+			{
+				error = "empty --vehicleDataPath";
+				return false;
+			}
+			continue;
+		}
+		error = "unknown headless option";
+		return false;
+	}
+	if(vehiclePathCount != 1)
+	{
+		error = vehiclePathCount == 0 ?
+			"missing --vehicleDataPath" :
+			"duplicate --vehicleDataPath";
+		return false;
+	}
+	return true;
+}
+
+static bool headlessPassed()
+{
+	const PxReal brakeSpeedDrop =
+		gMetrics.brakePhaseSeen ?
+		gMetrics.brakeStartSpeed - gMetrics.minBrakeSpeed : 0.0f;
+	return gMetrics.initialized == 1 &&
+		gMetrics.solverReadbackMatched &&
+		gCommandProgress == gNbCommands &&
+		gMetrics.completedFrames <= gHeadlessOptions.frames &&
+		gMetrics.fetchFailures == 0 && gMetrics.nonFinite == 0 &&
+		gMetrics.wheelCount == 4 && gMetrics.constraintCount == 1 &&
+		gMetrics.roadHitFrames > gMetrics.completedFrames / 2 &&
+		gMetrics.driveFrames > 0 && gMetrics.brakeFrames > 0 &&
+		gMetrics.activeConstraintFrames > 0 &&
+		gMetrics.initialBrakeMaxSpeed < 0.5f &&
+		gMetrics.maxThrottleSpeed > 1.0f &&
+		brakeSpeedDrop > 0.5f &&
+		gMetrics.maxForwardDisplacement > 1.0f &&
+		PxAbs(gMetrics.steerLateralDisplacement) > 0.1f &&
+		gMetrics.steerHeadingChange > 0.02f &&
+		gMetrics.minHeight > -1.0f && gMetrics.maxHeight < 5.0f &&
+		gErrorCallback.getFatalCount() == 0 &&
+		gMetrics.cleanupComplete == 1;
+}
+
+static const char* failureReason()
+{
+	const PxReal brakeSpeedDrop =
+		gMetrics.brakePhaseSeen ?
+		gMetrics.brakeStartSpeed - gMetrics.minBrakeSpeed : 0.0f;
+	if(gMetrics.initialized != 1)
+		return "initialization";
+	if(!gMetrics.solverReadbackMatched)
+		return "solver_readback";
+	if(gCommandProgress != gNbCommands)
+		return "command_cycle_incomplete";
+	if(gMetrics.fetchFailures)
+		return "fetch_failure";
+	if(gMetrics.nonFinite)
+		return "non_finite";
+	if(gMetrics.wheelCount != 4 || gMetrics.constraintCount != 1)
+		return "vehicle_topology";
+	if(gMetrics.roadHitFrames <= gMetrics.completedFrames / 2)
+		return "road_query_coverage";
+	if(!gMetrics.driveFrames || !gMetrics.brakeFrames)
+		return "actuation_coverage";
+	if(!gMetrics.activeConstraintFrames)
+		return "constraint_activity";
+	if(gMetrics.initialBrakeMaxSpeed >= 0.5f)
+		return "initial_brake_drift";
+	if(gMetrics.maxThrottleSpeed <= 1.0f)
+		return "throttle_response";
+	if(brakeSpeedDrop <= 0.5f)
+		return "brake_response";
+	if(gMetrics.maxForwardDisplacement <= 1.0f)
+		return "forward_motion";
+	if(PxAbs(gMetrics.steerLateralDisplacement) <= 0.1f ||
+		gMetrics.steerHeadingChange <= 0.02f)
+		return "steer_response";
+	if(gMetrics.minHeight <= -1.0f || gMetrics.maxHeight >= 5.0f)
+		return "vertical_bounds";
+	if(gErrorCallback.getFatalCount())
+		return "physx_error";
+	if(gMetrics.cleanupComplete != 1)
+		return "cleanup";
+	return "none";
+}
+
+static void printHeadlessResult()
+{
+	const bool pass = headlessPassed();
+	const PxReal minimumBrakeSpeed =
+		gMetrics.brakePhaseSeen ? gMetrics.minBrakeSpeed : 0.0f;
+	const PxReal brakeSpeedDrop =
+		gMetrics.brakePhaseSeen ?
+		gMetrics.brakeStartSpeed - gMetrics.minBrakeSpeed : 0.0f;
+	const PxReal minimumHeight =
+		gMetrics.completedFrames ? gMetrics.minHeight : 0.0f;
+	const PxReal maximumHeight =
+		gMetrics.completedFrames ? gMetrics.maxHeight : 0.0f;
+	std::printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetVehicleDirectDrive "
+		"solver=%s case=command-cycle execution=%s frames=%u "
+		"completedFrames=%u commands=%u wheels=%u constraints=%u "
+		"roadHitFrames=%u roadHitSamples=%u driveFrames=%u brakeFrames=%u "
+		"activeConstraintFrames=%u activeConstraintRows=%u "
+		"initialBrakeMaxSpeed=%.9g maxThrottleSpeed=%.9g "
+		"brakeStartSpeed=%.9g minBrakeSpeed=%.9g brakeSpeedDrop=%.9g "
+		"maxForwardDisplacement=%.9g steerLateralDisplacement=%.9g "
+		"steerHeadingChange=%.9g minHeight=%.9g maxHeight=%.9g "
+		"nonFinite=%u fetchFailures=%u fatalErrors=%u "
+		"cleanupComplete=%u pvd=0 status=%s reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		unsigned(gHeadlessOptions.frames), unsigned(gMetrics.completedFrames),
+		unsigned(gCommandProgress), unsigned(gMetrics.wheelCount),
+		unsigned(gMetrics.constraintCount), unsigned(gMetrics.roadHitFrames),
+		unsigned(gMetrics.roadHitSamples), unsigned(gMetrics.driveFrames),
+		unsigned(gMetrics.brakeFrames),
+		unsigned(gMetrics.activeConstraintFrames),
+		unsigned(gMetrics.activeConstraintRows),
+		double(gMetrics.initialBrakeMaxSpeed),
+		double(gMetrics.maxThrottleSpeed), double(gMetrics.brakeStartSpeed),
+		double(minimumBrakeSpeed), double(brakeSpeedDrop),
+		double(gMetrics.maxForwardDisplacement),
+		double(gMetrics.steerLateralDisplacement),
+		double(gMetrics.steerHeadingChange), double(minimumHeight),
+		double(maximumHeight), unsigned(gMetrics.nonFinite),
+		unsigned(gMetrics.fetchFailures),
+		unsigned(gErrorCallback.getFatalCount()),
+		unsigned(gMetrics.cleanupComplete), pass ? "PASS" : "FAIL",
+		pass ? "none" : failureReason());
 }
 	
 int snippetMain(int argc, const char*const* argv)
 {
-	if(!parseVehicleDataPath(argc, argv, "SnippetVehicleDirectDrive", gVehicleDataPath))
+	std::string error;
+	if(!parseHeadlessOptions(argc, argv, error))
+	{
+		std::fprintf(
+			stderr, "[AVBD_GATE_CONFIG_ERROR] %s\n", error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(!gHeadlessOptions.headless &&
+		!parseVehicleDataPath(
+			argc, argv, "SnippetVehicleDirectDrive", gVehicleDataPath))
 		return 1;
 
 	//Check that we can read from the json file before continuing.
@@ -334,6 +751,31 @@ int snippetMain(int argc, const char*const* argv)
 	if (!readDirectDrivetrainParamsFromJsonFile(gVehicleDataPath, "DirectDrive.json",
 		baseParams.axleDescription, directDrivetrainParams))
 		return 1;
+
+	if(gHeadlessOptions.headless)
+	{
+		if(!Snippets::applyExecutionEnvironment(gHeadlessOptions))
+		{
+			std::fprintf(
+				stderr,
+				"[AVBD_GATE_CONFIG_ERROR] failed to set execution mode\n");
+			return Snippets::eHEADLESS_CONFIG_ERROR;
+		}
+		Snippets::printHeadlessConfig(
+			"SnippetVehicleDirectDrive", gHeadlessOptions);
+		gErrorCallback.reset();
+		bool runOk = initPhysicsInternal(true);
+		while(runOk && gCommandProgress != gNbCommands &&
+			gMetrics.completedFrames < gHeadlessOptions.frames)
+		{
+			runOk = stepPhysicsInternal(gHeadlessOptions.dt, true);
+		}
+		cleanupPhysics();
+		printHeadlessResult();
+		return runOk && headlessPassed() ?
+			Snippets::eHEADLESS_PASS :
+			Snippets::eHEADLESS_GATE_FAILED;
+	}
 
 #ifdef RENDER_SNIPPET
 	extern void renderLoop(const char*);

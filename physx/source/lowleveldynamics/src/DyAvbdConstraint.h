@@ -59,6 +59,7 @@ struct AvbdConstraintType {
     eJOINT_D6,        //!< Configurable 6-DOF joint
     eJOINT_WELD,      //!< Weld joint (optimized for runtime attachment, e.g.,
                       //!< "Ultrahand")
+    eJOINT_CUSTOM_1D, //!< One hard row emitted by PxConstraintSolverPrep
     eJOINT_GEAR, //!< Gear joint (angular ratio constraint between two hinges)
     eSOFT_DISTANCE, //!< Soft body distance constraint
     eSOFT_VOLUME,   //!< Soft body volume preservation
@@ -253,6 +254,22 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   physx::PxVec3 contactNormal; //!< Contact normal (world space, from B to A)
   physx::PxReal friction;      //!< Dynamic friction μ_d (NP-combined)
 
+  /**
+   * Desired body0-minus-body1 contact-point velocity supplied by
+   * PxContactModifyCallback, plus the per-point normal impulse limit.
+   */
+  physx::PxVec3 targetVelocity;
+  physx::PxReal maxImpulse;
+
+  /**
+   * Contact-local response scales from the modifiable patch.  Zero makes the
+   * corresponding body infinite-mass/inertia for this contact only.
+   */
+  physx::PxReal invMassScaleA;
+  physx::PxReal invMassScaleB;
+  physx::PxReal invInertiaScaleA;
+  physx::PxReal invInertiaScaleB;
+
   //-------------------------------------------------------------------------
   // Friction tangents
   //-------------------------------------------------------------------------
@@ -281,6 +298,15 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   physx::PxU32 cacheIndex; //!< Index into lambda cache for warm-starting
                            //!< (PX_MAX_U32 = not cached)
   physx::PxU64 cacheKey;   //!< Contact identity expected in the cache slot
+
+  /**
+   * Narrow-phase scalar impulse slot consumed by contact reports.
+   *
+   * The AVBD normal multiplier is a force (penalty [N/m] times violation
+   * [m]); solver writeback converts its compressive magnitude to impulse by
+   * multiplying by dt. NULL means the pair did not request force data.
+   */
+  physx::PxReal *contactImpulseWriteback;
 
   //-------------------------------------------------------------------------
   // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
@@ -1368,7 +1394,102 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
 struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   enum SourceFlag {
     eD6_SLERP_DRIVE = 1u << 0,
-    eSAME_ARTICULATION_EXTERNAL_SPHERICAL = 1u << 1
+    eSAME_ARTICULATION_EXTERNAL_SPHERICAL = 1u << 1,
+    eD6_DRIVE_LIMITS_ARE_FORCES = 1u << 2,
+    // Transient two-dynamic, all-free linear-X velocity-drive ownership tag.
+    // The scoped physical path supports force mode and linear-X acceleration
+    // mode, with or without the predicate-approved contact rows. Prep never
+    // authors this bit.
+    eCOUPLED_LINEAR_DRIVE_ACTIVE = 1u << 3,
+    // Transient exactly-one-dynamic linear-X position-drive ownership tag.
+    eLINEAR_POSITION_DRIVE_ACTIVE = 1u << 4,
+    // Transient exactly-one-dynamic, all-free, force-mode
+    // TWIST/SWING1/SWING2
+    // velocity-drive ownership tag. This is intentionally narrower than the
+    // angular drive bits: SLERP, acceleration and spring drives need independent
+    // semantic gates before they can consume the physical path.
+    eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE = 1u << 5,
+    // Transient exactly-one-dynamic, all-free, force-mode SLERP velocity-drive
+    // ownership tag.  SLERP is a three-row fixed-world-axis objective and must
+    // not share the single-axis TWIST/SWING physical path.
+    eSLERP_VELOCITY_DRIVE_ACTIVE = 1u << 6,
+    // Transient exactly-one-dynamic, centered, force-mode single-axis angular
+    // position-drive ownership tag.  This path owns the SWING_TWIST target
+    // quaternion for a free TWIST, SWING1, or SWING2 axis with the other
+    // angular axes locked. Wider angular spring families remain on the legacy
+    // path until separately validated.
+    eANGULAR_AXIS_POSITION_DRIVE_ACTIVE = 1u << 7,
+    // Transient exactly-one-dynamic, centered, force-mode SLERP position-drive
+    // ownership tag.  This is a three-row quaternion-Jacobian spring with all
+    // angular axes free and is intentionally separate from stiffness-zero
+    // fixed-world-axis SLERP velocity ownership.
+    eSLERP_POSITION_DRIVE_ACTIVE = 1u << 8,
+    // Transient two-dynamic, centered, force-mode angular-position ownership
+    // tag.  Both endpoints, locked companion rows, and the selected
+    // TWIST/SWING or SLERP objective are solved from one frozen island system
+    // so an internal drive cannot create net angular momentum.
+    eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE = 1u << 9,
+    // Prep-owned tag for a hard Px1DConstraint row emitted by an otherwise
+    // unknown/custom PxConstraintSolverPrep. The stored body-B Jacobians have
+    // already consumed Px1DConstraint's public minus convention.
+    eGENERIC_HARD_1D_ROW = 1u << 10,
+    // A hard articulation-internal mimic row admitted by the strict
+    // fixed-parent/single-DOF prep predicate. The shared hard-row solver uses
+    // this tag to close its exact position and velocity manifold after AL.
+    eARTICULATION_MIMIC_ROW = 1u << 11,
+    // A compliant articulation fixed-tendon row admitted by the strict
+    // fixed-root/two-active-joint serial-angular or sibling-branch prep
+    // predicate. Unlike a generic hard row, this stores physical rest/limit
+    // spring and damping coefficients and must not participate in AL dual
+    // accumulation or exact projection.
+    eARTICULATION_FIXED_TENDON_ROW = 1u << 12,
+    // A compliant articulation spatial-tendon path admitted by the strict
+    // fixed-middle/two-sibling-endpoint prep predicate.  It shares compliant
+    // spring/damper consumption with fixed tendons, not hard-row AL state.
+    eARTICULATION_SPATIAL_TENDON_ROW = 1u << 13,
+    // Transient ownership tag for the strict two-sibling spatial-tendon
+    // island.  The tagged row is excluded from per-body block descent and
+    // solved against both reduced free-angle inertial coordinates in one
+    // frozen Newton system, preventing body ordering from assigning the
+    // response to only one articulation branch.
+    eCOUPLED_SPATIAL_TENDON_ACTIVE = 1u << 14,
+    // A pure velocity-damping Px1DConstraint row with
+    // eSPRING|eACCELERATION_SPRING, zero stiffness and zero geometric error.
+    // Its physical damping is converted to a mass-independent implicit
+    // position penalty at solve time and does not accumulate an AL lambda.
+    eGENERIC_ACCELERATION_DAMPING_1D_ROW = 1u << 15,
+    // Public force-spring Px1DConstraint row.  The stored stiffness/damping
+    // are consumed by the same backward-Euler compliant-row formulation used
+    // by articulation tendons.
+    eGENERIC_FORCE_SPRING_1D_ROW = 1u << 16,
+    // Public restitution row.  It is excluded from the position objective and
+    // consumes the pre-solve relative velocity in the post-finalization
+    // velocity projection.
+    eGENERIC_RESTITUTION_1D_ROW = 1u << 17,
+    // Multiple rows emitted by one solverPrep share one public
+    // ConstraintWriteback.  The leader clears that entry and all rows
+    // accumulate their actor-0 impulses into it.
+    eGENERIC_MULTI_ROW = 1u << 18,
+    eGENERIC_MULTI_ROW_LEADER = 1u << 19,
+    // A compliant articulation mimic row.  Natural frequency and damping
+    // ratio are converted to mass-scaled spring coefficients at solve time,
+    // matching the public mimic compliance definition.  Unlike hard mimic
+    // rows it has no AL multiplier or exact manifold projection.
+    eARTICULATION_COMPLIANT_MIMIC_ROW = 1u << 20,
+    // Both D6 swing axes use the public legacy PxJointLimitCone.  Their
+    // admissible region is one elliptical cone, not two independent angular
+    // intervals.  The solver consumes one geometric inequality and excludes
+    // the two per-axis LIMITED rows.
+    eD6_LEGACY_CONE_LIMIT_ACTIVE = 1u << 21,
+    // Native PxSphericalJoint uses the same PxJointLimitCone ellipse as the
+    // Extensions solver prep.  Keep the two authored half-angles instead of
+    // reducing the public limit to a circle with min(yAngle, zAngle).
+    eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE = 1u << 22,
+    // Native passive Fixed/Prismatic/Revolute rows whose public reaction is
+    // reconstructed from the converged physical row force.  This owns both
+    // PxConstraint::getForce() writeback and force-unit break comparison;
+    // limited, driven and motorized variants require separate authority.
+    eNATIVE_PASSIVE_REACTION_ACTIVE = 1u << 23
   };
 
   AvbdConstraintHeader header;
@@ -1385,6 +1506,15 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
 
   physx::PxQuat localFrameA; //!< Local frame on body A
   physx::PxQuat localFrameB; //!< Local frame on body B
+
+  // Infinite-mass endpoints are not necessarily stationary.  Prep converts
+  // a kinematic actor's target-derived angular velocity into its authored
+  // world-space step so drive damping can measure relative motion against
+  // that endpoint.  World and rigid-static endpoints retain zero.
+  physx::PxVec3 externalAngularStepA;
+  physx::PxReal externalAngularStepPaddingA;
+  physx::PxVec3 externalAngularStepB;
+  physx::PxReal externalAngularStepPaddingB;
 
   //-------------------------------------------------------------------------
   // Linear DOF configuration (3 axes)
@@ -1414,9 +1544,12 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
 
   physx::PxVec3 driveLinearVelocity; //!< Target linear velocity (X, Y, Z)
   physx::PxVec3 driveLinearForce;    //!< Max linear drive force (X, Y, Z)
+  physx::PxVec3 driveLinearPosition; //!< Target translation in joint frame A
+  physx::PxReal drivePositionPadding;
 
   physx::PxVec3 driveAngularVelocity; //!< Target angular velocity (X, Y, Z)
   physx::PxVec3 driveAngularForce;    //!< Max angular drive force (X, Y, Z)
+  physx::PxQuat driveAngularPosition; //!< Target rotation in joint frame A
 
   //-------------------------------------------------------------------------
   // Lagrangian multipliers (6 DOF)
@@ -1424,6 +1557,64 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
 
   physx::PxVec3 lambdaLinear;  //!< Linear constraint multipliers (X, Y, Z)
   physx::PxVec3 lambdaAngular; //!< Angular constraint multipliers (X, Y, Z)
+
+  //-------------------------------------------------------------------------
+  // Generic 1D solverPrep row
+  //-------------------------------------------------------------------------
+  //
+  // PhysX publishes J={linear0, angular0, -linear1, -angular1}. Store the
+  // effective world-space Jacobian for each endpoint so the primal and dual
+  // paths cannot accidentally apply the public body-B sign twice. The row is
+  // linearized about the exact body poses passed to solverPrep this frame.
+  physx::PxVec3 genericLinearA;
+  physx::PxReal genericGeometricError;
+  physx::PxVec3 genericAngularA;
+  physx::PxReal genericVelocityTarget;
+  physx::PxVec3 genericLinearB;
+  physx::PxReal genericMinImpulse;
+  physx::PxVec3 genericAngularB;
+  physx::PxReal genericMaxImpulse;
+  union {
+    physx::PxReal genericRestitution;
+    // Articulation-tendon low limit expressed in rest-error coordinates.
+    physx::PxReal genericTendonLowLimit;
+  };
+  union {
+    physx::PxReal genericBounceThreshold;
+    // Articulation-tendon high limit expressed in rest-error coordinates.
+    physx::PxReal genericTendonHighLimit;
+  };
+  physx::PxReal genericNaturalFrequency;
+  physx::PxReal genericDampingRatio;
+
+  physx::PxVec3 genericReferencePositionA;
+  physx::PxU32 genericRowFlags;
+  physx::PxQuat genericReferenceRotationA;
+  physx::PxVec3 genericReferencePositionB;
+  physx::PxU32 genericSolveHint;
+  physx::PxQuat genericReferenceRotationB;
+
+  // Actor-0 angular Jacobian used by PxConstraint::getForce().  This is
+  // deliberately separate from genericAngularA, which is the solver
+  // Jacobian about body 0's center of mass.  Standard PGS/TGS writeback
+  // reports the wrench about body0WorldOffset and therefore applies the
+  // solverPrep cA2w/body0WorldOffset reference-point shifts.
+  physx::PxVec3 genericAngularAWriteback;
+  union {
+    physx::PxU32 genericWritebackPadding;
+    // Physical limit stiffness for an articulation-tendon row.
+    physx::PxReal genericTendonLimitStiffness;
+  };
+
+  // Public-force writeback witness.  AVBD's leaky AL multipliers above are
+  // solver state, not the converged physical reaction by themselves.  The
+  // joint solve records a force*dt or torque*dt impulse separately for row
+  // sets whose reaction semantics are currently complete. Unsupported row
+  // sets retain the legacy multiplier fallback.
+  physx::PxVec3 writebackLinearImpulse;
+  physx::PxU32 writebackLinearImpulseValid;
+  physx::PxVec3 writebackAngularImpulse;
+  physx::PxU32 writebackAngularImpulseValid;
 
   // AL multipliers for velocity-level drive constraints
   physx::PxVec3 lambdaDriveLinear;  //!< Linear velocity drive multipliers
@@ -1441,6 +1632,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
                            //!< 3-5 angular)
   physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
+  physx::PxU32 driveOutputForceFlags; //!< eOUTPUT_FORCE flags matching drive bits
   physx::PxU32 sourceFlags; //!< Prep-side SourceFlag tags
   physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
   physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
@@ -1457,8 +1649,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   // Cone limit (for spherical joints mapped to D6)
   //-------------------------------------------------------------------------
 
-  physx::PxReal coneAngleLimit; //!< Cone half-angle limit (radians, 0 = disabled)
+  physx::PxReal coneAngleLimit; //!< Cone Y half-angle (radians, 0 = disabled)
+  physx::PxReal coneAngleLimitZ; //!< Cone Z half-angle; zero selects circular legacy path
   physx::PxReal coneLambda;     //!< Cone AL multiplier (<= 0, unilateral)
+  physx::PxReal conePadding;
 
   //-------------------------------------------------------------------------
   // Revolute motor (post-solve, not AL drive)
@@ -1558,21 +1752,22 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     if (relRot.w < 0.0f)
       relRot = -relRot;
 
-    // Convert to axis-angle
-    physx::PxReal angle =
-        2.0f * physx::PxAcos(physx::PxClamp(relRot.w, -1.0f, 1.0f));
-    if (angle < 1e-6f)
-      return 0.0f;
-
-    physx::PxVec3 axisVec(relRot.x, relRot.y, relRot.z);
-    axisVec.normalize();
-
     // Project onto the requested axis in local frame A
     physx::PxVec3 localAxis(0.0f);
     localAxis[axis] = 1.0f;
     physx::PxVec3 worldAxis = worldFrameA.rotate(localAxis);
 
-    return angle * axisVec.dot(worldAxis);
+    // Recover the rotation vector from atan2(|q.xyz|, q.w).  acos(q.w)
+    // loses all sub-milliradian information when q.w rounds to one, which
+    // quantizes stiff angular rows into zero or ~9.77e-4 rad impulses.
+    const physx::PxVec3 imaginary(relRot.x, relRot.y, relRot.z);
+    const physx::PxReal sinHalfSquared = imaginary.magnitudeSquared();
+    if (sinHalfSquared <= 1e-20f)
+      return 2.0f * imaginary.dot(worldAxis);
+    const physx::PxReal sinHalf = physx::PxSqrt(sinHalfSquared);
+    const physx::PxReal angle =
+        2.0f * physx::PxAtan2(sinHalf, physx::PxClamp(relRot.w, 0.0f, 1.0f));
+    return (angle / sinHalf) * imaginary.dot(worldAxis);
   }
 
   /**
@@ -1616,6 +1811,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     anchorB = physx::PxVec3(0.0f);
     localFrameA = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
     localFrameB = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
+    externalAngularStepA = physx::PxVec3(0.0f);
+    externalAngularStepPaddingA = 0.0f;
+    externalAngularStepB = physx::PxVec3(0.0f);
+    externalAngularStepPaddingB = 0.0f;
     linearLimitLower = physx::PxVec3(0.0f);
     linearLimitUpper = physx::PxVec3(0.0f);
     linearStiffness = physx::PxVec3(0.0f);
@@ -1626,16 +1825,44 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     angularDamping = physx::PxVec3(0.0f);
     driveLinearVelocity = physx::PxVec3(0.0f);
     driveLinearForce = physx::PxVec3(0.0f);
+    driveLinearPosition = physx::PxVec3(0.0f);
+    drivePositionPadding = 0.0f;
     driveAngularVelocity = physx::PxVec3(0.0f);
     driveAngularForce = physx::PxVec3(0.0f);
+    driveAngularPosition = physx::PxQuat(physx::PxIdentity);
     lambdaLinear = physx::PxVec3(0.0f);
     lambdaAngular = physx::PxVec3(0.0f);
+    genericLinearA = physx::PxVec3(0.0f);
+    genericGeometricError = 0.0f;
+    genericAngularA = physx::PxVec3(0.0f);
+    genericVelocityTarget = 0.0f;
+    genericLinearB = physx::PxVec3(0.0f);
+    genericMinImpulse = -PX_MAX_REAL;
+    genericAngularB = physx::PxVec3(0.0f);
+    genericMaxImpulse = PX_MAX_REAL;
+    genericRestitution = 0.0f;
+    genericBounceThreshold = 0.0f;
+    genericNaturalFrequency = 0.0f;
+    genericDampingRatio = 0.0f;
+    genericReferencePositionA = physx::PxVec3(0.0f);
+    genericRowFlags = 0;
+    genericReferenceRotationA = physx::PxQuat(physx::PxIdentity);
+    genericReferencePositionB = physx::PxVec3(0.0f);
+    genericSolveHint = 0;
+    genericReferenceRotationB = physx::PxQuat(physx::PxIdentity);
+    genericAngularAWriteback = physx::PxVec3(0.0f);
+    genericWritebackPadding = 0;
+    writebackLinearImpulse = physx::PxVec3(0.0f);
+    writebackLinearImpulseValid = 0;
+    writebackAngularImpulse = physx::PxVec3(0.0f);
+    writebackAngularImpulseValid = 0;
     lambdaDriveLinear = physx::PxVec3(0.0f);
     lambdaDriveAngular = physx::PxVec3(0.0f);
     linearMotion = 0;  // All locked by default
     angularMotion = 0; // All locked by default
     driveFlags = 0;
     driveAccelerationFlags = 0;
+    driveOutputForceFlags = 0;
     sourceFlags = 0;
     cacheIndex = 0xFFFFFFFFu; // PX_MAX_U32 = not cached
     cacheKey = 0;
@@ -1645,7 +1872,9 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     linBreakImpulse = PX_MAX_REAL;
     angBreakImpulse = PX_MAX_REAL;
     coneAngleLimit = 0.0f;
+    coneAngleLimitZ = 0.0f;
     coneLambda = 0.0f;
+    conePadding = 0.0f;
     motorEnabled = 0;
     motorTargetVelocity = 0.0f;
     motorMaxForce = 0.0f;

@@ -53,6 +53,7 @@
 #include "PxPhysicsAPI.h"
 #include "foundation/PxArray.h"
 #include "foundation/PxTime.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
@@ -97,6 +98,7 @@ static PxU32 gDynamicTreeRebuildRateHint = 10;
 //static const PxU32 gNbObjectsPerRegion = 2000;
 //static const PxU32 gNbObjectsPerRegion = 4000;
 static const PxU32 gNbObjectsPerRegion = 8000;
+static const PxU32 gHeadlessObjectsPerRegion = 32;
 
 static const float gGlobalScale = 1.0f;
 
@@ -168,13 +170,25 @@ static PxVec3 computePlayerPos(float globalTime)
 }
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
 static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
+static Snippets::HeadlessOptions gHeadlessOptions;
+static bool						gSolverReadbackMatched = false;
+static PxU32					gPrunersCreated = 0;
+static PxU32					gRegionAdds = 0;
+static PxU32					gRegionRemoves = 0;
+static PxU32					gRegionUpdates = 0;
+static PxU32					gBuildStarts = 0;
+static PxU32					gBuildFinishes = 0;
+static PxU64					gBuildTaskSubmissions = 0;
+static PxU32					gStreamingRaycasts = 0;
+static PxU32					gStreamingRaycastHits = 0;
+static PxU32					gCleanupComplete = 0;
 
 #define INVALID_ID	0xffffffff
 
@@ -220,9 +234,12 @@ namespace
 	{
 		public:
 
-		PrunerData	mPrunerData[gNbPruners];
+		PrunerData	mPrunerData[gNbPruners+1];
+		mutable std::atomic<PxU64> mGetPrunerIndexCalls;
+		mutable std::atomic<PxU64> mProcessPrunerCalls;
 
 		SnippetCustomSceneQuerySystemAdapter()
+			: mGetPrunerIndexCalls(0), mProcessPrunerCalls(0)
 		{
 		}
 
@@ -232,8 +249,14 @@ namespace
 			// map multiple regions to the same pruner (as long as these regions are close to each other it's just fine).
 			if(customSQ)
 			{
-				for(PxU32 i=0;i<gNbPruners;i++)
+				const PxU32 nbPrunersToCreate =
+					gHeadlessOptions.headless ? gNbPruners+1 : gNbPruners;
+				for(PxU32 i=0;i<nbPrunersToCreate;i++)
+				{
 					mPrunerData[i].mPrunerIndex = customSQ->addPruner(PxPruningStructureType::eDYNAMIC_AABB_TREE, PxDynamicTreeSecondaryPruner::eINCREMENTAL);
+					if(mPrunerData[i].mPrunerIndex!=INVALID_ID)
+						gPrunersCreated++;
+				}
 					//mPrunerData[i].mPrunerIndex = customSQ->addPruner(PxPruningStructureType::eDYNAMIC_AABB_TREE, PxDynamicTreeSecondaryPruner::eBVH);
 			}
 		}
@@ -241,7 +264,7 @@ namespace
 		// This is called by the streaming code to assign a pruner to a region
 		PrunerData*	findFreePruner()
 		{
-			for(PxU32 i=0;i<gNbPruners;i++)
+			for(PxU32 i=0;i<gPrunersCreated;i++)
 			{
 				if(mPrunerData[i].mNbObjects==0)
 					return &mPrunerData[i];
@@ -260,6 +283,7 @@ namespace
 		// This is called by PxCustomSceneQuerySystem to assign a pruner index to a new actor/shape
 		virtual	PxU32	getPrunerIndex(const PxRigidActor& actor, const PxShape& /*shape*/)	const
 		{
+			mGetPrunerIndexCalls.fetch_add(1, std::memory_order_relaxed);
 			const PrunerData* prunerData = reinterpret_cast<const PrunerData*>(actor.userData);
 			return prunerData->mPrunerIndex;
 		}
@@ -267,6 +291,7 @@ namespace
 		// This is called by PxCustomSceneQuerySystem to validate a pruner for scene queries
 		virtual	bool	processPruner(PxU32 /*prunerIndex*/, const PxQueryThreadContext* /*context*/, const PxQueryFilterData& /*filterData*/, PxQueryFilterCallback* /*filterCall*/)	const
 		{
+			mProcessPrunerCalls.fetch_add(1, std::memory_order_relaxed);
 			// We could filter out empty pruners here if we have some, but for now we don't bother
 			return true;
 		}
@@ -293,6 +318,8 @@ namespace
 						~Streamer();
 
 		void			update(const PxVec3& playerPos);
+		PxU32			getNbActiveRegions() { return mStreamingCache.size(); }
+		PxU32			getNbActiveObjects();
 		void			renderDebug();
 		void			render();
 
@@ -312,7 +339,10 @@ namespace
 
 #ifdef USE_CUSTOM_PRUNER
 static SnippetCustomSceneQuerySystemAdapter gAdapter;
+static PrunerData* gSolverPrunerData = NULL;
 #endif
+static PxRigidStatic* gSolverGround = NULL;
+static PxRigidDynamic* gSolverBody = NULL;
 
 Streamer::Streamer(float activeAreaSize, PxU32 nbCellsPerSide) : mTimestamp(0), mActiveAreaSize(activeAreaSize), mNbCellsPerSide(nbCellsPerSide)
 {
@@ -321,6 +351,26 @@ Streamer::Streamer(float activeAreaSize, PxU32 nbCellsPerSide) : mTimestamp(0), 
 
 Streamer::~Streamer()
 {
+	PxArray<PxU64> keys;
+	for(StreamingCache::Iterator iter = mStreamingCache.getIterator(); !iter.done(); ++iter)
+	{
+		if(iter->second.mRegionData)
+			removeRegion(iter->second);
+		keys.pushBack(iter->second.mKey);
+	}
+	for(PxU32 i=0;i<keys.size();++i)
+		mStreamingCache.erase(keys[i]);
+}
+
+PxU32 Streamer::getNbActiveObjects()
+{
+	PxU32 count = 0;
+	for(StreamingCache::Iterator iter = mStreamingCache.getIterator(); !iter.done(); ++iter)
+	{
+		if(iter->second.mRegionData)
+			count += iter->second.mRegionData->mObjects.size();
+	}
+	return count;
 }
 
 void Streamer::addRegion(StreamRegion& region)
@@ -354,10 +404,12 @@ void Streamer::addRegion(StreamRegion& region)
 	// single structure for dynamic actors is often enough.
 	PxShape* groundShape = gPhysics->createShape(PxBoxGeometry(extents), *gMaterial, false, shapeFlags);
 	PxRigidStatic* ground = PxCreateStatic(*gPhysics, PxTransform(center), *groundShape);
+	groundShape->release();
 
 	RegionData* regionData = new RegionData;
 	regionData->mObjects.pushBack(ground);
 	region.mRegionData = regionData;
+	gRegionAdds++;
 
 #ifdef USE_CUSTOM_PRUNER
 	regionData->mPrunerData = gAdapter.findFreePruner();
@@ -367,16 +419,19 @@ void Streamer::addRegion(StreamRegion& region)
 
 	gScene->addActor(*ground);
 
-	if(gNbObjectsPerRegion)
+	const PxU32 objectsPerRegion =
+		gHeadlessOptions.headless ? gHeadlessObjectsPerRegion : gNbObjectsPerRegion;
+	if(objectsPerRegion)
 	{
-		const PxU32 nbExtraObjects = gNbObjectsPerRegion;
+		const PxU32 nbExtraObjects = objectsPerRegion;
 		const float objectScale = gObjectScale;
 		const float coeffY = objectScale * 20.0f;
 		center.y = objectScale;
 		const PxBoxGeometry boxGeom(objectScale, objectScale, objectScale);
 		PxShape* shape = gPhysics->createShape(boxGeom, *gMaterial, false, shapeFlags);
 
-		PxRigidActor* actors[nbExtraObjects];
+		PxArray<PxRigidActor*> actors;
+		actors.resize(nbExtraObjects);
 		for(PxU32 j=0;j<nbExtraObjects;j++)
 		{
 			PxVec3 c = center;
@@ -401,8 +456,10 @@ void Streamer::addRegion(StreamRegion& region)
 		}
 		else*/
 		{
-			gScene->addActors(reinterpret_cast<PxActor**>(actors), nbExtraObjects);
+			gScene->addActors(
+				reinterpret_cast<PxActor**>(actors.begin()), nbExtraObjects);
 		}
+		shape->release();
 	}
 
 #ifdef RENDER_SNIPPET
@@ -455,6 +512,7 @@ void Streamer::addRegion(StreamRegion& region)
 void Streamer::updateRegion(StreamRegion& region)
 {
 	RegionData* regionData = region.mRegionData;
+	gRegionUpdates++;
 
 	if(gUpdateObjectsInRegion)
 	{
@@ -472,6 +530,7 @@ void Streamer::removeRegion(StreamRegion& region)
 {
 	PX_ASSERT(region.mRegionData);
 	RegionData* regionData = region.mRegionData;
+	gRegionRemoves++;
 
 #ifdef RENDER_SNIPPET
 	delete [] regionData->mIndices;
@@ -649,22 +708,62 @@ void renderScene()
 #endif
 }
 
-void initPhysics(bool /*interactive*/)
+static bool createHeadlessSolverWitness()
+{
+#ifdef USE_CUSTOM_PRUNER
+	gSolverPrunerData = gAdapter.findFreePruner();
+	if(!gSolverPrunerData)
+		return false;
+#endif
+
+	PxShape* groundShape = gPhysics->createShape(
+		PxBoxGeometry(4.0f, 0.5f, 4.0f), *gMaterial);
+	if(!groundShape)
+		return false;
+	gSolverGround = PxCreateStatic(
+		*gPhysics, PxTransform(PxVec3(100.0f, -0.5f, 100.0f)), *groundShape);
+	groundShape->release();
+	gSolverBody = PxCreateDynamic(
+		*gPhysics, PxTransform(PxVec3(100.0f, 4.0f, 100.0f)),
+		PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+	if(!gSolverGround || !gSolverBody)
+		return false;
+
+#ifdef USE_CUSTOM_PRUNER
+	gSolverGround->userData = gSolverPrunerData;
+	gSolverBody->userData = gSolverPrunerData;
+	gSolverPrunerData->mNbObjects += 2;
+#endif
+	gScene->addActor(*gSolverGround);
+	gScene->addActor(*gSolverBody);
+	return true;
+}
+
+static bool initPhysicsInternal(bool headless)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if(!gFoundation)
+		return false;
 
-	if(1)
+	if(!headless)
 	{
 		gPvd = PxCreatePvd(*gFoundation);
 		PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-		//gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
-		gPvd->connect(*transport,PxPvdInstrumentationFlag::ePROFILE);
+		if(gPvd && transport)
+			gPvd->connect(*transport,PxPvdInstrumentationFlag::ePROFILE);
 	}
 
 	gPhysics	= PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), false, gPvd);
-	gDispatcher	= PxDefaultCpuDispatcherCreate(NUM_WORKER_THREADS);
+	if(!gPhysics)
+		return false;
+	gDispatcher	= PxDefaultCpuDispatcherCreate(
+		headless ? gHeadlessOptions.dispatcherThreads : NUM_WORKER_THREADS);
+	if(!gDispatcher)
+		return false;
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
+	if(headless)
+		sceneDesc.solverType					= gHeadlessOptions.solverType;
 	sceneDesc.gravity						= PxVec3(0.0f, -9.81f, 0.0f);
 	sceneDesc.cpuDispatcher					= gDispatcher;
 	sceneDesc.filterShader					= PxDefaultSimulationFilterShader;
@@ -685,8 +784,14 @@ void initPhysics(bool /*interactive*/)
 		sceneDesc.sceneQuerySystem = customSQ;
 		gCustomSQ = customSQ;
 	}
+	else if(headless)
+		return false;
 #endif
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return false;
+	gSolverReadbackMatched =
+		!headless || gScene->getSolverType() == sceneDesc.solverType;
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
@@ -696,8 +801,18 @@ void initPhysics(bool /*interactive*/)
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
 	}
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+	if(!gMaterial)
+		return false;
+	if(headless && !createHeadlessSolverWitness())
+		return false;
 
 	gStreamer = new Streamer(gActiveAreaSize, gNbCellsPerSide);
+	return gStreamer != NULL;
+}
+
+void initPhysics(bool /*interactive*/)
+{
+	initPhysicsInternal(false);
 }
 
 #ifdef USE_CUSTOM_PRUNER
@@ -741,16 +856,18 @@ private:
 static void concurrentBuildSteps()
 {
 	const PxU32 nbPruners = gCustomSQ->startCustomBuildstep();
+	gBuildStarts++;
 	PX_UNUSED(nbPruners);
 	{
-		PX_ASSERT(nbPruners==gNbPruners);
+		PX_ASSERT(nbPruners==gPrunersCreated);
 
 		SnippetUtils::Sync* buildStepsComplete = SnippetUtils::syncCreate();
 		SnippetUtils::syncReset(buildStepsComplete);
 
 		TaskWait taskWait(buildStepsComplete);
-		TaskBuildStep taskBuildStep[gNbPruners];
-		for(PxU32 i=0; i<gNbPruners; i++)
+		TaskBuildStep taskBuildStep[gNbPruners+1];
+		gBuildTaskSubmissions += nbPruners;
+		for(PxU32 i=0; i<nbPruners; i++)
 			taskBuildStep[i].mIndex = i;
 
 		PxTaskManager* tm = gScene->getTaskManager();
@@ -758,23 +875,24 @@ static void concurrentBuildSteps()
 		tm->startSimulation();
 
 		taskWait.setContinuation(*tm, NULL);
-		for(PxU32 i=0; i<gNbPruners; i++)
+		for(PxU32 i=0; i<nbPruners; i++)
 			taskBuildStep[i].setContinuation(&taskWait);
 
 		taskWait.removeReference();
-		for(PxU32 i=0; i<gNbPruners; i++)
+		for(PxU32 i=0; i<nbPruners; i++)
 			taskBuildStep[i].removeReference();
 
 		SnippetUtils::syncWait(buildStepsComplete);
 		SnippetUtils::syncRelease(buildStepsComplete);
 	}
 	gCustomSQ->finishCustomBuildstep();
+	gBuildFinishes++;
 }
 #endif
 
 static PxTime gTime;
 
-void stepPhysics(bool /*interactive*/)
+static bool stepPhysicsInternal(bool headless)
 {
 	if(gStreamer)
 	{
@@ -785,17 +903,19 @@ void stepPhysics(bool /*interactive*/)
 
 	const PxU32 nbActors = gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC);
 
-	const float dt = 1.0f/60.0f;
-	gTime.getElapsedSeconds();
+	const float dt = headless ? gHeadlessOptions.dt : 1.0f/60.0f;
+	if(!headless)
+		gTime.getElapsedSeconds();
+	bool fetched = false;
 	{
 		gScene->simulate(dt);
-		gScene->fetchResults(true);
+		fetched = gScene->fetchResults(true);
 #ifdef USE_CUSTOM_PRUNER
-		if(gUseConcurrentBuildSteps)
+		if(fetched && gUseConcurrentBuildSteps)
 			concurrentBuildSteps();
 #endif
 	}
-	PxTime::Second time = gTime.getElapsedSeconds()*1000.0;
+	PxTime::Second time = headless ? 0.0 : gTime.getElapsedSeconds()*1000.0;
 
 	// Ignore first frames to skip the cost of creating all the initial regions
 	static PxU32 nbIgnored = 16;
@@ -803,39 +923,70 @@ void stepPhysics(bool /*interactive*/)
 	static PxF64 totalTime = 0;
 	static PxF64 peakTime = 0;
 
-	if(nbIgnored)
-		nbIgnored--;
-	else
+	if(!headless)
 	{
-		nbCalls++;
-		totalTime+=time;
-		if(time>peakTime)
-			peakTime = time;
-
-		if(1)
+		if(nbIgnored)
+			nbIgnored--;
+		else
+		{
+			nbCalls++;
+			totalTime+=time;
+			if(time>peakTime)
+				peakTime = time;
 			printf("%d: time: %f ms | avg: %f ms | peak: %f ms | %d actors\n", nbCalls, time, totalTime/PxU64(nbCalls), peakTime, nbActors);
+		}
 	}
 
-	gTime.getElapsedSeconds();
+	if(!headless)
+		gTime.getElapsedSeconds();
 	{
 		PxRaycastBuffer buf;
 		gScene->raycast(gOrigin, PxVec3(0.0f, -1.0f, 0.0f), 100.0f, buf);
+		if(headless)
+		{
+			gStreamingRaycasts++;
+			if(buf.hasBlock)
+				gStreamingRaycastHits++;
+		}
 		gHasRaycastHit = buf.hasBlock;
 		if(buf.hasBlock)
 			gRaycastHit = buf.block;
 	}
-	time = gTime.getElapsedSeconds()*1000.0;
+	time = headless ? 0.0 : gTime.getElapsedSeconds()*1000.0;
 	if(0)
 		printf("raycast time: %f us\n", time*1000.0);
 
 	gGlobalTime += dt;
+	return fetched;
+}
+
+void stepPhysics(bool /*interactive*/)
+{
+	stepPhysicsInternal(false);
 }
 
 void cleanupPhysics(bool /*interactive*/)
 {
 	delete gStreamer;
+	gStreamer = NULL;
+	PX_RELEASE(gSolverBody);
+	PX_RELEASE(gSolverGround);
+#ifdef USE_CUSTOM_PRUNER
+	if(gSolverPrunerData)
+	{
+		PX_ASSERT(gSolverPrunerData->mNbObjects==0 ||
+			gSolverPrunerData->mNbObjects==2);
+		if(gSolverPrunerData->mNbObjects==2)
+			gSolverPrunerData->mNbObjects -= 2;
+		gAdapter.releasePruner(gSolverPrunerData->mPrunerIndex);
+		gSolverPrunerData = NULL;
+	}
+#endif
 	PX_RELEASE(gMaterial);
 	PX_RELEASE(gScene);
+#ifdef USE_CUSTOM_PRUNER
+	gCustomSQ = NULL;
+#endif
 	PX_RELEASE(gDispatcher);
 	PX_RELEASE(gPhysics);
 	if(gPvd)
@@ -845,6 +996,7 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
+	gCleanupComplete = 1;
 	
 	printf("SnippetMultiPruners done.\n");
 }
@@ -862,9 +1014,199 @@ static void runWithoutRendering()
 	cleanupPhysics(false);
 }
 
-int snippetMain(int, const char*const*)
+static bool raycastSolverBody()
+{
+	PxRaycastBuffer hit;
+	return gScene->raycast(
+			PxVec3(100.0f, 10.0f, 100.0f), PxVec3(0.0f, -1.0f, 0.0f),
+			20.0f, hit) &&
+		hit.hasBlock && hit.block.actor==gSolverBody;
+}
+
+static PxU32 countActivePruners(PxU32& assignedObjects)
+{
+	assignedObjects = 0;
+	PxU32 active = 0;
+#ifdef USE_CUSTOM_PRUNER
+	for(PxU32 i=0;i<gPrunersCreated;i++)
+	{
+		assignedObjects += gAdapter.mPrunerData[i].mNbObjects;
+		if(gAdapter.mPrunerData[i].mNbObjects)
+			active++;
+	}
+#endif
+	return active;
+}
+
+static int runHeadless()
+{
+	gErrorCallback.reset();
+	gGlobalTime = 0.0f;
+	gSolverReadbackMatched = false;
+	gPrunersCreated = 0;
+	gRegionAdds = 0;
+	gRegionRemoves = 0;
+	gRegionUpdates = 0;
+	gBuildStarts = 0;
+	gBuildFinishes = 0;
+	gBuildTaskSubmissions = 0;
+	gStreamingRaycasts = 0;
+	gStreamingRaycastHits = 0;
+	gCleanupComplete = 0;
+#ifdef USE_CUSTOM_PRUNER
+	gAdapter.mGetPrunerIndexCalls.store(0, std::memory_order_relaxed);
+	gAdapter.mProcessPrunerCalls.store(0, std::memory_order_relaxed);
+#endif
+
+	if(!initPhysicsInternal(true))
+	{
+		cleanupPhysics(false);
+		return Snippets::eHEADLESS_GATE_FAILED;
+	}
+
+	const PxVec3 initialBodyPosition = gSolverBody->getGlobalPose().p;
+	PxU32 completedFrames = 0;
+	PxU32 fetchFailures = 0;
+	PxU32 nonFinite = 0;
+	PxU32 solverQueryHits = 0;
+	PxU32 minRegions = 0xffffffff;
+	PxU32 maxRegions = 0;
+	PxU32 maxStreamingObjects = 0;
+	PxReal minBodyY = initialBodyPosition.y;
+	PxReal maxBodySpeed = 0.0f;
+
+	for(PxU32 frame=0;frame<gHeadlessOptions.frames;frame++)
+	{
+		if(!stepPhysicsInternal(true))
+		{
+			fetchFailures++;
+			break;
+		}
+		completedFrames++;
+		if(raycastSolverBody())
+			solverQueryHits++;
+
+		const PxTransform pose = gSolverBody->getGlobalPose();
+		const PxVec3 velocity = gSolverBody->getLinearVelocity();
+		const PxVec3 angularVelocity = gSolverBody->getAngularVelocity();
+		if(!pose.isFinite() || !velocity.isFinite() || !angularVelocity.isFinite())
+		{
+			nonFinite++;
+			break;
+		}
+		minBodyY = PxMin(minBodyY, pose.p.y);
+		maxBodySpeed = PxMax(maxBodySpeed, velocity.magnitude());
+		const PxU32 activeRegions = gStreamer->getNbActiveRegions();
+		minRegions = PxMin(minRegions, activeRegions);
+		maxRegions = PxMax(maxRegions, activeRegions);
+		maxStreamingObjects = PxMax(
+			maxStreamingObjects, gStreamer->getNbActiveObjects());
+	}
+
+	const PxU32 finalRegions = gStreamer->getNbActiveRegions();
+	const PxU32 finalStreamingObjects = gStreamer->getNbActiveObjects();
+	const PxU32 streamingRegionRemoves = gRegionRemoves;
+	PxU32 assignedObjects = 0;
+	const PxU32 activePruners = countActivePruners(assignedObjects);
+	const PxU32 finalStaticActors =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+	const PxU32 finalDynamicActors =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	const PxReal finalBodyY = gSolverBody->getGlobalPose().p.y;
+	const PxReal bodyDisplacement =
+		(gSolverBody->getGlobalPose().p - initialBodyPosition).magnitude();
+#ifdef USE_CUSTOM_PRUNER
+	const PxU64 getPrunerIndexCalls =
+		gAdapter.mGetPrunerIndexCalls.load(std::memory_order_relaxed);
+	const PxU64 processPrunerCalls =
+		gAdapter.mProcessPrunerCalls.load(std::memory_order_relaxed);
+#else
+	const PxU64 getPrunerIndexCalls = 0;
+	const PxU64 processPrunerCalls = 0;
+#endif
+
+	const bool semanticPass =
+		gPrunersCreated==gNbPruners+1 &&
+		gRegionAdds>gNbCellsPerSide*gNbCellsPerSide &&
+		streamingRegionRemoves>0 && gRegionUpdates>0 &&
+		minRegions==gNbCellsPerSide*gNbCellsPerSide &&
+		maxRegions==gNbPruners &&
+		finalRegions==gNbPruners &&
+		finalStreamingObjects==
+			finalRegions*(gHeadlessObjectsPerRegion+1) &&
+		maxStreamingObjects==finalStreamingObjects &&
+		activePruners==finalRegions+1 &&
+		assignedObjects==finalStreamingObjects+2 &&
+		finalStaticActors==finalStreamingObjects+1 &&
+		finalDynamicActors==1 &&
+		gBuildStarts==gHeadlessOptions.frames &&
+		gBuildFinishes==gHeadlessOptions.frames &&
+		gBuildTaskSubmissions==
+			PxU64(gHeadlessOptions.frames)*PxU64(gPrunersCreated) &&
+		gStreamingRaycasts==gHeadlessOptions.frames &&
+		gStreamingRaycastHits>gHeadlessOptions.frames/2 &&
+		solverQueryHits==gHeadlessOptions.frames &&
+		getPrunerIndexCalls>=PxU64(finalStreamingObjects+2) &&
+		processPrunerCalls>0 &&
+		completedFrames==gHeadlessOptions.frames &&
+		maxBodySpeed>0.0f && maxBodySpeed<50.0f &&
+		minBodyY>0.0f && minBodyY<1.0f &&
+		finalBodyY>0.0f && finalBodyY<1.0f &&
+		bodyDisplacement>2.0f && bodyDisplacement<5.0f &&
+		nonFinite==0 && fetchFailures==0 &&
+		gSolverReadbackMatched && gErrorCallback.getFatalCount()==0;
+
+	cleanupPhysics(false);
+	const PxU32 fatalErrors = gErrorCallback.getFatalCount();
+	const bool passed = semanticPass && gCleanupComplete==1 && fatalErrors==0;
+	printf("[AVBD_GATE] schema=1 snippet=SnippetMultiPruners solver=%s "
+		"case=streaming-custom-pruners execution=%s frames=%u "
+		"prunersCreated=%u regionAdds=%u regionRemoves=%u regionUpdates=%u "
+		"minRegions=%u maxRegions=%u finalRegions=%u "
+		"maxStreamingObjects=%u finalStreamingObjects=%u activePruners=%u "
+		"assignedObjects=%u finalStaticActors=%u finalDynamicActors=%u "
+		"buildStarts=%u buildFinishes=%u buildTaskSubmissions=%llu "
+		"streamingRaycasts=%u streamingRaycastHits=%u solverQueryHits=%u "
+		"getPrunerIndexCalls=%llu processPrunerCalls=%llu completedFrames=%u "
+		"minBodyY=%.9g finalBodyY=%.9g maxBodySpeed=%.9g "
+		"bodyDisplacement=%.9g nonFinite=%u fetchFailures=%u fatalErrors=%u "
+		"cleanupComplete=%u pvd=0 status=%s reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, gPrunersCreated, gRegionAdds,
+		streamingRegionRemoves,
+		gRegionUpdates, minRegions, maxRegions, finalRegions,
+		maxStreamingObjects, finalStreamingObjects, activePruners,
+		assignedObjects, finalStaticActors, finalDynamicActors,
+		gBuildStarts, gBuildFinishes,
+		static_cast<unsigned long long>(gBuildTaskSubmissions),
+		gStreamingRaycasts, gStreamingRaycastHits, solverQueryHits,
+		static_cast<unsigned long long>(getPrunerIndexCalls),
+		static_cast<unsigned long long>(processPrunerCalls), completedFrames,
+		minBodyY, finalBodyY, maxBodySpeed, bodyDisplacement, nonFinite,
+		fetchFailures, fatalErrors, gCleanupComplete,
+		passed ? "PASS" : "FAIL",
+		passed ? "none" : "streaming_query_or_solver");
+	return passed ? Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
+}
+
+int snippetMain(int argc, const char*const* argv)
 {
 	printf("Multi Pruners snippet.\n");
+	Snippets::HeadlessOptions defaults;
+	defaults.frames = 120;
+	defaults.caseName = "streaming-custom-pruners";
+	std::string error;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error) ||
+	   !Snippets::applyExecutionEnvironment(gHeadlessOptions))
+	{
+		printf("[AVBD_GATE_CONFIG_ERROR] snippet=SnippetMultiPruners "
+			"reason=%s\n", error.empty() ? "execution_environment" : error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(gHeadlessOptions.headless)
+		return runHeadless();
 
 #ifdef RENDER_SNIPPET
 	if(gEnableRendering)
@@ -880,4 +1222,3 @@ int snippetMain(int, const char*const*)
 
 	return 0;
 }
-

@@ -32,6 +32,7 @@
 #include "DyAvbdConstraint.h"
 #include "DyAvbdKinematicShell.h"
 #include "DyConstraint.h"
+#include "DyConstraintPrep.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyIslandManager.h"
 #include "PxContact.h"
@@ -61,6 +62,17 @@ static PxU32 findArticulationLinkIndex(FeatherstoneArticulation *articulation,
   return PX_MAX_U32;
 }
 
+static PxVec3 computeKinematicContactStep(
+    const PxsRigidBody *kinematicBody, const PxVec3 &worldPoint, PxReal dt) {
+  if (!kinematicBody || dt <= 0.0f)
+    return PxVec3(0.0f);
+  const PxsBodyCore &core = kinematicBody->getCore();
+  const PxVec3 pointVelocity =
+      core.linearVelocity +
+      core.angularVelocity.cross(worldPoint - core.body2World.p);
+  return pointVelocity * dt;
+}
+
 #ifndef AVBD_JOINT_DEBUG
 #define AVBD_JOINT_DEBUG 0
 #endif
@@ -73,8 +85,11 @@ static constexpr physx::PxU16 AVBD_PRISMATIC_LIMIT_ENABLED_FLAG = 0x0002;
 // Match the standalone contact cache's 1 mm local-anchor quantization.  The
 // cache slot itself is still scoped by the persistent contact-manager index;
 // this key validates row identity when NP patch/contact ordering changes.
-static PX_FORCE_INLINE PxI32 quantizeAvbdContactAnchor(PxReal value) {
-  const PxReal scaled = PxClamp(value * 1000.0f, -2147483000.0f,
+static PX_FORCE_INLINE PxI32 quantizeAvbdContactAnchor(PxReal value,
+                                                       PxReal lengthScale) {
+  const PxReal safeLengthScale = PxMax(lengthScale, 1e-6f);
+  const PxReal scaled = PxClamp(value * (1000.0f / safeLengthScale),
+                                -2147483000.0f,
                                 2147483000.0f);
   return static_cast<PxI32>(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
 }
@@ -87,22 +102,29 @@ static PX_FORCE_INLINE void mixAvbdContactKey(PxU64 &hash, PxU32 value) {
 static PxU64 makeAvbdContactCacheKey(PxU32 globalBody0Idx,
                                      PxU32 globalBody1Idx,
                                      const PxVec3 &localPointA,
-                                     const PxVec3 &localPointB) {
+                                     const PxVec3 &localPointB,
+                                     PxReal lengthScale) {
   PxU64 hash = 14695981039346656037ull;
   mixAvbdContactKey(hash, globalBody0Idx);
   mixAvbdContactKey(hash, globalBody1Idx);
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.x)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointA.x, lengthScale)));
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.y)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointA.y, lengthScale)));
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointA.z)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointA.z, lengthScale)));
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.x)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointB.x, lengthScale)));
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.y)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointB.y, lengthScale)));
   mixAvbdContactKey(
-      hash, static_cast<PxU32>(quantizeAvbdContactAnchor(localPointB.z)));
+      hash, static_cast<PxU32>(
+                quantizeAvbdContactAnchor(localPointB.z, lengthScale)));
   return hash != 0 ? hash : 1;
 }
 
@@ -216,7 +238,12 @@ struct PhysXD6JointData : PhysXJointData {
   PxU32 locked;
   PxU32 limited;
   PxU32 driving;
-  // More members follow but not needed for detection
+  PxReal distanceMinDist;
+  bool mUseDistanceLimit;
+  bool mUseNewLinearLimits;
+  bool mUseConeLimit;
+  bool mUsePyramidLimits;
+  PxU8 angularDriveConfig;
 };
 
 // Mirror of GearJointData (ExtGearJoint.h)
@@ -262,6 +289,7 @@ static PhysXJointType getJointTypeFromConcreteType(PxU16 concreteType) {
 }
 
 PxU32 AvbdDynamicsContext::prepareAvbdContacts(
+    const IG::IslandSim &islandSim, PxReal dt,
     AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
     AvbdContactConstraint *constraints, PxU32 maxConstraints,
     PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset) {
@@ -271,6 +299,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
   const PxU32 actualMax =
       PxMin(static_cast<PxU32>(mContactList.size()), endContactIdx);
   const PxU32 bodyEnd = bodyOffset + islandBodyCount;
+  const PxU32 numActiveKinematics = islandSim.getNbActiveKinematics();
+  const PxNodeIndex *activeKinematics = islandSim.getActiveKinematics();
 
   // Debug counters for lambda warm-starting diagnosis
   static PxU32 sDebugHits = 0;
@@ -289,12 +319,24 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 
     PxU32 globalBody0Idx = PX_MAX_U32;
     PxU32 globalBody1Idx = PX_MAX_U32;
+    PxsRigidBody *kinematicBodyA = nullptr;
+    PxsRigidBody *kinematicBodyB = nullptr;
 
     if (icm.indexType0 == PxsIndexedInteraction::eBODY) {
       globalBody0Idx = static_cast<PxU32>(icm.solverBody0);
+    } else if (icm.indexType0 == PxsIndexedInteraction::eKINEMATIC) {
+      const PxU32 kinematicIndex = static_cast<PxU32>(icm.solverBody0);
+      if (kinematicIndex < numActiveKinematics)
+        kinematicBodyA =
+            getRigidBodyFromIG(islandSim, activeKinematics[kinematicIndex]);
     }
     if (icm.indexType1 == PxsIndexedInteraction::eBODY) {
       globalBody1Idx = static_cast<PxU32>(icm.solverBody1);
+    } else if (icm.indexType1 == PxsIndexedInteraction::eKINEMATIC) {
+      const PxU32 kinematicIndex = static_cast<PxU32>(icm.solverBody1);
+      if (kinematicIndex < numActiveKinematics)
+        kinematicBodyB =
+            getRigidBodyFromIG(islandSim, activeKinematics[kinematicIndex]);
     }
 
     if (globalBody0Idx == PX_MAX_U32 && globalBody1Idx == PX_MAX_U32)
@@ -340,6 +382,19 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     if (!contactData || !patchData)
       continue;
 
+    // Contact modification changes the point stride from PxContact to either
+    // PxExtendedContact or PxModifiableContact.  Use the public stream decoder
+    // to select the format; fixed sizeof(PxContact) arithmetic silently read
+    // later modified points from the middle of the preceding point.
+    const PxContactStreamIterator stream(
+        patchData, contactData, output.getInternalFaceIndice(),
+        output.nbPatches, output.nbContacts);
+    if (stream.forceNoResponse)
+      continue;
+    const PxU32 contactPointSize = stream.contactPointSize;
+    const bool hasExtendedContact =
+        stream.mStreamFormat != PxContactStreamIterator::eSIMPLE_STREAM;
+
     for (PxU8 patchIdx = 0; patchIdx < output.nbPatches; ++patchIdx) {
       const PxContactPatch *patch = reinterpret_cast<const PxContactPatch *>(
           patchData + patchIdx * sizeof(PxContactPatch));
@@ -351,7 +406,19 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
       for (PxU16 c = 0;
            c < numContactsInPatch && constraintIndex < maxConstraints; ++c) {
         const PxContact *contact = reinterpret_cast<const PxContact *>(
-            contactData + (startContact + c) * sizeof(PxContact));
+            contactData + (startContact + c) * contactPointSize);
+        const PxExtendedContact *extendedContact =
+            hasExtendedContact
+                ? static_cast<const PxExtendedContact *>(contact)
+                : nullptr;
+        const PxReal maxImpulse =
+            extendedContact ? extendedContact->maxImpulse : PX_MAX_REAL;
+
+        // Match the shared PhysX contact prep contract: a zero maximum impulse
+        // removes the point from response while leaving it available to
+        // notification callbacks.
+        if (maxImpulse <= 0.0f)
+          continue;
 
         AvbdContactConstraint &constraint = constraints[constraintIndex];
 
@@ -366,18 +433,25 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         constraint.header.penalty =
             AvbdConstants::AVBD_MIN_PENALTY_RHO; // PENALTY_MIN = 1000
 
+        const PxVec3 worldContact = contact->contact;
         if (bodyA) {
           constraint.contactPointA =
               bodyA->rotation.rotateInv(contact->contact - bodyA->position);
         } else {
-          constraint.contactPointA = contact->contact;
+          constraint.contactPointA =
+              worldContact +
+              computeKinematicContactStep(
+                  kinematicBodyA, worldContact, dt);
         }
 
         if (bodyB) {
           constraint.contactPointB =
               bodyB->rotation.rotateInv(contact->contact - bodyB->position);
         } else {
-          constraint.contactPointB = contact->contact;
+          constraint.contactPointB =
+              worldContact +
+              computeKinematicContactStep(
+                  kinematicBodyB, worldContact, dt);
         }
 
         // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
@@ -386,7 +460,7 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         const PxU32 cmIdx = cm->getIndex();
         const PxU64 cacheKey = makeAvbdContactCacheKey(
             globalBody0Idx, globalBody1Idx, constraint.contactPointA,
-            constraint.contactPointB);
+            constraint.contactPointB, getLengthScale());
         const PxU64 cacheIdx64 =
             static_cast<PxU64>(cmIdx) * CONTACT_CACHE_SLOTS_PER_CM +
             (cacheKey & (CONTACT_CACHE_SLOTS_PER_CM - 1u));
@@ -395,6 +469,10 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
                                    : PX_MAX_U32;
         constraint.cacheIndex = cacheIdx;
         constraint.cacheKey = cacheKey;
+        constraint.contactImpulseWriteback =
+            output.contactForces
+                ? output.contactForces + startContact + c
+                : nullptr;
 
         // AVBD warmstart decay constants
         // alpha=0.95, gamma=0.99 => alpha*gamma=0.9405
@@ -461,6 +539,17 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         }
 
         constraint.contactNormal = normal;
+        constraint.targetVelocity =
+            extendedContact ? extendedContact->targetVelocity : PxVec3(0.0f);
+        constraint.maxImpulse = maxImpulse;
+        constraint.invMassScaleA =
+            PxMax(0.0f, patch->mMassModification.linear0);
+        constraint.invMassScaleB =
+            PxMax(0.0f, patch->mMassModification.linear1);
+        constraint.invInertiaScaleA =
+            PxMax(0.0f, patch->mMassModification.angular0);
+        constraint.invInertiaScaleB =
+            PxMax(0.0f, patch->mMassModification.angular1);
         constraint.header.flags = deformableStaticAnchor
                                       ? AvbdContactConstraintFlags::
                                             eDEFORMABLE_STATIC_ANCHOR
@@ -494,7 +583,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         constraint.supportClass = AvbdSupportClass::eUnset;
 
         if (deformableStaticAnchor) {
-          const PxVec3 worldContact = contact->contact;
           // Entry 153: never restore staticPrev from CM-index lambda cache.
           // Contact order within a mesh CM reorders every frame -> aliasing
           // injects multi-metre fictitious mesh steps after long runs.
@@ -510,6 +598,13 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           } else {
             constraint.staticPrevWorldPoint = worldContact;
           }
+        } else if (bodyVsStatic) {
+          // A rigid world/kinematic partner has no AVBD solver body.  Its
+          // body-vs-static displacement baseline is therefore the world-space
+          // contact captured by narrow phase, not the world origin.  Using
+          // zero here turns the actor's absolute X/Z coordinates into a
+          // fictitious tangential step and injects unbounded friction energy.
+          constraint.staticPrevWorldPoint = worldContact;
         } else {
           constraint.staticPrevWorldPoint = PxVec3(0.0f);
         }
@@ -531,7 +626,7 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 }
 
 void AvbdDynamicsContext::prepareAvbdConstraints(
-    const IG::IslandSim &islandSim, AvbdSolverBody *avbdBodies,
+    const IG::IslandSim &islandSim, PxReal dt, AvbdSolverBody *avbdBodies,
     PxU32 islandBodyCount, PxU32 bodyOffset,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
@@ -558,7 +653,10 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
     Dy::Constraint *constraint = mIslandManager.getConstraint(edgeId);
 
     if (constraint && constraint->constantBlock &&
-        constraint->constantBlockSize > 0) {
+        constraint->constantBlockSize > 0 &&
+        (constraint->flags &
+         static_cast<PxU16>(
+             PxConstraintFlag::eDISABLE_CONSTRAINT)) == 0) {
 
       const PxNodeIndex nodeIndex0 =
           islandSim.mCpuData.getNodeIndex1(edgeId);
@@ -576,6 +674,12 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           constraint->bodyCore0 && constraint->bodyCore0->inverseMass == 0.0f;
       bool body1IsStatic =
           constraint->bodyCore1 && constraint->bodyCore1->inverseMass == 0.0f;
+      const bool body0IsKinematic =
+          !nodeIndex0.isStaticBody() &&
+          islandSim.getNode(nodeIndex0).isKinematic();
+      const bool body1IsKinematic =
+          !nodeIndex1.isStaticBody() &&
+          islandSim.getNode(nodeIndex1).isKinematic();
 
       if (!body0IsStatic) {
         if (!nodeIndex0.isStaticBody()) {
@@ -760,9 +864,9 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.angularLimitLower = PxVec3(-PxPi);
               c.angularLimitUpper = PxVec3(PxPi);
 
-              // Check for cone limit -- implemented as a single cone
-              // constraint (not per-axis LIMITED) to match reference
-              // spherical solver behavior and avoid 2-axis oscillation.
+              // Check for cone limit -- implemented as the same single
+              // elliptical constraint emitted by ExtSphericalJoint (not two
+              // independent per-axis LIMITED rows).
               if (constraint->constantBlockSize >=
                   sizeof(PhysXSphericalJointData)) {
                 const PhysXSphericalJointData *sphericalData =
@@ -771,9 +875,10 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
 
                 // PxSphericalJointFlag::eLIMIT_ENABLED = 0x0002
                 if (sphericalData->jointFlags & 0x0002) {
-                  // Use the smaller of the two cone angles as limit
-                  c.coneAngleLimit = PxMin(sphericalData->limit.yAngle,
-                                           sphericalData->limit.zAngle);
+                  c.sourceFlags |= AvbdD6JointConstraint::
+                      eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE;
+                  c.coneAngleLimit = sphericalData->limit.yAngle;
+                  c.coneAngleLimitZ = sphericalData->limit.zAngle;
                 }
               }
 
@@ -928,6 +1033,12 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.anchorB = anchorB;
               c.localFrameA = frameA;
               c.localFrameB = frameB;
+              if ((constraint->flags &
+                   static_cast<PxU16>(
+                       PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES)) != 0) {
+                c.sourceFlags |=
+                    AvbdD6JointConstraint::eD6_DRIVE_LIMITS_ARE_FORCES;
+              }
 
               // Set motion flags from D6 data
               // Each axis uses 2 bits: 0=LOCKED, 1=LIMITED, 2=FREE
@@ -954,9 +1065,22 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.angularLimitUpper =
                   PxVec3(d6Data->twistLimit.upper, d6Data->swingLimit.yAngle,
                          d6Data->swingLimit.zAngle);
+              const bool bothSwingAxesLimited =
+                  d6Data->motion[PxD6Axis::eSWING1] ==
+                      PxD6Motion::eLIMITED &&
+                  d6Data->motion[PxD6Axis::eSWING2] ==
+                      PxD6Motion::eLIMITED;
+              if (bothSwingAxesLimited && d6Data->mUseConeLimit) {
+                c.sourceFlags |= AvbdD6JointConstraint::
+                    eD6_LEGACY_CONE_LIMIT_ACTIVE;
+                c.coneAngleLimit = d6Data->swingLimit.yAngle;
+                c.coneAngleLimitZ = d6Data->swingLimit.zAngle;
+              }
 
               // Set drive parameters if any drives are active
               c.driveFlags = 0;
+              c.driveAccelerationFlags = 0;
+              c.driveOutputForceFlags = 0;
               if (d6Data->driving != 0) {
                 // Set stiffness and damping from drive parameters
                 c.linearStiffness = PxVec3(d6Data->drive[0].stiffness,
@@ -986,6 +1110,18 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 // AVBD expects: bit 0-2=linear X/Y/Z, bit 3-5=angular X/Y/Z
                 c.driveFlags = d6Data->driving &
                                0x07; // Linear drives (eX,eY,eZ) - bit 0-2
+                const PxU32 accelerationFlag =
+                    static_cast<PxU32>(PxD6JointDriveFlag::eACCELERATION);
+                const PxU32 outputForceFlag =
+                    static_cast<PxU32>(PxD6JointDriveFlag::eOUTPUT_FORCE);
+                for (PxU32 drive = 0; drive < 3; ++drive) {
+                  if ((c.driveFlags & (1u << drive)) != 0 &&
+                      (d6Data->drive[drive].flags & accelerationFlag) != 0)
+                    c.driveAccelerationFlags |= 1u << drive;
+                  if ((c.driveFlags & (1u << drive)) != 0 &&
+                      (d6Data->drive[drive].flags & outputForceFlag) != 0)
+                    c.driveOutputForceFlags |= 1u << drive;
+                }
                 if (d6Data->driving & (1 << PxD6Drive::eTWIST))
                   c.driveFlags |= 1 << 3; // TWIST -> bit 3 (angular X)
                 if (d6Data->driving & (1 << PxD6Drive::eSWING1))
@@ -998,7 +1134,22 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                   c.sourceFlags |= AvbdD6JointConstraint::eD6_SLERP_DRIVE;
                 }
 
+                const PxU32 angularDriveIndices[3] = {
+                    PxD6Drive::eTWIST, PxD6Drive::eSWING1,
+                    PxD6Drive::eSWING2};
+                for (PxU32 axis = 0; axis < 3; ++axis) {
+                  const PxU32 drive = angularDriveIndices[axis];
+                  if ((c.driveFlags & (1u << (axis + 3))) != 0 &&
+                      (d6Data->drive[drive].flags & accelerationFlag) != 0)
+                    c.driveAccelerationFlags |= 1u << (axis + 3);
+                  if ((c.driveFlags & (1u << (axis + 3))) != 0 &&
+                      (d6Data->drive[drive].flags & outputForceFlag) != 0)
+                    c.driveOutputForceFlags |= 1u << (axis + 3);
+                }
+
                 // Set target drive velocities
+                c.driveLinearPosition = d6Data->drivePosition.p;
+                c.driveAngularPosition = d6Data->drivePosition.q;
                 c.driveLinearVelocity = d6Data->driveLinearVelocity;
                 c.driveAngularVelocity = d6Data->driveAngularVelocity;
 
@@ -1030,6 +1181,28 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           // (see DyAvbdDynamics.cpp).
           if (numD6 > d6CountBefore) {
             AvbdD6JointConstraint &c = d6Constraints[numD6 - 1];
+            const bool passiveNativeReaction =
+                c.header.type == AvbdConstraintType::eJOINT_FIXED ||
+                (c.header.type ==
+                     AvbdConstraintType::eJOINT_PRISMATIC &&
+                 c.linearMotion == 0x02u && c.angularMotion == 0u) ||
+                (c.header.type ==
+                     AvbdConstraintType::eJOINT_REVOLUTE &&
+                 c.linearMotion == 0u && c.angularMotion == 0x02u &&
+                 c.motorEnabled == 0u);
+            if (passiveNativeReaction)
+              c.sourceFlags |= AvbdD6JointConstraint::
+                  eNATIVE_PASSIVE_REACTION_ACTIVE;
+            // A kinematic is represented by the same no-solver-body sentinel
+            // as rigid static/world, but its prescribed motion remains part
+            // of every velocity/damping objective.  Preserve that motion
+            // explicitly instead of treating the endpoint as stationary.
+            if (body0IsKinematic && constraint->bodyCore0)
+              c.externalAngularStepA =
+                  constraint->bodyCore0->angularVelocity * dt;
+            if (body1IsKinematic && constraint->bodyCore1)
+              c.externalAngularStepB =
+                  constraint->bodyCore1->angularVelocity * dt;
             // Same-articulation external spherical loop closures (scissor
             // crossings): linear locked + all angular free. Tag before warmstart
             // restore so downstream local-solve policy can key off sourceFlags.
@@ -1053,9 +1226,225 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             restoreJointLambdaFromCache(*this, c,
                                         reinterpret_cast<PxU64>(constraint));
           }
-        } // end else if (jointType != eJOINT_UNKNOWN && ...)
-        else if (constraint->constantBlockSize >=
-                 sizeof(AvbdSnippetJointData)) {
+          } // end validated standard joint data
+        } // end standard joint route
+        else if (jointType == eJOINT_UNKNOWN && constraint->solverPrep &&
+                 (constraint->flags &
+                  static_cast<PxU16>(
+                      PxConstraintFlag::eDISABLE_CONSTRAINT)) == 0 &&
+                 numD6 < maxD6) {
+          // Unknown extension/custom constraints are defined by their public
+          // solverPrep rows. Admit the complete row set only when every row is
+          // a unit-mass-scaled hard, force-spring, restitution, or pure
+          // acceleration-spring damping row.  Each public mode has an
+          // independent SnippetCustomJoint authority; non-unit mass scaling
+          // and breakable multi-row sets remain fail-closed.
+          Px1DConstraint rows[MAX_CONSTRAINT_ROWS];
+          setupConstraintRows(rows, MAX_CONSTRAINT_ROWS);
+          PxConstraintInvMassScale invMassScale(1.0f, 1.0f, 1.0f, 1.0f);
+          PxVec3p bodyAWorldOffset(0.0f);
+          PxVec3p cAtW(0.0f), cBtW(0.0f);
+          const PxTransform identity(PxIdentity);
+          const PxTransform &bodyFrame0 =
+              constraint->body0 ? constraint->body0->getPose() : identity;
+          const PxTransform &bodyFrame1 =
+              constraint->body1 ? constraint->body1->getPose() : identity;
+          const bool useExtendedLimits =
+              (constraint->flags &
+               static_cast<PxU16>(
+                   PxConstraintFlag::eENABLE_EXTENDED_LIMITS)) != 0;
+          const PxU32 rowCount = (*constraint->solverPrep)(
+              rows, bodyAWorldOffset, MAX_CONSTRAINT_ROWS, invMassScale,
+              constraint->constantBlock, bodyFrame0, bodyFrame1,
+              useExtendedLimits, cAtW, cBtW);
+
+          const bool unitMassScale =
+              PxAbs(invMassScale.linear0 - 1.0f) <= 1e-6f &&
+              PxAbs(invMassScale.angular0 - 1.0f) <= 1e-6f &&
+              PxAbs(invMassScale.linear1 - 1.0f) <= 1e-6f &&
+              PxAbs(invMassScale.angular1 - 1.0f) <= 1e-6f;
+
+          bool supportedRows =
+              rowCount > 0 && rowCount <= MAX_CONSTRAINT_ROWS &&
+              rowCount <= maxD6 - numD6 && unitMassScale;
+          const bool multiRow = rowCount > 1;
+          const bool multiRowBreakable =
+              multiRow && (constraint->linBreakForce < PX_MAX_F32 ||
+                           constraint->angBreakForce < PX_MAX_F32);
+          for (PxU32 rowIndex = 0;
+               supportedRows && rowIndex < rowCount; ++rowIndex) {
+            const Px1DConstraint &row = rows[rowIndex];
+            const PxU16 springFlag =
+                static_cast<PxU16>(Px1DConstraintFlag::eSPRING);
+            const PxU16 accelerationSpringFlag =
+                static_cast<PxU16>(
+                    Px1DConstraintFlag::eACCELERATION_SPRING);
+            const PxU16 restitutionFlag =
+                static_cast<PxU16>(Px1DConstraintFlag::eRESTITUTION);
+            const PxU16 driveLimitFlag =
+                static_cast<PxU16>(Px1DConstraintFlag::eHAS_DRIVE_LIMIT);
+            const bool spring = (row.flags & springFlag) != 0;
+            const bool accelerationSpring =
+                (row.flags & accelerationSpringFlag) != 0;
+            const bool restitution = (row.flags & restitutionFlag) != 0;
+            const bool driveLimit = (row.flags & driveLimitFlag) != 0;
+            const bool finiteRow =
+                row.linear0.isFinite() && row.angular0.isFinite() &&
+                row.linear1.isFinite() && row.angular1.isFinite() &&
+                PxIsFinite(row.geometricError) &&
+                PxIsFinite(row.velocityTarget) &&
+                PxIsFinite(row.minImpulse) &&
+                PxIsFinite(row.maxImpulse);
+            const bool nonzeroJacobian =
+                row.linear0.magnitudeSquared() +
+                    row.angular0.magnitudeSquared() +
+                    row.linear1.magnitudeSquared() +
+                    row.angular1.magnitudeSquared() >
+                1e-12f;
+            const bool pureAccelerationDamping =
+                spring && accelerationSpring &&
+                PxAbs(row.mods.spring.stiffness) <= 1e-6f &&
+                PxIsFinite(row.mods.spring.damping) &&
+                row.mods.spring.damping > 0.0f &&
+                PxAbs(row.geometricError) <= 1e-6f;
+            const bool forceSpring =
+                spring && !accelerationSpring &&
+                PxIsFinite(row.mods.spring.stiffness) &&
+                row.mods.spring.stiffness >= 0.0f &&
+                PxIsFinite(row.mods.spring.damping) &&
+                row.mods.spring.damping >= 0.0f;
+            const bool restitutionRow =
+                !spring && restitution &&
+                PxIsFinite(row.mods.bounce.restitution) &&
+                row.mods.bounce.restitution >= 0.0f &&
+                row.mods.bounce.restitution <= 1.0f &&
+                PxIsFinite(row.mods.bounce.velocityThreshold) &&
+                row.mods.bounce.velocityThreshold >= 0.0f;
+            const bool hardRow = !spring && !restitution;
+            const bool dampingOutputForce =
+                pureAccelerationDamping &&
+                (row.flags &
+                 static_cast<PxU16>(
+                     Px1DConstraintFlag::eOUTPUT_FORCE)) != 0;
+
+            supportedRows =
+                finiteRow && nonzeroJacobian &&
+                row.minImpulse <= row.maxImpulse &&
+                (!driveLimit || spring) &&
+                (hardRow || forceSpring || restitutionRow ||
+                 pureAccelerationDamping) &&
+                !dampingOutputForce &&
+                !multiRowBreakable;
+          }
+
+          if (supportedRows) {
+            for (PxU32 rowIndex = 0; rowIndex < rowCount; ++rowIndex) {
+              const Px1DConstraint &row = rows[rowIndex];
+              const bool accelerationDamping =
+                  (row.flags &
+                   static_cast<PxU16>(
+                       Px1DConstraintFlag::eSPRING)) != 0 &&
+                  (row.flags &
+                   static_cast<PxU16>(
+                       Px1DConstraintFlag::eACCELERATION_SPRING)) != 0;
+              const bool forceSpring =
+                  (row.flags &
+                   static_cast<PxU16>(Px1DConstraintFlag::eSPRING)) != 0 &&
+                  !accelerationDamping;
+              const bool restitution =
+                  (row.flags &
+                   static_cast<PxU16>(
+                       Px1DConstraintFlag::eRESTITUTION)) != 0 &&
+                  !forceSpring;
+              AvbdD6JointConstraint &c = d6Constraints[numD6++];
+              c.initDefaults();
+              c.header.type = AvbdConstraintType::eJOINT_CUSTOM_1D;
+              c.header.bodyIndexA = localBody0;
+              c.header.bodyIndexB = localBody1;
+              c.header.rho = forceSpring
+                                 ? row.mods.spring.stiffness
+                                 : (accelerationDamping || restitution
+                                        ? 0.0f
+                                        : AvbdConstants::
+                                              AVBD_DEFAULT_PENALTY_RHO_HIGH);
+              c.header.damping =
+                  (accelerationDamping || forceSpring)
+                      ? row.mods.spring.damping
+                      : 0.0f;
+              c.linearMotion = 0x2A;  // all standard D6 rows FREE
+              c.angularMotion = 0x2A;
+              if (accelerationDamping)
+                c.sourceFlags |= AvbdD6JointConstraint::
+                    eGENERIC_ACCELERATION_DAMPING_1D_ROW;
+              else if (forceSpring)
+                c.sourceFlags |=
+                    AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW;
+              else if (restitution)
+                c.sourceFlags |=
+                    AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW;
+              else
+                c.sourceFlags |=
+                    AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW;
+              if (multiRow) {
+                c.sourceFlags |=
+                    AvbdD6JointConstraint::eGENERIC_MULTI_ROW;
+                if (rowIndex == 0)
+                  c.sourceFlags |=
+                      AvbdD6JointConstraint::eGENERIC_MULTI_ROW_LEADER;
+              }
+
+              c.genericLinearA = row.linear0;
+              c.genericAngularA = row.angular0;
+              c.genericLinearB = -row.linear1;
+              c.genericAngularB = -row.angular1;
+              c.genericGeometricError = row.geometricError;
+              c.genericVelocityTarget = row.velocityTarget;
+              const bool scaleDriveLimitToImpulse =
+                  (row.flags &
+                   static_cast<PxU16>(
+                       Px1DConstraintFlag::eHAS_DRIVE_LIMIT)) != 0 &&
+                  (constraint->flags &
+                   static_cast<PxU16>(
+                       PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES)) != 0;
+              const PxReal impulseScale =
+                  scaleDriveLimitToImpulse ? dt : 1.0f;
+              c.genericMinImpulse = row.minImpulse * impulseScale;
+              c.genericMaxImpulse = row.maxImpulse * impulseScale;
+              c.genericRestitution =
+                  restitution ? row.mods.bounce.restitution : 0.0f;
+              c.genericBounceThreshold =
+                  restitution ? row.mods.bounce.velocityThreshold : 0.0f;
+              c.genericReferencePositionA = bodyFrame0.p;
+              c.genericReferenceRotationA = bodyFrame0.q;
+              c.genericReferencePositionB = bodyFrame1.p;
+              c.genericReferenceRotationB = bodyFrame1.q;
+              c.genericRowFlags = row.flags;
+              c.genericSolveHint = row.solveHint;
+              // Match Dy::writeBack1DStep exactly.  PxConstraint::getForce()
+              // exposes actor-0's wrench about body0WorldOffset rather than
+              // the raw center-of-mass solver Jacobian:
+              //   angular =
+              //       (angular0 + linear0 x (cA2w - bodyFrame0.p)
+              //        - body0WorldOffset x linear0) * impulse.
+              // solverPrep is invoked every frame, so freezing this authored
+              // writeback Jacobian here has the same lifetime as the row.
+              c.genericAngularAWriteback =
+                  row.angular0 +
+                  row.linear0.cross(PxVec3(cAtW) - bodyFrame0.p) -
+                  PxVec3(bodyAWorldOffset).cross(row.linear0);
+
+              c.linBreakImpulse = constraint->linBreakForce;
+              c.angBreakImpulse = constraint->angBreakForce;
+              c.writeBackIndex = constraint->index;
+              if (!multiRow) {
+                restoreJointLambdaFromCache(
+                    *this, c, reinterpret_cast<PxU64>(constraint));
+              }
+            }
+          }
+        } else if (!constraint->solverPrep &&
+                   constraint->constantBlockSize >=
+                       sizeof(AvbdSnippetJointData)) {
           const AvbdSnippetJointData *data =
               static_cast<const AvbdSnippetJointData *>(
                   constraint->constantBlock);
@@ -1092,7 +1481,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                                         reinterpret_cast<PxU64>(constraint));
           }
         }
-      } // end else if (AvbdSnippetJointData)
     } // end if (constraint && constraint->constantBlock && ...)
     GET_NEXT_ISLAND_EDGE
   } // end island constraint-edge enumeration

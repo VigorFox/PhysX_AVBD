@@ -851,6 +851,63 @@ PX_FORCE_INLINE void avbdEvaluateNeoHookeanForceHessian(
 	}
 }
 
+// Limit a single-particle displacement so no incident tetrahedron is
+// pushed through the same positive-J floor used by the Neo-Hookean model.
+// For one moving vertex, det(F) is affine in the displacement, so the
+// admissible fraction is available analytically without a global line search.
+PX_FORCE_INLINE PxVec3 avbdLimitTetDisplacement(
+	const AvbdSoftBody& body, PxU32 particleIdx,
+	const AvbdSoftParticle* particles, const PxVec3& displacement,
+	PxReal minDetF = 0.05f)
+{
+	if(particleIdx < body.particleStart ||
+		particleIdx >= body.particleStart + body.particleCount)
+		return displacement;
+
+	const PxU32 localIdx = particleIdx - body.particleStart;
+	const AvbdParticleAdjacency& adjacency = body.adjacency[localIdx];
+	PxReal fraction = 1.0f;
+	const PxVec3 proposedPosition =
+		particles[particleIdx].position + displacement;
+	for(PxU32 refId = 0; refId < adjacency.tetRefs.size(); ++refId)
+	{
+		const AvbdTetElement& tet =
+			body.tetElements[adjacency.tetRefs[refId].index];
+		const PxVec3 current0 = particles[tet.p0].position;
+		const PxVec3 current1 = particles[tet.p1].position;
+		const PxVec3 current2 = particles[tet.p2].position;
+		const PxVec3 current3 = particles[tet.p3].position;
+		const PxReal currentDetF =
+			(PxMat33(
+				current1 - current0, current2 - current0,
+				current3 - current0) * tet.DmInv).getDeterminant();
+		const PxVec3 proposed0 =
+			tet.p0 == particleIdx ? proposedPosition : current0;
+		const PxVec3 proposed1 =
+			tet.p1 == particleIdx ? proposedPosition : current1;
+		const PxVec3 proposed2 =
+			tet.p2 == particleIdx ? proposedPosition : current2;
+		const PxVec3 proposed3 =
+			tet.p3 == particleIdx ? proposedPosition : current3;
+		const PxReal proposedDetF =
+			(PxMat33(
+				proposed1 - proposed0, proposed2 - proposed0,
+				proposed3 - proposed0) * tet.DmInv).getDeterminant();
+
+		if(!PxIsFinite(currentDetF) || !PxIsFinite(proposedDetF))
+			return PxVec3(0.0f);
+		if(proposedDetF >= minDetF || proposedDetF >= currentDetF)
+			continue;
+		if(currentDetF <= minDetF)
+			return PxVec3(0.0f);
+		const PxReal admissible =
+			(currentDetF - minDetF) /
+			(currentDetF - proposedDetF);
+		fraction = PxMin(fraction, PxMax(0.0f, admissible * 0.99f));
+	}
+	return displacement * fraction;
+}
+
 PX_FORCE_INLINE void avbdEvaluateBendingForceHessian(
 	const AvbdBendingElement& be, int vOrder,
 	PxReal stiffness,
@@ -2367,6 +2424,16 @@ inline void avbdStepSoftBodies(
 	};
 	buildContactIndex();
 
+	PxArray<PxU32> particleBodyIdx(numParticles);
+	for(PxU32 i = 0; i < numParticles; ++i)
+		particleBodyIdx[i] = PX_MAX_U32;
+	for(PxU32 bodyIdx = 0; bodyIdx < numSoftBodies; ++bodyIdx)
+	{
+		const AvbdSoftBody& body = softBodies[bodyIdx];
+		for(PxU32 localIdx = 0; localIdx < body.particleCount; ++localIdx)
+			particleBodyIdx[body.particleStart + localIdx] = bodyIdx;
+	}
+
 	// Pre-compute body-level inertial targets for Newton-style body solve
 	PxArray<PxVec3> bodyComPred(numSoftBodies);
 	PxArray<PxVec3> bodyThetaPred(numSoftBodies);
@@ -2669,6 +2736,9 @@ inline void avbdStepSoftBodies(
 					const PxReal maxDx = 1.0f;
 					if (dxLenSq > maxDx * maxDx)
 						dx = dx * (maxDx / PxSqrt(dxLenSq));
+					dx = avbdLimitTetDisplacement(
+						sb, pi, particles, dx);
+					dxLenSq = dx.magnitudeSquared();
 					// NaN guard: skip update if degenerate
 					if (dx.x == dx.x)
 					{
@@ -2767,7 +2837,15 @@ inline void avbdStepSoftBodies(
 				// destabilizing elastic forces.
 				if (sc.rigidBodyIdx != PX_MAX_U32 && sc.rigidBodyIdx < numSoftBodies)
 					projPen = PxMin(projPen, 0.05f);
-				sp.position += n * projPen;
+				PxVec3 projection = n * projPen;
+				const PxU32 bodyIdx = particleBodyIdx[sc.particleIdx];
+				if(bodyIdx < numSoftBodies)
+				{
+					projection = avbdLimitTetDisplacement(
+						softBodies[bodyIdx], sc.particleIdx,
+						particles, projection);
+				}
+				sp.position += projection;
 			}
 		}
 

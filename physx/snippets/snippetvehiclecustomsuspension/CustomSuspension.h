@@ -54,6 +54,24 @@ struct CustomSuspensionState
 	}
 };
 
+struct CustomSuspensionDiagnostics
+{
+	PxU32 callCount;
+	PxU32 onGroundCallCount;
+	PxU32 nonZeroForceCount;
+	PxU32 nonFiniteCount;
+	PxReal maxMagnitude;
+	PxReal accumulatedMagnitude;
+
+	PX_FORCE_INLINE void setToDefault()
+	{
+		PxMemZero(this, sizeof(CustomSuspensionDiagnostics));
+	}
+};
+
+void resetCustomSuspensionDiagnostics();
+const CustomSuspensionDiagnostics& getCustomSuspensionDiagnostics();
+
 void addCustomSuspensionForce
 (const PxReal dt,
 	const PxVehicleSuspensionParams& suspParams,

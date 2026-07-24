@@ -27,12 +27,15 @@
 #include "DyAvbdDynamics.h"
 #include "../../common/include/utils/PxcScratchAllocator.h"
 #include "DyArticulationCore.h"
+#include "DyArticulationMimicJointCore.h"
+#include "DyArticulationTendon.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdConstraint.h"
 #include "DyAvbdTasks.h"
 #include "DyAvbdKinematicShell.h"
 #include "PxAvbdSoftBody.h"
 #include "DyConstraint.h"
+#include "DyConstraintPrep.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyIslandManager.h"
 #include "DyVArticulation.h"
@@ -664,6 +667,24 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
   }
 }
 
+void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
+                                 PxU32 numConstraints, PxReal dt) {
+  if (!constraints || numConstraints == 0 || dt <= 0.0f)
+    return;
+
+  for (PxU32 i = 0; i < numConstraints; ++i) {
+    const AvbdContactConstraint &constraint = constraints[i];
+    if (!constraint.contactImpulseWriteback)
+      continue;
+
+    // PxContactPairPoint::impulse is a scalar normal impulse expanded along
+    // the contact normal by extractContacts(). AVBD's unilateral normal
+    // multiplier uses the opposite sign: compression is lambda < 0.
+    const PxReal normalForce = PxMax(0.0f, -constraint.header.lambda);
+    *constraint.contactImpulseWriteback = normalForce * dt;
+  }
+}
+
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
                                  PxU64 cacheKey) {
@@ -771,6 +792,96 @@ void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
     cached.frameAge = 0;
   }
 }
+
+void writeJointConstraintWriteback(
+    AvbdDynamicsContext &ctx, const AvbdD6JointConstraint *constraints,
+    PxU32 numConstraints, PxReal dt) {
+  if (!constraints || numConstraints == 0)
+    return;
+
+  Cm::PinnableArray<Dy::ConstraintWriteback> &writeBackPool =
+      ctx.getConstraintWriteBackPool();
+  for (PxU32 i = 0; i < numConstraints; ++i) {
+    const AvbdD6JointConstraint &constraint = constraints[i];
+    if (constraint.writeBackIndex == PX_MAX_U32)
+      continue;
+
+    const bool positionDriveOwned =
+        (constraint.sourceFlags & AvbdD6JointConstraint::
+                                      eLINEAR_POSITION_DRIVE_ACTIVE) != 0;
+    const bool angularAxisVelocityDriveOwned =
+        (constraint.sourceFlags & AvbdD6JointConstraint::
+                       eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
+        0;
+    const bool slerpVelocityDriveOwned =
+        (constraint.sourceFlags & AvbdD6JointConstraint::
+                        eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+    const bool genericPhysical1DOwned =
+        (constraint.sourceFlags &
+         (AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
+          AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW |
+          AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) != 0;
+    const bool passiveNativeReactionOwned =
+        (constraint.sourceFlags &
+         AvbdD6JointConstraint::eNATIVE_PASSIVE_REACTION_ACTIVE) != 0;
+    const bool physicalWritebackOwned =
+        positionDriveOwned || angularAxisVelocityDriveOwned ||
+        slerpVelocityDriveOwned || genericPhysical1DOwned ||
+        passiveNativeReactionOwned;
+    const PxReal linearForce =
+        physicalWritebackOwned && constraint.writebackLinearImpulseValid &&
+                dt > 0.0f
+            ? constraint.writebackLinearImpulse.magnitude() / dt
+            : constraint.lambdaLinear.magnitude();
+    const PxReal angularTorque =
+        physicalWritebackOwned && constraint.writebackAngularImpulseValid &&
+                dt > 0.0f
+            ? constraint.writebackAngularImpulse.magnitude() / dt
+            : constraint.lambdaAngular.magnitude();
+    Dy::ConstraintWriteback &writeback =
+        writeBackPool[constraint.writeBackIndex];
+    const bool linearBreakable = constraint.linBreakImpulse < PX_MAX_F32;
+    const bool angularBreakable = constraint.angBreakImpulse < PX_MAX_F32;
+    const PxVec3 linearImpulse =
+        constraint.writebackLinearImpulseValid
+            ? constraint.writebackLinearImpulse
+            : constraint.lambdaLinear;
+    const PxVec3 angularImpulse =
+        constraint.writebackAngularImpulseValid
+            ? constraint.writebackAngularImpulse
+            : constraint.lambdaAngular;
+    const bool genericMultiRow =
+        (constraint.sourceFlags &
+         AvbdD6JointConstraint::eGENERIC_MULTI_ROW) != 0;
+    if (genericMultiRow) {
+      if ((constraint.sourceFlags &
+           AvbdD6JointConstraint::eGENERIC_MULTI_ROW_LEADER) != 0) {
+        writeback.linearImpulse = PxVec3(0.0f);
+        writeback.angularImpulse = PxVec3(0.0f);
+        writeback.broken = 0;
+      }
+      writeback.linearImpulse += linearImpulse;
+      writeback.angularImpulse += angularImpulse;
+      const PxReal aggregateLinearForce =
+          dt > 0.0f ? writeback.linearImpulse.magnitude() / dt : 0.0f;
+      const PxReal aggregateAngularTorque =
+          dt > 0.0f ? writeback.angularImpulse.magnitude() / dt : 0.0f;
+      if ((linearBreakable &&
+           aggregateLinearForce > constraint.linBreakImpulse) ||
+          (angularBreakable &&
+           aggregateAngularTorque > constraint.angBreakImpulse))
+        writeback.broken = 1;
+      continue;
+    }
+    writeback.linearImpulse = linearImpulse;
+    writeback.angularImpulse = angularImpulse;
+    writeback.broken =
+        ((linearBreakable && linearForce > constraint.linBreakImpulse) ||
+         (angularBreakable && angularTorque > constraint.angBreakImpulse))
+            ? 1u
+            : 0u;
+  }
+}
 } // namespace Dy
 } // namespace physx
 
@@ -843,6 +954,7 @@ void AvbdDynamicsContext::update(
   // Allocate global arrays - use scratch with main allocator fallback
   AvbdSolverBody *avbdBodies = nullptr;
   PxsRigidBody **rigidBodies = nullptr;
+  PxU32 *staticTouchCounts = nullptr;
   {
     PX_PROFILE_ZONE("AVBD.allocateMemory", mContextID);
     avbdBodies = reinterpret_cast<AvbdSolverBody *>(allocWithFallback(
@@ -852,12 +964,18 @@ void AvbdDynamicsContext::update(
     rigidBodies = reinterpret_cast<PxsRigidBody **>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxsRigidBody *) * totalBodyCount, "RigidBodies"));
+
+    staticTouchCounts = reinterpret_cast<PxU32 *>(allocWithFallback(
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
+        sizeof(PxU32) * totalBodyCount, "StaticTouchCounts"));
   }
 
   // Check if allocation failed completely
-  if (!avbdBodies || !rigidBodies) {
+  if (!avbdBodies || !rigidBodies || !staticTouchCounts) {
     return;
   }
+
+  memset(staticTouchCounts, 0, sizeof(PxU32) * totalBodyCount);
 
   // Track articulation info for writeback
   FeatherstoneArticulation **articulationForBody = nullptr;
@@ -950,6 +1068,8 @@ void AvbdDynamicsContext::update(
 
       if (node.getNodeType() == IG::Node::eRIGID_BODY_TYPE) {
         rigidBodies[bodyIndex] = getRigidBodyFromIG(islandSim, currentIndex);
+        staticTouchCounts[bodyIndex] =
+            islandSim.getIslandStaticTouchCount(currentIndex);
         const PxU32 activeNodeIdx = islandSim.getActiveNodeIndex(currentIndex);
         if (activeNodeIdx < maxActiveNodes) {
           bodyRemapTable[activeNodeIdx] = bodyIndex;
@@ -996,7 +1116,8 @@ void AvbdDynamicsContext::update(
                     R * invInertiaLocal * R.getTranspose();
                 solverBody.initialize(
                     bodyCore->body2World, bodyCore->linearVelocity,
-                    bodyCore->angularVelocity, bodyCore->inverseMass,
+                    computeAvbdAngularVelocity(*bodyCore, dt),
+                    bodyCore->inverseMass,
                     invInertiaWorld, bodyIndex);
               }
 
@@ -1023,8 +1144,38 @@ void AvbdDynamicsContext::update(
             bodyIndex++;
           }
 
-          // Count internal articulation joints
-          info.articulationJointCount += (linkCount > 1) ? (linkCount - 1) : 0;
+          // AVBD represents both inbound articulation joints and supported
+          // articulation-internal coupling rows in the unified row array.
+          // A spatial tendon contributes one constraint per leaf attachment,
+          // matching Featherstone's internal-tendon representation.
+          PxU32 spatialTendonRowCount = 0;
+          for (PxU32 tendonIndex = 0;
+               tendonIndex < artData.getSpatialTendonCount();
+               ++tendonIndex) {
+            ArticulationSpatialTendon *tendon =
+                artData.getSpatialTendon(tendonIndex);
+            if (!tendon)
+              continue;
+            ArticulationAttachment *attachments =
+                tendon->getAttachments();
+            const PxU32 attachmentCount =
+                tendon->getNumAttachments();
+            for (PxU32 attachmentIndex = 0;
+                 attachmentIndex < attachmentCount;
+                 ++attachmentIndex) {
+              const ArticulationAttachment &attachment =
+                  attachments[attachmentIndex];
+              if (attachment.parent !=
+                      DY_ARTICULATION_ATTACHMENT_NONE &&
+                  attachment.childCount == 0)
+                ++spatialTendonRowCount;
+            }
+          }
+          info.articulationJointCount +=
+              ((linkCount > 1) ? (linkCount - 1) : 0) +
+              artData.getMimicJointCount() +
+              artData.getFixedTendonCount() +
+              spatialTendonRowCount;
 
           // Offset articulation active index by numDynamicBodies to avoid
           // namespace collision -- getActiveNodeIndex() returns per-TYPE indices
@@ -1075,35 +1226,47 @@ void AvbdDynamicsContext::update(
         // Set up body0
         if (!nodeIndex1.isStaticBody()) {
           const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex1);
-          const bool isArt0 = (workUnit.mFlags & PxcNpWorkUnitFlag::eARTICULATION_BODY0) != 0;
-          const PxU32 remapIdx0 = isArt0 ? (numDynamicBodies + activeIdx) : activeIdx;
-          if (remapIdx0 < maxActiveNodes &&
-              bodyRemapTable[remapIdx0] != PX_MAX_U32) {
-            // Check if this is an articulation link
-            if (isArt0 &&
-                articulationByActiveIdx && articulationFirstLinkIndex &&
-                activeIdx < numArticulations + 1) {
-              // Find the actual link index for this contact
-              FeatherstoneArticulation *art =
-                  articulationByActiveIdx[activeIdx];
-              PxU32 linkIdx =
-                  findArticulationLinkIndex(art, workUnit.mRigidCore0);
-              if (linkIdx != PX_MAX_U32) {
-                icm.indexType0 = PxsIndexedInteraction::eBODY;
-                icm.solverBody0 =
-                    articulationFirstLinkIndex[activeIdx] + linkIdx;
+          if (islandSim.getNode(nodeIndex1).isKinematic()) {
+            // Preserve the island manager's kinematic namespace.  AVBD does
+            // not allocate a dynamic solver body for kinematics, but contact
+            // prep still needs the active-kinematic index to recover its
+            // target-derived point velocity.
+            icm.indexType0 = PxsIndexedInteraction::eKINEMATIC;
+            icm.solverBody0 = activeIdx;
+          } else {
+            const bool isArt0 =
+                (workUnit.mFlags &
+                 PxcNpWorkUnitFlag::eARTICULATION_BODY0) != 0;
+            const PxU32 remapIdx0 =
+                isArt0 ? (numDynamicBodies + activeIdx) : activeIdx;
+            if (remapIdx0 < maxActiveNodes &&
+                bodyRemapTable[remapIdx0] != PX_MAX_U32) {
+              // Check if this is an articulation link
+              if (isArt0 &&
+                  articulationByActiveIdx && articulationFirstLinkIndex &&
+                  activeIdx < numArticulations + 1) {
+                // Find the actual link index for this contact
+                FeatherstoneArticulation *art =
+                    articulationByActiveIdx[activeIdx];
+                PxU32 linkIdx =
+                    findArticulationLinkIndex(art, workUnit.mRigidCore0);
+                if (linkIdx != PX_MAX_U32) {
+                  icm.indexType0 = PxsIndexedInteraction::eBODY;
+                  icm.solverBody0 =
+                      articulationFirstLinkIndex[activeIdx] + linkIdx;
+                } else {
+                  // Fallback to first link if not found
+                  icm.indexType0 = PxsIndexedInteraction::eBODY;
+                  icm.solverBody0 = bodyRemapTable[remapIdx0];
+                }
               } else {
-                // Fallback to first link if not found
                 icm.indexType0 = PxsIndexedInteraction::eBODY;
                 icm.solverBody0 = bodyRemapTable[remapIdx0];
               }
             } else {
-              icm.indexType0 = PxsIndexedInteraction::eBODY;
-              icm.solverBody0 = bodyRemapTable[remapIdx0];
+              icm.indexType0 = PxsIndexedInteraction::eWORLD;
+              icm.solverBody0 = 0;
             }
-          } else {
-            icm.indexType0 = PxsIndexedInteraction::eWORLD;
-            icm.solverBody0 = 0;
           }
         } else {
           icm.indexType0 = PxsIndexedInteraction::eWORLD;
@@ -1116,35 +1279,43 @@ void AvbdDynamicsContext::update(
           icm.solverBody1 = 0;
         } else {
           const PxU32 activeIdx = islandSim.getActiveNodeIndex(nodeIndex2);
-          const bool isArt1 = (workUnit.mFlags & PxcNpWorkUnitFlag::eARTICULATION_BODY1) != 0;
-          const PxU32 remapIdx1 = isArt1 ? (numDynamicBodies + activeIdx) : activeIdx;
-          if (remapIdx1 < maxActiveNodes &&
-              bodyRemapTable[remapIdx1] != PX_MAX_U32) {
-            // Check if this is an articulation link
-            if (isArt1 &&
-                articulationByActiveIdx && articulationFirstLinkIndex &&
-                activeIdx < numArticulations + 1) {
-              // Find the actual link index for this contact
-              FeatherstoneArticulation *art =
-                  articulationByActiveIdx[activeIdx];
-              PxU32 linkIdx =
-                  findArticulationLinkIndex(art, workUnit.mRigidCore1);
-              if (linkIdx != PX_MAX_U32) {
-                icm.indexType1 = PxsIndexedInteraction::eBODY;
-                icm.solverBody1 =
-                    articulationFirstLinkIndex[activeIdx] + linkIdx;
+          if (islandSim.getNode(nodeIndex2).isKinematic()) {
+            icm.indexType1 = PxsIndexedInteraction::eKINEMATIC;
+            icm.solverBody1 = activeIdx;
+          } else {
+            const bool isArt1 =
+                (workUnit.mFlags &
+                 PxcNpWorkUnitFlag::eARTICULATION_BODY1) != 0;
+            const PxU32 remapIdx1 =
+                isArt1 ? (numDynamicBodies + activeIdx) : activeIdx;
+            if (remapIdx1 < maxActiveNodes &&
+                bodyRemapTable[remapIdx1] != PX_MAX_U32) {
+              // Check if this is an articulation link
+              if (isArt1 &&
+                  articulationByActiveIdx && articulationFirstLinkIndex &&
+                  activeIdx < numArticulations + 1) {
+                // Find the actual link index for this contact
+                FeatherstoneArticulation *art =
+                    articulationByActiveIdx[activeIdx];
+                PxU32 linkIdx =
+                    findArticulationLinkIndex(art, workUnit.mRigidCore1);
+                if (linkIdx != PX_MAX_U32) {
+                  icm.indexType1 = PxsIndexedInteraction::eBODY;
+                  icm.solverBody1 =
+                      articulationFirstLinkIndex[activeIdx] + linkIdx;
+                } else {
+                  // Fallback to first link if not found
+                  icm.indexType1 = PxsIndexedInteraction::eBODY;
+                  icm.solverBody1 = bodyRemapTable[remapIdx1];
+                }
               } else {
-                // Fallback to first link if not found
                 icm.indexType1 = PxsIndexedInteraction::eBODY;
                 icm.solverBody1 = bodyRemapTable[remapIdx1];
               }
             } else {
-              icm.indexType1 = PxsIndexedInteraction::eBODY;
-              icm.solverBody1 = bodyRemapTable[remapIdx1];
+              icm.indexType1 = PxsIndexedInteraction::eWORLD;
+              icm.solverBody1 = 0;
             }
-          } else {
-            icm.indexType1 = PxsIndexedInteraction::eWORLD;
-            icm.solverBody1 = 0;
           }
         }
         contactIndex++;
@@ -1165,6 +1336,8 @@ void AvbdDynamicsContext::update(
   // 4. Initialize Solver
   if (!mSolverInitialized) {
     AvbdSolverConfig config;
+    config.lengthScale = getLengthScale();
+    config.positionTolerance *= config.lengthScale;
     config.outerIterations = 1;
     config.innerIterations = 4; // Default for contact-only islands; articulations use per-body overrides
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
@@ -1253,22 +1426,36 @@ void AvbdDynamicsContext::update(
     totalArticulationJoints += islandInfos[i].articulationJointCount;
   }
 
-  PxU32 totalJointCapacity = totalJoints + totalArticulationJoints;
-  if (totalJointCapacity == 0)
-    totalJointCapacity = 1;
+  // An extension/custom PxConstraintSolverPrep may emit multiple independent
+  // Px1DConstraint rows (Vehicle emits up to 12 from one PxConstraint).
+  // Keep gear/articulation capacity at one object per source constraint, but
+  // reserve the public solverPrep maximum for the D6-backed generic row path.
+  const PxU64 totalD6Capacity64 =
+      static_cast<PxU64>(totalJoints) * MAX_CONSTRAINT_ROWS +
+      totalArticulationJoints;
+  PxU32 totalD6Capacity =
+      totalD6Capacity64 > PX_MAX_U32
+          ? PX_MAX_U32
+          : static_cast<PxU32>(totalD6Capacity64);
+  PxU32 totalGearCapacity = totalJoints + totalArticulationJoints;
+  if (totalD6Capacity == 0)
+    totalD6Capacity = 1;
+  if (totalGearCapacity == 0)
+    totalGearCapacity = 1;
 
   AvbdD6JointConstraint *d6Joints =
       reinterpret_cast<AvbdD6JointConstraint *>(allocWithFallback(
           mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-          sizeof(AvbdD6JointConstraint) * totalJointCapacity, "D6Joints"));
+          sizeof(AvbdD6JointConstraint) * totalD6Capacity, "D6Joints"));
   AvbdGearJointConstraint *gearJoints =
       reinterpret_cast<AvbdGearJointConstraint *>(allocWithFallback(
           mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-          sizeof(AvbdGearJointConstraint) * totalJointCapacity, "GearJoints"));
+          sizeof(AvbdGearJointConstraint) * totalGearCapacity, "GearJoints"));
 
   // 6. Create Task Chain
   AvbdWriteBackTask *wbTask = mTaskFactory->createWriteBackTask(
-      *this, avbdBodies, rigidBodies, bodyIndex, articulationForBody,
+      *this, avbdBodies, rigidBodies, staticTouchCounts, bodyIndex, dt,
+      mEnableStabilization, isSleepingDisabled(), articulationForBody,
       linkIndexForBody);
   wbTask->setContinuation(continuation);
 
@@ -1309,7 +1496,8 @@ void AvbdDynamicsContext::update(
     PxU32 numConstraints = 0;
     if (avbdConstraints && info.cmCount > 0) {
       numConstraints =
-          prepareAvbdContacts(&avbdBodies[info.bodyStart], info.bodyCount,
+          prepareAvbdContacts(islandSim, dt,
+                              &avbdBodies[info.bodyStart], info.bodyCount,
                               avbdConstraints + currentConstraintIdx,
                               maxConstraints - currentConstraintIdx,
                               info.cmStart, info.cmCount, info.bodyStart);
@@ -1321,10 +1509,10 @@ void AvbdDynamicsContext::update(
     // Prepare external joint constraints
     if (info.constraintCount > 0) {
       prepareAvbdConstraints(
-          islandSim, &avbdBodies[info.bodyStart], info.bodyCount,
+          islandSim, dt, &avbdBodies[info.bodyStart], info.bodyCount,
           info.bodyStart, d6Joints + currD6Idx, numD6,
-          totalJointCapacity - currD6Idx, gearJoints + currGearIdx, numGear,
-          totalJointCapacity - currGearIdx, i, bodyRemapTable,
+          totalD6Capacity - currD6Idx, gearJoints + currGearIdx, numGear,
+          totalGearCapacity - currGearIdx, i, bodyRemapTable,
           articulationFirstLinkIndex, articulationByActiveIdx,
           numArticulations);
     }
@@ -1367,9 +1555,9 @@ void AvbdDynamicsContext::update(
               prepareArticulationInternalJoints(
                   *this, articulation, localFirstBodyIdx,
                   d6Joints + currD6Idx + numD6, artD6,
-                  totalJointCapacity - currD6Idx - numD6,
+                  totalD6Capacity - currD6Idx - numD6,
                   gearJoints + currGearIdx + numGear, artGear,
-                  totalJointCapacity - currGearIdx - numGear,
+                  totalGearCapacity - currGearIdx - numGear,
                   dt);
 
               numD6 += artD6;
@@ -1577,12 +1765,14 @@ void AvbdDynamicsContext::update(
       // Write back lambda cache inline
       writeLambdaToCache(*this, batch.constraints, batch.numConstraints,
                          batch.numBodies);
+      writeContactImpulseToOutput(batch.constraints, batch.numConstraints, dt);
       if (AvbdKinematicShell::isActive() && batch.kinematicShellBatch &&
           batch.softContacts && batch.numSoftContacts > 0) {
         AvbdKinematicShell::saveIslandShellContactCache(batch.softContacts,
                                                         batch.numSoftContacts);
       }
       writeJointLambdaToCache(*this, batch.d6Joints, batch.numD6);
+      writeJointConstraintWriteback(*this, batch.d6Joints, batch.numD6, dt);
       // Release constraint maps
       PxAllocatorCallback &alloc = getAllocator();
       batch.contactMap.release(alloc);
@@ -1619,14 +1809,13 @@ void AvbdDynamicsContext::setupBodies(AvbdSolverBody *avbdBodies,
                                       PxsRigidBody **rigidBodies,
                                       PxU32 numBodies, PxReal dt,
                                       const PxVec3 &gravity) {
-  PX_UNUSED(dt);
   PX_UNUSED(gravity);
 
   for (PxU32 i = 0; i < numBodies; ++i) {
     PxsRigidBody *rigidBody = rigidBodies[i];
     if (rigidBody) {
       const PxsBodyCore &core = rigidBody->getCore();
-      copyToAvbdSolverBody(core, avbdBodies[i], i);
+      copyToAvbdSolverBody(core, avbdBodies[i], i, dt);
       restoreAndUpdateBodyVelocityHistory(core, avbdBodies[i]);
     }
   }
@@ -1649,6 +1838,60 @@ void AvbdDynamicsContext::writeBackBodies(AvbdSolverBody *avbdBodies,
 //=============================================================================
 // Articulation Internal Joints Preparation (Multi-Type)
 //=============================================================================
+
+static bool prepareHardMimicAxis(
+    const ArticulationJointCore &jointCore,
+    PxArticulationAxis::Enum axis, const PxsBodyCore &parentBody,
+    const PxsBodyCore &childBody, PxVec3 &worldAxis, PxReal &coordinate,
+    bool &linearAxis) {
+  if (jointCore.motion[axis] != PxArticulationMotion::eFREE ||
+      jointCore.childPose.p.magnitudeSquared() > 1e-8f)
+    return false;
+
+  PxU32 activeDofs = 0;
+  for (PxU32 i = 0; i < PxArticulationAxis::eCOUNT; ++i)
+    activeDofs +=
+        jointCore.motion[i] != PxArticulationMotion::eLOCKED ? 1u : 0u;
+  if (activeDofs != 1)
+    return false;
+
+  PxU32 component = 0;
+  switch (axis) {
+  case PxArticulationAxis::eX:
+  case PxArticulationAxis::eTWIST:
+    component = 0;
+    break;
+  case PxArticulationAxis::eY:
+  case PxArticulationAxis::eSWING1:
+    component = 1;
+    break;
+  case PxArticulationAxis::eZ:
+  case PxArticulationAxis::eSWING2:
+    component = 2;
+    break;
+  default:
+    return false;
+  }
+
+  PxVec3 localAxis(0.0f);
+  localAxis[component] = 1.0f;
+  const PxTransform parentFrame =
+      parentBody.body2World * jointCore.parentPose;
+  const PxTransform childFrame =
+      childBody.body2World * jointCore.childPose;
+  worldAxis = parentFrame.q.rotate(localAxis);
+  linearAxis = axis >= PxArticulationAxis::eX;
+  if (linearAxis) {
+    coordinate = (childFrame.p - parentFrame.p).dot(worldAxis);
+  } else {
+    PxQuat relative = parentFrame.q.getConjugate() * childFrame.q;
+    if (relative.w < 0.0f)
+      relative = -relative;
+    coordinate =
+        2.0f * PxAtan2((&relative.x)[component], relative.w);
+  }
+  return worldAxis.isFinite() && PxIsFinite(coordinate);
+}
 
 static void prepareArticulationInternalJoints(
   AvbdDynamicsContext &context, FeatherstoneArticulation *articulation,
@@ -1974,6 +2217,586 @@ static void prepareArticulationInternalJoints(
       numD6++;
     }
   }
+
+  ArticulationMimicJointCore **mimicCores =
+      artData.getMimicJointCores();
+  const PxU32 mimicCount = artData.getMimicJointCount();
+  for (PxU32 mimicIndex = 0;
+       mimicIndex < mimicCount && numD6 < maxD6;
+       ++mimicIndex) {
+    const ArticulationMimicJointCore *mimic = mimicCores[mimicIndex];
+    if (!mimic || !PxIsFinite(mimic->gearRatio) ||
+        !PxIsFinite(mimic->offset) || PxAbs(mimic->gearRatio) < 1e-6f ||
+        !PxIsFinite(mimic->naturalFrequency) ||
+        !PxIsFinite(mimic->dampingRatio) ||
+        mimic->naturalFrequency < 0.0f ||
+        mimic->dampingRatio < 0.0f ||
+        mimic->axisA >= PxArticulationAxis::eCOUNT ||
+        mimic->axisB >= PxArticulationAxis::eCOUNT ||
+        mimic->linkA == 0 || mimic->linkB == 0 ||
+        mimic->linkA >= linkCount || mimic->linkB >= linkCount ||
+        mimic->linkA == mimic->linkB)
+      continue;
+
+    const ArticulationLink &linkA = artData.getLink(mimic->linkA);
+    const ArticulationLink &linkB = artData.getLink(mimic->linkB);
+    if (linkA.parent == DY_ARTICULATION_LINK_NONE ||
+        linkA.parent != linkB.parent)
+      continue;
+    const ArticulationLink &parent = artData.getLink(linkA.parent);
+    if (!parent.bodyCore ||
+        (!parent.bodyCore->fixedBaseLink &&
+         parent.bodyCore->inverseMass > 0.0f) ||
+        !linkA.bodyCore || !linkB.bodyCore ||
+        !linkA.inboundJoint || !linkB.inboundJoint)
+      continue;
+
+    PxVec3 worldAxisA(0.0f), worldAxisB(0.0f);
+    PxReal coordinateA = 0.0f, coordinateB = 0.0f;
+    bool linearA = false, linearB = false;
+    if (!prepareHardMimicAxis(
+            *linkA.inboundJoint,
+            static_cast<PxArticulationAxis::Enum>(mimic->axisA),
+            *parent.bodyCore, *linkA.bodyCore, worldAxisA, coordinateA,
+            linearA) ||
+        !prepareHardMimicAxis(
+            *linkB.inboundJoint,
+            static_cast<PxArticulationAxis::Enum>(mimic->axisB),
+            *parent.bodyCore, *linkB.bodyCore, worldAxisB, coordinateB,
+            linearB))
+      continue;
+
+    AvbdD6JointConstraint &c = d6Constraints[numD6];
+    c.initDefaults();
+    c.header.type = AvbdConstraintType::eJOINT_CUSTOM_1D;
+    c.header.bodyIndexA = firstBodyIndex + mimic->linkA;
+    c.header.bodyIndexB = firstBodyIndex + mimic->linkB;
+    const bool compliant =
+        mimic->naturalFrequency > 0.0f && mimic->dampingRatio > 0.0f;
+    const PxReal invDt =
+        dt > 0.0f ? 1.0f / dt : 60.0f;
+    const PxReal massA =
+        linkA.bodyCore->inverseMass > 0.0f
+            ? 1.0f / linkA.bodyCore->inverseMass
+            : 1.0f;
+    const PxReal massB =
+        linkB.bodyCore->inverseMass > 0.0f
+            ? 1.0f / linkB.bodyCore->inverseMass
+            : 1.0f;
+    c.header.rho = compliant ? 0.0f :
+        PxMax(10.0f * PxMax(massA, massB) * invDt * invDt,
+              AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH);
+    c.header.compliance = 0.0f;
+    c.header.damping = compliant ? 0.0f :
+        AvbdConstants::AVBD_CONSTRAINT_DAMPING;
+    c.linearMotion = 0x2A;
+    c.angularMotion = 0x2A;
+    c.sourceFlags |= compliant
+        ? AvbdD6JointConstraint::eARTICULATION_COMPLIANT_MIMIC_ROW
+        : (AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
+           AvbdD6JointConstraint::eARTICULATION_MIMIC_ROW);
+
+    if (linearA)
+      c.genericLinearA = worldAxisA;
+    else
+      c.genericAngularA = worldAxisA;
+    if (linearB)
+      c.genericLinearB = worldAxisB * mimic->gearRatio;
+    else
+      c.genericAngularB = worldAxisB * mimic->gearRatio;
+    c.genericGeometricError =
+        coordinateA + mimic->gearRatio * coordinateB + mimic->offset;
+    c.genericVelocityTarget = 0.0f;
+    c.genericMinImpulse = -PX_MAX_REAL;
+    c.genericMaxImpulse = PX_MAX_REAL;
+    c.genericNaturalFrequency = mimic->naturalFrequency;
+    c.genericDampingRatio = mimic->dampingRatio;
+    c.genericReferencePositionA = linkA.bodyCore->body2World.p;
+    c.genericReferencePositionB = linkB.bodyCore->body2World.p;
+    c.genericReferenceRotationA = linkA.bodyCore->body2World.q;
+    c.genericReferenceRotationB = linkB.bodyCore->body2World.q;
+    c.genericRowFlags = 0;
+    ++numD6;
+  }
+
+  // Admit the fixed-root, two-active-joint fixed-tendon topologies covered by
+  // the headless TGS authority:
+  //   * serial centered angular joints
+  //   * sibling branch centered angular or linear joints
+  // The public tendon length is coeffA*qA + coeffB*qB + offset.  Expanding a
+  // serial angular path into maximal body coordinates gives
+  //   JA = coeffA*axisA - coeffB*axisB, JB = coeffB*axisB.
+  // A sibling branch has one independent coordinate on each endpoint and
+  // therefore uses JA = coeffA*axisA, JB = coeffB*axisB.  Length limits share
+  // the same row and are expressed below in rest-error coordinates.
+  // Asymmetric reciprocal coefficients remain excluded: supporting them
+  // requires distinct length and response Jacobians rather than treating
+  // recipCoefficient as a synonym for coefficient.
+  auto prepareFixedTendon = [&]() {
+  if (artData.getFixedTendonCount() != 1 || numD6 >= maxD6 ||
+      !d6Constraints)
+    return;
+  ArticulationFixedTendon *tendon = artData.getFixedTendon(0);
+  const bool limitActive =
+      tendon && PxIsFinite(tendon->mLimitStiffness) &&
+      tendon->mLimitStiffness > 0.0f;
+  if (!tendon || tendon->getNumJoints() != 3 ||
+      !PxIsFinite(tendon->mStiffness) || tendon->mStiffness < 0.0f ||
+      !PxIsFinite(tendon->mDamping) || tendon->mDamping < 0.0f ||
+      !PxIsFinite(tendon->mLimitStiffness) ||
+      tendon->mLimitStiffness < 0.0f ||
+      !PxIsFinite(tendon->mOffset) || !PxIsFinite(tendon->mRestLength) ||
+      (tendon->mStiffness <= 0.0f && !limitActive) ||
+      (limitActive &&
+       (!PxIsFinite(tendon->mLowLimit) ||
+        !PxIsFinite(tendon->mHighLimit) ||
+        tendon->mLowLimit > tendon->mHighLimit)) ||
+      (!limitActive &&
+       (tendon->mLowLimit != PX_MAX_F32 ||
+        tendon->mHighLimit != -PX_MAX_F32)))
+    return;
+
+  ArticulationTendonJoint *tendonJoints = tendon->getTendonJoints();
+  const ArticulationTendonJoint &rootTendonJoint = tendonJoints[0];
+  const ArticulationTendonJoint &tendonJointA = tendonJoints[1];
+  const ArticulationTendonJoint &tendonJointB = tendonJoints[2];
+  const ArticulationAttachmentBitField childA =
+      ArticulationAttachmentBitField(1) << 1;
+  const ArticulationAttachmentBitField childB =
+      ArticulationAttachmentBitField(1) << 2;
+  const bool serialTopology =
+      rootTendonJoint.childCount == 1 &&
+      rootTendonJoint.children == childA &&
+      tendonJointA.parent == 0 && tendonJointA.childCount == 1 &&
+      tendonJointA.children == childB &&
+      tendonJointB.parent == 1 && tendonJointB.childCount == 0 &&
+      tendonJointB.children == 0;
+  const bool branchTopology =
+      rootTendonJoint.childCount == 2 &&
+      rootTendonJoint.children == (childA | childB) &&
+      tendonJointA.parent == 0 && tendonJointA.childCount == 0 &&
+      tendonJointA.children == 0 &&
+      tendonJointB.parent == 0 && tendonJointB.childCount == 0 &&
+      tendonJointB.children == 0;
+  if (rootTendonJoint.parent != DY_ARTICULATION_ATTACHMENT_NONE ||
+      rootTendonJoint.linkInd != 0 ||
+      (!serialTopology && !branchTopology) ||
+      tendonJointA.linkInd == 0 || tendonJointB.linkInd == 0 ||
+      tendonJointA.linkInd >= linkCount ||
+      tendonJointB.linkInd >= linkCount ||
+      tendonJointA.axis >= PxArticulationAxis::eCOUNT ||
+      tendonJointB.axis >= PxArticulationAxis::eCOUNT ||
+      !PxIsFinite(tendonJointA.coefficient) ||
+      !PxIsFinite(tendonJointB.coefficient) ||
+      !PxIsFinite(tendonJointA.recipCoefficient) ||
+      !PxIsFinite(tendonJointB.recipCoefficient) ||
+      PxAbs(tendonJointA.coefficient) < 1e-6f ||
+      PxAbs(tendonJointB.coefficient) < 1e-6f ||
+      PxAbs(tendonJointA.coefficient -
+            tendonJointA.recipCoefficient) > 1e-6f ||
+      PxAbs(tendonJointB.coefficient -
+            tendonJointB.recipCoefficient) > 1e-6f)
+    return;
+
+  const ArticulationLink &linkA =
+      artData.getLink(tendonJointA.linkInd);
+  const ArticulationLink &linkB =
+      artData.getLink(tendonJointB.linkInd);
+  if (linkA.parent != 0 ||
+      (serialTopology && linkB.parent != tendonJointA.linkInd) ||
+      (branchTopology && linkB.parent != 0) ||
+      !artData.getLink(0).bodyCore ||
+      !artData.getLink(0).bodyCore->fixedBaseLink ||
+      !linkA.bodyCore || !linkB.bodyCore ||
+      !linkA.inboundJoint || !linkB.inboundJoint)
+    return;
+
+  PxVec3 worldAxisA(0.0f), worldAxisB(0.0f);
+  PxReal coordinateA = 0.0f, coordinateB = 0.0f;
+  bool linearA = false, linearB = false;
+  if (!prepareHardMimicAxis(
+          *linkA.inboundJoint,
+          static_cast<PxArticulationAxis::Enum>(tendonJointA.axis),
+          *artData.getLink(0).bodyCore, *linkA.bodyCore,
+          worldAxisA, coordinateA, linearA) ||
+      !prepareHardMimicAxis(
+          *linkB.inboundJoint,
+          static_cast<PxArticulationAxis::Enum>(tendonJointB.axis),
+          *(serialTopology ? linkA.bodyCore
+                           : artData.getLink(0).bodyCore),
+          *linkB.bodyCore, worldAxisB, coordinateB, linearB) ||
+      (serialTopology && (linearA || linearB)) ||
+      (branchTopology && linearA != linearB))
+    return;
+
+  AvbdD6JointConstraint &c = d6Constraints[numD6];
+  c.initDefaults();
+  c.header.type = AvbdConstraintType::eJOINT_CUSTOM_1D;
+  c.header.bodyIndexA = firstBodyIndex + tendonJointA.linkInd;
+  c.header.bodyIndexB = firstBodyIndex + tendonJointB.linkInd;
+  const PxReal activeJointScale = 0.5f;
+  c.header.rho = tendon->mStiffness * activeJointScale;
+  c.header.compliance = 0.0f;
+  c.header.damping = tendon->mDamping * activeJointScale;
+  c.linearMotion = 0x2A;
+  c.angularMotion = 0x2A;
+  c.sourceFlags |=
+      AvbdD6JointConstraint::eARTICULATION_FIXED_TENDON_ROW;
+  if (branchTopology) {
+    if (linearA) {
+      c.genericLinearA =
+          worldAxisA * tendonJointA.coefficient;
+      c.genericLinearB =
+          worldAxisB * tendonJointB.coefficient;
+    } else {
+      c.genericAngularA =
+          worldAxisA * tendonJointA.coefficient;
+      c.genericAngularB =
+          worldAxisB * tendonJointB.coefficient;
+    }
+  } else {
+    c.genericAngularA =
+        worldAxisA * tendonJointA.coefficient -
+        worldAxisB * tendonJointB.coefficient;
+    c.genericAngularB =
+        worldAxisB * tendonJointB.coefficient;
+  }
+  c.genericGeometricError =
+      tendonJointA.coefficient * coordinateA +
+      tendonJointB.coefficient * coordinateB +
+      tendon->mOffset - tendon->mRestLength;
+  c.genericTendonLowLimit =
+      limitActive ? tendon->mLowLimit - tendon->mRestLength : 0.0f;
+  c.genericTendonHighLimit =
+      limitActive ? tendon->mHighLimit - tendon->mRestLength : 0.0f;
+  c.genericTendonLimitStiffness =
+      tendon->mLimitStiffness * activeJointScale;
+  c.genericVelocityTarget = 0.0f;
+  c.genericMinImpulse = -PX_MAX_REAL;
+  c.genericMaxImpulse = PX_MAX_REAL;
+  c.genericReferencePositionA = linkA.bodyCore->body2World.p;
+  c.genericReferencePositionB = linkB.bodyCore->body2World.p;
+  c.genericReferenceRotationA = linkA.bodyCore->body2World.q;
+  c.genericReferenceRotationB = linkB.bodyCore->body2World.q;
+  c.genericRowFlags = 0;
+  ++numD6;
+  };
+  prepareFixedTendon();
+
+  // A spatial tendon produces one constraint per leaf. Intermediate
+  // attachments contribute to path length and its current linearization, but
+  // PhysX applies the opposing tendon forces only at the root attachment and
+  // the leaf attachment. This implementation admits a fixed articulation
+  // root with centered, single-DOF sibling endpoints; the endpoint DOFs may
+  // be angular or linear, while intermediate attachments may move.
+  auto prepareSpatialTendon =
+      [&](ArticulationSpatialTendon *spatialTendon) {
+    if (!spatialTendon || !d6Constraints)
+      return;
+    const PxU32 attachmentCount =
+        spatialTendon->getNumAttachments();
+    const bool limitActive =
+        PxIsFinite(spatialTendon->mLimitStiffness) &&
+        spatialTendon->mLimitStiffness > 0.0f;
+    if (attachmentCount < 2 || attachmentCount > 64 ||
+        !PxIsFinite(spatialTendon->mStiffness) ||
+        spatialTendon->mStiffness < 0.0f ||
+        !PxIsFinite(spatialTendon->mDamping) ||
+        spatialTendon->mDamping < 0.0f ||
+        !PxIsFinite(spatialTendon->mOffset) ||
+        !PxIsFinite(spatialTendon->mLimitStiffness) ||
+        spatialTendon->mLimitStiffness < 0.0f ||
+        (spatialTendon->mStiffness <= 0.0f && !limitActive))
+      return;
+
+    ArticulationAttachment *attachments =
+        spatialTendon->getAttachments();
+    const ArticulationAttachmentBitField validChildren =
+        attachmentCount == 64
+            ? ~ArticulationAttachmentBitField(0)
+            : (ArticulationAttachmentBitField(1) <<
+               attachmentCount) - 1;
+    PxU32 leafCount = 0;
+    for (PxU32 attachmentIndex = 0;
+         attachmentIndex < attachmentCount;
+         ++attachmentIndex) {
+      const ArticulationAttachment &attachment =
+          attachments[attachmentIndex];
+      if (attachment.linkInd >= linkCount ||
+          !artData.getLink(attachment.linkInd).bodyCore ||
+          !attachment.relativeOffset.isFinite() ||
+          !PxIsFinite(attachment.coefficient) ||
+          PxAbs(attachment.coefficient) < 1e-6f ||
+          (attachment.children & ~validChildren) != 0)
+        return;
+
+      PxU32 countedChildren = 0;
+      for (ArticulationAttachmentBitField children =
+               attachment.children;
+           children != 0; children &= children - 1) {
+        const PxU32 childIndex = PxLowestSetBit(children);
+        if (childIndex == attachmentIndex ||
+            attachments[childIndex].parent != attachmentIndex)
+          return;
+        ++countedChildren;
+      }
+      if (countedChildren != attachment.childCount)
+        return;
+
+      if (attachmentIndex == 0) {
+        if (attachment.parent !=
+                DY_ARTICULATION_ATTACHMENT_NONE ||
+            attachment.childCount == 0)
+          return;
+      } else {
+        if (attachment.parent >= attachmentCount ||
+            (attachments[attachment.parent].children &
+             (ArticulationAttachmentBitField(1) <<
+              attachmentIndex)) == 0)
+          return;
+        PxU32 ancestor = attachmentIndex;
+        for (PxU32 depth = 0; depth < attachmentCount; ++depth) {
+          ancestor = attachments[ancestor].parent;
+          if (ancestor == 0)
+            break;
+          if (ancestor >= attachmentCount)
+            return;
+        }
+        if (ancestor != 0)
+          return;
+      }
+
+      if (attachment.childCount == 0 &&
+          attachment.parent != DY_ARTICULATION_ATTACHMENT_NONE) {
+        if (!PxIsFinite(attachment.restLength) ||
+            (limitActive &&
+             (!PxIsFinite(attachment.lowLimit) ||
+              !PxIsFinite(attachment.highLimit) ||
+              attachment.lowLimit > attachment.highLimit)) ||
+            (!limitActive &&
+             (attachment.lowLimit != PX_MAX_F32 ||
+              attachment.highLimit != -PX_MAX_F32)))
+          return;
+        ++leafCount;
+      }
+    }
+    if (leafCount == 0)
+      return;
+
+    const ArticulationAttachment &rootAttachment =
+        attachments[0];
+    const ArticulationLink &rootEndpoint =
+        artData.getLink(rootAttachment.linkInd);
+    const ArticulationLink &articulationRoot =
+        artData.getLink(0);
+    if (rootAttachment.linkInd == 0 ||
+        rootEndpoint.parent != 0 ||
+        !articulationRoot.bodyCore ||
+        !articulationRoot.bodyCore->fixedBaseLink ||
+        !rootEndpoint.inboundJoint)
+      return;
+
+    auto findSingleFreeAxis =
+        [](const ArticulationJointCore &joint,
+           PxArticulationAxis::Enum &axis) -> bool {
+      axis = PxArticulationAxis::eCOUNT;
+      for (PxU32 axisIndex = 0;
+           axisIndex < PxArticulationAxis::eCOUNT;
+           ++axisIndex) {
+        if (joint.motion[axisIndex] ==
+            PxArticulationMotion::eLOCKED)
+          continue;
+        if (axis != PxArticulationAxis::eCOUNT ||
+            joint.motion[axisIndex] !=
+                PxArticulationMotion::eFREE)
+          return false;
+        axis =
+            static_cast<PxArticulationAxis::Enum>(axisIndex);
+      }
+      return axis < PxArticulationAxis::eCOUNT;
+    };
+
+    PxArticulationAxis::Enum rootAxis;
+    if (!findSingleFreeAxis(
+            *rootEndpoint.inboundJoint, rootAxis))
+      return;
+    PxVec3 worldAxisA(0.0f);
+    PxReal coordinateA = 0.0f;
+    bool linearAxisA = false;
+    if (!prepareHardMimicAxis(
+            *rootEndpoint.inboundJoint, rootAxis,
+            *articulationRoot.bodyCore, *rootEndpoint.bodyCore,
+            worldAxisA, coordinateA, linearAxisA))
+      return;
+
+    PxVec3 attachmentPoints[64];
+    for (PxU32 attachmentIndex = 0;
+         attachmentIndex < attachmentCount;
+         ++attachmentIndex) {
+      const ArticulationAttachment &attachment =
+          attachments[attachmentIndex];
+      const PxsBodyCore &body =
+          *artData.getLink(attachment.linkInd).bodyCore;
+      attachmentPoints[attachmentIndex] =
+          body.body2World.transform(attachment.relativeOffset);
+    }
+
+    const PxVec3 armA =
+        rootEndpoint.bodyCore->body2World.q.rotate(
+            rootAttachment.relativeOffset);
+    for (PxU32 leafIndex = 1;
+         leafIndex < attachmentCount;
+         ++leafIndex) {
+      const ArticulationAttachment &leaf =
+          attachments[leafIndex];
+      if (leaf.childCount != 0)
+        continue;
+      if (numD6 >= maxD6)
+        return;
+
+      const ArticulationLink &leafEndpoint =
+          artData.getLink(leaf.linkInd);
+      if (leaf.linkInd == 0 ||
+          leaf.linkInd == rootAttachment.linkInd ||
+          leafEndpoint.parent != 0 ||
+          !leafEndpoint.inboundJoint)
+        continue;
+      PxArticulationAxis::Enum leafAxis;
+      if (!findSingleFreeAxis(
+              *leafEndpoint.inboundJoint, leafAxis))
+        continue;
+      PxVec3 worldAxisB(0.0f);
+      PxReal coordinateB = 0.0f;
+      bool linearAxisB = false;
+      if (!prepareHardMimicAxis(
+              *leafEndpoint.inboundJoint, leafAxis,
+              *articulationRoot.bodyCore, *leafEndpoint.bodyCore,
+              worldAxisB, coordinateB, linearAxisB))
+        continue;
+
+      PxReal length =
+          rootAttachment.coefficient *
+          spatialTendon->mOffset;
+      PxU32 currentIndex = leafIndex;
+      PxU32 firstChildIndex = leafIndex;
+      bool pathValid = true;
+      while (currentIndex != 0) {
+        const ArticulationAttachment &current =
+            attachments[currentIndex];
+        const PxU32 parentIndex = current.parent;
+        const PxVec3 segment =
+            attachmentPoints[currentIndex] -
+            attachmentPoints[parentIndex];
+        const PxReal distance = segment.magnitude();
+        if (!(distance > 1e-4f) || !PxIsFinite(distance)) {
+          pathValid = false;
+          break;
+        }
+        length += current.coefficient * distance;
+        if (parentIndex == 0)
+          firstChildIndex = currentIndex;
+        currentIndex = parentIndex;
+      }
+      if (!pathValid || !PxIsFinite(length))
+        continue;
+
+      const PxVec3 rootSegment =
+          attachmentPoints[0] -
+          attachmentPoints[firstChildIndex];
+      const PxVec3 leafSegment =
+          attachmentPoints[leafIndex] -
+          attachmentPoints[leaf.parent];
+      const PxReal rootDistance = rootSegment.magnitude();
+      const PxReal leafDistance = leafSegment.magnitude();
+      if (!(rootDistance > 1e-4f) ||
+          !(leafDistance > 1e-4f) ||
+          !PxIsFinite(rootDistance) ||
+          !PxIsFinite(leafDistance))
+        continue;
+
+      const PxVec3 linearJacobianA =
+          rootSegment *
+          (attachments[firstChildIndex].coefficient /
+           rootDistance);
+      const PxVec3 linearJacobianB =
+          leafSegment * (leaf.coefficient / leafDistance);
+      const PxVec3 armB =
+          leafEndpoint.bodyCore->body2World.q.rotate(
+              leaf.relativeOffset);
+      const PxVec3 angularJacobianA =
+          armA.cross(linearJacobianA);
+      const PxVec3 angularJacobianB =
+          armB.cross(linearJacobianB);
+
+      AvbdD6JointConstraint &spatialRow =
+          d6Constraints[numD6];
+      spatialRow.initDefaults();
+      spatialRow.header.type =
+          AvbdConstraintType::eJOINT_CUSTOM_1D;
+      spatialRow.header.bodyIndexA =
+          firstBodyIndex + rootAttachment.linkInd;
+      spatialRow.header.bodyIndexB =
+          firstBodyIndex + leaf.linkInd;
+      spatialRow.header.rho = spatialTendon->mStiffness;
+      spatialRow.header.compliance = 0.0f;
+      spatialRow.header.damping = spatialTendon->mDamping;
+      spatialRow.linearMotion = 0x2A;
+      spatialRow.angularMotion = 0x2A;
+      spatialRow.sourceFlags |=
+          AvbdD6JointConstraint::
+              eARTICULATION_SPATIAL_TENDON_ROW;
+      if (linearAxisA)
+        spatialRow.genericLinearA =
+            worldAxisA * linearJacobianA.dot(worldAxisA);
+      else
+        spatialRow.genericAngularA =
+            worldAxisA * angularJacobianA.dot(worldAxisA);
+      if (linearAxisB)
+        spatialRow.genericLinearB =
+            worldAxisB * linearJacobianB.dot(worldAxisB);
+      else
+        spatialRow.genericAngularB =
+            worldAxisB * angularJacobianB.dot(worldAxisB);
+      if (spatialRow.genericLinearA.magnitudeSquared() +
+              spatialRow.genericAngularA.magnitudeSquared() <=
+              1e-12f ||
+          spatialRow.genericLinearB.magnitudeSquared() +
+              spatialRow.genericAngularB.magnitudeSquared() <=
+              1e-12f)
+        continue;
+
+      spatialRow.genericGeometricError =
+          length - leaf.restLength;
+      spatialRow.genericTendonLowLimit =
+          limitActive
+              ? leaf.lowLimit - leaf.restLength
+              : 0.0f;
+      spatialRow.genericTendonHighLimit =
+          limitActive
+              ? leaf.highLimit - leaf.restLength
+              : 0.0f;
+      spatialRow.genericTendonLimitStiffness =
+          spatialTendon->mLimitStiffness;
+      spatialRow.genericVelocityTarget = 0.0f;
+      spatialRow.genericMinImpulse = -PX_MAX_REAL;
+      spatialRow.genericMaxImpulse = PX_MAX_REAL;
+      spatialRow.genericReferencePositionA =
+          rootEndpoint.bodyCore->body2World.p;
+      spatialRow.genericReferencePositionB =
+          leafEndpoint.bodyCore->body2World.p;
+      spatialRow.genericReferenceRotationA =
+          rootEndpoint.bodyCore->body2World.q;
+      spatialRow.genericReferenceRotationB =
+          leafEndpoint.bodyCore->body2World.q;
+      spatialRow.genericRowFlags = 0;
+      ++numD6;
+    }
+  };
+  for (PxU32 tendonIndex = 0;
+       tendonIndex < artData.getSpatialTendonCount();
+       ++tendonIndex)
+    prepareSpatialTendon(
+        artData.getSpatialTendon(tendonIndex));
 }
 
 void AvbdDynamicsContext::solveIsland(const IG::IslandSim &islandSim, PxReal dt,

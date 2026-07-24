@@ -236,6 +236,9 @@ bool test9_tenBoxTower() {
         solver.addBody({0, 1.0f + 2.0f * i, 0}, Quat(), halfExt, 10.0f, 0.5f);
 
   ContactCache cache;
+  bool candidatePcgOk = true;
+  int candidateMaxPcgIterations = 0;
+  double candidateWorstPcgResidual = 0.0;
   for (int frame = 0; frame < 360; frame++) {
     solver.contacts.clear();
     addBoxGroundContacts(solver, boxIds[0], halfExt);
@@ -244,6 +247,38 @@ bool test9_tenBoxTower() {
     cache.restore(solver);
     solver.step(solver.dt);
     cache.save(solver);
+    if (solver.useContactIslandPcgProbe) {
+      candidatePcgOk = candidatePcgOk &&
+                       solver.contactIslandPcgLastStats.converged &&
+                       !solver.contactIslandPcgLastStats.breakdown &&
+                       solver.contactIslandPcgLastStats.finite;
+      candidateMaxPcgIterations =
+          std::max(candidateMaxPcgIterations,
+                   solver.contactIslandPcgLastStats.iterations);
+      candidateWorstPcgResidual =
+          std::max(candidateWorstPcgResidual,
+                   solver.contactIslandPcgLastStats
+                       .finalPreconditionedResidual);
+    }
+  }
+
+  if (solver.useContactIslandPcgProbe) {
+    float maxHeightError = 0.0f;
+    float minBottom = INFINITY;
+    for (int i = 0; i < N; ++i) {
+      maxHeightError =
+          std::max(maxHeightError,
+                   std::fabs(solver.bodies[boxIds[i]].position.y -
+                             (1.0f + 2.0f * i)));
+      minBottom =
+          std::min(minBottom, solver.bodies[boxIds[i]].position.y - 1.0f);
+    }
+    printf("[ContactCandidateTower] maxHeightError=%.7g minBottom=%.7g "
+           "topY=%.7g pcg=(%d,%d,%.7g)\n",
+           maxHeightError, minBottom,
+           solver.bodies[boxIds[N - 1]].position.y,
+           candidatePcgOk ? 1 : 0, candidateMaxPcgIterations,
+           candidateWorstPcgResidual);
   }
 
   for (int i = 0; i < N; i++) {

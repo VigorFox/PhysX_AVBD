@@ -16,6 +16,8 @@ if %errorlevel% neq 0 (
 
 echo Build SUCCESS. Running tests...
 avbd_test.exe
+set "testExit=%errorlevel%"
 
 echo Cleaning up...
 del /q *.obj 2>nul
+exit /b %testExit%

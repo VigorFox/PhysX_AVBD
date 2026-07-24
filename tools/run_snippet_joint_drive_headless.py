@@ -1,0 +1,1127 @@
+#!/usr/bin/env python3
+"""Run SnippetJointDrive headless matrices without shell argument expansion.
+
+Every child is launched with an explicit argv list, ``--headless``, the
+``PHYSX_SNIPPET_HEADLESS`` environment sentinel, and (on Windows)
+``CREATE_NO_WINDOW``, ``SW_HIDE``, and a kill-on-close Job Object.  The runner
+polls for visible child windows, terminates the process tree, and aborts the
+matrix if one appears.
+A run is accepted only when it emits exactly one machine-readable
+``[AVBD_GATE]`` authority line with the expected status, reason, exit code,
+frame count, and clean runtime diagnostics.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Iterable
+
+from snippet_headless_process import (
+    run_headless_process,
+    windows_creation_flags,
+    windows_startup_info,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_EXE = (
+    REPO_ROOT
+    / "physx"
+    / "bin"
+    / "win.x86_64.vc143.md"
+    / "checked"
+    / "SnippetJointDrive_64.exe"
+)
+
+
+@dataclass(frozen=True)
+class RunSpec:
+    name: str
+    args: tuple[str, ...]
+    expected_status: str = "PASS"
+    expected_reason: str = "none"
+
+
+@dataclass
+class RunResult:
+    name: str
+    command: list[str]
+    expected_status: str
+    expected_reason: str
+    actual_status: str
+    actual_reason: str
+    exit_code: int | None
+    authority_count: int
+    timed_out: bool
+    visible_window_detected: bool
+    visible_window_titles: list[str]
+    executable_sha256_before: str
+    executable_sha256_after: str
+    residual_process: bool
+    passed: bool
+    errors: list[str]
+    log: str
+
+
+def common_args(solver: str, execution: str) -> list[str]:
+    return [f"--solver={solver}", f"--execution={execution}"]
+
+
+def angular_position_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("pgs", "parallel"),
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for solver, execution in lanes:
+        for endpoint in ("forward", "reverse"):
+            for initial in ("identity", "driven-pos20"):
+                for rate_name, dt, frames in rates:
+                    name = (
+                        f"angular-position-{solver}-{execution}-{endpoint}-"
+                        f"{initial}-{rate_name}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=angular-position",
+                        "--drive=twist",
+                        f"--endpoint={endpoint}",
+                        f"--initial-relative={initial}",
+                        "--frame-a=rotz-neg45",
+                        "--frame-b=identity",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def angular_swing1_position_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("pgs", "parallel"),
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for solver, execution in lanes:
+        for endpoint in ("forward", "reverse"):
+            for initial in ("identity", "driven-pos20"):
+                for rate_name, dt, frames in rates:
+                    name = (
+                        f"angular-swing1-position-{solver}-{execution}-{endpoint}-"
+                        f"{initial}-{rate_name}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=angular-position",
+                        "--drive=swing1",
+                        f"--endpoint={endpoint}",
+                        f"--initial-relative={initial}",
+                        "--frame-a=rotz-neg45",
+                        "--frame-b=identity",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def angular_swing2_position_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("pgs", "parallel"),
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for solver, execution in lanes:
+        for endpoint in ("forward", "reverse"):
+            for initial in ("identity", "driven-pos20"):
+                for rate_name, dt, frames in rates:
+                    name = (
+                        f"angular-swing2-position-{solver}-{execution}-{endpoint}-"
+                        f"{initial}-{rate_name}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=angular-position",
+                        "--drive=swing2",
+                        f"--endpoint={endpoint}",
+                        f"--initial-relative={initial}",
+                        "--frame-a=rotx-neg45",
+                        "--frame-b=identity",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def angular_slerp_position_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("pgs", "parallel"),
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for solver, execution in lanes:
+        for endpoint in ("forward", "reverse"):
+            for initial in ("identity", "driven-pos20"):
+                for rate_name, dt, frames in rates:
+                    name = (
+                        f"angular-slerp-position-{solver}-{execution}-{endpoint}-"
+                        f"{initial}-{rate_name}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=angular-position",
+                        "--drive=slerp",
+                        f"--endpoint={endpoint}",
+                        f"--initial-relative={initial}",
+                        "--frame-a=rotx-neg45",
+                        "--frame-b=identity",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def dynamic_angular_position_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    drives = (
+        ("twist", "rotz-neg45"),
+        ("swing1", "rotz-neg45"),
+        ("swing2", "rotx-neg45"),
+        ("slerp", "rotx-neg45"),
+    )
+    specs: list[RunSpec] = []
+    for drive, frame_a in drives:
+        for endpoint in ("forward", "reverse"):
+            for mass in ("1", "10"):
+                for limit in ("low", "high"):
+                    for rate_name, dt, frames in rates:
+                        for solver, execution in lanes:
+                            name = (
+                                f"dynamic-angular-position-{drive}-{endpoint}-"
+                                f"mass{mass}-{limit}-{rate_name}-{solver}-"
+                                f"{execution}"
+                            )
+                            args = common_args(solver, execution) + [
+                                "--case=angular-position",
+                                f"--drive={drive}",
+                                f"--endpoint={endpoint}",
+                                "--topology=dynamic-dynamic",
+                                f"--mass={mass}",
+                                f"--limit={limit}",
+                                "--initial-relative=identity",
+                                f"--frame-a={frame_a}",
+                                "--frame-b=identity",
+                                f"--dt={dt}",
+                                f"--frames={frames}",
+                            ]
+                            specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def dynamic_angular_position12_specs() -> list[RunSpec]:
+    return [
+        spec
+        for spec in dynamic_angular_position_specs()
+        if "-twist-" in spec.name
+        and "-low-" in spec.name
+        and "-60hz-" in spec.name
+    ]
+
+
+def dynamic_angular_slerp72_specs() -> list[RunSpec]:
+    return [
+        spec
+        for spec in dynamic_angular_position_specs()
+        if "-slerp-" in spec.name
+    ]
+
+
+def position42_specs() -> list[RunSpec]:
+    configs = (
+        ("x", "static", "identity", "identity"),
+        ("twist", "static", "identity", "identity"),
+        ("swing1", "static", "identity", "identity"),
+        ("swing2", "static", "identity", "identity"),
+        ("slerp", "static", "identity", "identity"),
+        ("x", "kinematic", "rotz-neg45", "rotz-neg45"),
+        ("slerp", "kinematic", "rotz-neg45", "rotz-neg45"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for drive, actor_a, frame_a, frame_b in configs:
+        for initial in ("identity", "driven-pos20"):
+            for solver, execution in lanes:
+                supported = (
+                    solver == "tgs"
+                    or drive == "x"
+                    or drive == "twist"
+                    or drive == "swing1"
+                    or drive == "swing2"
+                    or drive == "slerp"
+                )
+                status = "PASS" if supported else "FAIL"
+                reason = "none" if supported else "position_target_not_tracked"
+                name = (
+                    f"position-{drive}-{actor_a}-{initial}-{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=position",
+                    f"--drive={drive}",
+                    "--drive-mode=force",
+                    f"--actor-a={actor_a}",
+                    f"--frame-a={frame_a}",
+                    f"--frame-b={frame_b}",
+                    f"--initial-relative={initial}",
+                    "--frames=180",
+                ]
+                specs.append(RunSpec(name, tuple(args), status, reason))
+    return specs
+
+
+def repeated_lanes() -> tuple[tuple[str, str, int], ...]:
+    return (
+        ("avbd", "parallel", 1),
+        ("avbd", "parallel", 2),
+        ("avbd", "parallel", 3),
+        ("avbd", "parallel", 4),
+        ("avbd", "parallel", 5),
+        ("avbd", "sequential", 1),
+        ("tgs", "parallel", 1),
+    )
+
+
+def velocity154_specs() -> list[RunSpec]:
+    configs = (
+        ("x", "static", "identity", "identity", "identity"),
+        ("y", "static", "identity", "identity", "identity"),
+        ("z", "static", "identity", "identity", "identity"),
+        ("twist", "static", "identity", "identity", "identity"),
+        ("swing1", "static", "identity", "identity", "identity"),
+        ("swing2", "static", "identity", "identity", "identity"),
+        ("slerp", "static", "identity", "identity", "identity"),
+        ("x", "kinematic", "rotz-neg45", "identity", "identity"),
+        ("twist", "static", "rotz-neg45", "rotz-neg45", "identity"),
+        ("swing1", "static", "rotz-neg45", "identity", "rotz-neg45"),
+        ("swing2", "static", "rotz-neg45", "rotz-neg45", "rotz-neg45"),
+        ("slerp", "kinematic", "rotz-neg45", "identity", "rotz-neg45"),
+    )
+    specs: list[RunSpec] = []
+    for index, config in enumerate(configs, start=1):
+        drive, actor_a, frame_a, frame_b, body_b = config
+        for solver, execution, seed in repeated_lanes():
+            name = f"velocity-{index:02d}-{solver}-{execution}-seed{seed}"
+            args = common_args(solver, execution) + [
+                "--case=velocity",
+                f"--drive={drive}",
+                f"--actor-a={actor_a}",
+                f"--frame-a={frame_a}",
+                f"--frame-b={frame_b}",
+                f"--body-b-rotation={body_b}",
+                "--frames=180",
+                f"--seed={seed}",
+            ]
+            specs.append(RunSpec(name, tuple(args)))
+
+    for endpoint in ("forward", "reverse"):
+        for solver, execution, seed in repeated_lanes():
+            name = f"velocity-ordering-{endpoint}-{solver}-{execution}-seed{seed}"
+            args = common_args(solver, execution) + [
+                "--case=velocity-ordering",
+                "--drive=x",
+                f"--endpoint={endpoint}",
+                "--frames=180",
+                f"--seed={seed}",
+            ]
+            specs.append(RunSpec(name, tuple(args)))
+
+    for drive in ("twist", "swing1", "swing2", "slerp"):
+        for endpoint in ("forward", "reverse"):
+            for solver, execution, seed in repeated_lanes():
+                name = (
+                    f"angular-ordering-{drive}-{endpoint}-{solver}-"
+                    f"{execution}-seed{seed}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=angular-ordering",
+                    f"--drive={drive}",
+                    f"--endpoint={endpoint}",
+                    "--frames=180",
+                    f"--seed={seed}",
+                ]
+                specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def comparison30_specs() -> list[RunSpec]:
+    selectors = (
+        ("mass-scaling", "--drive-mode=force", "--mass=1", False),
+        ("acceleration-mode", "--drive-mode=acceleration", "--mass=1", False),
+        ("force-limit", "--drive-mode=force", "--limit=high", False),
+        ("mass-scaling", "--drive-mode=force", "--mass=10", True),
+        ("acceleration-mode", "--drive-mode=acceleration", "--mass=10", True),
+        ("force-limit", "--drive-mode=force", "--limit=low", True),
+    )
+    specs: list[RunSpec] = []
+    for case, mode, selector, capability in selectors:
+        lanes = (
+            repeated_lanes()
+            if capability
+            else (
+                ("tgs", "parallel", 1),
+                ("avbd", "parallel", 1),
+                ("avbd", "sequential", 1),
+            )
+        )
+        for solver, execution, seed in lanes:
+            name = (
+                f"comparison-{case}-{selector.removeprefix('--').replace('=', '-')}-"
+                f"{solver}-{execution}-seed{seed}"
+            )
+            args = common_args(solver, execution) + [
+                f"--case={case}",
+                "--drive=x",
+                mode,
+                selector,
+                "--frames=180",
+                f"--seed={seed}",
+            ]
+            specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def soak2_specs() -> list[RunSpec]:
+    return [
+        RunSpec(
+            "soak-velocity-x-static-identity",
+            tuple(
+                common_args("avbd", "parallel")
+                + [
+                    "--case=velocity",
+                    "--drive=x",
+                    "--actor-a=static",
+                    "--frame-a=identity",
+                    "--frame-b=identity",
+                    "--body-b-rotation=identity",
+                    "--frames=10000",
+                ]
+            ),
+        ),
+        RunSpec(
+            "soak-velocity-slerp-kinematic-rotated",
+            tuple(
+                common_args("avbd", "parallel")
+                + [
+                    "--case=velocity",
+                    "--drive=slerp",
+                    "--actor-a=kinematic",
+                    "--frame-a=rotz-neg45",
+                    "--frame-b=identity",
+                    "--body-b-rotation=rotz-neg45",
+                    "--frames=10000",
+                ]
+            ),
+        ),
+    ]
+
+
+def legacy228_specs() -> list[RunSpec]:
+    return velocity154_specs() + position42_specs() + comparison30_specs() + soak2_specs()
+
+
+def position72_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for mass in ("1", "10"):
+            for limit in ("high", "low"):
+                for rate_name, dt, frames in rates:
+                    for solver, execution in lanes:
+                        name = (
+                            f"position-direct-{endpoint}-mass{mass}-{limit}-"
+                            f"{rate_name}-{solver}-{execution}"
+                        )
+                        args = common_args(solver, execution) + [
+                            "--case=position",
+                            "--drive=x",
+                            "--drive-mode=force",
+                            f"--endpoint={endpoint}",
+                            f"--mass={mass}",
+                            f"--limit={limit}",
+                            f"--dt={dt}",
+                            f"--frames={frames}",
+                        ]
+                        specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def dynamic36_specs() -> list[RunSpec]:
+    selectors = (
+        ("mass-scaling", "--drive-mode=force", "--mass=1", False),
+        ("mass-scaling", "--drive-mode=force", "--mass=10", False),
+        ("acceleration-mode", "--drive-mode=acceleration", "--mass=1", False),
+        ("acceleration-mode", "--drive-mode=acceleration", "--mass=10", False),
+        ("force-limit", "--drive-mode=force", "--limit=high", False),
+        ("force-limit", "--drive-mode=force", "--limit=low", False),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for case, mode, selector, avbd_expected_failure in selectors:
+        for endpoint in ("forward", "reverse"):
+            for solver, execution in lanes:
+                expected_failure = avbd_expected_failure and solver == "avbd"
+                status = "FAIL" if expected_failure else "PASS"
+                reason = (
+                    "acceleration_drive_not_distinct"
+                    if expected_failure
+                    else "none"
+                )
+                name = (
+                    f"dynamic-{case}-{selector.removeprefix('--').replace('=', '-')}-"
+                    f"{endpoint}-{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    f"--case={case}",
+                    "--drive=x",
+                    mode,
+                    selector,
+                    "--topology=dynamic-dynamic",
+                    f"--endpoint={endpoint}",
+                    "--frames=180",
+                ]
+                specs.append(RunSpec(name, tuple(args), status, reason))
+    return specs
+
+
+def contact72_specs() -> list[RunSpec]:
+    selectors = (
+        ("mass-scaling", "--mass=1"),
+        ("mass-scaling", "--mass=10"),
+        ("force-limit", "--limit=high"),
+        ("force-limit", "--limit=low"),
+    )
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for case, selector in selectors:
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-{case}-{selector.removeprefix('--').replace('=', '-')}-"
+                        f"{endpoint}-{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        f"--case={case}",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        selector,
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_acceleration36_specs() -> list[RunSpec]:
+    selectors = (
+        ("mass1", "--mass=1"),
+        ("mass10", "--mass=10"),
+    )
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for selector_name, selector in selectors:
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-acceleration-{selector_name}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=acceleration-mode",
+                        "--drive=x",
+                        "--drive-mode=acceleration",
+                        selector,
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_acceleration_limit18_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for rate_name, dt, frames in rates:
+            for solver, execution in lanes:
+                name = (
+                    f"contact-acceleration-limit-low-{endpoint}-"
+                    f"{rate_name}-{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=acceleration-mode",
+                    "--drive=x",
+                    "--drive-mode=acceleration",
+                    "--mass=1",
+                    "--limit=low",
+                    "--topology=contact-dynamic-dynamic",
+                    f"--endpoint={endpoint}",
+                    f"--dt={dt}",
+                    f"--frames={frames}",
+                ]
+                specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def dynamic_acceleration_limit18_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for rate_name, dt, frames in rates:
+            for solver, execution in lanes:
+                name = (
+                    f"dynamic-acceleration-limit-low-{endpoint}-"
+                    f"{rate_name}-{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=acceleration-mode",
+                    "--drive=x",
+                    "--drive-mode=acceleration",
+                    "--mass=1",
+                    "--limit=low",
+                    "--topology=dynamic-dynamic",
+                    f"--endpoint={endpoint}",
+                    f"--dt={dt}",
+                    f"--frames={frames}",
+                ]
+                specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def linear_output72_specs() -> list[RunSpec]:
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for output in ("on", "off"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"linear-output-nobreak-{endpoint}-{output}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=output-force",
+                        "--drive=x",
+                        f"--endpoint={endpoint}",
+                        f"--output-force={output}",
+                        "--break=none",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    for endpoint in ("forward", "reverse"):
+        for output in ("on", "off"):
+            for break_mode in ("none", "below", "above"):
+                for solver, execution in lanes:
+                    name = (
+                        f"linear-output-breakmatrix-{endpoint}-{output}-"
+                        f"{break_mode}-60hz-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=output-force",
+                        "--drive=x",
+                        f"--endpoint={endpoint}",
+                        f"--output-force={output}",
+                        f"--break={break_mode}",
+                        "--dt=0.0166666675",
+                        "--frames=180",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def angular_output432_specs() -> list[RunSpec]:
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    rates = (
+        ("30hz", "0.0333333351", "90"),
+        ("60hz", "0.0166666675", "180"),
+        ("120hz", "0.00833333377", "360"),
+    )
+    specs: list[RunSpec] = []
+    for drive in ("twist", "swing1", "swing2", "slerp"):
+        for endpoint in ("forward", "reverse"):
+            for output in ("on", "off"):
+                for break_mode in ("none", "below", "above"):
+                    for rate_name, dt, frames in rates:
+                        for solver, execution in lanes:
+                            name = (
+                                f"angular-output-{drive}-{endpoint}-{output}-"
+                                f"{break_mode}-{rate_name}-{solver}-{execution}"
+                            )
+                            args = common_args(solver, execution) + [
+                                "--case=angular-output-force",
+                                f"--drive={drive}",
+                                f"--endpoint={endpoint}",
+                                f"--output-force={output}",
+                                f"--break={break_mode}",
+                                f"--dt={dt}",
+                                f"--frames={frames}",
+                            ]
+                            specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+SUITES = {
+    "smoke": lambda: [
+        RunSpec(
+            "smoke-angular-position-avbd-parallel-60hz",
+            tuple(
+                common_args("avbd", "parallel")
+                + [
+                    "--case=angular-position",
+                    "--drive=twist",
+                    "--endpoint=forward",
+                    "--initial-relative=identity",
+                    "--frame-a=rotz-neg45",
+                    "--frame-b=identity",
+                    "--dt=0.0166666675",
+                    "--frames=180",
+                ]
+            ),
+        )
+    ],
+    "angular-position48": angular_position_specs,
+    "angular-swing1-position48": angular_swing1_position_specs,
+    "angular-swing2-position48": angular_swing2_position_specs,
+    "angular-slerp-position48": angular_slerp_position_specs,
+    "dynamic-angular-position12": dynamic_angular_position12_specs,
+    "dynamic-angular-position288": dynamic_angular_position_specs,
+    "dynamic-angular-slerp72": dynamic_angular_slerp72_specs,
+    "angular-output432": angular_output432_specs,
+    "contact72": contact72_specs,
+    "contact-acceleration36": contact_acceleration36_specs,
+    "contact-acceleration-limit18": contact_acceleration_limit18_specs,
+    "dynamic36": dynamic36_specs,
+    "dynamic-acceleration-limit18": dynamic_acceleration_limit18_specs,
+    "legacy228": legacy228_specs,
+    "linear-output72": linear_output72_specs,
+    "position42": position42_specs,
+    "position72": position72_specs,
+    "velocity154": velocity154_specs,
+}
+
+
+def parse_authority(line: str) -> tuple[dict[str, str], list[str]]:
+    fields: dict[str, str] = {}
+    errors: list[str] = []
+    for token in line.split()[1:]:
+        if "=" not in token:
+            errors.append(f"malformed authority token: {token}")
+            continue
+        key, value = token.split("=", 1)
+        if key in fields:
+            errors.append(f"duplicate authority key: {key}")
+        fields[key] = value
+    return fields, errors
+
+
+def requested_frames(args: Iterable[str]) -> str | None:
+    values = [arg.split("=", 1)[1] for arg in args if arg.startswith("--frames=")]
+    return values[0] if len(values) == 1 else None
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest().upper()
+
+
+def process_is_running(image_name: str, creationflags: int) -> bool:
+    if os.name != "nt":
+        return False
+    check = subprocess.run(
+        ["tasklist.exe", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        creationflags=creationflags,
+        startupinfo=windows_startup_info(),
+        shell=False,
+    )
+    return image_name.casefold() in check.stdout.casefold()
+
+
+def run_one(
+    executable: Path,
+    output_root: Path,
+    spec: RunSpec,
+    timeout_seconds: float,
+) -> RunResult:
+    argv = [str(executable), "--headless", *spec.args]
+    log_path = output_root / f"{spec.name}.log"
+    environment = os.environ.copy()
+    environment["PHYSX_SNIPPET_HEADLESS"] = "1"
+    creationflags = windows_creation_flags()
+    before_hash = sha256(executable)
+    timed_out = False
+    exit_code: int | None = None
+    stdout = ""
+    stderr = ""
+    completed = run_headless_process(
+        argv,
+        cwd=executable.parent,
+        env=environment,
+        timeout_seconds=timeout_seconds,
+    )
+    exit_code = completed.returncode
+    stdout = completed.stdout
+    stderr = completed.stderr
+    timed_out = completed.timed_out
+
+    authority_lines = [
+        line.strip()
+        for line in stdout.splitlines()
+        if line.startswith("[AVBD_GATE] ")
+    ]
+    fields: dict[str, str] = {}
+    errors: list[str] = []
+    if timed_out:
+        errors.append(f"timeout after {timeout_seconds:g} seconds")
+    if completed.visible_window_detected:
+        errors.append(
+            "visible child window detected; process tree terminated: "
+            + ", ".join(completed.visible_window_titles)
+        )
+    if len(authority_lines) != 1:
+        errors.append(f"authority count is {len(authority_lines)}, expected 1")
+    else:
+        fields, parse_errors = parse_authority(authority_lines[0])
+        errors.extend(parse_errors)
+
+    actual_status = fields.get("status", "MISSING")
+    actual_reason = fields.get("reason", "missing")
+    expected_exit = 0 if spec.expected_status == "PASS" else 1
+    if exit_code != expected_exit:
+        errors.append(f"exit code {exit_code}, expected {expected_exit}")
+    if actual_status != spec.expected_status:
+        errors.append(
+            f"status {actual_status}, expected {spec.expected_status}"
+        )
+    if actual_reason != spec.expected_reason:
+        errors.append(
+            f"reason {actual_reason}, expected {spec.expected_reason}"
+        )
+    if fields.get("snippet") != "SnippetJointDrive":
+        errors.append(f"snippet {fields.get('snippet', 'MISSING')}")
+    if fields.get("case") == "config-error":
+        errors.append("headless invocation was rejected as config-error")
+    frames = requested_frames(spec.args)
+    if frames is None:
+        errors.append("run spec must contain exactly one --frames selector")
+    else:
+        if fields.get("requestedFrames") != frames:
+            errors.append(
+                f"requestedFrames {fields.get('requestedFrames', 'MISSING')}, "
+                f"expected {frames}"
+            )
+        if fields.get("completedFrames") != frames:
+            errors.append(
+                f"completedFrames {fields.get('completedFrames', 'MISSING')}, "
+                f"expected {frames}"
+            )
+    for key in (
+        "nonFinite",
+        "physicsErrors",
+        "physicsWarnings",
+        "fetchFailures",
+        "fetchErrorState",
+    ):
+        if fields.get(key) != "0":
+            errors.append(f"{key}={fields.get(key, 'MISSING')}, expected 0")
+    if stderr:
+        errors.append(f"stderr is not empty ({len(stderr.encode('utf-8'))} bytes)")
+
+    after_hash = sha256(executable)
+    if after_hash != before_hash:
+        errors.append("executable SHA-256 changed during the run")
+    residual_process = process_is_running(executable.name, creationflags)
+    if residual_process:
+        errors.append(f"residual process detected: {executable.name}")
+
+    command_text = subprocess.list2cmdline(argv)
+    log_text = (
+        f"COMMAND: {command_text}\n"
+        f"HEADLESS_ENV: PHYSX_SNIPPET_HEADLESS=1\n"
+        f"CREATE_NO_WINDOW: {int(os.name == 'nt')}\n"
+        f"STARTUPINFO_SW_HIDE: {int(os.name == 'nt')}\n"
+        f"KILL_ON_JOB_CLOSE: {int(os.name == 'nt')}\n"
+        f"VISIBLE_WINDOW_DETECTED: {int(completed.visible_window_detected)}\n"
+        "VISIBLE_WINDOW_TITLES: "
+        + (", ".join(completed.visible_window_titles) or "none")
+        + "\n"
+        f"EXECUTABLE_SHA256_BEFORE: {before_hash}\n"
+        f"EXECUTABLE_SHA256_AFTER: {after_hash}\n"
+        f"EXPECTED: status={spec.expected_status} reason={spec.expected_reason}\n"
+        f"EXIT_CODE: {exit_code}\n"
+        f"TIMED_OUT: {int(timed_out)}\n"
+        f"RESIDUAL_PROCESS: {int(residual_process)}\n"
+        "--- STDOUT ---\n"
+        f"{stdout}"
+        "\n--- STDERR ---\n"
+        f"{stderr}"
+        "\n--- RUNNER ERRORS ---\n"
+        + ("\n".join(errors) if errors else "none")
+        + "\n"
+    )
+    log_path.write_text(log_text, encoding="utf-8")
+    return RunResult(
+        name=spec.name,
+        command=argv,
+        expected_status=spec.expected_status,
+        expected_reason=spec.expected_reason,
+        actual_status=actual_status,
+        actual_reason=actual_reason,
+        exit_code=exit_code,
+        authority_count=len(authority_lines),
+        timed_out=timed_out,
+        visible_window_detected=completed.visible_window_detected,
+        visible_window_titles=list(completed.visible_window_titles),
+        executable_sha256_before=before_hash,
+        executable_sha256_after=after_hash,
+        residual_process=residual_process,
+        passed=not errors,
+        errors=errors,
+        log=str(log_path),
+    )
+
+
+def make_output_root(requested: Path | None) -> Path:
+    if requested is not None:
+        root = requested.resolve()
+    else:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        root = Path(tempfile.gettempdir()) / f"PhysX_AVBD_jointdrive_headless_{stamp}"
+    root.mkdir(parents=True, exist_ok=False)
+    return root
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--suite",
+        action="append",
+        choices=sorted(SUITES),
+        help="Named matrix; may be repeated (default: smoke).",
+    )
+    parser.add_argument("--exe", type=Path, default=DEFAULT_EXE)
+    parser.add_argument("--output-root", type=Path)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--list-suites", action="store_true")
+    options = parser.parse_args()
+
+    if options.list_suites:
+        for name in sorted(SUITES):
+            print(name)
+        return 0
+    if options.timeout <= 0:
+        parser.error("--timeout must be positive")
+
+    executable = options.exe.resolve()
+    if not executable.is_file():
+        parser.error(f"executable does not exist: {executable}")
+    suites = options.suite or ["smoke"]
+    specs: list[RunSpec] = []
+    for suite in suites:
+        specs.extend(SUITES[suite]())
+    names = [spec.name for spec in specs]
+    if len(names) != len(set(names)):
+        parser.error("selected suites contain duplicate run names")
+
+    output_root = make_output_root(options.output_root)
+    print(f"ARTIFACT_ROOT={output_root}", flush=True)
+    print(f"RUN_COUNT={len(specs)}", flush=True)
+    results: list[RunResult] = []
+    for index, spec in enumerate(specs, start=1):
+        result = run_one(executable, output_root, spec, options.timeout)
+        results.append(result)
+        outcome = "OK" if result.passed else "BAD"
+        print(
+            f"[{index:03d}/{len(specs):03d}] {outcome} {spec.name} "
+            f"status={result.actual_status} reason={result.actual_reason} "
+            f"exit={result.exit_code}",
+            flush=True,
+        )
+        if not result.passed:
+            for error in result.errors:
+                print(f"  {error}", flush=True)
+        if result.visible_window_detected:
+            print("ABORTED: visible snippet window detected", flush=True)
+            break
+
+    summary_json = output_root / "summary.json"
+    summary_json.write_text(
+        json.dumps([asdict(result) for result in results], indent=2),
+        encoding="utf-8",
+    )
+    with (output_root / "summary.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=(
+                "name",
+                "expected_status",
+                "expected_reason",
+                "actual_status",
+                "actual_reason",
+                "exit_code",
+                "authority_count",
+                "timed_out",
+                "visible_window_detected",
+                "executable_sha256_before",
+                "executable_sha256_after",
+                "residual_process",
+                "passed",
+                "log",
+            ),
+        )
+        writer.writeheader()
+        for result in results:
+            row = asdict(result)
+            writer.writerow({key: row[key] for key in writer.fieldnames})
+
+    failures = sum(not result.passed for result in results)
+    expected_physical_failures = sum(
+        result.expected_status == "FAIL" for result in results
+    )
+    print(
+        f"SUMMARY runs={len(results)} accepted={len(results) - failures} "
+        f"expectedPhysicalFailures={expected_physical_failures} "
+        f"runnerFailures={failures}",
+        flush=True,
+    )
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

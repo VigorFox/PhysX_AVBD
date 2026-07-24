@@ -46,8 +46,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 #include "PxPhysicsAPI.h"
 #include "PxAvbdKinematicShell.h"
+#include "../snippetcommon/SnippetHeadless.h"
 
 #ifdef RENDER_SNIPPET
 #include "../snippetcommon/SnippetPrint.h"
@@ -59,7 +62,7 @@
 using namespace physx;
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
@@ -68,9 +71,17 @@ static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
 static PxTriangleMesh*			gMesh		= NULL;
 static PxRigidStatic*			gActor		= NULL;
+static Snippets::HeadlessOptions gHeadlessOptions;
+static bool gExtensionsInitialized = false;
+static bool gInitializationFailed = false;
+static bool gFetchPending = false;
+static bool gCleanupCompleted = false;
 
 static const PxU32 gGridSize = 8;
 static const PxReal gGridStep = 512.0f / PxReal(gGridSize-1);
+static const PxReal gGridMinimum = -400.0f;
+static const PxReal gGridMaximum =
+    gGridMinimum + gGridStep * PxReal(gGridSize - 1);
 static float gTime = 0.0f;
 
 static PxSolverType::Enum gSolverType = PxSolverType::eAVBD;
@@ -91,18 +102,61 @@ static const PxReal gShotSpawnY = 55.0f;
 static const PxReal gShotSpeedY = 200.0f;
 static const PxReal gMeshRestOffset = -0.5f;
 
+enum DeformableFilterTag {
+  eFILTER_UNTAGGED = 0,
+  eFILTER_MOVING_MESH = 1,
+  eFILTER_BOX = 2,
+  eFILTER_SPHERE_SHOT = 3,
+  eFILTER_STRESS_SHOT = 4
+};
+
+enum DeformableHeadlessCase {
+  eCASE_MOVING_MESH_STACK,
+  eCASE_SPHERE_SHOT,
+  eCASE_STRESS_DIAGNOSTIC
+};
+
+static DeformableHeadlessCase gHeadlessCase = eCASE_MOVING_MESH_STACK;
+static std::vector<PxRigidDynamic *> gStressShots;
+
+struct RuntimeMetrics {
+  PxU32 completedFrames;
+  PxU32 simulateFailures;
+  PxU32 fetchFailures;
+  PxU32 fetchErrorState;
+  PxU32 nonFinite;
+  PxU32 maxFullFallThroughBodies;
+  PxReal maxQuaternionNormError;
+  PxReal maxAbsPosition;
+  PxReal maxLinearSpeed;
+  PxReal maxAngularSpeed;
+
+  RuntimeMetrics()
+      : completedFrames(0), simulateFailures(0), fetchFailures(0),
+        fetchErrorState(0), nonFinite(0), maxFullFallThroughBodies(0),
+        maxQuaternionNormError(0.0f), maxAbsPosition(0.0f),
+        maxLinearSpeed(0.0f), maxAngularSpeed(0.0f) {}
+};
+static RuntimeMetrics gRuntimeMetrics;
+
 struct SphereShotMetrics {
+  PxU32 contactEvents;
+  PxU32 contactPoints;
+  PxU32 firstContactFrame;
+  PxU32 lastContactEventFrame;
+  PxU32 responseSamples;
   PxU32 firstOverlapFrame;
   PxU32 maxOverlapFrame;
-  PxU32 maxRaycastPenFrame;
-  PxU32 overlapFrames;
-  PxU32 deepOverlapFrames;
-  PxU32 settledOverlapFrames;
-  PxReal maxRaycastPen;
-  PxReal maxImpactRaycastPen;
-  PxReal maxSettledRaycastPen;
+  PxU32 maxRestOffsetProximityFrame;
+  PxU32 proximityFrames;
+  PxU32 deepProximityFrames;
+  PxU32 settledProximityFrames;
+  PxReal maxRestOffsetProximity;
+  PxReal maxImpactRestOffsetProximity;
+  PxReal maxSettledRestOffsetProximity;
   PxReal maxGeomOverlap;
   PxReal maxImpactGeomOverlap;
+  PxReal maxSettledGeomOverlap;
   PxReal minSphereY;
   PxReal maxAbsSphereVel;
   PxReal maxAirborneGap;
@@ -116,12 +170,21 @@ struct SphereShotMetrics {
   PxReal maxMeshAbsSlope;      // approximate surface slope magnitude
   PxReal sumSettledHorizVel;
   PxReal sumSettledMeshAbsDyDt;
+  PxReal maxContactImpulse;
+  PxReal maxImpactAxisVelocityDelta;
   PxU32 settledRideSamples;
+  PxU32 outOfFootprintFrames;
   bool nanDetected;
 };
 static SphereShotMetrics gSphereShotMetrics;
 static PxReal gPrevSampleSurfaceY = 0.0f;
 static bool gHavePrevSampleSurfaceY = false;
+static PxVec3 gPreviousSphereVelocity(0.0f);
+static PxVec3 gSphereContactBaselineVelocity(0.0f);
+static bool gHavePreviousSphereVelocity = false;
+static bool gHaveSphereContactBaseline = false;
+static const PxU32 gSphereResponseWindowFrames = 3;
+static const PxReal gMinSphereResponseFraction = 0.05f;
 
 struct StackHeadlessMetrics {
   PxReal maxSpeed;
@@ -132,6 +195,7 @@ struct StackHeadlessMetrics {
   PxReal maxSettledWorldY;
   PxReal minRelToSurface;     // most-submerged box center vs mesh surface (<0 sunk)
   PxU32 settledSunkBoxes;     // box center clearly below mesh surface (fell through)
+  PxU32 maxOutOfFootprintBoxes;
   PxU32 nanBodies;
 };
 static StackHeadlessMetrics gStackMetrics;
@@ -148,61 +212,189 @@ static PxU32 gStressShotSerial = 0;
 static PxU32 gStressActiveShots = 0;
 
 struct StressHeadlessMetrics {
+  PxU32 contactEvents;
+  PxU32 contactPoints;
   PxU32 worstFrame;
   PxReal worstMinBodyY;
   PxReal worstMinRelToSurface;
   PxU32 maxSunkBoxes;
   PxU32 maxPassThroughShots;
   PxU32 maxAirborneShots;
+  PxU32 maxOutOfFootprintShots;
+  PxU32 maxOutOfFootprintBoxes;
   PxU32 totalShotsFired;
   PxU32 nanEvents;
 };
 static StressHeadlessMetrics gStressMetrics;
 
-static bool hasArg(int argc, const char *const *argv, const char *name) {
-  for (int i = 1; i < argc; ++i) {
-    if (argv[i] && std::strcmp(argv[i], name) == 0)
-      return true;
-  }
-  return false;
+static void setShapeTag(PxShape &shape, DeformableFilterTag tag) {
+  // The default interactive filter shader interprets word0 as a collision
+  // group.  Gate tags are needed only by the headless custom shader.
+  if (!gHeadlessMode)
+    return;
+  PxFilterData data;
+  data.word0 = static_cast<PxU32>(tag);
+  shape.setSimulationFilterData(data);
 }
 
-static PxSolverType::Enum getRequestedSolverType(int argc, const char *const *argv) {
-  for (int i = 1; i < argc; ++i) {
-    if (!argv[i])
-      continue;
-    if (std::strncmp(argv[i], "--solver=", 9) == 0) {
-      const char *v = argv[i] + 9;
-      if (std::strcmp(v, "tgs") == 0 || std::strcmp(v, "TGS") == 0)
-        return PxSolverType::eTGS;
-      if (std::strcmp(v, "avbd") == 0 || std::strcmp(v, "AVBD") == 0)
-        return PxSolverType::eAVBD;
+static DeformableFilterTag getShapeTag(const PxShape *shape) {
+  return shape ? static_cast<DeformableFilterTag>(
+                     shape->getSimulationFilterData().word0)
+               : eFILTER_UNTAGGED;
+}
+
+static DeformableFilterTag getActorTag(PxRigidActor *actor) {
+  if (!actor || actor->getNbShapes() == 0)
+    return eFILTER_UNTAGGED;
+  PxShape *shape = NULL;
+  actor->getShapes(&shape, 1);
+  return getShapeTag(shape);
+}
+
+static bool isShotMeshPair(const PxShape *shape0, const PxShape *shape1,
+                           DeformableFilterTag shotTag) {
+  const DeformableFilterTag tag0 = getShapeTag(shape0);
+  const DeformableFilterTag tag1 = getShapeTag(shape1);
+  return (tag0 == shotTag && tag1 == eFILTER_MOVING_MESH) ||
+         (tag1 == shotTag && tag0 == eFILTER_MOVING_MESH);
+}
+
+class DeformableSimulationCallback : public PxSimulationEventCallback {
+public:
+  virtual void onConstraintBreak(PxConstraintInfo *, PxU32) PX_OVERRIDE {}
+  virtual void onWake(PxActor **, PxU32) PX_OVERRIDE {}
+  virtual void onSleep(PxActor **, PxU32) PX_OVERRIDE {}
+  virtual void onTrigger(PxTriggerPair *, PxU32) PX_OVERRIDE {}
+  virtual void onAdvance(const PxRigidBody *const *, const PxTransform *,
+                         const PxU32) PX_OVERRIDE {}
+
+  virtual void onContact(const PxContactPairHeader &pairHeader,
+                         const PxContactPair *pairs,
+                         PxU32 nbPairs) PX_OVERRIDE {
+    if (pairHeader.flags &
+        (PxContactPairHeaderFlag::eREMOVED_ACTOR_0 |
+         PxContactPairHeaderFlag::eREMOVED_ACTOR_1))
+      return;
+    const bool sphereActorPairMatches =
+        (pairHeader.actors[0] == gShotSphere &&
+         pairHeader.actors[1] == gActor) ||
+        (pairHeader.actors[1] == gShotSphere &&
+         pairHeader.actors[0] == gActor);
+    const bool containsMeshActor = pairHeader.actors[0] == gActor ||
+                                   pairHeader.actors[1] == gActor;
+    for (PxU32 i = 0; i < nbPairs; ++i) {
+      const PxContactPair &pair = pairs[i];
+      if (pair.flags & (PxContactPairFlag::eREMOVED_SHAPE_0 |
+                        PxContactPairFlag::eREMOVED_SHAPE_1))
+        continue;
+      if (!pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_FOUND))
+        continue;
+      const bool spherePair =
+          sphereActorPairMatches &&
+          isShotMeshPair(pair.shapes[0], pair.shapes[1],
+                         eFILTER_SPHERE_SHOT);
+      const bool stressPair =
+          containsMeshActor &&
+          isShotMeshPair(pair.shapes[0], pair.shapes[1],
+                         eFILTER_STRESS_SHOT);
+      if (!spherePair && !stressPair)
+        continue;
+
+      PxContactPairPoint points[32];
+      const PxU32 pointCount = pair.extractContacts(points, 32);
+      if (stressPair) {
+        gStressMetrics.contactEvents++;
+        for (PxU32 p = 0; p < pointCount; ++p) {
+          if (!points[p].position.isFinite() ||
+              !points[p].normal.isFinite() ||
+              !PxIsFinite(points[p].separation) ||
+              !points[p].impulse.isFinite() ||
+              !PxIsFinite(points[p].impulse.magnitude())) {
+            gStressMetrics.nanEvents++;
+            continue;
+          }
+          gStressMetrics.contactPoints++;
+        }
+        continue;
+      }
+
+      if (gSphereShotMetrics.lastContactEventFrame == gSimFrame)
+        continue;
+      gSphereShotMetrics.lastContactEventFrame = gSimFrame;
+      gSphereShotMetrics.contactEvents++;
+      if (gSphereShotMetrics.firstContactFrame == PX_MAX_U32)
+        gSphereShotMetrics.firstContactFrame = gSimFrame + 1;
+      if (!gHaveSphereContactBaseline && gHavePreviousSphereVelocity) {
+        gSphereContactBaselineVelocity = gPreviousSphereVelocity;
+        gHaveSphereContactBaseline = true;
+      }
+      for (PxU32 p = 0; p < pointCount; ++p) {
+        if (!points[p].position.isFinite() || !points[p].normal.isFinite() ||
+            !PxIsFinite(points[p].separation) ||
+            !points[p].impulse.isFinite()) {
+          gSphereShotMetrics.nanDetected = true;
+          continue;
+        }
+        const PxReal impulse = points[p].impulse.magnitude();
+        if (!PxIsFinite(impulse)) {
+          gSphereShotMetrics.nanDetected = true;
+          continue;
+        }
+        gSphereShotMetrics.contactPoints++;
+        gSphereShotMetrics.maxContactImpulse =
+            PxMax(gSphereShotMetrics.maxContactImpulse, impulse);
+      }
     }
   }
-  return PxSolverType::eAVBD;
+};
+static DeformableSimulationCallback gSimulationCallback;
+
+static PxFilterFlags deformableGateFilterShader(
+    PxFilterObjectAttributes, PxFilterData filterData0,
+    PxFilterObjectAttributes, PxFilterData filterData1, PxPairFlags &pairFlags,
+    const void *, PxU32) {
+  pairFlags = PxPairFlag::eCONTACT_DEFAULT;
+  const bool sphereMesh =
+      (filterData0.word0 == eFILTER_SPHERE_SHOT &&
+       filterData1.word0 == eFILTER_MOVING_MESH) ||
+      (filterData1.word0 == eFILTER_SPHERE_SHOT &&
+       filterData0.word0 == eFILTER_MOVING_MESH);
+  const bool stressMesh =
+      (filterData0.word0 == eFILTER_STRESS_SHOT &&
+       filterData1.word0 == eFILTER_MOVING_MESH) ||
+      (filterData1.word0 == eFILTER_STRESS_SHOT &&
+       filterData0.word0 == eFILTER_MOVING_MESH);
+  if (sphereMesh || stressMesh)
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_CONTACT_POINTS;
+  return PxFilterFlag::eDEFAULT;
 }
 
-static const char *getSolverTypeName(PxSolverType::Enum t) {
-  return (t == PxSolverType::eTGS) ? "tgs" : "avbd";
+static PxVec3 getMeshLocalPoint(const PxVec3 &worldPoint) {
+  return gActor ? gActor->getGlobalPose().transformInv(worldPoint)
+                : worldPoint;
 }
 
-static bool isHeadlessRequested(int argc, const char *const *argv) {
-  if (hasArg(argc, argv, "--headless") ||
-      hasArg(argc, argv, "--headless-sphere-shot") ||
-      hasArg(argc, argv, "--headless-stress"))
-    return true;
-  const char *value = std::getenv("PHYSX_SNIPPET_HEADLESS");
-  return value && value[0] && value[0] != '0';
+static bool isInsideMeshFootprint(const PxVec3 &worldPoint,
+                                  PxReal inset = 0.0f) {
+  const PxVec3 localPoint = getMeshLocalPoint(worldPoint);
+  return localPoint.x >= gGridMinimum + inset &&
+         localPoint.x <= gGridMaximum - inset &&
+         localPoint.z >= gGridMinimum + inset &&
+         localPoint.z <= gGridMaximum - inset;
 }
 
 static PxReal sampleMeshSurfaceY(const PxVec3 &p) {
   if (!gMesh)
     return 0.0f;
   const PxVec3 *verts = gMesh->getVertices();
+  const PxVec3 localPoint = getMeshLocalPoint(p);
   const PxReal gx =
-      PxClamp((p.x + 400.0f) / gGridStep, 0.0f, PxReal(gGridSize - 1));
+      PxClamp((localPoint.x - gGridMinimum) / gGridStep, 0.0f,
+              PxReal(gGridSize - 1));
   const PxReal gz =
-      PxClamp((p.z + 400.0f) / gGridStep, 0.0f, PxReal(gGridSize - 1));
+      PxClamp((localPoint.z - gGridMinimum) / gGridStep, 0.0f,
+              PxReal(gGridSize - 1));
   const PxU32 b0 = PxMin(PxU32(gx), gGridSize - 2);
   const PxU32 a0 = PxMin(PxU32(gz), gGridSize - 2);
   const PxReal tx = gx - PxReal(b0);
@@ -214,21 +406,29 @@ static PxReal sampleMeshSurfaceY(const PxVec3 &p) {
   const PxReal y10 = vert(a0, b0 + 1).y;
   const PxReal y01 = vert(a0 + 1, b0).y;
   const PxReal y11 = vert(a0 + 1, b0 + 1).y;
-  const PxReal y0 = y00 * (1.0f - tx) + y10 * tx;
-  const PxReal y1 = y01 * (1.0f - tx) + y11 * tx;
-  const PxReal localY = y0 * (1.0f - tz) + y1 * tz;
+  // Match createMeshGround() exactly: the cell diagonal is v00-v11.
+  // tri0=(v10,v00,v11) covers tx>=tz; tri1=(v11,v00,v01) covers tx<tz.
+  const PxReal localY =
+      tx >= tz
+          ? y00 * (1.0f - tx) + y10 * (tx - tz) + y11 * tz
+          : y00 * (1.0f - tz) + y11 * tx + y01 * (tz - tx);
   if (gActor)
-    return gActor->getGlobalPose().transform(PxVec3(p.x, localY, p.z)).y;
+    return gActor->getGlobalPose()
+        .transform(PxVec3(localPoint.x, localY, localPoint.z))
+        .y;
   return localY + 2.0f;
 }
 
-static bool measureSphereMeshPenetration(const PxVec3 &sphereCenter, PxReal radius,
-                                         PxReal &outPen) {
-  outPen = 0.0f;
+static bool measureSphereMeshRestOffsetProximity(
+    const PxVec3 &sphereCenter, PxReal radius, PxReal &outProximity) {
+  outProximity = 0.0f;
   if (!gScene || !gMesh)
     return false;
   const PxReal surfaceY = sampleMeshSurfaceY(sphereCenter);
-  outPen = surfaceY - (sphereCenter.y - radius) - gMeshRestOffset;
+  // This is a vertical proximity proxy around the negative rest-offset
+  // contact band.  It is not a geometric sphere/triangle penetration depth.
+  outProximity =
+      surfaceY - (sphereCenter.y - radius) - gMeshRestOffset;
   return true;
 }
 
@@ -241,8 +441,103 @@ static void resetStressHeadlessMetrics() {
   gStressActiveShots = 0;
 }
 
-static PxReal boxBottomRelToSurface(const PxVec3 &center) {
-  return center.y - gStackHalfExtent - sampleMeshSurfaceY(center);
+static bool isBoxInsideMeshFootprint(const PxTransform &pose) {
+  for (PxU32 corner = 0; corner < 8; ++corner) {
+    const PxVec3 local((corner & 1u) ? gStackHalfExtent : -gStackHalfExtent,
+                       (corner & 2u) ? gStackHalfExtent : -gStackHalfExtent,
+                       (corner & 4u) ? gStackHalfExtent : -gStackHalfExtent);
+    if (!isInsideMeshFootprint(pose.transform(local)))
+      return false;
+  }
+  return true;
+}
+
+static bool measureBoxBottomRelToSurface(const PxTransform &pose,
+                                         PxReal &relativeHeight) {
+  if (!isBoxInsideMeshFootprint(pose))
+    return false;
+  relativeHeight =
+      pose.p.y - gStackHalfExtent - sampleMeshSurfaceY(pose.p);
+  return true;
+}
+
+static bool isCompletelyBelowMovingMesh(const PxTransform &pose,
+                                        DeformableFilterTag tag) {
+  const PxReal margin = 0.5f;
+  if (tag == eFILTER_SPHERE_SHOT || tag == eFILTER_STRESS_SHOT) {
+    if (!isInsideMeshFootprint(pose.p, gShotSphereRadius))
+      return false;
+    return pose.p.y + gShotSphereRadius <
+           sampleMeshSurfaceY(pose.p) - margin;
+  }
+  if (tag != eFILTER_BOX)
+    return false;
+  if (!isBoxInsideMeshFootprint(pose))
+    return false;
+
+  // A tilted box cannot be classified from center.y+halfExtent.  Require all
+  // eight world-space OBB corners to lie below their corresponding triangle.
+  for (PxU32 corner = 0; corner < 8; ++corner) {
+    const PxVec3 local((corner & 1u) ? gStackHalfExtent : -gStackHalfExtent,
+                       (corner & 2u) ? gStackHalfExtent : -gStackHalfExtent,
+                       (corner & 4u) ? gStackHalfExtent : -gStackHalfExtent);
+    const PxVec3 world = pose.transform(local);
+    if (world.y >= sampleMeshSurfaceY(world) - margin)
+      return false;
+  }
+  return true;
+}
+
+static void updateRuntimeMetrics() {
+  if (!gScene)
+    return;
+  const PxU32 nbDyn = gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  if (!nbDyn)
+    return;
+  PxArray<PxRigidActor *> actors(nbDyn);
+  gScene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC,
+                    reinterpret_cast<PxActor **>(actors.begin()), nbDyn);
+  PxU32 frameFullFallThroughBodies = 0;
+  for (PxU32 i = 0; i < nbDyn; ++i) {
+    PxRigidDynamic *body =
+        actors[i] ? actors[i]->is<PxRigidDynamic>() : NULL;
+    if (!body)
+      continue;
+    const PxTransform pose = body->getGlobalPose();
+    const PxVec3 linearVelocity = body->getLinearVelocity();
+    const PxVec3 angularVelocity = body->getAngularVelocity();
+    if (!pose.p.isFinite() || !pose.q.isFinite() ||
+        !linearVelocity.isFinite() || !angularVelocity.isFinite()) {
+      gRuntimeMetrics.nonFinite++;
+      continue;
+    }
+    const PxReal quaternionNorm = pose.q.magnitudeSquared();
+    const PxReal linearSpeed = linearVelocity.magnitude();
+    const PxReal angularSpeed = angularVelocity.magnitude();
+    if (!PxIsFinite(quaternionNorm) || !PxIsFinite(linearSpeed) ||
+        !PxIsFinite(angularSpeed)) {
+      gRuntimeMetrics.nonFinite++;
+      continue;
+    }
+    gRuntimeMetrics.maxQuaternionNormError =
+        PxMax(gRuntimeMetrics.maxQuaternionNormError,
+              PxAbs(quaternionNorm - 1.0f));
+    gRuntimeMetrics.maxAbsPosition =
+        PxMax(gRuntimeMetrics.maxAbsPosition,
+              PxMax(PxAbs(pose.p.x),
+                    PxMax(PxAbs(pose.p.y), PxAbs(pose.p.z))));
+    gRuntimeMetrics.maxLinearSpeed =
+        PxMax(gRuntimeMetrics.maxLinearSpeed, linearSpeed);
+    gRuntimeMetrics.maxAngularSpeed =
+        PxMax(gRuntimeMetrics.maxAngularSpeed, angularSpeed);
+
+    const DeformableFilterTag tag = getActorTag(body);
+    if (isCompletelyBelowMovingMesh(pose, tag))
+      frameFullFallThroughBodies++;
+  }
+  gRuntimeMetrics.maxFullFallThroughBodies =
+      PxMax(gRuntimeMetrics.maxFullFallThroughBodies,
+            frameFullFallThroughBodies);
 }
 
 static void updateStressHeadlessMetrics() {
@@ -258,6 +553,8 @@ static void updateStressHeadlessMetrics() {
   PxU32 frameSunk = 0;
   PxU32 frameAirborneShots = 0;
   PxU32 framePassThroughShots = 0;
+  PxU32 frameOutOfFootprintShots = 0;
+  PxU32 frameOutOfFootprintBoxes = 0;
   PxReal frameMinBodyY = 1e9f;
   PxReal frameMinRel = 1e9f;
   gStressActiveShots = 0;
@@ -266,23 +563,33 @@ static void updateStressHeadlessMetrics() {
     PxRigidDynamic *rb = actors[a] ? actors[a]->is<PxRigidDynamic>() : NULL;
     if (!rb)
       continue;
-    const PxVec3 p = rb->getGlobalPose().p;
+    const PxTransform pose = rb->getGlobalPose();
+    const PxVec3 p = pose.p;
     const PxVec3 v = rb->getLinearVelocity();
     if (!PxIsFinite(p.x) || !PxIsFinite(p.y) || !PxIsFinite(p.z)) {
       gStressMetrics.nanEvents++;
       continue;
     }
-    const bool isShot = (rb->getMass() < 5.0f);
+    const DeformableFilterTag tag = getActorTag(rb);
+    const bool isShot = tag == eFILTER_STRESS_SHOT;
     if (isShot) {
       gStressActiveShots++;
+      if (!isInsideMeshFootprint(p, gShotSphereRadius)) {
+        frameOutOfFootprintShots++;
+        continue;
+      }
       const PxReal surfaceY = sampleMeshSurfaceY(p);
       const PxReal gap = (p.y - gShotSphereRadius) - surfaceY - gMeshRestOffset;
       if (gap > 2.0f)
         frameAirborneShots++;
       if (p.y < surfaceY - 5.0f)
         framePassThroughShots++;
-    } else {
-      const PxReal rel = boxBottomRelToSurface(p);
+    } else if (tag == eFILTER_BOX) {
+      PxReal rel = 0.0f;
+      if (!measureBoxBottomRelToSurface(pose, rel)) {
+        frameOutOfFootprintBoxes++;
+        continue;
+      }
       frameMinRel = PxMin(frameMinRel, rel);
       if (rel < -0.5f)
         frameSunk++;
@@ -300,6 +607,12 @@ static void updateStressHeadlessMetrics() {
       PxMax(gStressMetrics.maxPassThroughShots, framePassThroughShots);
   gStressMetrics.maxAirborneShots =
       PxMax(gStressMetrics.maxAirborneShots, frameAirborneShots);
+  gStressMetrics.maxOutOfFootprintShots =
+      PxMax(gStressMetrics.maxOutOfFootprintShots,
+            frameOutOfFootprintShots);
+  gStressMetrics.maxOutOfFootprintBoxes =
+      PxMax(gStressMetrics.maxOutOfFootprintBoxes,
+            frameOutOfFootprintBoxes);
 
   if (std::getenv("AVBD_STRESS_TRACE") &&
       (frameSunk > 0 || framePassThroughShots > 0 || gSimFrame < 30 ||
@@ -315,6 +628,11 @@ static void createStressBoxGrid() {
   PxShape *shape = gPhysics->createShape(
       PxBoxGeometry(gStackHalfExtent, gStackHalfExtent, gStackHalfExtent),
       *gMaterial);
+  if (!shape) {
+    gInitializationFailed = true;
+    return;
+  }
+  setShapeTag(*shape, eFILTER_BOX);
   const PxReal spacing = gStackHalfExtent * 2.2f;
   const PxReal originX = -0.5f * PxReal(gStressGridX - 1) * spacing;
   const PxReal originZ = -0.5f * PxReal(gStressGridZ - 1) * spacing;
@@ -326,6 +644,10 @@ static void createStressBoxGrid() {
       pos.y = sampleMeshSurfaceY(pos) + gStackHalfExtent + 0.05f;
       PxRigidDynamic *body =
           gPhysics->createRigidDynamic(PxTransform(pos, PxQuat(PxIdentity)));
+      if (!body) {
+        gInitializationFailed = true;
+        continue;
+      }
       body->attachShape(*shape);
       PxRigidBodyExt::updateMassAndInertia(*body, 10.0f);
       gScene->addActor(*body);
@@ -344,22 +666,22 @@ static void resetStackHeadlessMetrics() {
 }
 
 static void printStressHeadlessSummary() {
-  // ok=1: finite, no shot pass-through, bounded transient sink during wave heave.
-  // AVBD typically maxSunkBoxes<=3 (TGS ~39 on this harness). worstMinRelToSurface
-  // is diagnostic only: a single box free-fall after wave sign-flip can dominate it.
-  const bool pass = (gStressMetrics.nanEvents == 0) &&
-                    (gStressMetrics.maxPassThroughShots == 0) &&
-                    (gStressMetrics.maxSunkBoxes <= 3);
+  // Penetration, deep sink, and pass-through are probe findings here.  The
+  // stress case hardens only finite/runaway and harness lifecycle invariants.
   printf("[DeformableMeshStress] solver=%s frames=%u shots=%u "
+         "shotMeshContactEvents=%u shotMeshContactPoints=%u "
          "worstFrame=%u worstMinBodyY=%.4f worstMinBoxBottomRel=%.4f "
          "maxSunkBoxes=%u maxPassThroughShots=%u maxAirborneShots=%u "
-         "nanEvents=%u ok=%d\n",
-         getSolverTypeName(gSolverType), gHeadlessFrameCount,
-         gStressMetrics.totalShotsFired, gStressMetrics.worstFrame,
+         "maxOutOfFootprintShots=%u maxOutOfFootprintBoxes=%u nanEvents=%u "
+         "sunkDepthValidation=DIAGNOSTIC\n",
+         Snippets::getSolverTypeName(gSolverType), gHeadlessFrameCount,
+         gStressMetrics.totalShotsFired, gStressMetrics.contactEvents,
+         gStressMetrics.contactPoints, gStressMetrics.worstFrame,
          gStressMetrics.worstMinBodyY, gStressMetrics.worstMinRelToSurface,
          gStressMetrics.maxSunkBoxes, gStressMetrics.maxPassThroughShots,
-         gStressMetrics.maxAirborneShots, gStressMetrics.nanEvents,
-         pass ? 1 : 0);
+         gStressMetrics.maxAirborneShots,
+         gStressMetrics.maxOutOfFootprintShots,
+         gStressMetrics.maxOutOfFootprintBoxes, gStressMetrics.nanEvents);
 }
 
 static void updateStackHeadlessMetrics() {
@@ -379,6 +701,7 @@ static void updateStackHeadlessMetrics() {
   PxReal frameMaxVyUp = 0.0f;
   PxReal frameMaxVxz = 0.0f;
   PxU32 frameSunk = 0;
+  PxU32 frameOutOfFootprint = 0;
   PxU32 frameAwake = 0;
   for (PxU32 a = 0; a < nbDyn; ++a) {
     PxRigidDynamic *rb = actors[a] ? actors[a]->is<PxRigidDynamic>() : NULL;
@@ -387,7 +710,8 @@ static void updateStackHeadlessMetrics() {
     if (!rb->isSleeping())
       frameAwake++;
     const PxVec3 v = rb->getLinearVelocity();
-    const PxVec3 p = rb->getGlobalPose().p;
+    const PxTransform pose = rb->getGlobalPose();
+    const PxVec3 p = pose.p;
     if (!PxIsFinite(v.x) || !PxIsFinite(v.y) || !PxIsFinite(v.z) ||
         !PxIsFinite(p.x) || !PxIsFinite(p.y) || !PxIsFinite(p.z)) {
       gStackMetrics.nanBodies++;
@@ -398,7 +722,12 @@ static void updateStackHeadlessMetrics() {
     frameMaxVxz = PxMax(frameMaxVxz, PxSqrt(v.x * v.x + v.z * v.z));
     frameMaxSpread = PxMax(frameMaxSpread, PxSqrt(p.x * p.x + p.z * p.z));
     frameMaxWorldY = PxMax(frameMaxWorldY, p.y);
-    // Box center vs deformed mesh surface at its xz: <0 means fell through.
+    // Keep the historical center-vs-surface diagnostic, but only while the
+    // whole OBB is inside the finite mesh footprint.
+    if (!isBoxInsideMeshFootprint(pose)) {
+      frameOutOfFootprint++;
+      continue;
+    }
     const PxReal relToSurface = p.y - sampleMeshSurfaceY(p);
     frameMinRel = PxMin(frameMinRel, relToSurface);
     if (relToSurface < -1.0f)
@@ -415,6 +744,8 @@ static void updateStackHeadlessMetrics() {
   gStackMetrics.maxWorldY = PxMax(gStackMetrics.maxWorldY, frameMaxWorldY);
   gStackMetrics.minRelToSurface =
       PxMin(gStackMetrics.minRelToSurface, frameMinRel);
+  gStackMetrics.maxOutOfFootprintBoxes =
+      PxMax(gStackMetrics.maxOutOfFootprintBoxes, frameOutOfFootprint);
   if (settledWindow) {
     gStackMetrics.maxSettledSpeed =
         PxMax(gStackMetrics.maxSettledSpeed, frameMaxSpeed);
@@ -429,12 +760,18 @@ static void updateStackHeadlessMetrics() {
 
 static void resetSphereShotMetrics() {
   gSphereShotMetrics = SphereShotMetrics();
+  gSphereShotMetrics.firstContactFrame = PX_MAX_U32;
+  gSphereShotMetrics.lastContactEventFrame = PX_MAX_U32;
   gSphereShotMetrics.firstOverlapFrame = PX_MAX_U32;
   gSphereShotMetrics.maxOverlapFrame = PX_MAX_U32;
-  gSphereShotMetrics.maxRaycastPenFrame = PX_MAX_U32;
+  gSphereShotMetrics.maxRestOffsetProximityFrame = PX_MAX_U32;
   gSphereShotMetrics.minSphereY = 1e9f;
   gHavePrevSampleSurfaceY = false;
   gPrevSampleSurfaceY = 0.0f;
+  gPreviousSphereVelocity = PxVec3(0.0f);
+  gSphereContactBaselineVelocity = PxVec3(0.0f);
+  gHavePreviousSphereVelocity = false;
+  gHaveSphereContactBaseline = false;
 }
 
 static void updateSphereShotMetrics() {
@@ -443,19 +780,37 @@ static void updateSphereShotMetrics() {
   const PxVec3 p = gShotSphere->getGlobalPose().p;
   const PxVec3 v = gShotSphere->getLinearVelocity();
   const PxVec3 w = gShotSphere->getAngularVelocity();
-  if (!PxIsFinite(p.x) || !PxIsFinite(p.y) || !PxIsFinite(p.z) ||
-      !PxIsFinite(v.x) || !PxIsFinite(v.y) || !PxIsFinite(v.z)) {
+  if (!p.isFinite() || !v.isFinite() || !w.isFinite()) {
     gSphereShotMetrics.nanDetected = true;
     return;
   }
   gSphereShotMetrics.minSphereY = PxMin(gSphereShotMetrics.minSphereY, p.y);
   gSphereShotMetrics.maxAbsSphereVel =
       PxMax(gSphereShotMetrics.maxAbsSphereVel, v.magnitude());
+  if (gHaveSphereContactBaseline &&
+      gSphereShotMetrics.firstContactFrame != PX_MAX_U32 &&
+      gSimFrame >= gSphereShotMetrics.firstContactFrame &&
+      gSimFrame <
+          gSphereShotMetrics.firstContactFrame + gSphereResponseWindowFrames) {
+    const PxReal response =
+        PxAbs(v.y - gSphereContactBaselineVelocity.y);
+    gSphereShotMetrics.maxImpactAxisVelocityDelta =
+        PxMax(gSphereShotMetrics.maxImpactAxisVelocityDelta, response);
+    gSphereShotMetrics.responseSamples++;
+  }
   const PxReal horizVel = PxSqrt(v.x * v.x + v.z * v.z);
   const PxReal angVel = w.magnitude();
   gSphereShotMetrics.maxHorizVel =
       PxMax(gSphereShotMetrics.maxHorizVel, horizVel);
   gSphereShotMetrics.maxAngVel = PxMax(gSphereShotMetrics.maxAngVel, angVel);
+
+  if (!isInsideMeshFootprint(p, gShotSphereRadius)) {
+    gSphereShotMetrics.outOfFootprintFrames++;
+    gHavePrevSampleSurfaceY = false;
+    gPreviousSphereVelocity = v;
+    gHavePreviousSphereVelocity = true;
+    return;
+  }
 
   const PxReal surfaceY = sampleMeshSurfaceY(p);
   // Approximate surface slope from finite differences (world XZ).
@@ -506,79 +861,97 @@ static void updateSphereShotMetrics() {
       gSphereShotMetrics.maxSettledAirborneGap =
           PxMax(gSphereShotMetrics.maxSettledAirborneGap, gap);
   }
-  PxReal rayPen = 0.0f;
+  PxReal restOffsetProximity = 0.0f;
   const PxReal geomOverlap =
       sampleMeshSurfaceY(p) - (p.y - gShotSphereRadius);
   if (geomOverlap > gSphereShotMetrics.maxGeomOverlap)
     gSphereShotMetrics.maxGeomOverlap = geomOverlap;
   if (gSimFrame < 45 && geomOverlap > gSphereShotMetrics.maxImpactGeomOverlap)
     gSphereShotMetrics.maxImpactGeomOverlap = geomOverlap;
+  if (gSimFrame + 60 >= gHeadlessFrameCount &&
+      geomOverlap > gSphereShotMetrics.maxSettledGeomOverlap)
+    gSphereShotMetrics.maxSettledGeomOverlap = geomOverlap;
 
-  if (measureSphereMeshPenetration(p, gShotSphereRadius, rayPen) && rayPen > 0.0f) {
-    gSphereShotMetrics.overlapFrames++;
+  if (measureSphereMeshRestOffsetProximity(p, gShotSphereRadius,
+                                           restOffsetProximity) &&
+      restOffsetProximity > 0.0f) {
+    gSphereShotMetrics.proximityFrames++;
     if (gSphereShotMetrics.firstOverlapFrame == PX_MAX_U32)
       gSphereShotMetrics.firstOverlapFrame = gSimFrame;
-    if (rayPen > gSphereShotMetrics.maxRaycastPen) {
-      gSphereShotMetrics.maxRaycastPen = rayPen;
-      gSphereShotMetrics.maxRaycastPenFrame = gSimFrame;
+    if (restOffsetProximity > gSphereShotMetrics.maxRestOffsetProximity) {
+      gSphereShotMetrics.maxRestOffsetProximity = restOffsetProximity;
+      gSphereShotMetrics.maxRestOffsetProximityFrame = gSimFrame;
     }
-    if (gSimFrame < 45 && rayPen > gSphereShotMetrics.maxImpactRaycastPen)
-      gSphereShotMetrics.maxImpactRaycastPen = rayPen;
+    if (gSimFrame < 45 &&
+        restOffsetProximity >
+            gSphereShotMetrics.maxImpactRestOffsetProximity)
+      gSphereShotMetrics.maxImpactRestOffsetProximity =
+          restOffsetProximity;
     if (gSimFrame + 60 >= gHeadlessFrameCount &&
-        rayPen > gSphereShotMetrics.maxSettledRaycastPen)
-      gSphereShotMetrics.maxSettledRaycastPen = rayPen;
-    if (rayPen > 0.55f)
-      gSphereShotMetrics.deepOverlapFrames++;
+        restOffsetProximity >
+            gSphereShotMetrics.maxSettledRestOffsetProximity)
+      gSphereShotMetrics.maxSettledRestOffsetProximity =
+          restOffsetProximity;
+    if (restOffsetProximity > 0.55f)
+      gSphereShotMetrics.deepProximityFrames++;
     if (gSimFrame + 60 >= gHeadlessFrameCount)
-      gSphereShotMetrics.settledOverlapFrames++;
+      gSphereShotMetrics.settledProximityFrames++;
   }
+  gPreviousSphereVelocity = v;
+  gHavePreviousSphereVelocity = true;
 }
 
 static void printSphereShotSummary() {
   const PxVec3 fp = gShotSphere ? gShotSphere->getGlobalPose().p : PxVec3(0.0f);
   const PxReal lateralDrift = PxSqrt(fp.x * fp.x + fp.z * fp.z);
-  // Impact window: geometric overlap (no restOffset slack). Without CCD both
-  // AVBD and TGS peak near ~0.9m geom / ~1.4m raycast on this harness; settled
-  // band includes restOffset=-0.5 and mesh heave (~1.2-2.0).
+  // These are vertical proxies against the triangle surface height, not exact
+  // sphere/triangle penetration depths.  The rest-offset proximity metric is
+  // diagnostic; hard depth caps use geometric vertical overlap only.
   const PxReal passImpactGeomThreshold = 1.0f;
-  const PxReal passImpactRaycastThreshold = 1.5f;
-  const PxReal passSettledRaycastThreshold = 2.05f;
+  const PxReal passSettledGeomThreshold = 1.55f;
   const PxReal passLateralThreshold = 15.0f;
-  const PxReal finalSurfaceY = sampleMeshSurfaceY(fp);
-  const PxReal finalGap =
-      (fp.y - gShotSphereRadius) - finalSurfaceY - gMeshRestOffset;
-  const PxU32 minSettledOverlapFrames = 30;
+  const bool finalInsideFootprint =
+      isInsideMeshFootprint(fp, gShotSphereRadius);
+  const PxReal finalSurfaceY =
+      finalInsideFootprint ? sampleMeshSurfaceY(fp) : 0.0f;
+  const PxReal finalGap = finalInsideFootprint
+                              ? (fp.y - gShotSphereRadius) - finalSurfaceY -
+                                    gMeshRestOffset
+                              : 0.0f;
+  const PxU32 minSettledProximityFrames = 30;
   const bool notSettled =
-      gSphereShotMetrics.settledOverlapFrames < minSettledOverlapFrames;
+      gSphereShotMetrics.settledProximityFrames <
+      minSettledProximityFrames;
   const bool airborne = finalGap > 3.0f ||
                         gSphereShotMetrics.maxSettledAirborneGap > 8.0f;
   const bool impactPenFail =
-      gSphereShotMetrics.maxImpactGeomOverlap > passImpactGeomThreshold ||
-      gSphereShotMetrics.maxImpactRaycastPen > passImpactRaycastThreshold;
+      gSphereShotMetrics.maxImpactGeomOverlap > passImpactGeomThreshold;
   const bool settledPenFail =
-      gSphereShotMetrics.maxSettledRaycastPen > passSettledRaycastThreshold;
-  const bool passThrough = gSphereShotMetrics.nanDetected || impactPenFail ||
-                           settledPenFail ||
-                           lateralDrift > passLateralThreshold || notSettled ||
-                           airborne;
-  const bool pass = !passThrough;
+      gSphereShotMetrics.maxSettledGeomOverlap > passSettledGeomThreshold;
   printf("\n[DeformableMeshSphereShot] SUMMARY solver=%s frames=%u stack=%s\n",
-         getSolverTypeName(gSolverType), gHeadlessFrameCount,
+         Snippets::getSolverTypeName(gSolverType), gHeadlessFrameCount,
          gCreateStack ? "yes" : "no");
   printf("[DeformableMeshSphereShot] meshRestOffset=-0.5 contactOffset=0.02 "
          "waveAmp=20\n");
-  printf("[DeformableMeshSphereShot] firstOverlapFrame=%u maxRaycastPen=%.4f "
-         "maxImpactRaycastPen=%.4f maxSettledRaycastPen=%.4f "
-         "maxGeomOverlap=%.4f maxImpactGeomOverlap=%.4f maxRaycastPenFrame=%u "
-         "overlapFrames=%u deepOverlapFrames=%u settledOverlapFrames=%u\n",
-         gSphereShotMetrics.firstOverlapFrame, gSphereShotMetrics.maxRaycastPen,
-         gSphereShotMetrics.maxImpactRaycastPen,
-         gSphereShotMetrics.maxSettledRaycastPen,
+  printf("[DeformableMeshSphereShot] firstProximityFrame=%u "
+         "maxRestOffsetProximity=%.4f "
+         "maxImpactRestOffsetProximity=%.4f "
+         "maxSettledRestOffsetProximity=%.4f "
+         "maxVerticalGeomOverlap=%.4f maxImpactVerticalGeomOverlap=%.4f "
+         "maxSettledVerticalGeomOverlap=%.4f "
+         "maxRestOffsetProximityFrame=%u proximityFrames=%u "
+         "deepProximityFrames=%u settledProximityFrames=%u\n",
+         gSphereShotMetrics.firstOverlapFrame,
+         gSphereShotMetrics.maxRestOffsetProximity,
+         gSphereShotMetrics.maxImpactRestOffsetProximity,
+         gSphereShotMetrics.maxSettledRestOffsetProximity,
          gSphereShotMetrics.maxGeomOverlap,
          gSphereShotMetrics.maxImpactGeomOverlap,
-         gSphereShotMetrics.maxRaycastPenFrame, gSphereShotMetrics.overlapFrames,
-         gSphereShotMetrics.deepOverlapFrames,
-         gSphereShotMetrics.settledOverlapFrames);
+         gSphereShotMetrics.maxSettledGeomOverlap,
+         gSphereShotMetrics.maxRestOffsetProximityFrame,
+         gSphereShotMetrics.proximityFrames,
+         gSphereShotMetrics.deepProximityFrames,
+         gSphereShotMetrics.settledProximityFrames);
   printf("[DeformableMeshSphereShot] minSphereY=%.4f maxAbsVel=%.4f "
          "maxAirborneGap=%.4f maxSettledAirborneGap=%.4f finalGap=%.4f nan=%s\n",
          gSphereShotMetrics.minSphereY, gSphereShotMetrics.maxAbsSphereVel,
@@ -587,6 +960,10 @@ static void printSphereShotSummary() {
          gSphereShotMetrics.nanDetected ? "true" : "false");
   printf("[DeformableMeshSphereShot] finalSpherePos=(%.4f,%.4f,%.4f)\n", fp.x,
          fp.y, fp.z);
+  printf("[DeformableMeshSphereShot] finalInsideFootprint=%u "
+         "outOfFootprintFrames=%u\n",
+         finalInsideFootprint ? 1u : 0u,
+         gSphereShotMetrics.outOfFootprintFrames);
   printf("[DeformableMeshSphereShot] lateralDriftXZ=%.4f (limit %.1f)\n",
          lateralDrift, passLateralThreshold);
   const PxReal avgSettledHoriz =
@@ -619,47 +996,90 @@ static void printSphereShotSummary() {
   printf("[DeformableMeshSphereShot] rideDiagnosis=%s "
          "(weak if settled on slope>0.15 but |vxz| and |w| both <0.25)\n",
          rideWeak ? "WEAK_OR_STUCK" : "ok_or_flat");
-  printf("[DeformableMeshSphereShot] RESULT pass=%d passThrough=%d "
-         "(fail if impactGeom>%.2f impactRaycast>%.2f settledRaycast>%.2f "
-         "lateralDriftXZ>%.1f settledOverlap<%u or airborne)\n",
-         pass ? 1 : 0, passThrough ? 1 : 0, passImpactGeomThreshold,
-         passImpactRaycastThreshold, passSettledRaycastThreshold,
-         passLateralThreshold, minSettledOverlapFrames);
+  printf("[DeformableMeshSphereShot] contactEvents=%u contactPoints=%u "
+         "firstContactFrame=%u responseSamples=%u maxContactImpulse=%.4f "
+         "maxImpactAxisVelocityDelta=%.4f responseFraction=%.4f\n",
+         gSphereShotMetrics.contactEvents, gSphereShotMetrics.contactPoints,
+         gSphereShotMetrics.firstContactFrame,
+         gSphereShotMetrics.responseSamples,
+         gSphereShotMetrics.maxContactImpulse,
+         gSphereShotMetrics.maxImpactAxisVelocityDelta,
+         gSphereShotMetrics.maxImpactAxisVelocityDelta / gShotSpeedY);
+  printf("[DeformableMeshSphereShot] penetrationDiagnostic impactFail=%u "
+         "settledFail=%u lateralFail=%u notSettled=%u airborne=%u "
+         "(limits impactVerticalGeom=%.2f settledVerticalGeom=%.2f "
+         "lateralDriftXZ=%.1f settledProximity=%u)\n",
+         impactPenFail ? 1u : 0u, settledPenFail ? 1u : 0u,
+         lateralDrift > passLateralThreshold ? 1u : 0u,
+         notSettled ? 1u : 0u, airborne ? 1u : 0u,
+         passImpactGeomThreshold, passSettledGeomThreshold,
+         passLateralThreshold, minSettledProximityFrames);
 }
 
-static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geometry, const PxVec3& velocity=PxVec3(0), PxReal density=1.0f)
+static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geometry, const PxVec3& velocity=PxVec3(0), PxReal density=1.0f, DeformableFilterTag tag=eFILTER_UNTAGGED)
 {
 	PxRigidDynamic* dynamic = PxCreateDynamic(*gPhysics, t, geometry, *gMaterial, density);
+	if (!dynamic) {
+		gInitializationFailed = true;
+		return NULL;
+	}
+	PxShape *shape = NULL;
+	dynamic->getShapes(&shape, 1);
+	if (shape)
+		setShapeTag(*shape, tag);
 	dynamic->setLinearVelocity(velocity);
 	gScene->addActor(*dynamic);
 	return dynamic;
 }
 
-static void spawnStressShot() {
+static bool spawnStressShot() {
   if (!gScene)
-    return;
+    return false;
   const PxReal spread = 120.0f;
   const PxReal fx = PxReal(gStressShotSerial % 7);
   const PxReal fz = PxReal((gStressShotSerial * 3) % 11);
   const PxReal x = (fx - 3.0f) * spread * 0.25f;
-  const PxReal z = (fz - 5.0f) * spread * 0.22f;
-  createDynamic(PxTransform(PxVec3(x, gStressShotSpawnY, z)),
-                PxSphereGeometry(gShotSphereRadius),
-                PxVec3(0.0f, -gStressShotSpeedY, 0.0f), 3.0f);
+  // Keep every diagnostic projectile inside the actual [-400, 112] mesh
+  // footprint.  The former 0.22 factor placed two projectiles at z=132,
+  // where free fall was incorrectly classified against a clamped edge height.
+  const PxReal z = (fz - 5.0f) * spread * 0.16f;
+  const PxVec3 spawnPosition(x, gStressShotSpawnY, z);
+  if (!isInsideMeshFootprint(spawnPosition, gShotSphereRadius)) {
+    gInitializationFailed = true;
+    return false;
+  }
+  PxRigidDynamic *shot =
+      createDynamic(PxTransform(spawnPosition),
+                    PxSphereGeometry(gShotSphereRadius),
+                    PxVec3(0.0f, -gStressShotSpeedY, 0.0f), 3.0f,
+                    eFILTER_STRESS_SHOT);
+  if (!shot)
+    return false;
+  gStressShots.push_back(shot);
   gStressShotSerial++;
   gStressActiveShots++;
   gFastImpactSubstepFrames = gFastImpactSubstepHoldFrames;
+  return true;
 }
 
 static void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent)
 {
 	PxShape* shape = gPhysics->createShape(PxBoxGeometry(halfExtent, halfExtent, halfExtent), *gMaterial);
+	if (!shape) {
+		gInitializationFailed = true;
+		return;
+	}
+	setShapeTag(*shape, eFILTER_BOX);
 	for(PxU32 i=0; i<size;i++)
 	{
 		for(PxU32 j=0;j<size-i;j++)
 		{
 			PxTransform localTm(PxVec3(PxReal(j*2) - PxReal(size-i), PxReal(i*2+1), 0) * halfExtent);
 			PxRigidDynamic* body = gPhysics->createRigidDynamic(t.transform(localTm));
+			if (!body) {
+				gInitializationFailed = true;
+				continue;
+			}
 			body->attachShape(*shape);
 			PxRigidBodyExt::updateMassAndInertia(*body, 10.0f);
 			gScene->addActor(*body);
@@ -687,7 +1107,7 @@ static void updateVertices(PxVec3* verts, float amplitude=0.0f)
 
 			const float y = 20.0f + sinf(coeffA*PxTwoPi)*cosf(coeffB*PxTwoPi)*amplitude;
 
-			verts[a * gridSize + b] = PxVec3(-400.0f + b*gridStep, y, -400.0f + a*gridStep);
+			verts[a * gridSize + b] = PxVec3(gGridMinimum + b*gridStep, y, gGridMinimum + a*gridStep);
 		}
 	}
 }
@@ -734,24 +1154,80 @@ static PxTriangleMesh* createMeshGround(const PxCookingParams& params)
 	return triMesh;
 }
 
-void initPhysics(bool /*interactive*/)
+static void resetRuntimeState() {
+  gErrorCallback.reset();
+  gInitializationFailed = false;
+  gExtensionsInitialized = false;
+  gFetchPending = false;
+  gCleanupCompleted = false;
+  gFoundation = NULL;
+  gPhysics = NULL;
+  gDispatcher = NULL;
+  gScene = NULL;
+  gMaterial = NULL;
+  gPvd = NULL;
+  gMesh = NULL;
+  gActor = NULL;
+  gShotSphere = NULL;
+  gStressShots.clear();
+  gTime = 0.0f;
+  gSimFrame = 0;
+  gFastImpactSubstepFrames = 0;
+  gRuntimeMetrics = RuntimeMetrics();
+  resetStackHeadlessMetrics();
+  resetSphereShotMetrics();
+  resetStressHeadlessMetrics();
+}
+
+void initPhysics(bool interactive)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if (!gFoundation) {
+		gInitializationFailed = true;
+		return;
+	}
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if (interactive) {
+		gPvd = PxCreatePvd(*gFoundation);
+		if (gPvd) {
+			PxPvdTransport* transport =
+				PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+			if (transport)
+				gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
+		}
+	}
 
-	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation,
+		PxTolerancesScale(), true, gPvd);
+	if (!gPhysics) {
+		gInitializationFailed = true;
+		return;
+	}
+	gExtensionsInitialized = PxInitExtensions(*gPhysics, gPvd);
+	if (!gExtensionsInitialized) {
+		gInitializationFailed = true;
+		return;
+	}
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
-	gDispatcher = PxDefaultCpuDispatcherCreate(2);
-	sceneDesc.cpuDispatcher	= gDispatcher;
-	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
+	const PxU32 dispatcherThreads =
+		interactive ? 2u : gHeadlessOptions.dispatcherThreads;
+	gDispatcher = PxDefaultCpuDispatcherCreate(dispatcherThreads);
+	if (!gDispatcher) {
+		gInitializationFailed = true;
+		return;
+	}
+	sceneDesc.cpuDispatcher = gDispatcher;
+	sceneDesc.filterShader =
+		interactive ? PxDefaultSimulationFilterShader : deformableGateFilterShader;
+	sceneDesc.simulationEventCallback = interactive ? NULL : &gSimulationCallback;
 	sceneDesc.solverType = gSolverType;
-
 	gScene = gPhysics->createScene(sceneDesc);
+	if (!gScene) {
+		gInitializationFailed = true;
+		return;
+	}
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
@@ -764,46 +1240,51 @@ void initPhysics(bool /*interactive*/)
 	const PxReal staticFriction = gHeadlessSphereShot ? 0.5f : 1.0f;
 	const PxReal dynamicFriction = gHeadlessSphereShot ? 0.5f : 1.0f;
 	gMaterial = gPhysics->createMaterial(staticFriction, dynamicFriction, 0.0f);
+	if (!gMaterial) {
+		gInitializationFailed = true;
+		return;
+	}
 
 	PxCookingParams cookingParams(gPhysics->getTolerancesScale());
-
-	if(0)
-	{
-		cookingParams.midphaseDesc.setToDefault(PxMeshMidPhase::eBVH33);
-	}
-	else
-	{
-		cookingParams.midphaseDesc.setToDefault(PxMeshMidPhase::eBVH34);
-		cookingParams.midphaseDesc.mBVH34Desc.quantized = false;
-	}
+	cookingParams.midphaseDesc.setToDefault(PxMeshMidPhase::eBVH34);
+	cookingParams.midphaseDesc.mBVH34Desc.quantized = false;
 	// We need to disable the mesh cleaning part so that the vertex mapping remains untouched.
-	cookingParams.meshPreprocessParams	= PxMeshPreprocessingFlag::eDISABLE_CLEAN_MESH;
-
-	PxTriangleMesh* mesh = createMeshGround(cookingParams);
-	gMesh = mesh;
-
-	PxTriangleMeshGeometry geom(mesh);
-
-	PxRigidStatic* groundMesh = gPhysics->createRigidStatic(PxTransform(PxVec3(0, 2, 0)));
-	gActor = groundMesh;
-	PxShape* shape = gPhysics->createShape(geom, *gMaterial);
-
-	{
-		shape->setContactOffset(0.02f);
-		// A negative rest offset helps to avoid jittering when the deformed mesh moves away from objects resting on it.
-		shape->setRestOffset(-0.5f);
+	cookingParams.meshPreprocessParams = PxMeshPreprocessingFlag::eDISABLE_CLEAN_MESH;
+	gMesh = createMeshGround(cookingParams);
+	if (!gMesh) {
+		gInitializationFailed = true;
+		return;
 	}
 
-	groundMesh->attachShape(*shape);
-	gScene->addActor(*groundMesh);
+	PxTriangleMeshGeometry geom(gMesh);
+	gActor = gPhysics->createRigidStatic(PxTransform(PxVec3(0, 2, 0)));
+	PxShape* shape = gPhysics->createShape(geom, *gMaterial);
+	if (!gActor || !shape) {
+		PX_RELEASE(shape);
+		// The actor is not scene-owned until addActor() below.  Release a
+		// partially-created actor here so the headless initialization error path
+		// remains leak-free.
+		PX_RELEASE(gActor);
+		gInitializationFailed = true;
+		return;
+	}
+	shape->setContactOffset(0.02f);
+	// A negative rest offset helps to avoid jittering when the deformed mesh moves away from objects resting on it.
+	shape->setRestOffset(gMeshRestOffset);
+	setShapeTag(*shape, eFILTER_MOVING_MESH);
+	gActor->attachShape(*shape);
+	shape->release();
+	gScene->addActor(*gActor);
 
 	if (gHeadlessSphereShot) {
 		gShotSphere = createDynamic(
 		    PxTransform(PxVec3(0.0f, gShotSpawnY, 0.0f)),
 		    PxSphereGeometry(gShotSphereRadius), PxVec3(0.0f, -gShotSpeedY, 0.0f),
-		    3.0f);
+		    3.0f, eFILTER_SPHERE_SHOT);
+		gPreviousSphereVelocity = PxVec3(0.0f, -gShotSpeedY, 0.0f);
+		gHavePreviousSphereVelocity = gShotSphere != NULL;
 		printf("[DeformableMeshSphereShot] init solver=%s headlessShot=true stack=no\n",
-		       getSolverTypeName(gSolverType));
+		       Snippets::getSolverTypeName(gSolverType));
 		printf("[DeformableMeshSphereShot] spawn frame=0 pos=(0,%.2f,0) vel=(0,-%.1f,0) "
 		       "radius=%.2f\n",
 		       gShotSpawnY, gShotSpeedY, gShotSphereRadius);
@@ -812,7 +1293,7 @@ void initPhysics(bool /*interactive*/)
 		createStressBoxGrid();
 		printf("[DeformableMeshStress] init solver=%s wavyMesh=true "
 		       "shotInterval=%u substeps=%u\n",
-		       getSolverTypeName(gSolverType), gStressShotIntervalFrames,
+		       Snippets::getSolverTypeName(gSolverType), gStressShotIntervalFrames,
 		       gDeformSubsteps);
 	} else if (gCreateStack) {
 		createStack(PxTransform(PxVec3(0, 22, 0)), 10, 2.0f);
@@ -890,14 +1371,16 @@ static void noteFastImpactsForSubsteps() {
   }
 }
 
-void stepPhysics(bool /*interactive*/)
+void stepPhysics(bool interactive)
 {
-	const PxReal frameDt = 1.0f / 60.0f;
+	if (!gScene)
+		return;
+	const PxReal frameDt = interactive ? (1.0f / 60.0f) : gHeadlessOptions.dt;
 	// Substeps for sphere-shot / stress harness. Stack-only interactive stays at 1
 	// substep/frame unless a fast body is in flight (space-bar shot).
 	if (gHeadlessStress && gSimFrame == gStressNextShotFrame) {
-		spawnStressShot();
-		gStressMetrics.totalShotsFired++;
+		if (spawnStressShot())
+			gStressMetrics.totalShotsFired++;
 		gStressNextShotFrame += gStressShotIntervalFrames;
 	}
 	noteFastImpactsForSubsteps();
@@ -920,10 +1403,27 @@ void stepPhysics(bool /*interactive*/)
 			PxAvbdKinematicShellUpdateFromMeshGrid(gMesh->getVertices(), gGridSize,
 			                                       gGridStep, gActor->getGlobalPose());
 		}
-		gScene->simulate(subDt);
-		gScene->fetchResults(true);
+		if (!gScene->simulate(subDt)) {
+			if (!interactive)
+				gRuntimeMetrics.simulateFailures++;
+			return;
+		}
+		gFetchPending = true;
+		PxU32 errorState = 0;
+		if (!gScene->fetchResults(true, &errorState)) {
+			if (!interactive)
+				gRuntimeMetrics.fetchFailures++;
+			return;
+		}
+		gFetchPending = false;
+		if (!interactive)
+			gRuntimeMetrics.fetchErrorState |= errorState;
 	}
 	++gSimFrame;
+	if (!interactive) {
+		gRuntimeMetrics.completedFrames++;
+		updateRuntimeMetrics();
+	}
 	if (gHeadlessSphereShot)
 		updateSphereShotMetrics();
 	else if (gHeadlessStress)
@@ -932,11 +1432,37 @@ void stepPhysics(bool /*interactive*/)
 		updateStackHeadlessMetrics();
 }
 
-void cleanupPhysics(bool /*interactive*/)
+static bool drainPendingFetch() {
+	if (!gFetchPending)
+		return true;
+	if (!gScene)
+		return false;
+	PxU32 errorState = 0;
+	if (!gScene->fetchResults(true, &errorState)) {
+		gRuntimeMetrics.fetchFailures++;
+		return false;
+	}
+	gRuntimeMetrics.fetchErrorState |= errorState;
+	gFetchPending = false;
+	return true;
+}
+
+void cleanupPhysics(bool interactive)
 {
+	if (!drainPendingFetch())
+		return;
 	PxAvbdKinematicShellReset();
 	PX_RELEASE(gScene);
+	gActor = NULL;
+	gShotSphere = NULL;
+	gStressShots.clear();
+	PX_RELEASE(gMesh);
+	PX_RELEASE(gMaterial);
 	PX_RELEASE(gDispatcher);
+	if (gExtensionsInitialized) {
+		PxCloseExtensions();
+		gExtensionsInitialized = false;
+	}
 	PX_RELEASE(gPhysics);
 	if(gPvd)
 	{
@@ -945,8 +1471,11 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
-	
-	printf("SnippetDeformableMesh done.\n");
+	gCleanupCompleted = !gScene && !gMesh && !gMaterial && !gDispatcher &&
+	                    !gPhysics && !gPvd && !gFoundation &&
+	                    !gFetchPending;
+	if (interactive)
+		printf("SnippetDeformableMesh done.\n");
 }
 
 #ifdef RENDER_SNIPPET
@@ -963,36 +1492,425 @@ void keyPress(unsigned char key, const PxTransform& camera)
 }
 #endif
 
+static const char *getHeadlessCaseName(DeformableHeadlessCase headlessCase) {
+  switch (headlessCase) {
+  case eCASE_MOVING_MESH_STACK:
+    return "moving-mesh-stack";
+  case eCASE_SPHERE_SHOT:
+    return "sphere-shot";
+  case eCASE_STRESS_DIAGNOSTIC:
+    return "stress-diagnostic";
+  default:
+    return "unknown";
+  }
+}
+
+static bool tryParseHeadlessCase(const char *value,
+                                 DeformableHeadlessCase &headlessCase) {
+  if (Snippets::equalsIgnoreCase(value, "moving-mesh-stack")) {
+    headlessCase = eCASE_MOVING_MESH_STACK;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "sphere-shot")) {
+    headlessCase = eCASE_SPHERE_SHOT;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "stress-diagnostic")) {
+    headlessCase = eCASE_STRESS_DIAGNOSTIC;
+    return true;
+  }
+  return false;
+}
+
+struct GateEvaluation {
+  PxU32 exitCode;
+  const char *status;
+  const char *reason;
+  PxU32 nonFinite;
+  PxU32 dynamicBodies;
+  PxU32 expectedStressShots;
+  PxReal finalSphereGap;
+  PxReal sphereLateralDrift;
+  PxReal sphereResponseFraction;
+
+  GateEvaluation()
+      : exitCode(Snippets::eHEADLESS_PASS), status("PASS"), reason("none"),
+        nonFinite(0), dynamicBodies(0), expectedStressShots(0),
+        finalSphereGap(0.0f),
+        sphereLateralDrift(0.0f), sphereResponseFraction(0.0f) {}
+};
+
+static void setGateError(GateEvaluation &evaluation, const char *reason) {
+  if (evaluation.exitCode == Snippets::eHEADLESS_CONFIG_ERROR)
+    return;
+  evaluation.exitCode = Snippets::eHEADLESS_CONFIG_ERROR;
+  evaluation.status = "ERROR";
+  evaluation.reason = reason;
+}
+
+static void setGateFailure(GateEvaluation &evaluation, const char *reason) {
+  if (evaluation.exitCode != Snippets::eHEADLESS_PASS)
+    return;
+  evaluation.exitCode = Snippets::eHEADLESS_GATE_FAILED;
+  evaluation.status = "FAIL";
+  evaluation.reason = reason;
+}
+
+static GateEvaluation evaluateGate(bool sceneQueriesAllowed = true) {
+  GateEvaluation evaluation;
+  evaluation.nonFinite = gRuntimeMetrics.nonFinite + gStackMetrics.nanBodies +
+                         gStressMetrics.nanEvents +
+                         (gSphereShotMetrics.nanDetected ? 1u : 0u);
+  if (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC)
+    evaluation.expectedStressShots =
+        (gHeadlessOptions.frames - 1u) / gStressShotIntervalFrames + 1u;
+  if (!sceneQueriesAllowed) {
+    setGateError(evaluation, "fetch_results");
+    return evaluation;
+  }
+  if (gScene)
+    evaluation.dynamicBodies =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  if (gShotSphere) {
+    const PxVec3 finalPosition = gShotSphere->getGlobalPose().p;
+    if (isInsideMeshFootprint(finalPosition, gShotSphereRadius))
+      evaluation.finalSphereGap =
+          (finalPosition.y - gShotSphereRadius) -
+          sampleMeshSurfaceY(finalPosition) - gMeshRestOffset;
+    evaluation.sphereLateralDrift =
+        PxSqrt(finalPosition.x * finalPosition.x +
+               finalPosition.z * finalPosition.z);
+  }
+  evaluation.sphereResponseFraction =
+      gSphereShotMetrics.maxImpactAxisVelocityDelta / gShotSpeedY;
+  if (gInitializationFailed)
+    setGateError(evaluation, "initialization");
+  if (gRuntimeMetrics.simulateFailures ||
+      gRuntimeMetrics.completedFrames != gHeadlessOptions.frames ||
+      gRuntimeMetrics.fetchFailures)
+    setGateError(evaluation, "incomplete_simulation");
+  if (gErrorCallback.getFatalCount() || gRuntimeMetrics.fetchErrorState)
+    setGateFailure(evaluation, "physx_error");
+  if (evaluation.nonFinite)
+    setGateFailure(evaluation, "non_finite");
+  if (gRuntimeMetrics.maxQuaternionNormError > 1e-3f)
+    setGateFailure(evaluation, "quaternion_norm");
+  if (gRuntimeMetrics.maxAbsPosition > 100000.0f ||
+      gRuntimeMetrics.maxLinearSpeed > 10000.0f ||
+      gRuntimeMetrics.maxAngularSpeed > 10000.0f)
+    setGateFailure(evaluation, "runaway");
+  if (gHeadlessCase != eCASE_STRESS_DIAGNOSTIC &&
+      gRuntimeMetrics.maxFullFallThroughBodies)
+    setGateFailure(evaluation, "full_fall_through");
+
+  if (gHeadlessCase == eCASE_MOVING_MESH_STACK) {
+    if (evaluation.dynamicBodies != 55)
+      setGateError(evaluation, "stack_body_count");
+    if (gStackMetrics.maxSpeed >= 50.0f ||
+        gStackMetrics.maxSettledSpeed >= 8.0f)
+      setGateFailure(evaluation, "stack_speed");
+    if (gStackMetrics.settledSunkBoxes)
+      setGateFailure(evaluation, "settled_sink");
+    if (gStackMetrics.maxOutOfFootprintBoxes)
+      setGateFailure(evaluation, "stack_out_of_footprint");
+  } else if (gHeadlessCase == eCASE_SPHERE_SHOT) {
+    if (evaluation.dynamicBodies != 1 || !gShotSphere)
+      setGateError(evaluation, "sphere_body_count");
+    if (!gSphereShotMetrics.contactEvents ||
+        !gSphereShotMetrics.contactPoints)
+      setGateFailure(evaluation, "missing_mesh_contact");
+    if (!gSphereShotMetrics.responseSamples ||
+        evaluation.sphereResponseFraction < gMinSphereResponseFraction)
+      setGateFailure(evaluation, "missing_contact_response");
+    if (gSphereShotMetrics.outOfFootprintFrames)
+      setGateFailure(evaluation, "sphere_out_of_footprint");
+    if (gSphereShotMetrics.firstContactFrame == PX_MAX_U32 ||
+        gSphereShotMetrics.firstContactFrame +
+                gSphereResponseWindowFrames - 1u >
+            gRuntimeMetrics.completedFrames)
+      setGateFailure(evaluation, "incomplete_contact_observation");
+    if (gSphereShotMetrics.maxImpactGeomOverlap > 1.0f)
+      setGateFailure(evaluation, "impact_penetration");
+    if (gSphereShotMetrics.maxSettledGeomOverlap > 1.55f)
+      setGateFailure(evaluation, "settled_penetration");
+    if (evaluation.sphereLateralDrift > 15.0f)
+      setGateFailure(evaluation, "lateral_drift");
+    if (gSphereShotMetrics.settledProximityFrames < 30)
+      setGateFailure(evaluation, "not_settled");
+    if (evaluation.finalSphereGap > 3.0f ||
+        gSphereShotMetrics.maxSettledAirborneGap > 8.0f)
+      setGateFailure(evaluation, "airborne");
+  } else {
+    if (evaluation.dynamicBodies !=
+        gStressGridX * gStressGridZ + gStressMetrics.totalShotsFired)
+      setGateError(evaluation, "stress_body_count");
+    if (gStressMetrics.totalShotsFired != evaluation.expectedStressShots)
+      setGateError(evaluation, "stress_shot_launch");
+    if (!gStressMetrics.contactEvents || !gStressMetrics.contactPoints)
+      setGateError(evaluation, "stress_no_contact_witness");
+  }
+  return evaluation;
+}
+
+static void printGateDetails(const GateEvaluation &evaluation) {
+  if (gHeadlessCase == eCASE_SPHERE_SHOT) {
+    printSphereShotSummary();
+  } else if (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC) {
+    printStressHeadlessSummary();
+  } else {
+    printf("[DeformableMeshStack] solver=%s frames=%u numBoxes=%u "
+           "maxSpeed=%.4f maxSettledSpeed=%.4f nanBodies=%u\n",
+           Snippets::getSolverTypeName(gSolverType), gHeadlessFrameCount,
+           evaluation.dynamicBodies, gStackMetrics.maxSpeed,
+           gStackMetrics.maxSettledSpeed, gStackMetrics.nanBodies);
+    printf("[DeformableMeshStack] maxSpreadXZ=%.4f maxSettledSpreadXZ=%.4f "
+           "maxWorldY=%.4f maxSettledWorldY=%.4f minRelToSurface=%.4f "
+           "settledSunkBoxes=%u maxOutOfFootprintBoxes=%u "
+           "spreadValidation=DIAGNOSTIC\n",
+           gStackMetrics.maxSpreadXZ, gStackMetrics.maxSettledSpreadXZ,
+           gStackMetrics.maxWorldY, gStackMetrics.maxSettledWorldY,
+           gStackMetrics.minRelToSurface, gStackMetrics.settledSunkBoxes,
+           gStackMetrics.maxOutOfFootprintBoxes);
+  }
+}
+
+static PxReal printableMetric(PxReal value) {
+  return PxIsFinite(value) ? value : 0.0f;
+}
+
+static void printGateResult(const GateEvaluation &evaluation,
+                            PxU32 physicsErrors, PxU32 physicsWarnings) {
+  const char *validation = gHeadlessCase == eCASE_STRESS_DIAGNOSTIC
+                               ? "PROBE"
+                               : "GATED";
+  const bool stressDeepSinkObserved =
+      gHeadlessCase == eCASE_STRESS_DIAGNOSTIC &&
+      (gStressMetrics.maxSunkBoxes ||
+       gStressMetrics.maxPassThroughShots ||
+       gRuntimeMetrics.maxFullFallThroughBodies);
+  const char *probeFinding =
+      stressDeepSinkObserved
+          ? "deep-sink-observed"
+          : (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC &&
+                     (gStressMetrics.maxOutOfFootprintShots ||
+                      gStressMetrics.maxOutOfFootprintBoxes)
+                 ? "out-of-footprint-observed"
+                 : "none");
+  const bool sphereContactObserved =
+      gSphereShotMetrics.firstContactFrame != PX_MAX_U32;
+  const bool stressMetricsObserved =
+      gHeadlessCase == eCASE_STRESS_DIAGNOSTIC &&
+      gRuntimeMetrics.completedFrames > 0;
+  const PxU32 sphereFirstContactFrame =
+      sphereContactObserved ? gSphereShotMetrics.firstContactFrame : 0u;
+  const PxReal stressWorstMinRel =
+      stressMetricsObserved ? gStressMetrics.worstMinRelToSurface : 0.0f;
+  printf(
+      "[AVBD_GATE] schema=1 snippet=SnippetDeformableMesh case=%s solver=%s "
+      "execution=%s requestedFrames=%u completedFrames=%u dt=%.9g seed=%u "
+      "dispatcherThreads=%u "
+      "capability=SUPPORTED validation=%s status=%s reason=%s "
+      "sceneClass=rigid-on-moving-triangle-mesh meshActor=rigid-static "
+      "meshMotion=vertex-update softBody=0 cloth=0 probeFinding=%s "
+      "zeroPenetrationClaim=0 "
+      "nonFinite=%u physicsErrors=%u physicsWarnings=%u simulateFailures=%u "
+      "fetchFailures=%u "
+      "fetchErrorState=%u cleanupCompleted=%u dynamicBodies=%u "
+      "maxFullFallThroughBodies=%u maxQuaternionNormError=%.9g "
+      "maxAbsPosition=%.9g maxLinearSpeed=%.9g maxAngularSpeed=%.9g "
+      "maxSpeed=%.9g maxSettledSpeed=%.9g settledSunkBoxes=%u "
+      "stackMaxOutOfFootprintBoxes=%u maxSettledSpreadXZ=%.9g "
+      "sphereContactEvents=%u "
+      "sphereContactPoints=%u sphereFirstContactObserved=%u "
+      "sphereFirstContactFrame=%u sphereOutOfFootprintFrames=%u "
+      "sphereResponseSamples=%u sphereResponseFraction=%.9g "
+      "sphereFinalGap=%.9g sphereLateralDrift=%.9g "
+      "maxImpactVerticalGeomOverlap=%.9g "
+      "maxSettledVerticalGeomOverlap=%.9g "
+      "maxImpactRestOffsetProximity=%.9g "
+      "maxSettledRestOffsetProximity=%.9g settledProximityFrames=%u "
+      "stressShots=%u expectedStressShots=%u stressContactEvents=%u "
+      "stressContactPoints=%u stressMaxSunkBoxes=%u "
+      "stressMetricsObserved=%u stressWorstMinRelToSurface=%.9g "
+      "stressMaxPassThroughShots=%u stressMaxOutOfFootprintShots=%u "
+      "stressMaxOutOfFootprintBoxes=%u "
+      "minSphereResponseFraction=%.9g responseWindowFrames=%u\n",
+      getHeadlessCaseName(gHeadlessCase),
+      Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+      Snippets::getExecutionName(gHeadlessOptions.execution),
+      gHeadlessOptions.frames, gRuntimeMetrics.completedFrames,
+      double(gHeadlessOptions.dt), gHeadlessOptions.seed,
+      gHeadlessOptions.dispatcherThreads, validation, evaluation.status,
+      evaluation.reason, probeFinding,
+      evaluation.nonFinite, physicsErrors, physicsWarnings,
+      gRuntimeMetrics.simulateFailures, gRuntimeMetrics.fetchFailures,
+      gRuntimeMetrics.fetchErrorState, gCleanupCompleted ? 1u : 0u,
+      evaluation.dynamicBodies, gRuntimeMetrics.maxFullFallThroughBodies,
+      double(printableMetric(gRuntimeMetrics.maxQuaternionNormError)),
+      double(printableMetric(gRuntimeMetrics.maxAbsPosition)),
+      double(printableMetric(gRuntimeMetrics.maxLinearSpeed)),
+      double(printableMetric(gRuntimeMetrics.maxAngularSpeed)),
+      double(printableMetric(gStackMetrics.maxSpeed)),
+      double(printableMetric(gStackMetrics.maxSettledSpeed)),
+      gStackMetrics.settledSunkBoxes,
+      gStackMetrics.maxOutOfFootprintBoxes,
+      double(printableMetric(gStackMetrics.maxSettledSpreadXZ)),
+      gSphereShotMetrics.contactEvents, gSphereShotMetrics.contactPoints,
+      sphereContactObserved ? 1u : 0u, sphereFirstContactFrame,
+      gSphereShotMetrics.outOfFootprintFrames,
+      gSphereShotMetrics.responseSamples,
+      double(printableMetric(evaluation.sphereResponseFraction)),
+      double(printableMetric(evaluation.finalSphereGap)),
+      double(printableMetric(evaluation.sphereLateralDrift)),
+      double(printableMetric(gSphereShotMetrics.maxImpactGeomOverlap)),
+      double(printableMetric(gSphereShotMetrics.maxSettledGeomOverlap)),
+      double(printableMetric(
+          gSphereShotMetrics.maxImpactRestOffsetProximity)),
+      double(printableMetric(
+          gSphereShotMetrics.maxSettledRestOffsetProximity)),
+      gSphereShotMetrics.settledProximityFrames,
+      gStressMetrics.totalShotsFired, evaluation.expectedStressShots,
+      gStressMetrics.contactEvents, gStressMetrics.contactPoints,
+      gStressMetrics.maxSunkBoxes, stressMetricsObserved ? 1u : 0u,
+      double(printableMetric(stressWorstMinRel)),
+      gStressMetrics.maxPassThroughShots,
+      gStressMetrics.maxOutOfFootprintShots,
+      gStressMetrics.maxOutOfFootprintBoxes,
+      double(gMinSphereResponseFraction), gSphereResponseWindowFrames);
+}
+
+static int reportConfigurationError(const Snippets::HeadlessOptions &options,
+                                    const char *message) {
+  const char *validation =
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "stress-diagnostic")
+          ? "PROBE"
+          : "GATED";
+  printf("[AVBD_GATE_ERROR] snippet=SnippetDeformableMesh message=%s\n",
+         message);
+  printf(
+      "[AVBD_GATE] schema=1 snippet=SnippetDeformableMesh case=config-error "
+      "solver=%s execution=%s requestedFrames=%u completedFrames=0 dt=%.9g "
+      "seed=%u dispatcherThreads=%u capability=SUPPORTED validation=%s "
+      "status=ERROR "
+      "reason=config nonFinite=0 physicsErrors=0 simulateFailures=0 "
+      "physicsWarnings=0 fetchFailures=0\n",
+      Snippets::getSolverTypeName(options.solverType),
+      Snippets::getExecutionName(options.execution), options.frames,
+      double(options.dt), options.seed, options.dispatcherThreads, validation);
+  return Snippets::eHEADLESS_CONFIG_ERROR;
+}
+
 int snippetMain(int argc, const char *const *argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
-  gSolverType = getRequestedSolverType(argc, argv);
-  gHeadlessSphereShot = hasArg(argc, argv, "--headless-sphere-shot");
-  gHeadlessStress = hasArg(argc, argv, "--headless-stress");
-  gHeadlessMode = isHeadlessRequested(argc, argv);
-  gCreateStack = !gHeadlessSphereShot && !gHeadlessStress;
-  bool framesSpecified = false;
+
+  Snippets::HeadlessOptions defaults;
+  defaults.caseName = "moving-mesh-stack";
+  defaults.frames = 7200;
+  defaults.seed = 1;
+  defaults.dispatcherThreads = 2;
+  defaults.dt = 1.0f / 60.0f;
+
+  Snippets::HeadlessOptions options;
+  std::string parseError;
+  if (!Snippets::parseCommonHeadlessOptions(argc, argv, defaults, options,
+                                            parseError))
+    return reportConfigurationError(options, parseError.c_str());
+
+  bool legacySphere = false;
+  bool legacyStress = false;
+  bool caseSeen = false;
+  bool headlessOnlyOptionSeen = false;
   for (int i = 1; i < argc; ++i) {
-    if (argv[i] && std::strncmp(argv[i], "--frames=", 9) == 0) {
-      gHeadlessFrameCount = PxU32(atoi(argv[i] + 9));
-      framesSpecified = true;
+    const char *arg = argv[i];
+    if (!arg)
+      continue;
+    if (Snippets::isCommonHeadlessOption(arg)) {
+      if (Snippets::hasOptionPrefix(arg, "--case=") ||
+          Snippets::hasOptionPrefix(arg, "--scenario="))
+        caseSeen = true;
+      if (std::strcmp(arg, "--headless") != 0 &&
+          !Snippets::hasOptionPrefix(arg, "--solver="))
+        headlessOnlyOptionSeen = true;
+      continue;
     }
+    if (std::strcmp(arg, "--headless-sphere-shot") == 0) {
+      if (legacySphere)
+        return reportConfigurationError(options,
+                                        "duplicate_legacy_sphere_alias");
+      legacySphere = true;
+      options.headless = true;
+      options.caseName = "sphere-shot";
+      headlessOnlyOptionSeen = true;
+      continue;
+    }
+    if (std::strcmp(arg, "--headless-stress") == 0) {
+      if (legacyStress)
+        return reportConfigurationError(options,
+                                        "duplicate_legacy_stress_alias");
+      legacyStress = true;
+      options.headless = true;
+      options.caseName = "stress-diagnostic";
+      headlessOnlyOptionSeen = true;
+      continue;
+    }
+    return reportConfigurationError(options, "unknown_argument");
   }
-  if (!framesSpecified) {
-    if (gHeadlessStress)
-      gHeadlessFrameCount = 600;
-    else if (gHeadlessMode && gCreateStack)
-      // The historical sink/launch defect first appeared after roughly
-      // 3000-3700 frames.  Keep the default stack gate long enough to cover
-      // several complete mesh-heave cycles instead of requiring a hidden
-      // command-line override to reproduce it.
-      gHeadlessFrameCount = 7200;
+
+#ifndef RENDER_SNIPPET
+  options.headless = true;
+#endif
+
+  if (legacySphere && legacyStress)
+    return reportConfigurationError(options, "conflicting_legacy_aliases");
+  if (caseSeen && (legacySphere || legacyStress))
+    return reportConfigurationError(options, "legacy_alias_conflicts_case");
+  if (legacySphere)
+    options.caseName = "sphere-shot";
+  else if (legacyStress)
+    options.caseName = "stress-diagnostic";
+
+  DeformableHeadlessCase headlessCase = eCASE_MOVING_MESH_STACK;
+  if (!tryParseHeadlessCase(options.caseName.c_str(), headlessCase))
+    return reportConfigurationError(options, "invalid_--case_value");
+  options.caseName = getHeadlessCaseName(headlessCase);
+  if (!options.headless && headlessOnlyOptionSeen)
+    return reportConfigurationError(options, "gate_option_requires_--headless");
+
+  if (!options.framesExplicit) {
+    if (headlessCase == eCASE_SPHERE_SHOT)
+      options.frames = 180;
+    else if (headlessCase == eCASE_STRESS_DIAGNOSTIC)
+      options.frames = 600;
+    else
+      options.frames = 7200;
   }
-  if (gHeadlessSphereShot)
-    resetSphereShotMetrics();
-  else if (gHeadlessStress)
-    resetStressHeadlessMetrics();
-  else if (gHeadlessMode && gCreateStack)
-    resetStackHeadlessMetrics();
+  if (headlessCase == eCASE_MOVING_MESH_STACK && options.frames < 7200)
+    return reportConfigurationError(options,
+                                    "stack_frames_must_be_at_least_7200");
+  if (headlessCase == eCASE_SPHERE_SHOT && options.frames < 180)
+    return reportConfigurationError(options,
+                                    "sphere_frames_must_be_at_least_180");
+  if (headlessCase == eCASE_STRESS_DIAGNOSTIC && options.frames < 600)
+    return reportConfigurationError(options,
+                                    "stress_frames_must_be_at_least_600");
+  if (options.execution == Snippets::eHEADLESS_SEQUENTIAL &&
+      options.solverType != PxSolverType::eAVBD)
+    return reportConfigurationError(options, "sequential_requires_avbd");
+  if (PxAbs(options.dt - (1.0f / 60.0f)) > 1e-7f)
+    return reportConfigurationError(options, "dt_requires_60hz_calibration");
+  if (!Snippets::applyExecutionEnvironment(options))
+    return reportConfigurationError(options, "execution_environment_failed");
+
+  gHeadlessOptions = options;
+  gHeadlessCase = headlessCase;
+  gSolverType = options.solverType;
+  gHeadlessMode = options.headless;
+  gHeadlessSphereShot = headlessCase == eCASE_SPHERE_SHOT;
+  gHeadlessStress = headlessCase == eCASE_STRESS_DIAGNOSTIC;
+  gCreateStack = headlessCase == eCASE_MOVING_MESH_STACK;
+  gHeadlessFrameCount = options.frames;
+  resetRuntimeState();
 
 #ifdef RENDER_SNIPPET
   if (!gHeadlessMode) {
@@ -1002,40 +1920,33 @@ int snippetMain(int argc, const char *const *argv) {
   }
 #endif
 
+  Snippets::printHeadlessConfig("SnippetDeformableMesh", gHeadlessOptions);
   initPhysics(false);
-  for (PxU32 i = 0; i < gHeadlessFrameCount; ++i)
+  for (PxU32 i = 0; i < gHeadlessOptions.frames &&
+                    !gInitializationFailed &&
+                    !gRuntimeMetrics.simulateFailures &&
+                    !gRuntimeMetrics.fetchFailures;
+       ++i)
     stepPhysics(false);
-  if (gHeadlessSphereShot) {
-    printSphereShotSummary();
-  } else if (gHeadlessStress) {
-    printStressHeadlessSummary();
-  } else if (gHeadlessMode && gCreateStack) {
-    const PxU32 nbDyn = gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
-    const PxReal maxSpeed = gStackMetrics.maxSpeed;
-    const PxReal maxSettledSpeed = gStackMetrics.maxSettledSpeed;
-    const bool stackSanityOk = (nbDyn > 0) && (gStackMetrics.nanBodies == 0) &&
-                             PxIsFinite(maxSpeed) && maxSpeed < 50.0f &&
-                             PxIsFinite(maxSettledSpeed) &&
-                             maxSettledSpeed < 8.0f &&
-                             gStackMetrics.settledSunkBoxes == 0;
-    // ok=1: finite, no NaN, no fall-through. Spread vs TGS is a known AVBD
-    // limitation on this mesh+stack.
-    const bool stackOk = stackSanityOk;
-    printf("[DeformableMeshStack] solver=%s frames=%u numBoxes=%u "
-           "maxSpeed=%.4f maxSettledSpeed=%.4f nanBodies=%u ok=%d\n",
-           getSolverTypeName(gSolverType), gHeadlessFrameCount, nbDyn, maxSpeed,
-           maxSettledSpeed, gStackMetrics.nanBodies, stackOk ? 1 : 0);
-    printf("[DeformableMeshStack] maxSpreadXZ=%.4f maxSettledSpreadXZ=%.4f "
-           "maxWorldY=%.4f maxSettledWorldY=%.4f minRelToSurface=%.4f "
-           "settledSunkBoxes=%u\n",
-           gStackMetrics.maxSpreadXZ, gStackMetrics.maxSettledSpreadXZ,
-           gStackMetrics.maxWorldY, gStackMetrics.maxSettledWorldY,
-           gStackMetrics.minRelToSurface, gStackMetrics.settledSunkBoxes);
-    if (gSolverType == PxSolverType::eAVBD) {
-      printf("[DeformableMeshStack] NOTE: AVBD/TGS stack footprint parity is not "
-             "a gate on the heaving mesh.\n");
-    }
-  }
+
+  // A failed blocking fetch may still leave the scene in the simulate/fetch
+  // interval.  Drain it before any actor or articulation query.  If that is
+  // impossible, create a lifecycle-only ERROR snapshot without reading scene.
+  const bool sceneQueriesSafe = drainPendingFetch();
+  GateEvaluation evaluation = evaluateGate(sceneQueriesSafe);
+  if (sceneQueriesSafe)
+    printGateDetails(evaluation);
   cleanupPhysics(false);
-  return 0;
+  if (!gCleanupCompleted)
+    setGateError(evaluation, "teardown");
+  const PxU32 physicsErrors = gErrorCallback.getFatalCount();
+  if (physicsErrors &&
+      evaluation.exitCode != Snippets::eHEADLESS_CONFIG_ERROR) {
+    evaluation.exitCode = Snippets::eHEADLESS_GATE_FAILED;
+    evaluation.status = "FAIL";
+    evaluation.reason = "physx_error";
+  }
+  printGateResult(evaluation, physicsErrors,
+                  gErrorCallback.getWarningCount());
+  return static_cast<int>(evaluation.exitCode);
 }

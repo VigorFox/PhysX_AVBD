@@ -981,6 +981,8 @@ static void testConeCubePenetration()
 	ogcParams.contactRadius    = 0.15f;
 	ogcParams.contactStiffness = 1e5f;
 	ogcParams.friction         = 0.3f;
+	PxU32 softSoftContactDetectionFrames = 0;
+	PxU32 maxSoftSoftContacts = 0;
 
 	// Simulate 5 seconds with ground + OGC soft-soft collision
 	for (PxU32 f = 0; f < 300; f++)
@@ -994,6 +996,17 @@ static void testConeCubePenetration()
 			avbdDetectSoftSoftOGC(particles.begin(), particles.size(),
 								  bodies.begin(), bodies.size(),
 								  contacts, ogcParams);
+			PxU32 softSoftContacts = 0;
+			for(PxU32 contactId = 0;
+				contactId < contacts.size(); ++contactId)
+			{
+				if(contacts[contactId].rigidBodyIdx < bodies.size())
+					softSoftContacts++;
+			}
+			if(softSoftContacts)
+				softSoftContactDetectionFrames++;
+			maxSoftSoftContacts =
+				PxMax(maxSoftSoftContacts, softSoftContacts);
 		}
 
 		avbdStepSoftBodies(
@@ -1024,7 +1037,39 @@ static void testConeCubePenetration()
 	// Key test: cone bottom must NOT penetrate deeply into cube top.
 	PxReal overlap = maxYCube - minYCone;
 	printf("  overlap (cubeMaxY - coneMinY) = %.3f\n", overlap);
-	TEST_CHECK(overlap < 0.7f, "Cone not deeply penetrating cube (overlap < 0.7)");
+	printf("  soft-soft contact detection frames=%u maxContacts=%u\n",
+		softSoftContactDetectionFrames, maxSoftSoftContacts);
+
+	PxU32 cubeParticlesInsideCone = 0;
+	for(PxU32 localId = 0; localId < bodies[0].particleCount; ++localId)
+	{
+		const PxU32 particleId = bodies[0].particleStart + localId;
+		if(avbdIsPointInsideTetMesh(
+			particles[particleId].position,
+			bodies[1].surfaceTriangles, particles.begin()))
+		{
+			cubeParticlesInsideCone++;
+		}
+	}
+	PxU32 coneParticlesInsideCube = 0;
+	for(PxU32 localId = 0; localId < bodies[1].particleCount; ++localId)
+	{
+		const PxU32 particleId = bodies[1].particleStart + localId;
+		if(avbdIsPointInsideTetMesh(
+			particles[particleId].position,
+			bodies[0].surfaceTriangles, particles.begin()))
+		{
+			coneParticlesInsideCube++;
+		}
+	}
+	printf("  final inside particles: cube-in-cone=%u cone-in-cube=%u\n",
+		cubeParticlesInsideCone, coneParticlesInsideCube);
+	TEST_CHECK(
+		softSoftContactDetectionFrames > 0 && maxSoftSoftContacts > 0,
+		"Cone-cube OGC contact path was exercised");
+	TEST_CHECK(
+		cubeParticlesInsideCone == 0 && coneParticlesInsideCube == 0,
+		"No final cone-cube volumetric interpenetration");
 
 	// Cone centroid should be above cube centroid (not fallen through it)
 	TEST_CHECK(cCone.y > cCube.y - 0.2f, "Cone centroid above cube centroid");
@@ -1955,4 +2000,3 @@ int snippetMain(int, const char*const*)
 	PX_RELEASE(gFoundation);
 	return gTestsFailed > 0 ? 1 : 0;
 }
-

@@ -49,6 +49,15 @@ public:
 
 	static const physx::PxU32 TYPE_ID = physx::PxConcreteType::eFIRST_USER_EXTENSION;
 
+	enum HeadlessRowMode
+	{
+		ePULLEY_ROW,
+		eMULTI_OUTPUT_ROW,
+		eSPRING_ROW,
+		eRESTITUTION_ROW,
+		eDRIVE_LIMIT_ROW
+	};
+
 	PulleyJoint(physx::PxPhysics& physics, 
 				physx::PxRigidBody& body0, const physx::PxTransform& localFrame0, const physx::PxVec3& attachment0,
 			    physx::PxRigidBody& body1, const physx::PxTransform& localFrame1, const physx::PxVec3& attachment1);
@@ -68,6 +77,9 @@ public:
 	
 	void			setRatio(physx::PxReal ratio);
 	physx::PxReal	getRatio() const;
+
+	void			setHeadlessRowMode(HeadlessRowMode mode);
+	HeadlessRowMode	getHeadlessRowMode() const;
 
 	// PxConstraintConnector boilerplate
 
@@ -97,6 +109,8 @@ public:
 		physx::PxReal distance;
 		physx::PxReal ratio;
 		physx::PxReal tolerance;
+		physx::PxU32 headlessRowMode;
+		physx::PxVec3 genericReferenceDelta;
 	};
 
 	physx::PxRigidBody*		mBody[2];

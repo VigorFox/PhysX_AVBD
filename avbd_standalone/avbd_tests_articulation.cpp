@@ -23,7 +23,8 @@ extern int gTestsFailed;
 
 #define PASS(msg)                                                              \
   do {                                                                         \
-    printf("  PASS: %s\n", msg);                                               \
+    const std::string passMessage = (msg);                                     \
+    printf("  PASS: %s\n", passMessage.c_str());                              \
     gTestsPassed++;                                                            \
     return true;                                                               \
   } while (0)
@@ -1988,7 +1989,11 @@ bool test103_scissorLiftValidation() {
       for (int c = 0; c < 4; c++) {
         Vec3 wc = solver.bodies[i].position + solver.bodies[i].rotation.rotate(corners[c]);
         float depth = -wc.y; // positive = penetrating ground
-        solver.addContact(i, UINT32_MAX, Vec3(0,1,0), corners[c], Vec3(wc.x, 0, wc.z),
+        const Vec3 groundPoint =
+            solver.useCanonicalRigidContactAuthoringProbe
+                ? wc
+                : Vec3(wc.x, 0, wc.z);
+        solver.addContact(i, UINT32_MAX, Vec3(0,1,0), corners[c], groundPoint,
                           depth, solver.bodies[i].friction);
       }
     }
@@ -2010,6 +2015,8 @@ bool test103_scissorLiftValidation() {
           if (inX && inZ) {
             float depth = platTop - wc.y;
             Vec3 worldContact(wc.x, platTop, wc.z);
+            if (solver.useCanonicalRigidContactAuthoringProbe)
+              worldContact = wc;
             Vec3 rB = worldContact - plat.position;
             solver.addContact(bi, platformBody, Vec3(0,1,0), corners[c], rB,
                               depth, 0.5f);

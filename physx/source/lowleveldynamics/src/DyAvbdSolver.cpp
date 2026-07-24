@@ -74,6 +74,84 @@ static bool bodyTouchesDeformableAnchor(AvbdContactConstraint *contacts,
   return false;
 }
 
+// Enforce the velocity counterpart of body-vs-static locked D6 linear rows.
+// Position-level AL convergence can leave a small first-step pose residual;
+// reconstructing velocity directly from that residual creates a velocity that
+// violates an otherwise hard joint.  This is a Jacobian/effective-mass
+// projection, not a magnitude dead-zone.  Dynamic-dynamic, limited/free and
+// driven rows remain outside this first body-vs-static correctness slice.
+static void projectBodyStaticLockedD6LinearVelocities(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdD6JointConstraint *joints, physx::PxU32 numJoints) {
+  if (!bodies || !joints)
+    return;
+
+  for (physx::PxU32 ji = 0; ji < numJoints; ++ji) {
+    const AvbdD6JointConstraint &joint = joints[ji];
+    const bool aDynamic = joint.header.bodyIndexA < numBodies;
+    const bool bDynamic = joint.header.bodyIndexB < numBodies;
+    if (aDynamic == bDynamic)
+      continue;
+
+    AvbdSolverBody &body =
+        bodies[aDynamic ? joint.header.bodyIndexA : joint.header.bodyIndexB];
+    if (body.invMass <= 0.0f)
+      continue;
+
+    physx::PxQuat worldFrameA =
+        aDynamic ? body.rotation * joint.localFrameA : joint.localFrameA;
+    const physx::PxReal frameMagnitudeSquared = worldFrameA.magnitudeSquared();
+    if (frameMagnitudeSquared > 1e-8f &&
+        physx::PxIsFinite(frameMagnitudeSquared))
+      worldFrameA *= 1.0f / physx::PxSqrt(frameMagnitudeSquared);
+    const physx::PxVec3 r = body.rotation.rotate(
+        aDynamic ? joint.anchorA : joint.anchorB);
+    const bool allLinearLocked = joint.linearMotion == 0;
+
+    for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+      if (joint.getLinearMotion(axis) != 0 ||
+          joint.isLinearDriveEnabled(axis))
+        continue;
+
+      physx::PxVec3 worldAxis(0.0f);
+      worldAxis[axis] = 1.0f;
+      if (!allLinearLocked)
+        worldAxis = worldFrameA.rotate(worldAxis);
+
+      const physx::PxVec3 rCrossAxis = r.cross(worldAxis);
+      const physx::PxReal recipResponse =
+          body.invMass +
+          rCrossAxis.dot(body.invInertiaWorld.transform(rCrossAxis));
+      if (recipResponse <= 1e-12f || !physx::PxIsFinite(recipResponse))
+        continue;
+
+      const physx::PxReal anchorSpeed =
+          (body.linearVelocity + body.angularVelocity.cross(r)).dot(worldAxis);
+      if (!physx::PxIsFinite(anchorSpeed))
+        continue;
+
+      // C = anchorA-anchorB, so the dynamic-B Jacobian is -J.
+      const physx::PxReal dynamicSign = aDynamic ? 1.0f : -1.0f;
+      const physx::PxReal impulse =
+          -dynamicSign * anchorSpeed / recipResponse;
+      body.linearVelocity += worldAxis * (dynamicSign * impulse * body.invMass);
+      body.angularVelocity += body.invInertiaWorld.transform(
+          rCrossAxis * (dynamicSign * impulse));
+    }
+
+    // A dynamic body fixed to a static/world endpoint has no admissible
+    // spatial velocity.  Project the complete six-dimensional locked
+    // subspace after pose-to-velocity reconstruction; the row-wise linear
+    // projection above remains responsible for partially locked joints.
+    if (allLinearLocked && joint.angularMotion == 0 &&
+        joint.driveFlags == 0) {
+      body.linearVelocity = physx::PxVec3(0.0f);
+      body.angularVelocity = physx::PxVec3(0.0f);
+    }
+
+  }
+}
+
 // Suppress pose-solve bounce only on fast normal approach (sphere shot).
 static const physx::PxReal kBodyStaticFastImpactSpeed =
     AvbdConstants::AVBD_BODY_STATIC_FAST_IMPACT_SPEED;
@@ -81,6 +159,137 @@ static const physx::PxReal kBodyStaticFastImpactSpeed =
 // Near-surface band for e=0 / mesh-following (meters). After geometric depen
 // clears overlap, residual pose-solve velocity still separates - must clamp.
 static const physx::PxReal kBodyStaticNearSurface = 0.05f;
+
+/**
+ * Consume PxContactModifyCallback target velocity after pose-to-velocity
+ * reconstruction.  The projection uses the same contact-local inverse
+ * mass/inertia scales as PhysX's impulse solvers and remains unilateral on
+ * the normal row.
+ */
+static void applyAvbdContactTargetVelocity(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxReal dt) {
+  if (!bodies || !contacts || dt <= 0.0f)
+    return;
+
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    AvbdContactConstraint &cc = contacts[c];
+    if (cc.targetVelocity.magnitudeSquared() <= 1e-12f)
+      continue;
+
+    const physx::PxU32 bA = cc.header.bodyIndexA;
+    const physx::PxU32 bB = cc.header.bodyIndexB;
+    const bool dynA = bA < numBodies && bodies[bA].invMass > 0.0f;
+    const bool dynB = bB < numBodies && bodies[bB].invMass > 0.0f;
+    if (!dynA && !dynB)
+      continue;
+
+    const physx::PxVec3 rA =
+        dynA ? bodies[bA].rotation.rotate(cc.contactPointA)
+             : physx::PxVec3(0.0f);
+    const physx::PxVec3 rB =
+        dynB ? bodies[bB].rotation.rotate(cc.contactPointB)
+             : physx::PxVec3(0.0f);
+    const physx::PxReal invMassA =
+        dynA ? bodies[bA].invMass * cc.invMassScaleA : 0.0f;
+    const physx::PxReal invMassB =
+        dynB ? bodies[bB].invMass * cc.invMassScaleB : 0.0f;
+    const physx::PxMat33 invInertiaA =
+        dynA ? bodies[bA].invInertiaWorld * cc.invInertiaScaleA
+             : physx::PxMat33(physx::PxZero);
+    const physx::PxMat33 invInertiaB =
+        dynB ? bodies[bB].invInertiaWorld * cc.invInertiaScaleB
+             : physx::PxMat33(physx::PxZero);
+
+    auto pointVelocity = [&](bool bodyA) {
+      if (bodyA) {
+        return dynA ? bodies[bA].linearVelocity +
+                          bodies[bA].angularVelocity.cross(rA)
+                    : physx::PxVec3(0.0f);
+      }
+      return dynB ? bodies[bB].linearVelocity +
+                        bodies[bB].angularVelocity.cross(rB)
+                  : physx::PxVec3(0.0f);
+    };
+    auto response = [&](const physx::PxVec3 &axis) {
+      const physx::PxVec3 rAx = rA.cross(axis);
+      const physx::PxVec3 rBx = rB.cross(axis);
+      return invMassA + invMassB +
+             rAx.dot(invInertiaA * rAx) +
+             rBx.dot(invInertiaB * rBx);
+    };
+    auto applyImpulse = [&](const physx::PxVec3 &axis,
+                            physx::PxReal impulse) {
+      if (dynA) {
+        bodies[bA].linearVelocity += axis * (impulse * invMassA);
+        bodies[bA].angularVelocity +=
+            invInertiaA * (rA.cross(axis) * impulse);
+      }
+      if (dynB) {
+        bodies[bB].linearVelocity -= axis * (impulse * invMassB);
+        bodies[bB].angularVelocity -=
+            invInertiaB * (rB.cross(axis) * impulse);
+      }
+    };
+
+    const physx::PxVec3 &normal = cc.contactNormal;
+    physx::PxReal normalImpulse = 0.0f;
+    const physx::PxReal normalResponse = response(normal);
+    if (normalResponse > 1e-12f) {
+      const physx::PxReal currentNormal =
+          (pointVelocity(true) - pointVelocity(false)).dot(normal);
+      const physx::PxReal requestedNormal =
+          cc.targetVelocity.dot(normal);
+      const physx::PxReal deltaNormal =
+          requestedNormal - currentNormal;
+      if (deltaNormal > 0.0f) {
+        normalImpulse = deltaNormal / normalResponse;
+        if (cc.maxImpulse < PX_MAX_REAL) {
+          const physx::PxReal existingImpulse =
+              physx::PxMax(0.0f, -cc.header.lambda) * dt;
+          normalImpulse = physx::PxMin(
+              normalImpulse,
+              physx::PxMax(0.0f, cc.maxImpulse - existingImpulse));
+        }
+        if (normalImpulse > 0.0f)
+          applyImpulse(normal, normalImpulse);
+      }
+    }
+
+    const physx::PxReal targetT0 =
+        cc.targetVelocity.dot(cc.tangent0);
+    const physx::PxReal targetT1 =
+        cc.targetVelocity.dot(cc.tangent1);
+    if (physx::PxAbs(targetT0) <= 1e-6f &&
+        physx::PxAbs(targetT1) <= 1e-6f)
+      continue;
+
+    const physx::PxReal mu = contactCoulombMu(cc);
+    const physx::PxReal normalSupport =
+        physx::PxMax(normalImpulse,
+                     physx::PxMax(0.0f, -cc.header.lambda) * dt);
+    const physx::PxReal tangentLimit = mu * normalSupport;
+    if (tangentLimit <= 0.0f)
+      continue;
+
+    const physx::PxVec3 relativeVelocity =
+        pointVelocity(true) - pointVelocity(false);
+    const physx::PxReal responseT0 = response(cc.tangent0);
+    const physx::PxReal responseT1 = response(cc.tangent1);
+    physx::PxReal impulseT0 =
+        responseT0 > 1e-12f
+            ? (targetT0 - relativeVelocity.dot(cc.tangent0)) / responseT0
+            : 0.0f;
+    physx::PxReal impulseT1 =
+        responseT1 > 1e-12f
+            ? (targetT1 - relativeVelocity.dot(cc.tangent1)) / responseT1
+            : 0.0f;
+    avbdProjectImpulseCone(tangentLimit, impulseT0, impulseT1);
+    applyImpulse(cc.tangent0, impulseT0);
+    applyImpulse(cc.tangent1, impulseT1);
+  }
+}
 
 /**
  * Material normal-velocity response after pose finalize (friction already applied).
@@ -93,7 +302,8 @@ static void applyAvbdMaterialNormalVelocity(
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
     const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
-    physx::PxReal dt, physx::PxReal bounceApproachThreshold) {
+    physx::PxReal dt, physx::PxReal bounceApproachThreshold,
+    physx::PxReal lengthScale) {
   const physx::PxReal invDt = (dt > 0.0f) ? (1.0f / dt) : 0.0f;
   const physx::PxReal bounceThreshold =
       bounceApproachThreshold > 0.0f
@@ -106,8 +316,11 @@ static void applyAvbdMaterialNormalVelocity(
       continue;
 
     physx::PxU32 dominant = 0xFFFFFFFFu;
+    physx::PxU32 initialDominant = 0xFFFFFFFFu;
     physx::PxReal worstViolation = 1e9f;
+    physx::PxReal worstInitialViolation = 1e9f;
     physx::PxVec3 domWorldA(0.0f), domWorldB(0.0f);
+    physx::PxVec3 initialDomWorldA(0.0f), initialDomWorldB(0.0f);
 
     for (physx::PxU32 c = 0; c < numContacts; ++c) {
       const physx::PxU32 bA = contacts[c].header.bodyIndexA;
@@ -131,6 +344,19 @@ static void applyAvbdMaterialNormalVelocity(
       physx::PxReal violation =
           (worldA - worldB).dot(contacts[c].contactNormal) +
           contacts[c].penetrationDepth;
+      const physx::PxVec3 initialWorldA =
+          dynIsA
+              ? bodies[i].prevPosition +
+                    bodies[i].prevRotation.rotate(contacts[c].contactPointA)
+              : contacts[c].staticPrevWorldPoint;
+      const physx::PxVec3 initialWorldB =
+          dynIsA
+              ? contacts[c].staticPrevWorldPoint
+              : bodies[i].prevPosition +
+                    bodies[i].prevRotation.rotate(contacts[c].contactPointB);
+      const physx::PxReal initialViolation =
+          (initialWorldA - initialWorldB).dot(contacts[c].contactNormal) +
+          contacts[c].penetrationDepth;
       if (hasDeformableStaticAnchor(contacts[c]))
         violation = finalizeBodyVsStaticViolation(violation,
                                                 contacts[c].penetrationDepth);
@@ -140,24 +366,51 @@ static void applyAvbdMaterialNormalVelocity(
         domWorldA = worldA;
         domWorldB = worldB;
       }
+      if (initialViolation < worstInitialViolation) {
+        worstInitialViolation = initialViolation;
+        initialDominant = c;
+        initialDomWorldA = worldA;
+        initialDomWorldB = worldB;
+      }
     }
 
     if (dominant == 0xFFFFFFFFu)
       continue;
+
+    const bool splitDeepInitialDepenetration =
+        initialDominant != 0xFFFFFFFFu &&
+        !hasDeformableStaticAnchor(contacts[initialDominant]) &&
+        worstInitialViolation <
+            -kBodyStaticNearSurface *
+                physx::PxMax(lengthScale, physx::PxReal(1e-6f));
+    if (splitDeepInitialDepenetration) {
+      dominant = initialDominant;
+      domWorldA = initialDomWorldA;
+      domWorldB = initialDomWorldB;
+    }
 
     const bool isDeform = hasDeformableStaticAnchor(contacts[dominant]);
     const AvbdContactConstraint &cc = contacts[dominant];
     const bool dynIsA = (cc.header.bodyIndexA == i);
     const physx::PxVec3 nd = cc.contactNormal * (dynIsA ? 1.0f : -1.0f);
 
+    physx::PxReal staticNormalVelocity = 0.0f;
+    if (!isDeform && invDt > 0.0f) {
+      const physx::PxVec3 staticNow = dynIsA ? domWorldB : domWorldA;
+      staticNormalVelocity =
+          ((staticNow - cc.staticPrevWorldPoint) * invDt).dot(nd);
+    }
+
     physx::PxReal approach = 0.0f;
     if (linearVelAtSolveStart && linearVelAtSolveStart->size() == numBodies) {
-      approach = -(*linearVelAtSolveStart)[i].dot(nd);
+      approach =
+          -((*linearVelAtSolveStart)[i].dot(nd) - staticNormalVelocity);
       if (approach < 0.0f)
         approach = 0.0f;
     }
 
     const physx::PxReal vn = bodies[i].linearVelocity.dot(nd);
+    const physx::PxReal relativeVn = vn - staticNormalVelocity;
 
     if (isDeform) {
       const physx::PxReal nearLim = kBodyStaticNearSurface;
@@ -185,15 +438,21 @@ static void applyAvbdMaterialNormalVelocity(
     const physx::PxReal e =
         (cc.restitution > 0.0f) ? physx::PxMin(cc.restitution, 1.0f) : 0.0f;
     physx::PxReal approachEff = approach;
-    if (e > 0.0f && vn < 0.0f)
-      approachEff = physx::PxMax(approachEff, -vn);
+    if (e > 0.0f && relativeVn < 0.0f)
+      approachEff = physx::PxMax(approachEff, -relativeVn);
     if (e > 0.0f && approachEff > bounceThreshold) {
-      const physx::PxReal desiredVn = e * approachEff;
-      bodies[i].linearVelocity += nd * (desiredVn - vn);
-    } else if (worstViolation < -1e-5f) {
-      // Inelastic / resting: kill separating while still penetrating.
-      if (vn > 0.0f)
-        bodies[i].linearVelocity -= nd * vn;
+      const physx::PxReal desiredRelativeVn = e * approachEff;
+      bodies[i].linearVelocity +=
+          nd * (staticNormalVelocity + desiredRelativeVn - vn);
+    } else if (worstViolation < -1e-5f ||
+               splitDeepInitialDepenetration) {
+      // Inelastic / resting: kill separating relative to the static or
+      // kinematic contact anchor while still penetrating.  A deep initial
+      // overlap remains a split geometric correction even when the position
+      // solve clears the stale contact set in one step; it must not become
+      // launch velocity.
+      if (relativeVn > 0.0f)
+        bodies[i].linearVelocity -= nd * relativeVn;
     }
   }
 
@@ -244,10 +503,11 @@ static void clampBodyStaticInelasticNormalVelocities(
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
     const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
-    physx::PxReal dt, physx::PxReal bounceApproachThreshold) {
+    physx::PxReal dt, physx::PxReal bounceApproachThreshold,
+    physx::PxReal lengthScale) {
   applyAvbdMaterialNormalVelocity(bodies, numBodies, contacts, numContacts,
                                   linearVelAtSolveStart, dt,
-                                  bounceApproachThreshold);
+                                  bounceApproachThreshold, lengthScale);
 }
 
 static void computeMaxPoseDeltas(const AvbdSolverBody* bodies,
@@ -327,11 +587,10 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
     computePrediction(bodies, numBodies, dt, gravity);
   }
 
-  // Stage 2: Graph Coloring (skip if pre-computed coloring is provided)
-  if (mConfig.enableParallelization && numColors == 0) {
-    PX_PROFILE_ZONE("AVBD.graphColoring", 0);
-    computeGraphColoring(bodies, numBodies, contacts, numContacts, stats);
-  }
+  // The contact BCD path below uses body-level Jacobi snapshots and does not
+  // consume the legacy solver-owned graph coloring.  Building that shared
+  // coloring here is both redundant and unsafe when independent island tasks
+  // enter the same solver concurrently.
 
   // Adaptive position warmstarting (ref: AVBD3D solver.cpp L76-98)
   //
@@ -522,14 +781,24 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
 
       const physx::PxReal effectiveMassH2 = effectiveMass * invDt2;
       const physx::PxReal penaltyFloor = penScale * effectiveMassH2;
-      if (contacts[c].header.penalty < penaltyFloor) {
+      // A freshly prepared row carries the reference unit-mass minimum.
+      // Replace that sentinel with the mass/time-scaled floor even when the
+      // physical floor is lower; otherwise sub-unit-mass scenes become
+      // artificially stiffer and are not scale-equivalent.
+      if (contacts[c].header.penalty <= mConfig.avbdPenaltyMin) {
+        contacts[c].header.penalty = penaltyFloor;
+      } else if (contacts[c].header.penalty < penaltyFloor) {
         contacts[c].header.penalty = penaltyFloor;
       }
       // Also floor tangent penalties (ref: standalone floors all 3 rows)
-      if (contacts[c].tangentPenalty0 < penaltyFloor) {
+      if (contacts[c].tangentPenalty0 <= mConfig.avbdPenaltyMin) {
+        contacts[c].tangentPenalty0 = penaltyFloor;
+      } else if (contacts[c].tangentPenalty0 < penaltyFloor) {
         contacts[c].tangentPenalty0 = penaltyFloor;
       }
-      if (contacts[c].tangentPenalty1 < penaltyFloor) {
+      if (contacts[c].tangentPenalty1 <= mConfig.avbdPenaltyMin) {
+        contacts[c].tangentPenalty1 = penaltyFloor;
+      } else if (contacts[c].tangentPenalty1 < penaltyFloor) {
         contacts[c].tangentPenalty1 = penaltyFloor;
       }
     }
@@ -595,8 +864,8 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
 
       // Depth-adaptive C0 clamping: for deep penetrations (fast impacts),
       // reduce C0 so that alpha blending does not over-soften the correction.
-      const physx::PxReal c0Threshold = 0.05f;  // 50 mm
-      const physx::PxReal c0MaxDepth  = 0.20f;  // 200 mm
+      const physx::PxReal c0Threshold = 0.05f * mConfig.lengthScale;
+      const physx::PxReal c0MaxDepth = 0.20f * mConfig.lengthScale;
       if (rawC0 < -c0Threshold) {
         physx::PxReal t = PxClamp(
             (c0MaxDepth + rawC0) / (c0MaxDepth - c0Threshold), 0.0f, 1.0f);
@@ -628,9 +897,11 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
   {
     PX_PROFILE_ZONE("AVBD.solveIterations", 0);
 
-    // Chebyshev extrapolation overshoots on deep body-vs-static impacts (no CCD).
+    // Chebyshev extrapolation can overshoot a deep quasi-static
+    // body-vs-static overlap after the ordinary block step clears it.
     const bool useChebyshev =
-        !hasDeformableAnchorContact && mConfig.chebyshevRho > 0.0f &&
+        !hasDeformableAnchorContact &&
+        mConfig.chebyshevRho > 0.0f &&
         mConfig.chebyshevRho < 1.0f;
     physx::PxReal chebyOmega = 1.0f;
     physx::PxArray<physx::PxVec3> chebyPrevPos, chebyPrevPrevPos;
@@ -654,7 +925,9 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
     const bool enableEarlyStop = (mConfig.positionTolerance > 0.0f && iters > 1);
     const physx::PxU32 minIterations = physx::PxMin(iters, physx::PxU32(4));
     const physx::PxReal rotationTolerance =
-        physx::PxMax(4.0f * mConfig.positionTolerance, 1e-4f);
+        physx::PxMax(4.0f * mConfig.positionTolerance /
+                         physx::PxMax(mConfig.lengthScale, 1e-6f),
+                     1e-4f);
     physx::PxU32 consecutiveConvergedIterations = 0;
     physx::PxArray<physx::PxVec3> earlyStopPrevPos;
     physx::PxArray<physx::PxQuat> earlyStopPrevRot;
@@ -710,8 +983,10 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
 
         for (physx::PxU32 i = 0; i < numBodies; ++i) {
           if (bodies[i].invMass <= 0.0f) continue;
+          const physx::PxVec3 gsPosition = bodies[i].position;
+          const physx::PxQuat gsRotation = bodies[i].rotation;
           // Position relaxation
-          bodies[i].position = chebyPrevPrevPos[i] +
+          const physx::PxVec3 relaxedPosition = chebyPrevPrevPos[i] +
               (bodies[i].position - chebyPrevPrevPos[i]) * chebyOmega;
           // Rotation: quaternion linear blend + normalize
           physx::PxQuat qPrev = chebyPrevPrevRot[i];
@@ -722,7 +997,111 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
               qPrev.y + chebyOmega * (qCur.y - qPrev.y),
               qPrev.z + chebyOmega * (qCur.z - qPrev.z),
               qPrev.w + chebyOmega * (qCur.w - qPrev.w));
-          bodies[i].rotation = qBlend.getNormalized();
+          const physx::PxQuat relaxedRotation = qBlend.getNormalized();
+
+          // Chebyshev acceleration assumes a smooth equality system.  A
+          // unilateral body-static active set has zero energy anywhere on
+          // its satisfied side, so extrapolating after the ordinary block
+          // step has cleared every row only creates artificial separation.
+          // Keep Chebyshev while any row still needs correction; reject only
+          // the no-benefit outward overshoot of an already-cleared set.
+          bool rejectBodyStaticOvershoot = false;
+          if (hasBodyStaticContact) {
+            physx::PxReal minGsViolation = PX_MAX_REAL;
+            physx::PxReal minRelaxedViolation = PX_MAX_REAL;
+            bool foundBodyStatic = false;
+            bool deepQuasistaticInitialOverlap = false;
+            const physx::PxU32 *mapIndices = nullptr;
+            physx::PxU32 mapCount = 0;
+            if (contactMap && contactMap->numBodies > 0)
+              contactMap->getBodyConstraints(i, mapIndices, mapCount);
+            const physx::PxU32 loopCount =
+                mapIndices ? mapCount : numContacts;
+            for (physx::PxU32 ci = 0; ci < loopCount; ++ci) {
+              const physx::PxU32 c = mapIndices ? mapIndices[ci] : ci;
+              const physx::PxU32 bA = contacts[c].header.bodyIndexA;
+              const physx::PxU32 bB = contacts[c].header.bodyIndexB;
+              if (!isBodyVsStaticContact(bA, bB, numBodies) ||
+                  (bA != i && bB != i))
+                continue;
+
+              const bool dynIsA = (bA == i);
+              const physx::PxVec3 gsWorldA =
+                  dynIsA
+                      ? gsPosition +
+                            gsRotation.rotate(contacts[c].contactPointA)
+                      : contacts[c].contactPointA;
+              const physx::PxVec3 gsWorldB =
+                  dynIsA
+                      ? contacts[c].contactPointB
+                      : gsPosition +
+                            gsRotation.rotate(contacts[c].contactPointB);
+              const physx::PxVec3 relaxedWorldA =
+                  dynIsA
+                      ? relaxedPosition +
+                            relaxedRotation.rotate(contacts[c].contactPointA)
+                      : contacts[c].contactPointA;
+              const physx::PxVec3 relaxedWorldB =
+                  dynIsA
+                      ? contacts[c].contactPointB
+                      : relaxedPosition +
+                            relaxedRotation.rotate(contacts[c].contactPointB);
+              const physx::PxReal gsViolation =
+                  (gsWorldA - gsWorldB).dot(contacts[c].contactNormal) +
+                  contacts[c].penetrationDepth;
+              const physx::PxReal relaxedViolation =
+                  (relaxedWorldA - relaxedWorldB)
+                          .dot(contacts[c].contactNormal) +
+                  contacts[c].penetrationDepth;
+              minGsViolation =
+                  physx::PxMin(minGsViolation, gsViolation);
+              minRelaxedViolation =
+                  physx::PxMin(minRelaxedViolation, relaxedViolation);
+              foundBodyStatic = true;
+
+              const physx::PxVec3 initialWorldA =
+                  dynIsA
+                      ? bodies[i].prevPosition +
+                            bodies[i].prevRotation.rotate(
+                                contacts[c].contactPointA)
+                      : contacts[c].staticPrevWorldPoint;
+              const physx::PxVec3 initialWorldB =
+                  dynIsA
+                      ? contacts[c].staticPrevWorldPoint
+                      : bodies[i].prevPosition +
+                            bodies[i].prevRotation.rotate(
+                                contacts[c].contactPointB);
+              const physx::PxReal initialViolation =
+                  (initialWorldA - initialWorldB)
+                          .dot(contacts[c].contactNormal) +
+                  contacts[c].penetrationDepth;
+              const physx::PxVec3 outwardNormal =
+                  contacts[c].contactNormal * (dynIsA ? 1.0f : -1.0f);
+              const physx::PxReal approach =
+                  linearVelAtSolveStart.size() == numBodies
+                      ? physx::PxMax(
+                            0.0f,
+                            -linearVelAtSolveStart[i].dot(outwardNormal))
+                      : 0.0f;
+              const physx::PxReal deepOverlapThreshold =
+                  0.05f * physx::PxMax(mConfig.lengthScale, 1e-6f);
+              if (initialViolation < -deepOverlapThreshold &&
+                  approach <= mConfig.bounceApproachSpeedThreshold())
+                deepQuasistaticInitialOverlap = true;
+            }
+            const physx::PxReal activeSetTolerance =
+                0.01f * physx::PxMax(mConfig.lengthScale, 1e-6f);
+            rejectBodyStaticOvershoot =
+                foundBodyStatic && deepQuasistaticInitialOverlap &&
+                minGsViolation >= activeSetTolerance &&
+                minRelaxedViolation >
+                    minGsViolation + activeSetTolerance;
+          }
+
+          bodies[i].position =
+              rejectBodyStaticOvershoot ? gsPosition : relaxedPosition;
+          bodies[i].rotation =
+              rejectBodyStaticOvershoot ? gsRotation : relaxedRotation;
         }
       }
 
@@ -822,8 +1201,8 @@ void AvbdSolver::postAlStages(
 
   if (contacts && numContacts > 0) {
     PX_PROFILE_ZONE("AVBD.bodyStaticFriction", 0);
-    applyBodyStaticFrictionSweeps(bodies, numBodies, contacts, numContacts, dt,
-                                  6u, &postDepenPos, &postDepenRot,
+    applyBodyStaticFrictionSweeps(bodies, numBodies, contacts, numContacts,
+                                  gravity, dt, 6u, &postDepenPos, &postDepenRot,
                                   shellSkipDepen);
   }
   if (hasKinematicShellContacts) {
@@ -981,21 +1360,46 @@ void AvbdSolver::postAlStages(
         if (applyVelocityDamping)
           bodies[i].linearVelocity *= mConfig.velocityDamping;
 
-        physx::PxQuat deltaQBlock =
-            postBlockRot[i] * bodies[i].prevRotation.getConjugate();
-        if (deltaQBlock.w < 0.0f)
-          deltaQBlock = -deltaQBlock;
-        physx::PxVec3 wBlock =
-            physx::PxVec3(deltaQBlock.x, deltaQBlock.y, deltaQBlock.z) *
-            (2.0f * invDt);
-        physx::PxQuat deltaQFr =
-            bodies[i].rotation * postDepenRot[i].getConjugate();
-        if (deltaQFr.w < 0.0f)
-          deltaQFr = -deltaQFr;
-        physx::PxVec3 wFr =
-            physx::PxVec3(deltaQFr.x, deltaQFr.y, deltaQFr.z) * (2.0f * invDt);
-        bodies[i].angularVelocity = wBlock + wFr;
-        bodies[i].angularVelocity *= mConfig.angularDamping;
+        const bool unconstrainedAngularMotion =
+            numContacts == 0 && !hasKinematicShellContacts &&
+            (!d6Joints || numD6 == 0);
+        bool physicalSlerpPositionDrive = false;
+        if (d6Joints) {
+          for (physx::PxU32 j = 0; j < numD6; ++j) {
+            const AvbdD6JointConstraint &joint = d6Joints[j];
+            if ((joint.header.bodyIndexA == i ||
+                 joint.header.bodyIndexB == i) &&
+                (joint.sourceFlags &
+                 AvbdD6JointConstraint::
+                     eSLERP_POSITION_DRIVE_ACTIVE) != 0) {
+              physicalSlerpPositionDrive = true;
+              break;
+            }
+          }
+        }
+        if (!unconstrainedAngularMotion) {
+          physx::PxQuat deltaQBlock =
+              postBlockRot[i] * bodies[i].prevRotation.getConjugate();
+          if (deltaQBlock.w < 0.0f)
+            deltaQBlock = -deltaQBlock;
+          const physx::PxVec3 wBlock =
+              physx::PxVec3(deltaQBlock.x, deltaQBlock.y, deltaQBlock.z) *
+              (2.0f * invDt);
+          physx::PxQuat deltaQFr =
+              bodies[i].rotation * postDepenRot[i].getConjugate();
+          if (deltaQFr.w < 0.0f)
+            deltaQFr = -deltaQFr;
+          const physx::PxVec3 wFr =
+              physx::PxVec3(deltaQFr.x, deltaQFr.y, deltaQFr.z) *
+              (2.0f * invDt);
+          bodies[i].angularVelocity = wBlock + wFr;
+          // The predicate-owned SLERP position path already consumes the
+          // public PxD6JointDrive damping coefficient.  Applying the
+          // solver-wide stabilization decay again changes an authored
+          // constant-speed kinematic target into a frame-rate-dependent lag.
+          if (!physicalSlerpPositionDrive)
+            bodies[i].angularVelocity *= mConfig.angularDamping;
+        }
 
         if (bodies[i].linearDamping > 0.0f) {
           physx::PxReal linDecay =
@@ -1024,6 +1428,11 @@ void AvbdSolver::postAlStages(
         }
       }
     }
+    if (d6Joints && numD6 > 0) {
+      PX_PROFILE_ZONE("AVBD.projectBodyStaticLockedD6LinearVelocity", 0);
+      projectBodyStaticLockedD6LinearVelocities(bodies, numBodies, d6Joints,
+                                                numD6);
+    }
     // Material normal response: body-static e / deformable e=0 / dyn-dyn bounce.
     // Gate on numContacts (not hasBodyStaticContact) so pure dyn-dyn islands
     // still consume restitution e (criterion 2 / Entry 160).
@@ -1031,7 +1440,10 @@ void AvbdSolver::postAlStages(
       PX_PROFILE_ZONE("AVBD.materialNormalVelocity", 0);
       clampBodyStaticInelasticNormalVelocities(
           bodies, numBodies, contacts, numContacts, linearVelAtSolveStart, dt,
-          mConfig.bounceApproachSpeedThreshold());
+          mConfig.bounceApproachSpeedThreshold(), mConfig.lengthScale);
+      PX_PROFILE_ZONE("AVBD.contactTargetVelocity", 0);
+      applyAvbdContactTargetVelocity(bodies, numBodies, contacts, numContacts,
+                                     dt);
     }
     if (hasKinematicShellContacts) {
       PX_PROFILE_ZONE("AVBD.kinematicShellInelasticVel", 0);
@@ -1187,17 +1599,12 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
                                              physx::PxU32 numContacts,
                                              physx::PxReal dt,
                                              AvbdSolverStats &stats) {
-  PX_UNUSED(dt);
   physx::PxReal totalError = 0.0f;
   KahanSum totalErrorKahan;
   const bool useKahan =
       mConfig.isDeterministic() &&
       (mConfig.determinismFlags & AvbdDeterminismFlags::eUSE_KAHAN_SUMMATION);
   physx::PxU32 numActive = 0;
-
-  // AVBD reference parameters for penalty growth
-  const physx::PxReal beta = mConfig.avbdBeta;
-  const physx::PxReal penaltyMax = mConfig.avbdPenaltyMax;
 
   for (physx::PxU32 c = 0; c < numContacts; ++c) {
     physx::PxU32 bodyAIdx = contacts[c].header.bodyIndexA;
@@ -1228,6 +1635,14 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
       violation = (worldPointA - worldPointB).dot(contacts[c].contactNormal) +
                   contacts[c].penetrationDepth;
     }
+
+    // The reference beta is calibrated in unit-length coordinates.  Normalize
+    // the raw world-space violation while preserving the established
+    // lengthScale=1 behavior and its impact-energy/stability envelope.
+    const physx::PxReal lengthScale =
+        physx::PxMax(mConfig.lengthScale, 1e-6f);
+    const physx::PxReal beta = mConfig.avbdBeta / lengthScale;
+    const physx::PxReal penaltyMax = mConfig.avbdPenaltyMax;
 
     // Alpha blending (ref: AVBD3D manifold.cpp computeConstraint)
     violation -= mConfig.avbdAlpha * contacts[c].C0;
@@ -1293,11 +1708,21 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
           pen, violation, oldLambda, contacts[c].tangentPenalty0, tC0,
           contacts[c].tangentLambda0, contacts[c].tangentPenalty1, tC1,
           contacts[c].tangentLambda1, mu, Fn, Ft0, Ft1);
+      if (contacts[c].maxImpulse < PX_MAX_REAL && dt > 0.0f) {
+        const physx::PxReal maxNormalForce =
+            physx::PxMax(0.0f, contacts[c].maxImpulse) / dt;
+        Fn = physx::PxMax(Fn, -maxNormalForce);
+        avbdProjectImpulseCone(maxNormalForce * mu, Ft0, Ft1);
+      }
       // Coulomb bound uses Fn / prior ? only (demo3d). Do NOT inject m*g here:
       // per-contact weight floors multi-count box corners and glue HelloWorld
       // stacks under ball impact. Resting grip is the post-pass, impact-gated.
       const physx::PxReal nCap = physx::PxMax(
           -Fn, (oldLambda < 0.0f) ? -oldLambda : 0.0f);
+      const physx::PxReal boundedNCap =
+          contacts[c].maxImpulse < PX_MAX_REAL && dt > 0.0f
+              ? physx::PxMin(nCap, contacts[c].maxImpulse / dt)
+              : nCap;
       newLambda = Fn;
       contacts[c].header.lambda = Fn;
       contacts[c].tangentLambda0 = Ft0;
@@ -1308,11 +1733,11 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
         if (deformableStaticAnchor ||
             (numContacts > 4u &&
              isBodyVsStaticContact(bodyAIdx, bodyBIdx, numBodies)))
-          growthDist = physx::PxMin(growthDist, 0.15f);
+          growthDist = physx::PxMin(growthDist, 0.15f * lengthScale);
         contacts[c].header.penalty =
             physx::PxMin(pen + beta * growthDist, penaltyMax);
       }
-      const physx::PxReal bounds = nCap * mu;
+      const physx::PxReal bounds = boundedNCap * mu;
       if (preLen <= bounds) {
         contacts[c].tangentPenalty0 = physx::PxMin(
             contacts[c].tangentPenalty0 + beta * physx::PxAbs(tC0),
@@ -1322,7 +1747,10 @@ void AvbdSolver::updateLagrangianMultipliers(AvbdSolverBody *bodies,
             penaltyMax);
       }
       setFrictionStick(contacts[c],
-                       avbdFrictionStickFromDual(nCap, mu, preLen, tC0, tC1));
+                       avbdFrictionStickFromDual(boundedNCap, mu, preLen,
+                                                tC0, tC1,
+                                                AVBD_FRICTION_STICK_THRESH *
+                                                    lengthScale));
     }
 
     // Track convergence
@@ -1370,6 +1798,11 @@ void AvbdSolver::applyBodyStaticNormalDepenetrationSweeps(
       if (dynIsA == dynIsB)
         continue;
       const physx::PxU32 bi = dynIsA ? bA : bB;
+      const physx::PxReal linearResponseScale =
+          dynIsA ? contacts[c].invMassScaleA
+                 : contacts[c].invMassScaleB;
+      if (linearResponseScale <= 0.0f)
+        continue;
       if (skipDepenForBodies && bi < skipDepenForBodies->size() &&
           (*skipDepenForBodies)[bi] &&
           hasDeformableStaticAnchor(contacts[c]))
@@ -1391,12 +1824,15 @@ void AvbdSolver::applyBodyStaticNormalDepenetrationSweeps(
       if (hasDeformableStaticAnchor(contacts[c]))
         violation = finalizeBodyVsStaticViolation(violation,
                                                 contacts[c].penetrationDepth);
-      if (violation >= -1e-5f)
+      const physx::PxReal lengthScale =
+          physx::PxMax(mConfig.lengthScale, 1e-6f);
+      if (violation >= -1e-5f * lengthScale)
         continue;
 
       const physx::PxReal approachSpeed =
           body.linearVelocity.magnitude() + gravity.magnitude() * dt;
-      physx::PxReal sweepCap = physx::PxMax(approachSpeed * dt * 0.5f, 0.01f);
+      physx::PxReal sweepCap =
+          physx::PxMax(approachSpeed * dt * 0.5f, 0.01f * lengthScale);
       if (hasDeformableStaticAnchor(contacts[c])) {
         const physx::PxVec3 staticNow = dynIsA ? worldB : worldA;
         const physx::PxVec3 meshStep =
@@ -1404,8 +1840,8 @@ void AvbdSolver::applyBodyStaticNormalDepenetrationSweeps(
         // Mesh step + deeper floor: prevent multi-cycle trough sink when the
         // heaving surface rises into resting stacks (was capped too soft).
         sweepCap = physx::PxMax(sweepCap, meshStep.magnitude() * 1.5f);
-        sweepCap = physx::PxMax(sweepCap, 0.04f);
-        if (violation < -0.05f)
+        sweepCap = physx::PxMax(sweepCap, 0.04f * lengthScale);
+        if (violation < -0.05f * lengthScale)
           sweepCap = physx::PxMax(sweepCap, -violation * 0.6f);
       }
       const physx::PxReal corr = physx::PxMin(-violation, sweepCap);
@@ -1431,6 +1867,7 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
                                                physx::PxU32 numBodies,
                                                AvbdContactConstraint *contacts,
                                                physx::PxU32 numContacts,
+                                               const physx::PxVec3 &gravity,
                                                physx::PxReal dt,
                                                physx::PxU32 sweeps,
                                                const physx::PxArray<physx::PxVec3> *velSeedPos,
@@ -1528,7 +1965,9 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
 
   // Resting weight floor only when quasi-static. Impact / ball-shot must use
   // dual normal force alone - m*g floors glued HelloWorld boxes and killed ball KE.
-  static const physx::PxReal kRestSpeed = 1.5f;
+  const physx::PxReal lengthScale =
+      physx::PxMax(mConfig.lengthScale, 1e-6f);
+  const physx::PxReal restSpeed = 1.5f * lengthScale;
 
   for (physx::PxU32 sweep = 0; sweep < sweeps; ++sweep) {
     for (physx::PxU32 fi = 0; fi < frContacts.size(); ++fi) {
@@ -1536,11 +1975,21 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
       const bool dynIsA = cc.header.bodyIndexA < numBodies;
       const physx::PxU32 bi = dynIsA ? cc.header.bodyIndexA : cc.header.bodyIndexB;
       AvbdSolverBody &body = bodies[bi];
+      const physx::PxReal linearResponseScale =
+          dynIsA ? cc.invMassScaleA : cc.invMassScaleB;
+      const physx::PxReal angularResponseScale =
+          dynIsA ? cc.invInertiaScaleA : cc.invInertiaScaleB;
+      if (linearResponseScale <= 0.0f &&
+          angularResponseScale <= 0.0f)
+        continue;
       touched[bi] = true;
 
       const physx::PxVec3 cpLocal = dynIsA ? cc.contactPointA : cc.contactPointB;
       const physx::PxVec3 r = body.rotation.rotate(cpLocal);
-      const physx::PxMat33 &invI = body.invInertiaWorld;
+      const physx::PxReal contactInvMass =
+          body.invMass * linearResponseScale;
+      const physx::PxMat33 contactInvI =
+          body.invInertiaWorld * angularResponseScale;
 
       physx::PxVec3 worldA, worldB;
       if (dynIsA) {
@@ -1595,9 +2044,10 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
           cc.header.penalty * physx::PxMax(0.0f, -viol));
 
       // Soft shared m*g fill only when resting (not under ball impact).
-      if (body.invMass > 1e-8f && bodySpeed[bi] < kRestSpeed && viol <= 0.05f) {
+      if (body.invMass > 1e-8f && bodySpeed[bi] < restSpeed &&
+          viol <= 0.05f * lengthScale) {
         const physx::PxReal weight =
-            (1.0f / body.invMass) * 9.81f /
+            (1.0f / body.invMass) * gravity.magnitude() /
             physx::PxReal(physx::PxMax(1u, bodyContactCount[bi]));
         contactN = physx::PxMax(contactN, weight);
       }
@@ -1618,10 +2068,15 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
       for (physx::PxU32 a = 0; a < 2; ++a) {
         const physx::PxVec3 &t = tangents[a];
         rCrossT[a] = r.cross(t);
-        kEff[a] = body.invMass + rCrossT[a].dot(invI * rCrossT[a]);
+        kEff[a] =
+            contactInvMass + rCrossT[a].dot(contactInvI * rCrossT[a]);
         if (kEff[a] <= 1e-12f)
           continue;
-        const physx::PxVec3 vRel = (vLin[bi] + vAng[bi].cross(r)) - vMesh;
+        const physx::PxVec3 dynamicTargetVelocity =
+            cc.targetVelocity * (dynIsA ? 1.0f : -1.0f);
+        const physx::PxVec3 vRel =
+            (vLin[bi] + vAng[bi].cross(r)) - vMesh -
+            dynamicTargetVelocity;
         jUnc[a] = -vRel.dot(t) / kEff[a];
       }
       avbdProjectImpulseCone(jmax, jUnc[0], jUnc[1]);
@@ -1629,8 +2084,8 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
         if (kEff[a] <= 1e-12f)
           continue;
         const physx::PxReal j = jUnc[a];
-        vLin[bi] += tangents[a] * (j * body.invMass);
-        vAng[bi] += invI * (rCrossT[a] * j);
+        vLin[bi] += tangents[a] * (j * contactInvMass);
+        vAng[bi] += contactInvI * (rCrossT[a] * j);
       }
     }
   }
@@ -1962,6 +2417,18 @@ void AvbdSolver::accumulateBodyContactRows(
     }
 
     const bool isBodyA = (bodyAIdx == bodyIndex);
+    const physx::PxReal linearResponseScale =
+        isBodyA ? contacts[c].invMassScaleA
+                : contacts[c].invMassScaleB;
+    const physx::PxReal angularResponseScale =
+        isBodyA ? contacts[c].invInertiaScaleA
+                : contacts[c].invInertiaScaleB;
+    if (linearResponseScale <= 0.0f &&
+        angularResponseScale <= 0.0f) {
+      // Contact-local infinite mass/inertia: this row must not move this body,
+      // but the peer still consumes the same row with its own response scales.
+      continue;
+    }
     AvbdSolverBody *otherBody = nullptr;
     if (isBodyA && bodyBIdx < numBodies) {
       otherBody = &bodies[bodyBIdx];
@@ -2008,14 +2475,15 @@ void AvbdSolver::accumulateBodyContactRows(
     physx::PxVec3 gradPos = normal * sign;
     physx::PxVec3 gradRot = rCrossN * sign;
 
-    A.addConstraintContribution(gradPos, gradRot, pen);
+    A.addResponseScaledConstraintContribution(
+        gradPos, gradRot, pen, linearResponseScale, angularResponseScale);
     numTouching++;
 
     // Normal force (unilateral) + optional Coulomb-cone tangents in 6x6.
     physx::PxReal f = physx::PxMin(0.0f, pen * violation + lambda);
     if (f < 0.0f) {
-      gLinear += gradPos * f;
-      gAngular += gradRot * f;
+      gLinear += gradPos * (f * linearResponseScale);
+      gAngular += gradRot * (f * angularResponseScale);
     }
 
     // Never stack body-static tangents in aggregated 6x6 (PhysX contract).
@@ -2060,18 +2528,22 @@ void AvbdSolver::accumulateBodyContactRows(
         const physx::PxVec3 rCrossT = r.cross(t);
         const physx::PxVec3 tGradPos = t * sign;
         const physx::PxVec3 tGradRot = rCrossT * sign;
-        A.addConstraintContribution(tGradPos, tGradRot, tPen0);
-        gLinear += tGradPos * Ft0;
-        gAngular += tGradRot * Ft0;
+        A.addResponseScaledConstraintContribution(
+            tGradPos, tGradRot, tPen0, linearResponseScale,
+            angularResponseScale);
+        gLinear += tGradPos * (Ft0 * linearResponseScale);
+        gAngular += tGradRot * (Ft0 * angularResponseScale);
       }
       {
         const physx::PxVec3 &t = contacts[c].tangent1;
         const physx::PxVec3 rCrossT = r.cross(t);
         const physx::PxVec3 tGradPos = t * sign;
         const physx::PxVec3 tGradRot = rCrossT * sign;
-        A.addConstraintContribution(tGradPos, tGradRot, tPen1);
-        gLinear += tGradPos * Ft1;
-        gAngular += tGradRot * Ft1;
+        A.addResponseScaledConstraintContribution(
+            tGradPos, tGradRot, tPen1, linearResponseScale,
+            angularResponseScale);
+        gLinear += tGradPos * (Ft1 * linearResponseScale);
+        gAngular += tGradRot * (Ft1 * angularResponseScale);
       }
     }
   }
@@ -2212,9 +2684,11 @@ void AvbdSolver::blockDescentIteration(
   // For each body, solve a local optimization problem considering all
   // constraints that affect this body.
   //
-  // Parallelization: each body's local solve reads only its own position
-  // (mutated) and neighbor positions (read-only). The AVBD proximal term
-  // ensures convergence under Jacobi (parallel) updates.
+  // Parallelization uses a read-only pose snapshot for every local solve and
+  // writes each result to a distinct output body.  Reading the live body array
+  // here would be asynchronous Gauss-Seidel with unsynchronized neighbor
+  // reads, not Jacobi, and makes both results and scale invariance depend on
+  // task scheduling.
 
   const bool useDeterministicOrder =
       mConfig.isDeterministic() &&
@@ -2257,7 +2731,28 @@ void AvbdSolver::blockDescentIteration(
   };
 
   if (useParallel) {
-    avbdParallelFor(0u, numBodies, solveBody);
+    physx::PxArray<AvbdSolverBody> bodySnapshot(numBodies);
+    for (physx::PxU32 i = 0; i < numBodies; ++i)
+      bodySnapshot[i] = bodies[i];
+
+    auto solveBodyJacobi = [&](physx::PxU32 i) {
+      if (bodySnapshot[i].invMass <= 0.0f)
+        return;
+      AvbdSolverBody updatedBody = bodySnapshot[i];
+      if (mConfig.enableLocal6x6Solve) {
+        solveLocalSystem(
+            updatedBody, bodySnapshot.begin(), numBodies, contacts, numContacts,
+            dt, invDt2, contactMap, kinematicShellParticles,
+            numKinematicShellParticles, kinematicShellContacts,
+            numKinematicShellContacts);
+      } else {
+        solveLocalSystemWithJoints(
+            updatedBody, bodySnapshot.begin(), numBodies, contacts, numContacts,
+            nullptr, 0, nullptr, 0, dt, invDt2, contactMap, nullptr, nullptr);
+      }
+      bodies[i] = updatedBody;
+    };
+    avbdParallelFor(0u, numBodies, solveBodyJacobi);
   } else {
     for (physx::PxU32 idx = 0; idx < numBodies; ++idx)
       solveBody(idx);

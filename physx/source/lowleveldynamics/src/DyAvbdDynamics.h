@@ -239,7 +239,8 @@ private:
    * @param bodyOffset Global index of first body in this island
    * @return Number of constraints created
    */
-  PxU32 prepareAvbdContacts(AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
+  PxU32 prepareAvbdContacts(const IG::IslandSim &islandSim, PxReal dt,
+                            AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
                             AvbdContactConstraint *constraints,
                             PxU32 maxConstraints, PxU32 startContactIdx,
                             PxU32 numContactsToProcess, PxU32 bodyOffset);
@@ -248,6 +249,7 @@ private:
    * @brief Convert PhysX constraints (joints) to AVBD joint constraints
    */
   void prepareAvbdConstraints(const IG::IslandSim &islandSim,
+                              PxReal dt,
                               AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
                               PxU32 bodyOffset,
                               AvbdD6JointConstraint *d6Constraints,
@@ -340,6 +342,9 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
                         AvbdContactConstraint *constraints,
                         PxU32 numConstraints, PxU32 numBodies);
 
+void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
+                                 PxU32 numConstraints, PxReal dt);
+
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
                                  PxU64 cacheKey);
@@ -347,6 +352,10 @@ void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
 void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
                              AvbdD6JointConstraint *constraints,
                              PxU32 numConstraints);
+
+void writeJointConstraintWriteback(AvbdDynamicsContext &ctx,
+                                   const AvbdD6JointConstraint *constraints,
+                                   PxU32 numConstraints, PxReal dt);
 
 /**
  * @brief Factory function to create AVBD dynamics context

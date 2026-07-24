@@ -43,13 +43,38 @@ namespace Dy {
  * @param body Target AVBD solver body
  * @param bodyIndex Index in solver body array
  */
+PX_FORCE_INLINE PxVec3 computeAvbdAngularVelocity(
+    const PxsBodyCore &core, PxReal dt) {
+  PxVec3 angularVelocity = core.angularVelocity;
+  if ((core.mFlags & PxRigidBodyFlag::eENABLE_GYROSCOPIC_FORCES) &&
+      dt > 0.0f) {
+    // Match PGS/TGS copyToSolverBodyData(): integrate the torque-free Euler
+    // term in body space and renormalize angular momentum magnitude.
+    const PxVec3 localInertia = Cm::safeRecip<PxVec3>(core.inverseInertia);
+    const PxVec3 localAngularVelocity =
+        core.body2World.q.rotateInv(angularVelocity);
+    const PxVec3 originalMomentum =
+        localInertia.multiply(localAngularVelocity);
+    const PxVec3 torque =
+        -localAngularVelocity.cross(originalMomentum);
+    PxVec3 newMomentum = originalMomentum + torque * dt;
+    const PxReal denominator = newMomentum.magnitude();
+    const PxReal ratio =
+        denominator > 0.0f ? originalMomentum.magnitude() / denominator : 0.0f;
+    newMomentum *= ratio;
+    angularVelocity += core.body2World.q.rotate(
+        core.inverseInertia.multiply(newMomentum) - localAngularVelocity);
+  }
+  return angularVelocity;
+}
+
 PX_FORCE_INLINE void copyToAvbdSolverBody(const PxsBodyCore &core,
                                           AvbdSolverBody &body,
-                                          PxU32 bodyIndex) {
+                                          PxU32 bodyIndex, PxReal dt) {
   // Initialize AVBD body from PhysX core data
   const PxTransform &pose = core.body2World;
   const PxVec3 &linVel = core.linearVelocity;
-  const PxVec3 &angVel = core.angularVelocity;
+  const PxVec3 angVel = computeAvbdAngularVelocity(core, dt);
   const PxReal invMass = core.inverseMass;
   const PxVec3 &invInertia = core.inverseInertia;
 

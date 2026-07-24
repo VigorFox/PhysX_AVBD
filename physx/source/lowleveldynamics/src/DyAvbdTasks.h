@@ -165,11 +165,16 @@ private:
 class AvbdWriteBackTask : public AvbdTask {
 public:
   AvbdWriteBackTask(AvbdDynamicsContext &context, AvbdSolverBody *avbdBodies,
-                    PxsRigidBody **rigidBodies, PxU32 numBodies,
+                    PxsRigidBody **rigidBodies,
+                    const PxU32 *staticTouchCounts, PxU32 numBodies, PxReal dt,
+                    bool enableStabilization, bool sleepingDisabled,
                     FeatherstoneArticulation **articulationForBody = nullptr,
                     PxU32 *linkIndexForBody = nullptr)
       : AvbdTask(context), mAvbdBodies(avbdBodies), mRigidBodies(rigidBodies),
-        mNumBodies(numBodies), mArticulationForBody(articulationForBody),
+        mStaticTouchCounts(staticTouchCounts), mNumBodies(numBodies), mDt(dt),
+        mEnableStabilization(enableStabilization),
+        mSleepingDisabled(sleepingDisabled),
+        mArticulationForBody(articulationForBody),
         mLinkIndexForBody(linkIndexForBody) {}
 
   virtual void run() override; // Implemented in cpp
@@ -179,7 +184,11 @@ public:
 private:
   AvbdSolverBody *mAvbdBodies;
   PxsRigidBody **mRigidBodies;
+  const PxU32 *mStaticTouchCounts;
   PxU32 mNumBodies;
+  PxReal mDt;
+  bool mEnableStabilization;
+  bool mSleepingDisabled;
   FeatherstoneArticulation **mArticulationForBody;
   PxU32 *mLinkIndexForBody;
 };
@@ -224,13 +233,17 @@ public:
 
   AvbdWriteBackTask *
   createWriteBackTask(AvbdDynamicsContext &context, AvbdSolverBody *avbdBodies,
-                      PxsRigidBody **rigidBodies, PxU32 numBodies,
+                      PxsRigidBody **rigidBodies,
+                      const PxU32 *staticTouchCounts, PxU32 numBodies,
+                      PxReal dt, bool enableStabilization,
+                      bool sleepingDisabled,
                       FeatherstoneArticulation **articulationForBody = nullptr,
                       PxU32 *linkIndexForBody = nullptr) {
     void *mem = mAllocator.allocate(sizeof(AvbdWriteBackTask),
                                     "AvbdWriteBackTask", __FILE__, __LINE__);
     return PX_PLACEMENT_NEW(mem, AvbdWriteBackTask)(
-        context, avbdBodies, rigidBodies, numBodies, articulationForBody,
+        context, avbdBodies, rigidBodies, staticTouchCounts, numBodies, dt,
+        enableStabilization, sleepingDisabled, articulationForBody,
         linkIndexForBody);
   }
 

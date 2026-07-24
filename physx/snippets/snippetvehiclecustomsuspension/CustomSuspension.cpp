@@ -31,6 +31,18 @@
 namespace snippetvehicle
 {
 
+static CustomSuspensionDiagnostics gCustomSuspensionDiagnostics;
+
+void resetCustomSuspensionDiagnostics()
+{
+	gCustomSuspensionDiagnostics.setToDefault();
+}
+
+const CustomSuspensionDiagnostics& getCustomSuspensionDiagnostics()
+{
+	return gCustomSuspensionDiagnostics;
+}
+
 void addCustomSuspensionForce
 (const PxReal dt,
  const PxVehicleSuspensionParams& suspParams,
@@ -46,6 +58,22 @@ void addCustomSuspensionForce
 	const PxVec3 customForce = suspDir * magnitude;
 	const PxVec3 r = rigidBodyState.pose.rotate(suspParams.suspensionAttachment.transform(suspComplianceState.suspForceAppPoint));
 	const PxVec3 customTorque = r.cross(customForce);
+	gCustomSuspensionDiagnostics.callCount++;
+	if(isWheelOnGround)
+		gCustomSuspensionDiagnostics.onGroundCallCount++;
+	if(PxAbs(magnitude) > 1e-4f && !customForce.isZero())
+		gCustomSuspensionDiagnostics.nonZeroForceCount++;
+	if(!PxIsFinite(magnitude) || !customForce.isFinite() ||
+		!customTorque.isFinite())
+	{
+		gCustomSuspensionDiagnostics.nonFiniteCount++;
+	}
+	else
+	{
+		gCustomSuspensionDiagnostics.maxMagnitude = PxMax(
+			gCustomSuspensionDiagnostics.maxMagnitude, PxAbs(magnitude));
+		gCustomSuspensionDiagnostics.accumulatedMagnitude += PxAbs(magnitude);
+	}
 
 	//Increment the phase of the oscillator and clamp it in range (-Pi,Pi)
 	PxReal theta = customState.theta + 2.0f*PxPi*customParams.frequency*dt;

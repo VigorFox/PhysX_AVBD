@@ -1,3 +1,4 @@
+#include "avbd_solver.h"
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -139,13 +140,115 @@ bool test118_boxOnGround_aggregatedUnchangedBySequentialMode();
 bool test119_kinematicShell_sphereShot();
 bool test120_kinematicShell_stressHarness();
 bool test121_kinematicShell_vs_staticAnchor_sphereShot();
+bool test122_prismaticReverseEndpointFrameA();
+bool test123_d6VelocityDriveReverseEndpointFrameA();
+bool test124_d6LockedLinearReactionWriteback();
+bool test125_d6OffsetCoupledReaction();
+bool test126_matrixFreeIslandOperator();
+bool test127_linearPositionDriveDiscreteEquation();
+bool test128_linearPositionDriveOutputForceSemantics();
+bool test129_angularTwistVelocityDriveOutputForceSemantics();
+bool test130_angularSwing1VelocityDriveOutputForceSemantics();
+bool test131_angularSwing2VelocityDriveOutputForceSemantics();
+bool test132_angularSlerpVelocityDriveOutputForceSemantics();
+bool test133_linearPositionDriveOffsetMomentSemantics();
+bool test134_angularTwistPositionDriveDiscreteEquation();
+bool test135_linearAccelerationDriveEffectiveMassSemantics();
+bool test136_angularSwing1PositionDriveDiscreteEquation();
+bool test137_angularSwing2PositionDriveDiscreteEquation();
+bool test138_angularSlerpPositionDriveDiscreteEquation();
+bool test139_gearJointImpulseProjectionDiscreteEquation();
+bool test140_dynamicDynamicAngularPositionDriveDiscreteEquation();
+bool probe127_canonicalPyramidFrictionOrder();
+bool probe128_canonicalBridgeFrictionOrder();
+bool probe129_contactPcgFixedPairDrop();
+bool probe130_contactPcgRevolutePair();
+bool probe131_contactPcgPrismaticPair();
+bool probe132_contactPcgLinearDrivePair();
+bool probe133_contactPcgLinearAccelerationDrivePair();
+bool probe134_contactPcgTwistDrivePair();
+bool probe135_contactPcgSwingDrivePairs();
+bool probe136_contactPcgSlerpDrivePair();
 
 int gTestsPassed = 0;
 int gTestsFailed = 0;
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=canonical-pyramid-friction") {
+    return probe127_canonicalPyramidFrictionOrder() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=canonical-bridge-friction") {
+    return probe128_canonicalBridgeFrictionOrder() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-fixed-pair") {
+    return probe129_contactPcgFixedPairDrop() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-revolute-pair") {
+    return probe130_contactPcgRevolutePair() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-prismatic-pair") {
+    return probe131_contactPcgPrismaticPair() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-linear-drive") {
+    return probe132_contactPcgLinearDrivePair() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=contact-pcg-linear-acceleration-drive") {
+    return probe133_contactPcgLinearAccelerationDrivePair() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-twist-drive") {
+    return probe134_contactPcgTwistDrivePair() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-swing-drives") {
+    return probe135_contactPcgSwingDrivePairs() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=contact-pcg-slerp-drive") {
+    return probe136_contactPcgSlerpDrivePair() ? 0 : 1;
+  }
+  const bool contactCandidateSuite =
+      argc == 2 &&
+      std::string(argv[1]) == "--suite=canonical-contact-pcg";
+  const bool contactLegacyAuthoringSuite =
+      argc == 2 &&
+      std::string(argv[1]) == "--suite=contact-pcg-legacy-authoring";
+  if (argc != 1 && !contactCandidateSuite &&
+      !contactLegacyAuthoringSuite) {
+    fprintf(stderr,
+            "Usage: avbd_test.exe "
+            "[--probe=canonical-pyramid-friction|"
+            "--probe=canonical-bridge-friction|"
+            "--probe=contact-pcg-fixed-pair|"
+            "--probe=contact-pcg-revolute-pair|"
+            "--probe=contact-pcg-prismatic-pair|"
+            "--probe=contact-pcg-linear-drive|"
+            "--probe=contact-pcg-linear-acceleration-drive|"
+            "--probe=contact-pcg-twist-drive|"
+            "--probe=contact-pcg-swing-drives|"
+            "--probe=contact-pcg-slerp-drive|"
+            "--suite=canonical-contact-pcg|"
+            "--suite=contact-pcg-legacy-authoring]\n");
+    return 2;
+  }
+  AvbdRef::setContactIslandPcgSuiteProbeEnabled(
+      contactCandidateSuite || contactLegacyAuthoringSuite);
+  AvbdRef::setCanonicalRigidContactAuthoringSuiteProbeEnabled(
+      contactCandidateSuite);
   printf("=========================================\n");
-  printf("Running AVBD Refactored Tests (52 Cases)\n");
+  printf("Running AVBD Refactored Tests (137 Cases, contact=%s, authoring=%s)\n",
+         contactCandidateSuite || contactLegacyAuthoringSuite
+             ? "island-pcg"
+             : "baseline",
+         contactCandidateSuite ? "canonical" : "legacy");
   printf("=========================================\n");
 
   test1_singleBoxOnGround();
@@ -285,6 +388,25 @@ int main() {
   test119_kinematicShell_sphereShot();
   test120_kinematicShell_stressHarness();
   test121_kinematicShell_vs_staticAnchor_sphereShot();
+  test122_prismaticReverseEndpointFrameA();
+  test123_d6VelocityDriveReverseEndpointFrameA();
+  test124_d6LockedLinearReactionWriteback();
+  test125_d6OffsetCoupledReaction();
+  test126_matrixFreeIslandOperator();
+  test127_linearPositionDriveDiscreteEquation();
+  test128_linearPositionDriveOutputForceSemantics();
+  test129_angularTwistVelocityDriveOutputForceSemantics();
+  test130_angularSwing1VelocityDriveOutputForceSemantics();
+  test131_angularSwing2VelocityDriveOutputForceSemantics();
+  test132_angularSlerpVelocityDriveOutputForceSemantics();
+  test133_linearPositionDriveOffsetMomentSemantics();
+  test134_angularTwistPositionDriveDiscreteEquation();
+  test135_linearAccelerationDriveEffectiveMassSemantics();
+  test136_angularSwing1PositionDriveDiscreteEquation();
+  test137_angularSwing2PositionDriveDiscreteEquation();
+  test138_angularSlerpPositionDriveDiscreteEquation();
+  test139_gearJointImpulseProjectionDiscreteEquation();
+  test140_dynamicDynamicAngularPositionDriveDiscreteEquation();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

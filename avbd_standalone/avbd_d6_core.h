@@ -31,7 +31,7 @@ inline float d6ComputeRhoDual(uint32_t idxA, uint32_t idxB, float rho,
 }
 
 // =============================================================================
-// computeAngularError -- axis-angle decomposition (matches PhysX)
+// computeAngularError -- stable rotation-vector decomposition (matches PhysX)
 //
 // Computes angular error around a specific axis using axis-angle decomposition.
 // This is numerically equivalent to PhysX's AvbdD6JointConstraint::computeAngularError.
@@ -45,21 +45,18 @@ inline float computeAngularError(const Quat &rotA, const Quat &rotB,
   if (relRot.w < 0.0f)
     relRot = relRot * (-1.0f);
 
-  float angle = 2.0f * acosf(std::max(-1.0f, std::min(1.0f, relRot.w)));
-  if (angle < 1e-6f)
-    return 0.0f;
-
-  Vec3 axisVec(relRot.x, relRot.y, relRot.z);
-  float len = axisVec.length();
-  if (len < 1e-12f)
-    return 0.0f;
-  axisVec = axisVec * (1.0f / len);
-
   Vec3 localAxis(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f,
                  axis == 2 ? 1.0f : 0.0f);
   Vec3 worldAxis = worldFrameA.rotate(localAxis);
 
-  return angle * axisVec.dot(worldAxis);
+  Vec3 imaginary(relRot.x, relRot.y, relRot.z);
+  float sinHalfSquared = imaginary.length2();
+  if (sinHalfSquared <= 1e-20f)
+    return 2.0f * imaginary.dot(worldAxis);
+  float sinHalf = sqrtf(sinHalfSquared);
+  float angle =
+      2.0f * atan2f(sinHalf, std::max(0.0f, std::min(1.0f, relRot.w)));
+  return (angle / sinHalf) * imaginary.dot(worldAxis);
 }
 
 // Compute angular limit violation for a given error and axis limits
@@ -67,6 +64,172 @@ inline float computeAngularLimitViolation(float error, float lower, float upper)
   if (error < lower) return error - lower;
   if (error > upper) return error - upper;
   return 0.0f;
+}
+
+// Reconstruct the actor-A/world linear reaction represented by the locked D6
+// primal rows.  The leaky AL lambda is solver state; the physical row force is
+// effectiveRho*C + lambda.  LIMITED rows and linear drives are deliberately
+// rejected until their unilateral/output-force aggregation is covered.
+inline bool computeD6LockedLinearActor0Force(
+    const D6Joint &jnt, const std::vector<Body> &bodies, float dt,
+    Vec3 &actor0Force) {
+  actor0Force = Vec3();
+  if (!(dt > 0.0f))
+    return false;
+
+  bool hasLockedRow = false;
+  for (int axis = 0; axis < 3; ++axis) {
+    const uint32_t motion = jnt.getLinearMotion(axis);
+    hasLockedRow |= motion == 0;
+    if (motion == 1 || (jnt.driveFlags & (1u << axis)) != 0)
+      return false;
+  }
+  if (!hasLockedRow)
+    return false;
+
+  const auto isStatic = [&](uint32_t idx) {
+    return idx == UINT32_MAX || idx >= static_cast<uint32_t>(bodies.size());
+  };
+  const bool aStatic = isStatic(jnt.bodyA);
+  const bool bStatic = isStatic(jnt.bodyB);
+  const Vec3 worldAnchorA =
+      aStatic ? jnt.anchorA
+              : bodies[jnt.bodyA].position +
+                    bodies[jnt.bodyA].rotation.rotate(jnt.anchorA);
+  const Vec3 worldAnchorB =
+      bStatic ? jnt.anchorB
+              : bodies[jnt.bodyB].position +
+                    bodies[jnt.bodyB].rotation.rotate(jnt.anchorB);
+  const Vec3 positionViolation = worldAnchorA - worldAnchorB;
+
+  const Quat rotationA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
+  const Quat jointFrameA =
+      (aStatic ? jnt.localFrameA : rotationA * jnt.localFrameA).normalized();
+  Vec3 axes[3];
+  if (jnt.linearMotion == 0) {
+    axes[0] = Vec3(1, 0, 0);
+    axes[1] = Vec3(0, 1, 0);
+    axes[2] = Vec3(0, 0, 1);
+  } else {
+    axes[0] = jointFrameA.rotate(Vec3(1, 0, 0));
+    axes[1] = jointFrameA.rotate(Vec3(0, 1, 0));
+    axes[2] = jointFrameA.rotate(Vec3(0, 0, 1));
+  }
+
+  const float massA = aStatic ? 0.0f : bodies[jnt.bodyA].mass;
+  const float massB = bStatic ? 0.0f : bodies[jnt.bodyB].mass;
+  const float effectiveRho =
+      std::max(jnt.rho, std::max(massA, massB) / (dt * dt));
+  for (int axis = 0; axis < 3; ++axis) {
+    if (jnt.getLinearMotion(axis) != 0)
+      continue;
+    const float totalForce =
+        effectiveRho * positionViolation.dot(axes[axis]) +
+        (&jnt.lambdaLinear.x)[axis];
+    actor0Force -= axes[axis] * totalForce;
+  }
+  return true;
+}
+
+// Reconstruct actor-A/world torque from generic all-LOCKED angular primal
+// rows.  The stable rotation vector above preserves the small errors required
+// by stiff offset joints; the leaky AL multiplier alone is not a public
+// impulse and therefore is never returned directly.
+inline bool computeD6LockedAngularActor0Torque(
+    const D6Joint &jnt, const std::vector<Body> &bodies, float dt,
+    Vec3 &actor0Torque) {
+  actor0Torque = Vec3();
+  if (!(dt > 0.0f) || jnt.angularMotion != 0 ||
+      (jnt.driveFlags & 0x38u) != 0)
+    return false;
+
+  const auto isStatic = [&](uint32_t idx) {
+    return idx == UINT32_MAX || idx >= static_cast<uint32_t>(bodies.size());
+  };
+  const bool aStatic = isStatic(jnt.bodyA);
+  const bool bStatic = isStatic(jnt.bodyB);
+  const Quat rotationA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
+  const Quat rotationB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
+  const Quat jointFrameA =
+      (aStatic ? jnt.localFrameA : rotationA * jnt.localFrameA).normalized();
+  const float massA = aStatic ? 0.0f : bodies[jnt.bodyA].mass;
+  const float massB = bStatic ? 0.0f : bodies[jnt.bodyB].mass;
+  const float effectiveRho =
+      std::max(jnt.rho, std::max(massA, massB) / (dt * dt));
+
+  for (int axis = 0; axis < 3; ++axis) {
+    Vec3 localAxis(axis == 0 ? 1.0f : 0.0f,
+                   axis == 1 ? 1.0f : 0.0f,
+                   axis == 2 ? 1.0f : 0.0f);
+    const Vec3 worldAxis = jointFrameA.rotate(localAxis);
+    const float angularError = computeAngularError(
+        rotationA, rotationB, jnt.localFrameA, jnt.localFrameB, axis);
+    const float totalTorque =
+        effectiveRho * angularError + (&jnt.lambdaAngular.x)[axis];
+    actor0Torque -= worldAxis * totalTorque;
+  }
+  return true;
+}
+
+// Enforce the velocity counterpart of body-vs-static locked linear rows using
+// the row Jacobian and anchor effective mass.  This deliberately excludes
+// dynamic-dynamic, LIMITED/FREE and driven rows, matching the first PhysX
+// correctness slice rather than applying a velocity dead-zone.
+inline void projectD6BodyStaticLockedLinearVelocities(
+    std::vector<Body> &bodies, const std::vector<D6Joint> &joints) {
+  for (const D6Joint &joint : joints) {
+    const bool aDynamic = joint.bodyA < static_cast<uint32_t>(bodies.size());
+    const bool bDynamic = joint.bodyB < static_cast<uint32_t>(bodies.size());
+    if (aDynamic == bDynamic)
+      continue;
+
+    Body &body = bodies[aDynamic ? joint.bodyA : joint.bodyB];
+    if (body.mass <= 0.0f)
+      continue;
+
+    const Quat worldFrameA =
+        (aDynamic ? body.rotation * joint.localFrameA : joint.localFrameA)
+            .normalized();
+    const Vec3 r = body.rotation.rotate(
+        aDynamic ? joint.anchorA : joint.anchorB);
+    const bool allLinearLocked = joint.linearMotion == 0;
+
+    for (int axis = 0; axis < 3; ++axis) {
+      if (joint.getLinearMotion(axis) != 0 ||
+          (joint.driveFlags & (1u << axis)) != 0)
+        continue;
+
+      Vec3 worldAxis(axis == 0 ? 1.0f : 0.0f,
+                     axis == 1 ? 1.0f : 0.0f,
+                     axis == 2 ? 1.0f : 0.0f);
+      if (!allLinearLocked)
+        worldAxis = worldFrameA.rotate(worldAxis);
+
+      const Vec3 rCrossAxis = r.cross(worldAxis);
+      const float recipResponse =
+          body.invMass + rCrossAxis.dot(body.invInertiaWorld * rCrossAxis);
+      if (recipResponse <= 1e-12f || !std::isfinite(recipResponse))
+        continue;
+
+      const float anchorSpeed =
+          (body.linearVelocity + body.angularVelocity.cross(r)).dot(worldAxis);
+      if (!std::isfinite(anchorSpeed))
+        continue;
+
+      const float impulse = -anchorSpeed / recipResponse;
+      body.linearVelocity += worldAxis * (impulse * body.invMass);
+      body.angularVelocity += body.invInertiaWorld * (rCrossAxis * impulse);
+    }
+
+    // A body fixed to a static/world endpoint has no admissible spatial
+    // velocity.  This is the complete locked subspace projection, not a
+    // magnitude threshold; partially locked joints retain the row projection.
+    if (allLinearLocked && joint.angularMotion == 0 &&
+        joint.driveFlags == 0) {
+      body.linearVelocity = Vec3();
+      body.angularVelocity = Vec3();
+    }
+  }
 }
 
 // =============================================================================
@@ -134,8 +297,8 @@ inline void addD6Contribution(const D6Joint &jnt, uint32_t bi,
                                                 : bodies[jnt.bodyB].rotation)
                    : body.rotation;
 
-  bool bStatic = (jnt.bodyB == UINT32_MAX);
-  Quat jointFrameA = bStatic ? jnt.localFrameA : rotA * jnt.localFrameA;
+  bool aStatic = (jnt.bodyA == UINT32_MAX);
+  Quat jointFrameA = aStatic ? jnt.localFrameA : rotA * jnt.localFrameA;
   jointFrameA = jointFrameA.normalized();
 
   Vec3 localAxesA[3] = {jointFrameA.rotate(Vec3(1, 0, 0)),
@@ -448,7 +611,7 @@ inline void updateD6Dual(D6Joint &jnt, const std::vector<Body> &bodies,
 
   Quat rotA = aStatic ? Quat() : bodies[jnt.bodyA].rotation;
   Quat rotB = bStatic ? Quat() : bodies[jnt.bodyB].rotation;
-  Quat jointFrameA = bStatic ? jnt.localFrameA : rotA * jnt.localFrameA;
+  Quat jointFrameA = aStatic ? jnt.localFrameA : rotA * jnt.localFrameA;
   jointFrameA = jointFrameA.normalized();
   Vec3 localAxesA[3] = {jointFrameA.rotate(Vec3(1, 0, 0)),
                         jointFrameA.rotate(Vec3(0, 1, 0)),

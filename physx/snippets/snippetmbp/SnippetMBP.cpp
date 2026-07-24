@@ -38,15 +38,18 @@
 // ****************************************************************************
 
 #include <ctype.h>
+#include <cfloat>
+#include <vector>
 #include "PxPhysicsAPI.h"
 #include "../snippetutils/SnippetUtils.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 
 using namespace physx;
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
@@ -57,6 +60,9 @@ static PxPvd*					gPvd        = NULL;
 static PxReal stackZ = 10.0f;
 
 PxU32 gRegionHandles[4];
+static Snippets::HeadlessOptions gHeadlessOptions;
+static bool gSolverReadbackMatched = false;
+static PxU32 gCleanupComplete = 0;
 
 static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geometry, const PxVec3& velocity=PxVec3(0))
 {
@@ -87,9 +93,17 @@ static void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent)
 class SnippetMBPBroadPhaseCallback : public physx::PxBroadPhaseCallback
 {
 	PxArray<PxActor*> outOfBoundsActors;
+	PxU32 outOfBoundsCount;
+	PxU32 purgedCount;
 public:
+	SnippetMBPBroadPhaseCallback()
+	: outOfBoundsCount(0), purgedCount(0)
+	{
+	}
+
 	virtual void onObjectOutOfBounds(PxShape& /*shape*/, PxActor& actor)
 	{
+		outOfBoundsCount++;
 		PxU32 i = 0;
 		for(; i < outOfBoundsActors.size(); ++i)
 		{
@@ -112,6 +126,7 @@ public:
 		for(PxU32 i = 0; i < outOfBoundsActors.size(); ++i)
 		{
 			outOfBoundsActors[i]->release();
+			purgedCount++;
 		}
 		outOfBoundsActors.clear();
 	}
@@ -120,29 +135,57 @@ public:
     {
         outOfBoundsActors.reset();
     }
+
+	void resetMetrics()
+	{
+		outOfBoundsActors.clear();
+		outOfBoundsCount = 0;
+		purgedCount = 0;
+	}
+
+	PxU32 getOutOfBoundsCount() const { return outOfBoundsCount; }
+	PxU32 getPurgedCount() const { return purgedCount; }
 } gBroadPhaseCallback;
 
 
-void initPhysics(bool interactive)
+static bool initPhysicsInternal(bool interactive, bool headless)
 {
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(!gFoundation)
+		return false;
+	if(!headless)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+		if(gPvd && transport)
+			gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	}
 
 	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+		return false;
 		
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
+	if(headless)
+		sceneDesc.solverType = gHeadlessOptions.solverType;
 	
 	PxU32 numCores = SnippetUtils::getNbPhysicalCores();
-	gDispatcher = PxDefaultCpuDispatcherCreate(numCores == 0 ? 0 : numCores - 1);
+	gDispatcher = PxDefaultCpuDispatcherCreate(headless ?
+		gHeadlessOptions.dispatcherThreads :
+		(numCores == 0 ? 0 : numCores - 1));
+	if(!gDispatcher)
+		return false;
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
 
 	sceneDesc.broadPhaseType = PxBroadPhaseType::eMBP;
 
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return false;
+	gSolverReadbackMatched =
+		!headless || gScene->getSolverType() == sceneDesc.solverType;
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
 	{
@@ -159,7 +202,7 @@ void initPhysics(bool interactive)
 	};
 
 	for(PxU32 i=0;i<4;i++)
-		gScene->addBroadPhaseRegion(regions[i]);
+		gRegionHandles[i] = gScene->addBroadPhaseRegion(regions[i]);
 
 	gScene->setBroadPhaseCallback(&gBroadPhaseCallback);
 
@@ -173,13 +216,27 @@ void initPhysics(bool interactive)
 
 	if(!interactive)
 		createDynamic(PxTransform(PxVec3(0,40,100)), PxSphereGeometry(10), PxVec3(0,-50,-100));
+	return true;
+}
+
+void initPhysics(bool interactive)
+{
+	initPhysicsInternal(interactive, false);
+}
+
+static bool stepPhysicsInternal()
+{
+	gScene->simulate(gHeadlessOptions.headless ?
+		gHeadlessOptions.dt : 1.0f/60.0f);
+	if(!gScene->fetchResults(true))
+		return false;
+	gBroadPhaseCallback.purgeOutOfBoundsObjects();
+	return true;
 }
 
 void stepPhysics(bool /*interactive*/)
 {
-	gScene->simulate(1.0f/60.0f);
-	gScene->fetchResults(true);
-	gBroadPhaseCallback.purgeOutOfBoundsObjects();
+	stepPhysicsInternal();
 }
 	
 void cleanupPhysics(bool /*interactive*/)
@@ -188,6 +245,7 @@ void cleanupPhysics(bool /*interactive*/)
     
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
+	PX_RELEASE(gMaterial);
 	PX_RELEASE(gPhysics);
 	if(gPvd)
 	{
@@ -196,6 +254,7 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
+	gCleanupComplete = 1;
 
 	printf("SnippetMBP done.\n");
 }
@@ -209,8 +268,127 @@ void keyPress(unsigned char key, const PxTransform& camera)
 	}
 }
 
-int snippetMain(int, const char*const*)
+static PxU32 queryDynamicStacks()
 {
+	PxU32 hits = 0;
+	for(PxU32 i=0; i<5; ++i)
+	{
+		const PxReal z = -10.0f * PxReal(i);
+		PxRaycastBuffer hit;
+		if(gScene->raycast(PxVec3(0.0f, 80.0f, z),
+			PxVec3(0.0f, -1.0f, 0.0f), 160.0f, hit) &&
+		   hit.hasBlock && hit.block.actor &&
+		   hit.block.actor->is<PxRigidDynamic>())
+			hits++;
+	}
+	return hits;
+}
+
+static int runHeadless()
+{
+	gErrorCallback.reset();
+	gBroadPhaseCallback.resetMetrics();
+	gCleanupComplete = 0;
+	stackZ = 10.0f;
+	if(!initPhysicsInternal(false, true))
+	{
+		cleanupPhysics(false);
+		return Snippets::eHEADLESS_GATE_FAILED;
+	}
+	PxU32 validRegions = 0;
+	for(PxU32 i=0; i<4; ++i)
+		validRegions += gRegionHandles[i] != PX_INVALID_U32 ? 1u : 0u;
+	const PxU32 initialDynamicActors =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	const PxU32 queryHitsBefore = queryDynamicStacks();
+	PxU32 completedFrames = 0;
+	PxU32 fetchFailures = 0;
+	PxU32 nonFinite = 0;
+	PxReal minDynamicY = FLT_MAX;
+	PxReal maxDynamicSpeed = 0.0f;
+	for(PxU32 frame=0; frame<gHeadlessOptions.frames; ++frame)
+	{
+		if(!stepPhysicsInternal())
+		{
+			fetchFailures++;
+			break;
+		}
+		completedFrames++;
+		const PxU32 count =
+			gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+		std::vector<PxActor*> actors(count);
+		if(count)
+			gScene->getActors(
+				PxActorTypeFlag::eRIGID_DYNAMIC, actors.data(), count);
+		for(PxU32 i=0; i<count; ++i)
+		{
+			PxRigidDynamic* dynamic = actors[i]->is<PxRigidDynamic>();
+			if(!dynamic || !dynamic->getGlobalPose().isFinite() ||
+			   !dynamic->getLinearVelocity().isFinite() ||
+			   !dynamic->getAngularVelocity().isFinite())
+			{
+				nonFinite++;
+				continue;
+			}
+			minDynamicY = PxMin(
+				minDynamicY, dynamic->getGlobalPose().p.y);
+			maxDynamicSpeed = PxMax(
+				maxDynamicSpeed,
+				dynamic->getLinearVelocity().magnitude());
+		}
+		if(nonFinite)
+			break;
+	}
+	const PxU32 finalDynamicActors =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	const PxU32 queryHitsAfter = queryDynamicStacks();
+	const PxU32 outOfBounds = gBroadPhaseCallback.getOutOfBoundsCount();
+	const PxU32 purged = gBroadPhaseCallback.getPurgedCount();
+	const bool passed =
+		gScene->getBroadPhaseType() == PxBroadPhaseType::eMBP &&
+		validRegions == 4 && initialDynamicActors == 276 &&
+		finalDynamicActors + purged == initialDynamicActors &&
+		queryHitsBefore == 5 && queryHitsAfter == 5 &&
+		outOfBounds > 0 && purged > 0 && outOfBounds >= purged &&
+		completedFrames == gHeadlessOptions.frames &&
+		minDynamicY > 1.0f && nonFinite == 0 && fetchFailures == 0 &&
+		gSolverReadbackMatched && gErrorCallback.getFatalCount() == 0;
+	const PxU32 fatalErrors = gErrorCallback.getFatalCount();
+	cleanupPhysics(false);
+	printf("[AVBD_GATE] schema=1 snippet=SnippetMBP solver=%s "
+		"case=mbp-regions execution=%s frames=%u regions=%u "
+		"initialDynamicActors=%u finalDynamicActors=%u "
+		"queryHitsBefore=%u queryHitsAfter=%u outOfBounds=%u purged=%u "
+		"completedFrames=%u minDynamicY=%.9g maxDynamicSpeed=%.9g "
+		"nonFinite=%u fetchFailures=%u fatalErrors=%u cleanupComplete=%u "
+		"pvd=0 status=%s reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, validRegions, initialDynamicActors,
+		finalDynamicActors, queryHitsBefore, queryHitsAfter, outOfBounds,
+		purged, completedFrames, minDynamicY, maxDynamicSpeed, nonFinite,
+		fetchFailures, fatalErrors, gCleanupComplete,
+		passed ? "PASS" : "FAIL",
+		passed ? "none" : "mbp_region_or_dynamics");
+	return passed ? Snippets::eHEADLESS_PASS :
+		Snippets::eHEADLESS_GATE_FAILED;
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.frames = 240;
+	defaults.caseName = "mbp-regions";
+	std::string error;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+	{
+		printf("[AVBD_GATE_CONFIG_ERROR] snippet=SnippetMBP reason=%s\n",
+			error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(gHeadlessOptions.headless)
+		return runHeadless();
 #ifdef RENDER_SNIPPET
 	extern void renderLoop();
 	renderLoop();

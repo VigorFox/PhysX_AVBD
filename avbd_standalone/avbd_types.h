@@ -181,8 +181,11 @@ struct D6Joint {
   //   0x01=linearX, 0x02=linearY, 0x04=linearZ
   //   0x10=TWIST, 0x20=SLERP, 0x40=SWING1, 0x80=SWING2
   uint32_t driveFlags;
+  uint32_t driveAccelerationFlags; // same bit layout; acceleration gains
   Vec3 driveLinearVelocity;  // target velocity in joint frame A space
   Vec3 driveAngularVelocity; // target angular velocity in joint frame A space
+  Vec3 driveLinearForce;     // per-axis force limit for velocity drives
+  Vec3 driveAngularForce;    // per-axis torque limit for velocity drives
   Vec3 linearDriveDamping;   // per-axis
   Vec3 angularDriveDamping;  // (twist / swing1 / swing2)
   Vec3 lambdaDriveLinear;

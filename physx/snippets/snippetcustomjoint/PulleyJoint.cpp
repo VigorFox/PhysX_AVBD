@@ -42,9 +42,7 @@ static PxU32 solverPrep(Px1DConstraint* constraints,
 						const PxTransform& bB2w,
 						bool /*useExtendedLimits*/,
 						PxVec3p& cA2wOut, PxVec3p& cB2wOut)
-{		
-	PX_UNUSED(maxConstraints);
-
+{
 	const PulleyJoint::PulleyJointData& data = *reinterpret_cast<const PulleyJoint::PulleyJointData*>(constantBlock);
 
 	PxTransform cA2w = bA2w.transform(data.c2b[0]);
@@ -54,6 +52,63 @@ static PxU32 solverPrep(Px1DConstraint* constraints,
 	cB2wOut = cB2w.p;
 
 	body0WorldOffset = cB2w.p - bA2w.p;
+
+	if (data.headlessRowMode != PulleyJoint::ePULLEY_ROW)
+	{
+		cA2wOut = bA2w.p;
+		cB2wOut = bB2w.p;
+		body0WorldOffset = PxVec3(0.0f);
+		const PxVec3 axes[2] = { PxVec3(1.0f, 0.0f, 0.0f), PxVec3(0.0f, 0.0f, 1.0f) };
+		const PxU32 rowCount = data.headlessRowMode == PulleyJoint::eMULTI_OUTPUT_ROW ? 2u : 1u;
+		if (maxConstraints < rowCount)
+			return 0;
+
+		for (PxU32 i = 0; i < rowCount; ++i)
+		{
+			Px1DConstraint& row = constraints[i];
+			const PxVec3 axis = axes[i];
+			row.linear0 = axis;
+			row.linear1 = axis;
+			row.angular0 = PxVec3(0.0f);
+			row.angular1 = PxVec3(0.0f);
+			row.geometricError =
+				(bA2w.p - bB2w.p - data.genericReferenceDelta).dot(axis);
+			row.flags = Px1DConstraintFlag::eOUTPUT_FORCE;
+		}
+
+		Px1DConstraint& row = constraints[0];
+		switch (data.headlessRowMode)
+		{
+		case PulleyJoint::eSPRING_ROW:
+			row.flags |= static_cast<PxU16>(Px1DConstraintFlag::eSPRING);
+			row.mods.spring.stiffness = 120.0f;
+			row.mods.spring.damping = 12.0f;
+			break;
+		case PulleyJoint::eRESTITUTION_ROW:
+			row.flags |= static_cast<PxU16>(Px1DConstraintFlag::eRESTITUTION);
+			row.mods.bounce.restitution = 0.75f;
+			row.mods.bounce.velocityThreshold = 0.5f;
+			row.geometricError = 0.0f;
+			row.minImpulse = -PX_MAX_F32;
+			row.maxImpulse = PX_MAX_F32;
+			break;
+		case PulleyJoint::eDRIVE_LIMIT_ROW:
+			row.flags |=
+				static_cast<PxU16>(Px1DConstraintFlag::eSPRING) |
+				static_cast<PxU16>(Px1DConstraintFlag::eHAS_DRIVE_LIMIT);
+			row.mods.spring.stiffness = 0.0f;
+			row.mods.spring.damping = 40.0f;
+			row.velocityTarget = 2.0f;
+			row.minImpulse = -12.0f;
+			row.maxImpulse = 12.0f;
+			break;
+		case PulleyJoint::eMULTI_OUTPUT_ROW:
+		case PulleyJoint::ePULLEY_ROW:
+		default:
+			break;
+		}
+		return rowCount;
+	}
 
 	PxVec3 directionA = data.attachment0 - cA2w.p;
 	PxReal distanceA = directionA.normalize();
@@ -127,6 +182,10 @@ PulleyJoint::PulleyJoint(PxPhysics& physics, PxRigidBody& body0, const PxTransfo
 	mData.attachment1 = attachment1;
 	mData.distance = 1.0f;
 	mData.ratio = 1.0f;
+	mData.tolerance = 0.0f;
+	mData.headlessRowMode = ePULLEY_ROW;
+	mData.genericReferenceDelta =
+		body0.getGlobalPose().p - body1.getGlobalPose().p;
 	mData.c2b[0] = body0.getCMassLocalPose().transformInv(mLocalPose[0]);
 	mData.c2b[1] = body1.getCMassLocalPose().transformInv(mLocalPose[1]);
 }
@@ -182,6 +241,17 @@ float PulleyJoint::getRatio() const
 	return mData.ratio;
 }
 
+void PulleyJoint::setHeadlessRowMode(HeadlessRowMode mode)
+{
+	mData.headlessRowMode = static_cast<PxU32>(mode);
+	mConstraint->markDirty();
+}
+
+PulleyJoint::HeadlessRowMode PulleyJoint::getHeadlessRowMode() const
+{
+	return static_cast<HeadlessRowMode>(mData.headlessRowMode);
+}
+
 ///////////////////////////////////////////// PxConstraintConnector methods
 
 void* PulleyJoint::prepareData()
@@ -211,4 +281,3 @@ void* PulleyJoint::getExternalReference(PxU32& typeID)
 	typeID = TYPE_ID;
 	return this;
 }
-

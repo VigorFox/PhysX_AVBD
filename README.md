@@ -8,7 +8,7 @@ Upstream baseline: **NVIDIA PhysX 5.9.0** (`110.1-omni-and-physx-5.9.0`, `517a00
 
 ## ⚠️ Project Status
 
-Status Legend: `Integrated` = merged into main code path; `Accepted` = integrated and fully validated by current acceptance gates; `Early` = prototype path exists but is not acceptance-validated and still has major gaps; `Pending` = not complete or acceptance not closed.
+Status Legend: `Integrated` = merged into main code path; `Accepted` = integrated and fully validated by current acceptance gates; `Early` = prototype path exists but is not acceptance-validated and still has major gaps; `Pending` = not complete or acceptance not closed; `Unsupported` = currently functionally unavailable with AVBD.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -16,19 +16,27 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | **D6 Unified Joint** | ✅ Accepted | All joint types (Spherical, Fixed, Revolute, Prismatic) unified into single D6 constraint path |
 | Joint Limits | ✅ Accepted | Revolute angle, Prismatic linear, Spherical cone, D6 per-axis |
 | Motor Drive | ✅ Accepted | Post-solve torque motor for revolute; SLERP drive for D6 |
-| Gear Joint | ✅ Accepted | Velocity-ratio constraint with post-solve motor |
+| Gear Joint | ✅ Accepted | Velocity-ratio/phase/external-impulse physics plus binary round-trip dependency identity and post-load consumption (`30/30`) |
 | Standalone Alignment | ✅ Accepted | Rigid/joint D6 path is aligned with avbd_standalone; standalone soft body has progressed further than the current PhysX port |
-| Regression Baseline | ⏳ Pending | Standalone: 118/118; the checked articulation gate is stable again, while full PhysX acceptance remains open on SnippetJoint impact coverage and the moving-mesh stress criterion |
+| Regression Baseline | ✅ Accepted | Breadth checkpoint: standalone `137/137`; all 46 AVBD in-scope CPU Snippets have reproducible headless gates |
 | O(M) Constraint Lookup | ✅ Accepted | Eliminates O(N²) complexity |
 | Multi-threaded Islands | ✅ Accepted | Per-island constraint mappings |
 | Friction Model | ✅ Accepted | Coulomb cone, per-material coefficients from PxContactPatch |
-| Soft Body | ⚠️ Early | The PhysX AVBD soft-body path remains an early research implementation with performance and architecture gaps |
+| Soft Body | ⚠️ Early | Existing CPU component correctness is gated by `SnippetSoftBodyAVBD` and `SnippetDeformableVolumeAVBD`; public CPU `PxScene` deformable actors and performance remain open |
 | Moving Triangle-Mesh Contact | 🔧 Integrated | Rigid bodies on a vertex-updated triangle mesh pass the default 7200-frame gate; the separate stress policy remains open |
-| Custom Joint | ⏳ Pending | Custom constraint callbacks unsupported |
-| Rack & Pinion | ⏳ Pending | RackAndPinionJoint unsupported |
-| Mimic Joint | ⏳ Pending | MimicJoint unsupported |
+| Custom Joint | ✅ Accepted | `SnippetCustomJoint` retains the pulley public-wrench/break matrix (`12/12`) plus multi-row aggregation, force spring, restitution and force drive-limit modes (`12/12`) |
+| Rack & Pinion | ✅ Accepted | `SnippetRackJoint` gates positive/negative ratio, bidirectional passive response and binary round-trip consumption for the centered principal-axis topology (`18/18`); wider topology remains pending |
+| Mimic Joint | ✅ Accepted | `SnippetMimicJoint` retains its hard ratio/offset/bidirectional matrix (`12/12`) and adds compliant response plus two simultaneous mimic equations (`12/12`); shared-endpoint and wider topology remain pending |
+| Fixed Tendon | ✅ Accepted | `SnippetFixedTendon` gates fixed-root serial angular plus sibling branch angular/linear tendons, rest spring/damping, runtime offset actuation and branch length limits; asymmetric reciprocal coefficients and wider trees remain pending |
+| Spatial Tendon | ✅ Accepted | `SnippetSpatialTendon` gates fixed/moving intermediate paths, shared-root multi-leaf rows, angular/linear endpoints, rest spring/damping and leaf-local limits (`12/12` new modes plus `6/6` legacy); moving-root, contact and wider topology remain pending |
+| Contact Modification | ✅ Accepted | `SnippetContactModification` gates modified normal, target velocity, zero max-impulse response, and contact-local zero mass/inertia scale for TGS plus AVBD parallel/sequential execution |
+| CCD Contact Report | ✅ Accepted | `SnippetContactReportCCD` gates three CCD TOI events, event poses, contact points, and nonzero impulses in one step, plus a no-CCD tunneling negative control |
+| Custom Geometry Collision | ✅ Accepted | `SnippetCustomGeometryCollision` gates callback-generated falling, sliding, and impact contacts through TGS plus AVBD parallel/sequential execution, with nonzero solver response and no fall-through |
+| Voxel Custom Geometry | ✅ Accepted | `SnippetCustomGeometry` gates voxel callback-generated drop and impact contacts through TGS plus AVBD parallel/sequential execution, with public nonzero impulses and complete teardown |
+| Custom Convex | ✅ Accepted | `SnippetCustomConvex` gates instrumented cylinder/cone callbacks through TGS plus AVBD parallel/sequential execution, with finite generated contacts, public nonzero impulses, no fall-through, and callback-safe teardown |
 | Articulation | ✅ Accepted | Pure AVBD penalty path passes the strengthened 31/31 suite; asymmetric angular limits and the multi-cycle scissor-lift gate are covered headlessly |
-| Sleep / Wake | ⏳ Pending | Not implemented |
+| Sleep / Wake | 🔧 Integrated | Ordinary free-rigid-body idle sleep, wake, and disable-sleep behavior is headlessly gated; static-contact settling remains diagnostic |
+| Rigid-Body Lock Flags | ⏳ Pending | The six public linear/angular lock flags are the next correctness capability to validate and complete |
 
 **For research and evaluation only. Not production-ready.**
 
@@ -40,6 +48,7 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 - Aligned AVBD with the 5.9 allocator, pinnable bitmap, threshold stream, island-edge traversal, D6 angular-drive slots, and constraint metadata APIs.
 - Restored the upstream 16-bit low-level constraint flags. AVBD joint concrete types now use a solver-side table instead of consuming flag bits or changing the shared `Dy::Constraint` layout.
 - Synchronized AVBD articulation write-back with both 5.9 motion-velocity buffers, preventing driven and falling articulations from being put to sleep using stale velocity state.
+- Connected ordinary AVBD rigid-body write-back to the shared PhysX sleep lifecycle. Idle sleep, external-force wake, re-sleep, and `eDISABLE_SLEEPING` now have headless gates; static-touch sleep is not yet an accepted parity gate.
 - The post-migration checked gates pass: standalone `118/118`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
 
 ### Moving Triangle-Mesh Contact Stability (2026-07)
@@ -58,6 +67,19 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 - Test 11 is now a real floating-base ground-contact gate. It checks shape bounds against the plane and parent/child anchor coincidence instead of relying on a fixed-base chain and a permissive link-center threshold; repeated default and forced-sequential samples both pass 30/30.
 - Fixed-base behavior has its own pose assertion in Test 1. Drive coverage now checks velocity tracking, relative-frame position tracking, anchor closure, and mass-invariant acceleration drives on both twist and swing2 axes. Test 3 independently drives both sides of an asymmetric twist interval.
 - `SnippetArticulationRC` now defaults to 3600 headless frames and compares base-local platform height at the same drive phase across cycles. The final AVBD 10000-frame run retained all 18 sampled cycles with 1.8% maximum relative drift, no stall, and less than 0.4 degrees of twist-limit violation; the TGS reference also passes.
+
+### Articulation Mimic Coupling (2026-07)
+
+- AVBD ingests articulation-internal mimic equations as shared 1D rows. Hard rows close both position and velocity equations; compliant rows use mass-scaled natural-frequency/damping-ratio coefficients and retain the hard mimic velocity derivative.
+- The original hard matrix remains `12/12 PASS`. A separate compliant/multi-mimic failure-first pack moved from TGS `4/4 PASS` plus AVBD `8/8 real FAIL` (stationary followers) to a complete `12/12 PASS`.
+- The accepted topology is fixed-parent, sibling, centered and single-DOF. The multi fixture proves two disjoint mimic equations in one articulation; shared-endpoint graphs and wider topology remain future hardening.
+
+### Articulation Fixed Tendon Coupling (2026-07)
+
+- AVBD emits compliant articulation-internal fixed-tendon rows for fixed-root, centered, single-DOF serial angular and two-sibling branch topologies. Branch rows support angular or prismatic-X coordinates.
+- The row uses the public fixed-tendon length equation, physical rest stiffness/damping and additive low/high length-limit stiffness. It remains separate from hard generic/mimic rows: no AL dual multiplier or exact hard projection is applied.
+- The branch/linear/limit failure-first pack moved from TGS `6/6 PASS` plus AVBD `12/12 real FAIL` with stationary followers to a complete `18/18 PASS`; the original serial drive/offset matrix remains `6/6 PASS`.
+- Coefficient and reciprocal coefficient must currently be equal. Asymmetric reciprocal response, wider trees, serial linear/limit and mixed-axis paths remain outside the accepted boundary.
 
 ### Articulation Solver (2026-03)
 
@@ -107,26 +129,31 @@ Key changes:
 
 ### Soft Body Status (EARLY)
 
-The PhysX AVBD soft-body path is still in an early prototype stage.
+The PhysX AVBD soft-body path is still in an early prototype stage, but its existing CPU component now has an accepted correctness baseline.
 
-- Native AVBD soft-particle/VBD pieces and the current OGC-based collision experiments exist. `SnippetDeformableMesh` is not evidence for this path because all simulated bodies in that scene are rigid.
-- `avbd_standalone` soft body is already accepted with a full 118/118 standalone pass set (101 rigid/artic + 17 soft body), but that maturity has not yet carried over to the current PhysX port.
-- It is **not** part of the accepted regression baseline summarized above.
+- Native AVBD soft-particle/VBD pieces and the current OGC-based collision experiments exist. `SnippetSoftBodyAVBD` passes its self-contained component suite `66/66`; `SnippetDeformableVolumeAVBD` passes five isolated component/lifecycle cases repeated twice (`10/10`) with finite state and zero inverted tetrahedra.
+- `SnippetDeformableVolumeAVBD` directly owns and steps soft-particle arrays. It reports `sceneSoftIntegration=0`: its `PxScene` contains no public deformable actor, so this is component correctness plus AVBD scene coexistence—not a public CPU `PxScene` deformable backend gate.
+- `SnippetDeformableMesh` is not evidence for this path because all simulated bodies in that scene are rigid.
+- `avbd_standalone` passes its full `137/137` suite. A direct port of the PhysX positive-J displacement limiter regressed standalone material semantics and was reverted rather than forced into alignment.
+- The two existing PhysX CPU soft-body component Snippets are now part of the regression baseline; public scene integration remains outside that accepted slice.
 - Current implementation has **major performance problems** and should be treated as a research path, not a production-ready or even feature-complete baseline.
-- Near-term work is expected to focus on architecture cleanup, data layout, and performance before soft body results should be interpreted as representative.
+- Soft-body optimization remains deferred until the post-inventory capability review closes any remaining functional correctness blockers.
 
 ### Current Validation Snapshot
 
-- ✅ Upstream baseline and checked binaries are PhysX 5.9.0; Windows CPU-only outputs use `win.x86_64.vc143.md`.
-- ✅ Standalone full suite passes: `118 PASSED / 0 FAILED`.
-- ✅ Checked builds pass for `SnippetJoint`, `SnippetAvbdArticulation`, `SnippetArticulationRC`, and `SnippetDeformableMesh`.
-- ✅ The default AVBD moving-triangle-mesh rigid-stack gate passes 7200 headless frames with finite state and zero settled sunk boxes; the TGS reference also passes.
-- ✅ Focused articulation Test 3 passes `2/2`, Test 16 passes `9/9`, and Test 17 passes `1/1`; `SnippetArticulationRC` passes its 3600-frame cycle gate and a 10000-frame AVBD extension with 18 samples and 2.4% maximum relative drift, without a stall, non-finite state, or `Illegal BroadPhaseUpdateData`.
-- ✅ Friction reads per-material coefficients; Coulomb cone and augmented-Lagrangian behavior remain validated.
-- ✅ The strengthened full articulation suite passes `31/31`; focused Test 11 passes `30/30` under both default and forced-sequential execution with finite geometry and bounded joint-anchor error.
-- ⚠️ `SnippetJoint` produces a bounded, clean headless smoke result, but the required one-sphere-per-chain impact launcher is not currently present, so the formal impact gate remains pending.
-- ⚠️ The moving-mesh `--headless-stress` policy remains looser than the default stack gate and is not evidence of zero transient sinking.
-- ⚠️ PhysX AVBD soft body remains an early research path with major performance work still pending.
+- Checkpoint date: **2026-07-24**.
+- The breadth-first CPU inventory is complete: **61/61** executable Snippets are classified, **46/46** AVBD `PxScene` Snippets have reproducible headless gates, and 15 CPU tools/query/cooking Snippets are outside standard solver dynamics.
+- All render-built validation executables are launched through dedicated hidden Python runners with explicit `--headless` arguments, timeout handling, visible-window rejection, process-tree cleanup, and fail-closed authority parsing.
+- The final standalone suite passes **137/137**. The post-relink shared-DLL cross matrix passes **14/14**.
+- `SnippetJointDrive` passes its cumulative **1176/1176** matrix; dynamic angular-position is **288/288**, contact angular-position is **24/24**, moving-kinematic SLERP is **18/18**, and the public legacy elliptical cone is **6/6**.
+- `SnippetJoint` retains force-pair **24/24**, external-disabled constraint **6/6**, native asymmetric spherical cone **12/12**, passive native prismatic/revolute reaction and break **18/18**, and legacy fixed no-break/break **6/6**.
+- `SnippetCustomJoint` retains its public wrench/break and generic-row mode matrices (**12/12** each). Rack/Gear runtime plus binary round-trip matrices pass **18/18** and **30/30**.
+- Mimic, Fixed Tendon, and Spatial Tendon public mode packs pass **12/12**, **18/18**, and **12/12**, while their legacy matrices remain green.
+- Articulation coverage retains the strengthened **31/31** suite, the 3600-frame RC cycle gate, and the 10000-frame RC extension without stall or non-finite state.
+- Rigid contact coverage includes stack/impact, CCD, contact report/modification, custom geometry/convex, moving mesh, tolerance scaling, gyroscopic response, split simulation/fetch, serialization, multithreading, triggers, MBP, and CPU Vehicle Snippets.
+- Existing CPU soft-body components retain `SnippetSoftBodyAVBD` **66/66** and `SnippetDeformableVolumeAVBD` **10/10**. They do not represent a public CPU `PxScene` deformable backend.
+- Remaining correctness boundaries are explicit: rigid-body lock flags, static-contact sleep parity, wider native-joint topology, and selected extreme/contact-combined variants. Performance work remains deferred until these capability checks are resolved.
+- Local handoff, audit, probe history, and per-iteration reports are intentionally not part of this checkpoint.
 
 ## SnippetChainmail Demo
 
@@ -257,12 +284,13 @@ PVD Profile Zones available:
 
 ## Known Limitations
 
-1. **No Sleep/Wake** - Bodies remain active
-2. **CPU only** - No GPU acceleration
-3. **Articulation low-budget edge cases** - The April validation floor was 10 iterations; the loaded Scissor Lift case still fails at 8
-4. **Soft body performance** - The current PhysX AVBD soft-body path remains early-stage and has major performance problems
-5. **SnippetJoint impact coverage** - The checked harness currently provides a bounded no-impact smoke, not the required one-sphere-per-chain gate
-6. **Moving-mesh stress policy** - The default `SnippetDeformableMesh` stack is recovered, but the separate stress acceptance criterion still needs tightening
+1. **Rigid-body lock flags and static-contact sleep** - Ordinary free-rigid-body sleep/wake is integrated, but the six public lock flags still require AVBD completion and static-touch settling remains diagnostic
+2. **Joint coverage boundaries** - generic custom modes are gated only for the accepted row packs; mimic remains limited to fixed-parent centered single-DOF siblings (including two disjoint equations), and rack-and-pinion remains limited to centered principal-axis topology
+3. **CPU only** - No GPU acceleration
+4. **Articulation low-budget edge cases** - The April validation floor was 10 iterations; the loaded Scissor Lift case still fails at 8
+5. **Soft body architecture and performance** - Existing CPU component correctness is gated, but public CPU `PxScene` deformable actors are not integrated and the component remains slow
+6. **Joint reaction and break coverage** - Native unconstrained dynamic-dynamic fixed-pair reaction, shared external `eDISABLE_CONSTRAINT` ingestion, asymmetric spherical-cone response, and centered passive prismatic/revolute reaction/break are accepted; limited, driven, motorized, off-center, contact-combined and wider native topology remain incomplete
+7. **Moving-mesh stress policy** - The default `SnippetDeformableMesh` stack is recovered, but the separate stress acceptance criterion still needs tightening
 
 ## Original PhysX Documentation
 

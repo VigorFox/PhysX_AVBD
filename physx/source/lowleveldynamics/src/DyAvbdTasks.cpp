@@ -29,6 +29,8 @@
 #include "DyAvbdDynamics.h"
 #include "DyAvbdKinematicShell.h"
 #include "DyFeatherstoneArticulation.h"
+#include "DyFeatherstoneArticulationUtils.h"
+#include "DySleep.h"
 #include "DyVArticulation.h"
 #include "PxsRigidBody.h"
 #include <cstdio>
@@ -46,6 +48,86 @@
 
 namespace physx {
 namespace Dy {
+
+static void syncSingleDofArticulationJointState(
+    ArticulationData &artData, PxU32 linkIndex) {
+  if (linkIndex == 0 || linkIndex >= artData.getLinkCount())
+    return;
+  const ArticulationLink &link = artData.getLink(linkIndex);
+  if (link.parent == DY_ARTICULATION_LINK_NONE ||
+      link.parent >= artData.getLinkCount() || !link.inboundJoint ||
+      !link.bodyCore)
+    return;
+  const ArticulationLink &parent = artData.getLink(link.parent);
+  if (!parent.bodyCore)
+    return;
+
+  ArticulationJointCore &joint = *link.inboundJoint;
+  ArticulationJointCoreData &jointData =
+      artData.getJointData(linkIndex);
+  if (jointData.nbDof != 1 || jointData.jointOffset == PX_MAX_U32)
+    return;
+  const PxArticulationAxis::Enum axis =
+      static_cast<PxArticulationAxis::Enum>(joint.dofIds[0]);
+  PxU32 component = 0;
+  switch (axis) {
+  case PxArticulationAxis::eX:
+  case PxArticulationAxis::eTWIST:
+    component = 0;
+    break;
+  case PxArticulationAxis::eY:
+  case PxArticulationAxis::eSWING1:
+    component = 1;
+    break;
+  case PxArticulationAxis::eZ:
+  case PxArticulationAxis::eSWING2:
+    component = 2;
+    break;
+  default:
+    return;
+  }
+
+  const PxTransform parentFrame =
+      parent.bodyCore->body2World * joint.parentPose;
+  const PxTransform childFrame =
+      link.bodyCore->body2World * joint.childPose;
+  PxVec3 localAxis(0.0f);
+  localAxis[component] = 1.0f;
+  const PxVec3 worldAxis = parentFrame.q.rotate(localAxis);
+  const bool linearAxis = axis >= PxArticulationAxis::eX;
+  PxReal position = 0.0f;
+  PxReal velocity = 0.0f;
+  if (linearAxis) {
+    position = (childFrame.p - parentFrame.p).dot(worldAxis);
+    const PxVec3 parentPointVelocity =
+        parent.bodyCore->linearVelocity +
+        parent.bodyCore->angularVelocity.cross(
+            parentFrame.p - parent.bodyCore->body2World.p);
+    const PxVec3 childPointVelocity =
+        link.bodyCore->linearVelocity +
+        link.bodyCore->angularVelocity.cross(
+            childFrame.p - link.bodyCore->body2World.p);
+    velocity =
+        (childPointVelocity - parentPointVelocity).dot(worldAxis);
+  } else {
+    PxQuat relative = parentFrame.q.getConjugate() * childFrame.q;
+    if (relative.w < 0.0f)
+      relative = -relative;
+    position =
+        2.0f * PxAtan2((&relative.x)[component], relative.w);
+    velocity =
+        (link.bodyCore->angularVelocity -
+         parent.bodyCore->angularVelocity).dot(worldAxis);
+  }
+  if (!PxIsFinite(position) || !PxIsFinite(velocity))
+    return;
+
+  artData.getJointPositions()[jointData.jointOffset] = position;
+  artData.getJointVelocities()[jointData.jointOffset] = velocity;
+  artData.getPosIterJointVelocities()[jointData.jointOffset] = velocity;
+  joint.jointPos[axis] = position;
+  joint.jointVel[axis] = velocity;
+}
 
 void AvbdTask::release() {
   AVBD_LOG("Task release: %s", getName());
@@ -81,45 +163,17 @@ void AvbdSolveIslandTask::release() {
 
     // Function declared as friend in AvbdDynamicsContext class
     writeLambdaToCache(mContext, constraints, numConstraints, mBatch.numBodies);
+    writeContactImpulseToOutput(constraints, numConstraints, mDt);
     writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 
-  // Write back breakable joint status to ConstraintWriteBackPool
-  // This enables PhysX's checkConstraintBreakage() to detect broken joints.
-  //
-  // AVBD-specific writeback contract:
-  //   * d6.lambdaLinear / d6.lambdaAngular are Lagrange multipliers in
-  //     force / torque units (N, N*m) inside the solver.
-  //   * d6.linBreakImpulse / d6.angBreakImpulse store the authored
-  //     PxConstraint::setBreakForce() thresholds verbatim in N / N*m (no
-  //     dt multiplication, see DyAvbdDynamicsPrep.cpp), so the break gate
-  //     stays in force space.
-  //   * Sc::ConstraintSim::getForce() reports `linearImpulse * (1/dt)`, so
-  //     storing lambda as-is in linearImpulse over-reports the readback by
-  //     1/dt. That is a long-standing AVBD reporting quirk; do not change
-  //     here without auditing every consumer of PxConstraint::getForce()
-  //     under the AVBD solver.
-  if (mBatch.numD6 > 0) {
-    Cm::PinnableArray<Dy::ConstraintWriteback> &writeBackPool =
-        mContext.getConstraintWriteBackPool();
-
-    for (PxU32 j = 0; j < mBatch.numD6; ++j) {
-      const AvbdD6JointConstraint &d6 = mBatch.d6Joints[j];
-      if (d6.writeBackIndex == 0xFFFFFFFFu)
-        continue;
-
-      const PxReal linForce = d6.lambdaLinear.magnitude();
-      const PxReal angTorque = d6.lambdaAngular.magnitude();
-
-      const bool isBroken = (linForce > d6.linBreakImpulse) ||
-                            (angTorque > d6.angBreakImpulse);
-
-      Dy::ConstraintWriteback &wb = writeBackPool[d6.writeBackIndex];
-      wb.linearImpulse = d6.lambdaLinear;
-      wb.angularImpulse = d6.lambdaAngular;
-      wb.broken = isBroken ? 1u : 0u;
-    }
-  }
+  // Shared by the task and forced-sequential paths so constraint force and
+  // breakage semantics do not depend on scheduling mode. Scoped drive
+  // families with a validated physical writeback contract compare their
+  // force*dt or torque*dt impulse divided by dt; every other family retains
+  // the legacy lambda comparison until it has an independent reaction gate.
+  writeJointConstraintWriteback(mContext, mBatch.d6Joints, mBatch.numD6,
+                                mDt);
 
   // Release constraint maps to prevent memory leak
   // Each frame builds new maps, so we must free them when task completes
@@ -138,8 +192,35 @@ void AvbdWriteBackTask::run() {
   for (PxU32 i = 0; i < mNumBodies; ++i) {
     if (mRigidBodies[i]) {
       // Regular rigid body - writeback to body core
-      if (!mAvbdBodies[i].isStatic())
-        writeBackAvbdSolverBody(mAvbdBodies[i], mRigidBodies[i]->getCore());
+      if (!mAvbdBodies[i].isStatic()) {
+        PxsRigidBody &rigidBody = *mRigidBodies[i];
+        PxsBodyCore &bodyCore = rigidBody.getCore();
+        const PxTransform oldTransform = bodyCore.body2World;
+
+        // Match the PGS/TGS writeback contract: CCD consumes the pre-step COM
+        // pose, while sleeping consumes the motion that actually changed the
+        // COM pose this step (which is not necessarily AVBD's final API
+        // velocity after depenetration, damping, and velocity limiting).
+        rigidBody.mLastTransform = oldTransform;
+        writeBackAvbdSolverBody(mAvbdBodies[i], bodyCore);
+
+        if (!mSleepingDisabled) {
+          PxVec3 linearMotionVelocity(0.0f);
+          PxVec3 angularMotionVelocity(0.0f);
+          if (mDt > 0.0f) {
+            calculateNewVelocity(bodyCore.body2World, oldTransform, mDt,
+                                 linearMotionVelocity,
+                                 angularMotionVelocity);
+          }
+
+          const Cm::SpatialVector motionVelocity(linearMotionVelocity,
+                                                  angularMotionVelocity);
+          const PxU32 staticTouchCount =
+              mStaticTouchCounts ? mStaticTouchCounts[i] : 0;
+          sleepCheck(&rigidBody, mDt, mEnableStabilization, motionVelocity,
+                     staticTouchCount);
+        }
+      }
     } else if (mArticulationForBody && mLinkIndexForBody) {
       // Articulation link - writeback to articulation link body core
       FeatherstoneArticulation *articulation = mArticulationForBody[i];
@@ -173,6 +254,24 @@ void AvbdWriteBackTask::run() {
         }
       }
     }
+  }
+
+  // Joint coordinates are relative parent/child state. Rebuild them only
+  // after every AVBD link pose and velocity has been written back; doing this
+  // inside the loop can observe a new child against a parent that has not yet
+  // reached its final pose when body ordering changes.
+  FeatherstoneArticulation *lastArticulation = nullptr;
+  for (PxU32 i = 0; i < mNumBodies; ++i) {
+    if (!mArticulationForBody || !mLinkIndexForBody)
+      break;
+    FeatherstoneArticulation *articulation = mArticulationForBody[i];
+    if (!articulation || articulation == lastArticulation)
+      continue;
+    lastArticulation = articulation;
+    ArticulationData &artData = articulation->getArticulationData();
+    for (PxU32 linkIndex = 1; linkIndex < artData.getLinkCount();
+         ++linkIndex)
+      syncSingleDofArticulationJointState(artData, linkIndex);
   }
 
   mContext.flushIterationDiagnosticsFrame();

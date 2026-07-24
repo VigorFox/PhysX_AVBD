@@ -52,6 +52,8 @@ class CustomTireVehicle
 	, public CustomTireComponent
 {
 public:
+	CustomTireVehicle() : mUseCustomTire(true) {}
+
 	bool initialize(PxPhysics& physics, const PxCookingParams& params, PxMaterial& defaultMaterial, bool addPhysXBeginEndComponents = true);
 	virtual void destroy();
 
@@ -101,6 +103,7 @@ public:
 
 
 	//Parameters and states of the vehicle's custom tire.
+	bool mUseCustomTire;
 	CustomTireParams mCustomTireParams[2];  //One shared parameter set for front and one for rear wheels.
 	CustomTireParams* mTireParamsList[4];
 };

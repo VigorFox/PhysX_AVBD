@@ -62,6 +62,23 @@ struct MFTireConfig
 
 typedef MFTireDataT<MFTireConfig::Float> MFTireData;
 
+struct CustomTireDiagnostics
+{
+	PxU32 gripCalls;
+	PxU32 onGroundCalls;
+	PxU32 slipCalls;
+	PxU32 forceCalls;
+	PxU32 nonZeroLongForceCalls;
+	PxU32 nonZeroLatForceCalls;
+	PxU32 nonFiniteCount;
+	PxReal maxLongForce;
+	PxReal maxLatForce;
+	PxReal maxWheelTorque;
+};
+
+void resetCustomTireDiagnostics();
+const CustomTireDiagnostics& getCustomTireDiagnostics();
+
 
 /**
 \brief Custom method to compute tire grip values.

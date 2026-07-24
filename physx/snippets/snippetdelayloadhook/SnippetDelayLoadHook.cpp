@@ -46,6 +46,7 @@
 #include "PxPhysicsAPI.h"
 // Include the delay load hook headers
 #include "common/windows/PxWindowsDelayLoadHook.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
@@ -80,13 +81,54 @@ HMODULE physxLibrary = NULL;
 using namespace physx;
 
 static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*			gFoundation = NULL;
 static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
 PxScene*						gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
+static PxRigidDynamic*			gProjectile = NULL;
+static bool						gExtensionsInitialized = false;
+static bool						gInitializationFailed = false;
+static Snippets::HeadlessOptions gHeadlessOptions;
+
+struct DelayLoadMetrics
+{
+	PxU32 foundationLoaded;
+	PxU32 commonLoaded;
+	PxU32 physxLoaded;
+	PxU32 foundationPathMatched;
+	PxU32 commonPathMatched;
+	PxU32 physxPathMatched;
+	PxU32 exportsResolved;
+	PxU32 hooksRegistered;
+	PxU32 initialized;
+	PxU32 solverReadbackMatched;
+	PxU32 sceneStatics;
+	PxU32 sceneDynamics;
+	PxU32 completedFrames;
+	PxU32 fetchFailures;
+	PxU32 nonFiniteActorSamples;
+	PxU32 unloadCompleted;
+	PxU32 cleanupComplete;
+	PxReal projectileDisplacement;
+	PxReal maxProjectileSpeed;
+	PxVec3 projectileInitialPosition;
+
+	DelayLoadMetrics()
+	: foundationLoaded(0), commonLoaded(0), physxLoaded(0),
+	  foundationPathMatched(0), commonPathMatched(0), physxPathMatched(0),
+	  exportsResolved(0), hooksRegistered(0), initialized(0),
+	  solverReadbackMatched(0), sceneStatics(0), sceneDynamics(0),
+	  completedFrames(0), fetchFailures(0), nonFiniteActorSamples(0),
+	  unloadCompleted(0), cleanupComplete(0), projectileDisplacement(0.0f),
+	  maxProjectileSpeed(0.0f), projectileInitialPosition(0.0f)
+	{
+	}
+};
+
+static DelayLoadMetrics gMetrics;
 
 // typedef the PhysX entry points
 typedef PxFoundation*(PxCreateFoundation_FUNC)(PxU32, PxAllocatorCallback&, PxErrorCallback&);
@@ -110,27 +152,53 @@ PxGetSuggestedCudaDeviceOrdinal_FUNC* s_PxGetSuggestedCudaDeviceOrdinal_Func = N
 PxCreateCudaContextManager_FUNC* s_PxCreateCudaContextManager_Func = NULL;
 #endif
 
+static bool loadedModuleMatchesPath(
+	HMODULE module, const char* configuredPath)
+{
+	char modulePath[MAX_PATH] = {};
+	char expectedPath[MAX_PATH] = {};
+	const DWORD moduleLength =
+		GetModuleFileNameA(module, modulePath, MAX_PATH);
+	const DWORD expectedLength =
+		GetFullPathNameA(configuredPath, MAX_PATH, expectedPath, NULL);
+	return moduleLength > 0 && moduleLength < MAX_PATH &&
+		expectedLength > 0 && expectedLength < MAX_PATH &&
+		_stricmp(modulePath, expectedPath) == 0;
+}
+
 bool loadPhysicsExplicitely()
 {
 	// load the dlls
 	foundationLibrary = LoadLibraryA(foundationLibraryPath);	
 	if(!foundationLibrary)
 		return false;
+	gMetrics.foundationLoaded = 1;
+	gMetrics.foundationPathMatched =
+		loadedModuleMatchesPath(foundationLibrary, foundationLibraryPath) ? 1u : 0u;
 
 	commonLibrary = LoadLibraryA(commonLibraryPath);	
 	if(!commonLibrary)
 	{
 		FreeLibrary(foundationLibrary);
+		foundationLibrary = NULL;
 		return false;
 	}
+	gMetrics.commonLoaded = 1;
+	gMetrics.commonPathMatched =
+		loadedModuleMatchesPath(commonLibrary, commonLibraryPath) ? 1u : 0u;
 
 	physxLibrary = LoadLibraryA(physxLibraryPath);	
 	if(!physxLibrary)
 	{
 		FreeLibrary(foundationLibrary);
 		FreeLibrary(commonLibrary);
+		foundationLibrary = NULL;
+		commonLibrary = NULL;
 		return false;
 	}
+	gMetrics.physxLoaded = 1;
+	gMetrics.physxPathMatched =
+		loadedModuleMatchesPath(physxLibrary, physxLibraryPath) ? 1u : 0u;
 
 	// get the function pointers
 	s_PxCreateFoundation_Func = (PxCreateFoundation_FUNC*)GetProcAddress(foundationLibrary, "PxCreateFoundation");
@@ -147,6 +215,7 @@ bool loadPhysicsExplicitely()
 	// check if we have all required function pointers
 	if(s_PxCreateFoundation_Func == NULL || s_PxCreatePhysics_Func == NULL || s_PxSetPhysXDelayLoadHook_Func == NULL || s_PxSetPhysXCommonDelayLoadHook_Func == NULL)
 		return false;
+	gMetrics.exportsResolved = 4;
 
 #if PX_SUPPORT_GPU_PHYSX
 	if(s_PxSetPhysXGpuLoadHook_Func == NULL || s_PxGetSuggestedCudaDeviceOrdinal_Func == NULL || s_PxCreateCudaContextManager_Func == NULL)
@@ -158,9 +227,21 @@ bool loadPhysicsExplicitely()
 // unload the dlls
 void unloadPhysicsExplicitely()
 {
-	FreeLibrary(physxLibrary);
-	FreeLibrary(commonLibrary);
-	FreeLibrary(foundationLibrary);
+	bool unloaded = true;
+	if(physxLibrary)
+		unloaded = FreeLibrary(physxLibrary) != 0 && unloaded;
+	if(commonLibrary)
+		unloaded = FreeLibrary(commonLibrary) != 0 && unloaded;
+	if(foundationLibrary)
+		unloaded = FreeLibrary(foundationLibrary) != 0 && unloaded;
+	physxLibrary = NULL;
+	commonLibrary = NULL;
+	foundationLibrary = NULL;
+	s_PxCreateFoundation_Func = NULL;
+	s_PxCreatePhysics_Func = NULL;
+	s_PxSetPhysXDelayLoadHook_Func = NULL;
+	s_PxSetPhysXCommonDelayLoadHook_Func = NULL;
+	gMetrics.unloadCompleted = unloaded ? 1u : 0u;
 }
 
 // Overriding the PxDelayLoadHook allows the load of a custom name dll inside PhysX, PhysXCommon and PhysXCooking dlls
@@ -177,6 +258,8 @@ struct SnippetDelayLoadHook : public PxDelayLoadHook
 	}
 };
 
+static SnippetDelayLoadHook gDelayLoadHook;
+
 #if PX_SUPPORT_GPU_PHYSX
 // Overriding the PxGpuLoadHook allows the load of a custom GPU name dll
 struct SnippetGpuLoadHook : public PxGpuLoadHook
@@ -186,6 +269,8 @@ struct SnippetGpuLoadHook : public PxGpuLoadHook
 		return gpuLibraryPath;
 	}
 };
+
+static SnippetGpuLoadHook gGpuLoadHook;
 #endif
 
 PxReal stackZ = 10.0f;
@@ -218,72 +303,184 @@ void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent)
 
 void initPhysics(bool interactive)
 {	
+	gInitializationFailed = false;
+	gMetrics = DelayLoadMetrics();
+	gErrorCallback.reset();
+
 	// load the explictely named dlls
 	const bool isLoaded = loadPhysicsExplicitely();
 	if (!isLoaded)
+	{
+		gInitializationFailed = true;
 		return;
-
-	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
-
+	}
+	gFoundation = PxCreateFoundation(
+		PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if(!gFoundation)
+	{
+		gInitializationFailed = true;
+		return;
+	}
 	// set PhysX and PhysXCommon delay load hook, this must be done before the create physics is called, before
 	// the PhysXFoundation, PhysXCommon delay load happens.
-	SnippetDelayLoadHook delayLoadHook;
-	s_PxSetPhysXDelayLoadHook_Func(&delayLoadHook);
-	s_PxSetPhysXCommonDelayLoadHook_Func(&delayLoadHook);
+	s_PxSetPhysXDelayLoadHook_Func(&gDelayLoadHook);
+	s_PxSetPhysXCommonDelayLoadHook_Func(&gDelayLoadHook);
+	gMetrics.hooksRegistered = 2;
 
 #if PX_SUPPORT_GPU_PHYSX
 	// set PhysXGpu load hook
-	SnippetGpuLoadHook gpuLoadHook;
-	s_PxSetPhysXGpuLoadHook_Func(&gpuLoadHook);
+	s_PxSetPhysXGpuLoadHook_Func(&gGpuLoadHook);
 #endif
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(interactive)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		if(gPvd)
+		{
+			PxPvdTransport* transport =
+				PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+			if(transport)
+				gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+		}
+	}
 
-	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
-
+	gPhysics = PxCreatePhysics(
+		PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+	{
+		gInitializationFailed = true;
+		return;
+	}
+	gExtensionsInitialized = PxInitExtensions(*gPhysics, gPvd);
+	if(!gExtensionsInitialized)
+	{
+		gInitializationFailed = true;
+		return;
+	}
 	// We setup the delay load hooks first
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
-	gDispatcher = PxDefaultCpuDispatcherCreate(2);
+	if(!interactive)
+		sceneDesc.solverType = gHeadlessOptions.solverType;
+	gDispatcher = PxDefaultCpuDispatcherCreate(
+		interactive ? 2u : gHeadlessOptions.dispatcherThreads);
+	if(!gDispatcher)
+	{
+		gInitializationFailed = true;
+		return;
+	}
 	sceneDesc.cpuDispatcher	= gDispatcher;
 	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+	{
+		gInitializationFailed = true;
+		return;
+	}
+	gMetrics.solverReadbackMatched =
+		gScene->getSolverType() == sceneDesc.solverType ? 1u : 0u;
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if(pvdClient)
+	if(interactive && pvdClient)
 	{
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
 	}
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+	if(!gMaterial)
+	{
+		gInitializationFailed = true;
+		return;
+	}
 
 	PxRigidStatic* groundPlane = PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+	if(!groundPlane)
+	{
+		gInitializationFailed = true;
+		return;
+	}
 	gScene->addActor(*groundPlane);
 
 	for(PxU32 i=0;i<5;i++)
 		createStack(PxTransform(PxVec3(0,0,stackZ-=10.0f)), 10, 2.0f);
 
 	if(!interactive)
-		createDynamic(PxTransform(PxVec3(0,40,100)), PxSphereGeometry(10), PxVec3(0,-50,-100));
+	{
+		gProjectile = createDynamic(
+			PxTransform(PxVec3(0,40,100)), PxSphereGeometry(10),
+			PxVec3(0,-50,-100));
+		gMetrics.projectileInitialPosition =
+			gProjectile->getGlobalPose().p;
+	}
+
+	gMetrics.sceneStatics =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+	gMetrics.sceneDynamics =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	gMetrics.initialized = 1;
 }
 
-void stepPhysics(bool /*interactive*/)
+void stepPhysics(bool interactive)
 {
 	if (gScene)
 	{
-		gScene->simulate(1.0f/60.0f);
-		gScene->fetchResults(true);
+		gScene->simulate(interactive ? 1.0f/60.0f : gHeadlessOptions.dt);
+		if(!gScene->fetchResults(true))
+			gMetrics.fetchFailures++;
+		else if(!interactive)
+			gMetrics.completedFrames++;
+
+		if(!interactive)
+		{
+			const PxU32 actorCount =
+				gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+			PxArray<PxRigidDynamic*> actors(actorCount);
+			if(actorCount)
+			{
+				gScene->getActors(
+					PxActorTypeFlag::eRIGID_DYNAMIC,
+					reinterpret_cast<PxActor**>(actors.begin()), actorCount);
+			}
+			for(PxU32 actorId = 0; actorId < actorCount; ++actorId)
+			{
+				const PxTransform pose = actors[actorId]->getGlobalPose();
+				const PxVec3 linearVelocity =
+					actors[actorId]->getLinearVelocity();
+				const PxVec3 angularVelocity =
+					actors[actorId]->getAngularVelocity();
+				if(!pose.isFinite() || !linearVelocity.isFinite() ||
+					!angularVelocity.isFinite())
+				{
+					gMetrics.nonFiniteActorSamples++;
+				}
+			}
+			if(gProjectile)
+			{
+				gMetrics.projectileDisplacement = PxMax(
+					gMetrics.projectileDisplacement,
+					(gProjectile->getGlobalPose().p -
+						gMetrics.projectileInitialPosition).magnitude());
+				gMetrics.maxProjectileSpeed = PxMax(
+					gMetrics.maxProjectileSpeed,
+					gProjectile->getLinearVelocity().magnitude());
+			}
+		}
 	}
 }
 	
 void cleanupPhysics(bool /*interactive*/)
 {
+	gProjectile = NULL;
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
+	PX_RELEASE(gMaterial);
+	if(gExtensionsInitialized)
+	{
+		PxCloseExtensions();
+		gExtensionsInitialized = false;
+	}
 	PX_RELEASE(gPhysics);
 	
 	if(gPvd)
@@ -296,6 +493,9 @@ void cleanupPhysics(bool /*interactive*/)
 	PX_RELEASE(gFoundation);
 
 	unloadPhysicsExplicitely();
+	gMetrics.cleanupComplete =
+		!gScene && !gDispatcher && !gMaterial && !gPhysics &&
+		!gPvd && !gFoundation && gMetrics.unloadCompleted ? 1u : 0u;
 	
 	printf("SnippetDelayLoadHook done.\n");
 }
@@ -309,17 +509,157 @@ void keyPress(unsigned char key, const PxTransform& camera)
 	}
 }
 
-int snippetMain(int, const char*const*)
+static int reportConfigurationError(
+	const Snippets::HeadlessOptions& options, const char* reason)
 {
+	printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetDelayLoadHook solver=%s "
+		"case=%s execution=%s status=CONFIG_ERROR reason=%s "
+		"validation=GATED\n",
+		Snippets::getSolverTypeName(options.solverType),
+		options.caseName.c_str(),
+		Snippets::getExecutionName(options.execution), reason);
+	return Snippets::eHEADLESS_CONFIG_ERROR;
+}
+
+static bool evaluateHeadlessGate(const char*& reason)
+{
+	reason = "none";
+	if(gInitializationFailed || !gMetrics.initialized)
+		reason = "initialization";
+	else if(gMetrics.foundationLoaded != 1 ||
+		gMetrics.commonLoaded != 1 || gMetrics.physxLoaded != 1)
+		reason = "explicit_load";
+	else if(gMetrics.foundationPathMatched != 1 ||
+		gMetrics.commonPathMatched != 1 || gMetrics.physxPathMatched != 1)
+		reason = "configured_path";
+	else if(gMetrics.exportsResolved != 4 || gMetrics.hooksRegistered != 2)
+		reason = "hook_exports";
+	else if(!gMetrics.solverReadbackMatched)
+		reason = "solver_readback";
+	else if(gMetrics.sceneStatics != 1 || gMetrics.sceneDynamics != 276)
+		reason = "scene_topology";
+	else if(gMetrics.completedFrames != gHeadlessOptions.frames ||
+		gMetrics.fetchFailures)
+		reason = "simulation";
+	else if(gMetrics.nonFiniteActorSamples)
+		reason = "non_finite";
+	else if(gMetrics.projectileDisplacement <= 1.0f ||
+		gMetrics.maxProjectileSpeed <= 1.0f)
+		reason = "rigid_response";
+	else if(gErrorCallback.getFatalCount())
+		reason = "physx_error";
+	else if(!gMetrics.cleanupComplete)
+		reason = "cleanup";
+	return strcmp(reason, "none") == 0;
+}
+
+static void printHeadlessGate(bool passed, const char* reason)
+{
+	printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetDelayLoadHook solver=%s "
+		"case=%s execution=%s frames=%u completedFrames=%u "
+		"foundationLoaded=%u commonLoaded=%u physxLoaded=%u "
+		"foundationPathMatched=%u commonPathMatched=%u "
+		"physxPathMatched=%u exportsResolved=%u hooksRegistered=%u "
+		"initialized=%u solverReadbackMatched=%u sceneStatics=%u "
+		"sceneDynamics=%u projectileDisplacement=%.9g "
+		"maxProjectileSpeed=%.9g nonFiniteActorSamples=%u "
+		"fetchFailures=%u fatalErrors=%u warnings=%u "
+		"unloadCompleted=%u cleanupComplete=%u pvd=0 status=%s "
+		"reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		gHeadlessOptions.caseName.c_str(),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, gMetrics.completedFrames,
+		gMetrics.foundationLoaded, gMetrics.commonLoaded,
+		gMetrics.physxLoaded, gMetrics.foundationPathMatched,
+		gMetrics.commonPathMatched, gMetrics.physxPathMatched,
+		gMetrics.exportsResolved, gMetrics.hooksRegistered,
+		gMetrics.initialized, gMetrics.solverReadbackMatched,
+		gMetrics.sceneStatics, gMetrics.sceneDynamics,
+		double(gMetrics.projectileDisplacement),
+		double(gMetrics.maxProjectileSpeed),
+		gMetrics.nonFiniteActorSamples, gMetrics.fetchFailures,
+		gErrorCallback.getFatalCount(), gErrorCallback.getWarningCount(),
+		gMetrics.unloadCompleted, gMetrics.cleanupComplete,
+		passed ? "PASS" : "FAIL", reason);
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.solverType = PxSolverType::eAVBD;
+	defaults.frames = 180;
+	defaults.caseName = "delay-load-scene";
+	std::string error;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+	{
+		return reportConfigurationError(gHeadlessOptions, "invalid_arguments");
+	}
+	if(gHeadlessOptions.headless &&
+		!Snippets::equalsIgnoreCase(
+			gHeadlessOptions.caseName.c_str(), "delay-load-scene"))
+	{
+		return reportConfigurationError(gHeadlessOptions, "invalid_case");
+	}
+	if(gHeadlessOptions.headless &&
+		gHeadlessOptions.execution == Snippets::eHEADLESS_SEQUENTIAL &&
+		gHeadlessOptions.solverType != PxSolverType::eAVBD)
+	{
+		return reportConfigurationError(
+			gHeadlessOptions, "sequential_requires_avbd");
+	}
+	if(gHeadlessOptions.headless &&
+		!Snippets::applyExecutionEnvironment(gHeadlessOptions))
+	{
+		return reportConfigurationError(
+			gHeadlessOptions, "execution_environment");
+	}
+
 #ifdef RENDER_SNIPPET
+	if(gHeadlessOptions.headless)
+	{
+		setvbuf(stdout, NULL, _IONBF, 0);
+		Snippets::printHeadlessConfig(
+			"SnippetDelayLoadHook", gHeadlessOptions);
+		initPhysics(false);
+		if(!gInitializationFailed)
+		{
+			for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
+			{
+				stepPhysics(false);
+				if(gMetrics.fetchFailures ||
+					gMetrics.nonFiniteActorSamples)
+					break;
+			}
+		}
+		cleanupPhysics(false);
+		const char* reason = "none";
+		const bool passed = evaluateHeadlessGate(reason);
+		printHeadlessGate(passed, reason);
+		return passed ?
+			Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
+	}
 	extern void renderLoop();
 	renderLoop();
 #else
-	static const PxU32 frameCount = 100;
+	gHeadlessOptions.headless = true;
+	Snippets::printHeadlessConfig(
+		"SnippetDelayLoadHook", gHeadlessOptions);
 	initPhysics(false);
-	for(PxU32 i=0; i<frameCount; i++)
-		stepPhysics(false);
+	if(!gInitializationFailed)
+	{
+		for(PxU32 i=0; i<gHeadlessOptions.frames; i++)
+			stepPhysics(false);
+	}
 	cleanupPhysics(false);
+	const char* reason = "none";
+	const bool passed = evaluateHeadlessGate(reason);
+	printHeadlessGate(passed, reason);
+	return passed ?
+		Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
 #endif
 
 	return 0;

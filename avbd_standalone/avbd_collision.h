@@ -45,6 +45,8 @@ inline int collideBoxGround(Solver &solver, uint32_t boxIdx,
     if (dist < margin) {
       float depth = -dist; // positive when penetrating
       Vec3 groundPt(wc.x, 0, wc.z);
+      if (solver.useCanonicalRigidContactAuthoringProbe)
+        groundPt = wc;
       solver.addContact(boxIdx, UINT32_MAX, normal, localCorners[i], groundPt,
                         depth, box.friction);
       count++;

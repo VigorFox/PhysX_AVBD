@@ -34,8 +34,12 @@
 
 #include "PxPhysicsAPI.h"
 #include "../snippetutils/SnippetUtils.h"
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
+
+#include <cfloat>
+#include <cstdio>
 
 using namespace physx;
 
@@ -79,7 +83,7 @@ static PX_FORCE_INLINE	bool		usesCCD()				{ return gData[gScenario].mCCD;				}
 static PX_FORCE_INLINE	bool		usesTriggerTrigger()	{ return gData[gScenario].mTriggerTrigger;	}
 
 static	PxDefaultAllocator		gAllocator;
-static	PxDefaultErrorCallback	gErrorCallback;
+static	Snippets::TrackingErrorCallback gErrorCallback;
 
 static	PxFoundation*			gFoundation = NULL;
 static	PxPhysics*				gPhysics	= NULL;
@@ -91,6 +95,38 @@ static	PxPvd*                  gPvd        = NULL;
 
 static bool	gPause		= false;
 static bool	gOneFrame	= false;
+static Snippets::HeadlessOptions gHeadlessOptions;
+static PxRigidDynamic* gRemovalActor = NULL;
+static PxRigidDynamic* gTriggerActors[2] = {NULL, NULL};
+
+struct ScenarioMetrics
+{
+	PxU32 found;
+	PxU32 lost;
+	PxU32 ccd;
+	PxU32 triggerTrigger;
+	PxU32 filterFound;
+	PxU32 filterLost;
+	PxU32 objectRemoved;
+	PxU32 completedFrames;
+	PxU32 nonFinite;
+	PxU32 fetchFailures;
+	bool removalIssued;
+	bool overlapActuationIssued;
+	PxReal minActorDistance;
+
+	ScenarioMetrics()
+	: found(0), lost(0), ccd(0), triggerTrigger(0), filterFound(0),
+	  filterLost(0), objectRemoved(0), completedFrames(0), nonFinite(0),
+	  fetchFailures(0), removalIssued(false), overlapActuationIssued(false),
+	  minActorDistance(FLT_MAX)
+	{
+	}
+};
+
+static ScenarioMetrics gScenarioMetrics[SCENARIO_COUNT];
+static bool gSolverReadbackMatched = false;
+static PxU32 gCleanupComplete = 0;
 
 // Detects a trigger using the shape's simulation filter data. See createTriggerShape() function.
 bool isTrigger(const PxFilterData& data)
@@ -178,6 +214,7 @@ class TriggersFilterCallback : public PxSimulationFilterCallback
 											PxPairFlags& pairFlags)	PX_OVERRIDE
 	{
 //		printf("pairFound\n");
+		gScenarioMetrics[gScenario].filterFound++;
 
 		if(s0->userData || s1->userData)	// See createTriggerShape() function
 		{
@@ -195,9 +232,13 @@ class TriggersFilterCallback : public PxSimulationFilterCallback
 	virtual		void	pairLost(	PxU64 /*pairID*/,
 									PxFilterObjectAttributes /*attributes0*/, PxFilterData /*filterData0*/,
 									PxFilterObjectAttributes /*attributes1*/, PxFilterData /*filterData1*/,
-									bool /*objectRemoved*/)	PX_OVERRIDE
+									bool objectRemoved)	PX_OVERRIDE
 	{
 //		printf("pairLost\n");
+		ScenarioMetrics& metrics = gScenarioMetrics[gScenario];
+		metrics.filterLost++;
+		if(objectRemoved)
+			metrics.objectRemoved++;
 	}
 
 	virtual		bool	statusChange(PxU64& /*pairID*/, PxPairFlags& /*pairFlags*/, PxFilterFlags& /*filterFlags*/)	PX_OVERRIDE
@@ -231,9 +272,19 @@ class ContactReportCallback: public PxSimulationEventCallback
 		{
 			const PxTriggerPair& current = *pairs++;
 			if(current.status & PxPairFlag::eNOTIFY_TOUCH_FOUND)
+			{
+				gScenarioMetrics[gScenario].found++;
 				printf("Shape is entering trigger volume\n");
+			}
 			if(current.status & PxPairFlag::eNOTIFY_TOUCH_LOST)
+			{
+				gScenarioMetrics[gScenario].lost++;
 				printf("Shape is leaving trigger volume\n");
+			}
+			if(current.flags &
+			   (PxTriggerPairFlag::eREMOVED_SHAPE_TRIGGER |
+			    PxTriggerPairFlag::eREMOVED_SHAPE_OTHER))
+				gScenarioMetrics[gScenario].objectRemoved++;
 		}
 	}
 
@@ -258,12 +309,30 @@ class ContactReportCallback: public PxSimulationEventCallback
 			// in a hash-set and test the reported shape pointers against it. Many options here.
 
 			if(current.events & (PxPairFlag::eNOTIFY_TOUCH_FOUND|PxPairFlag::eNOTIFY_TOUCH_CCD))
+			{
+				gScenarioMetrics[gScenario].found++;
+				if(current.events & PxPairFlag::eNOTIFY_TOUCH_CCD)
+					gScenarioMetrics[gScenario].ccd++;
 				printf("Shape is entering trigger volume\n");
+			}
 			if(current.events & PxPairFlag::eNOTIFY_TOUCH_LOST)
+			{
+				gScenarioMetrics[gScenario].lost++;
 				printf("Shape is leaving trigger volume\n");
+			}
 
-			if(isTriggerShape(current.shapes[0]) && isTriggerShape(current.shapes[1]))
+			const bool removedShape =
+				!!(current.flags &
+				   (PxContactPairFlag::eREMOVED_SHAPE_0 |
+				    PxContactPairFlag::eREMOVED_SHAPE_1));
+			if(removedShape)
+				gScenarioMetrics[gScenario].objectRemoved++;
+			if(!removedShape && isTriggerShape(current.shapes[0]) &&
+			   isTriggerShape(current.shapes[1]))
+			{
+				gScenarioMetrics[gScenario].triggerTrigger++;
 				printf("Trigger-trigger overlap detected\n");
+			}
 		}
 	}
 };
@@ -368,6 +437,12 @@ static void createTriggerTriggerScene()
 			triggerShape->release();
 
 			body->setLinearVelocity(linVel);
+			if(!gTriggerActors[0])
+				gTriggerActors[0] = body;
+			else if(!gTriggerActors[1])
+				gTriggerActors[1] = body;
+			if(!gRemovalActor)
+				gRemovalActor = body;
 		}
 	};
 
@@ -377,12 +452,16 @@ static void createTriggerTriggerScene()
 
 static void initScene()
 {
+	gRemovalActor = NULL;
+	gTriggerActors[0] = gTriggerActors[1] = NULL;
 	const TriggerImpl impl = getImpl();
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 //	sceneDesc.flags &= ~PxSceneFlag::eENABLE_PCM;
 	sceneDesc.cpuDispatcher = gDispatcher;
 	sceneDesc.gravity = PxVec3(0, -9.81f, 0);
+	if(gHeadlessOptions.headless)
+		sceneDesc.solverType = gHeadlessOptions.solverType;
 	sceneDesc.simulationEventCallback = &gContactReportCallback;
 	if(impl==REAL_TRIGGERS)
 	{
@@ -412,6 +491,11 @@ static void initScene()
 	}
 
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return;
+	if(gHeadlessOptions.headless)
+		gSolverReadbackMatched &=
+			gScene->getSolverType() == sceneDesc.solverType;
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
 	if(pvdClient)
@@ -429,37 +513,68 @@ static void initScene()
 static void releaseScene()
 {
 	PX_RELEASE(gScene);
+	gRemovalActor = NULL;
+	gTriggerActors[0] = gTriggerActors[1] = NULL;
 }
 
-void stepPhysics(bool /*interactive*/)
+static bool stepPhysicsInternal()
 {
 	if(gPause && !gOneFrame)
-		return;
+		return true;
 	gOneFrame = false;
 
 	if(gScene)
 	{
 //		printf("Update...\n");
-		gScene->simulate(1.0f/60.0f);
-		gScene->fetchResults(true);
+		gScene->simulate(gHeadlessOptions.headless ? gHeadlessOptions.dt :
+			1.0f/60.0f);
+		if(!gScene->fetchResults(true))
+			return false;
 	}
+	return true;
 }
 
-void initPhysics(bool /*interactive*/)
+void stepPhysics(bool /*interactive*/)
+{
+	stepPhysicsInternal();
+}
+
+static bool initPhysicsInternal(bool headless)
 {
 	printf("Press keys F1 to F9 to select a scenario.\n");
 
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	if(!gFoundation)
+		return false;
+	if(!headless)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+		if(gPvd && transport)
+			gPvd->connect(*transport,PxPvdInstrumentationFlag::eALL);
+	}
 	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	if(!gPhysics)
+		return false;
 	PxInitExtensions(*gPhysics,gPvd);
 	const PxU32 numCores = SnippetUtils::getNbPhysicalCores();
-	gDispatcher = PxDefaultCpuDispatcherCreate(numCores == 0 ? 0 : numCores - 1);
+	const PxU32 workerCount = headless ? gHeadlessOptions.dispatcherThreads :
+		(numCores == 0 ? 0 : numCores - 1);
+	gDispatcher = PxDefaultCpuDispatcherCreate(workerCount);
+	if(!gDispatcher)
+		return false;
 	gMaterial = gPhysics->createMaterial(1.0f, 1.0f, 0.0f);
+	if(!gMaterial)
+		return false;
 
+	gSolverReadbackMatched = true;
 	initScene();
+	return gScene != NULL;
+}
+
+void initPhysics(bool /*interactive*/)
+{
+	initPhysicsInternal(false);
 }
 	
 void cleanupPhysics(bool /*interactive*/)
@@ -467,6 +582,7 @@ void cleanupPhysics(bool /*interactive*/)
 	releaseScene();
 
 	PX_RELEASE(gDispatcher);
+	PX_RELEASE(gMaterial);
 	PxCloseExtensions();
 	PX_RELEASE(gPhysics);
 	if(gPvd)
@@ -476,6 +592,7 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(transport);
 	}
 	PX_RELEASE(gFoundation);
+	gCleanupComplete = 1;
 	
 	printf("SnippetTriggers done.\n");
 }
@@ -508,8 +625,202 @@ void keyPress(unsigned char key, const PxTransform& /*camera*/)
 	}
 }
 
-int snippetMain(int, const char*const*)
+static bool validateFiniteActors()
 {
+	PxActor* actors[16];
+	const PxU32 count = gScene->getActors(
+		PxActorTypeFlag::eRIGID_DYNAMIC, actors, 16);
+	for(PxU32 i=0; i<count; ++i)
+	{
+		PxRigidDynamic* body = static_cast<PxRigidDynamic*>(actors[i]);
+		if(!body->getGlobalPose().isFinite() ||
+		   !body->getLinearVelocity().isFinite() ||
+		   !body->getAngularVelocity().isFinite())
+			return false;
+	}
+	return true;
+}
+
+static int runHeadless()
+{
+	gErrorCallback.reset();
+	gCleanupComplete = 0;
+	for(PxU32 i=0; i<SCENARIO_COUNT; ++i)
+		gScenarioMetrics[i] = ScenarioMetrics();
+	gScenario = 0;
+	if(!initPhysicsInternal(true))
+	{
+		cleanupPhysics(false);
+		return Snippets::eHEADLESS_GATE_FAILED;
+	}
+
+	for(PxU32 scenario=0; scenario<SCENARIO_COUNT; ++scenario)
+	{
+		if(scenario)
+		{
+			releaseScene();
+			gScenario = scenario;
+			initScene();
+			if(!gScene)
+				break;
+		}
+		ScenarioMetrics& metrics = gScenarioMetrics[scenario];
+		for(PxU32 frame=0; frame<gHeadlessOptions.frames; ++frame)
+		{
+			if(usesTriggerTrigger() && frame == 120 &&
+			   gTriggerActors[0] && gTriggerActors[1])
+			{
+				gTriggerActors[0]->setGlobalPose(
+					PxTransform(PxVec3(-3.5f, 1.0f, 0.0f)));
+				gTriggerActors[1]->setGlobalPose(
+					PxTransform(PxVec3(3.5f, 1.0f, 0.0f)));
+				metrics.overlapActuationIssued = true;
+			}
+			if(gTriggerActors[0] && gTriggerActors[1])
+			{
+				const PxReal distance =
+					(gTriggerActors[0]->getGlobalPose().p -
+					 gTriggerActors[1]->getGlobalPose().p).magnitude();
+				metrics.minActorDistance =
+					PxMin(metrics.minActorDistance, distance);
+			}
+			if(usesTriggerTrigger() && frame == 150 && gRemovalActor)
+			{
+				PxRigidDynamic* removedActor = gRemovalActor;
+				gScene->removeActor(*removedActor);
+				if(gTriggerActors[0] == removedActor)
+					gTriggerActors[0] = NULL;
+				if(gTriggerActors[1] == removedActor)
+					gTriggerActors[1] = NULL;
+				removedActor->release();
+				gRemovalActor = NULL;
+				metrics.removalIssued = true;
+			}
+			if(!stepPhysicsInternal())
+			{
+				metrics.fetchFailures++;
+				break;
+			}
+			metrics.completedFrames++;
+			if(!validateFiniteActors())
+			{
+				metrics.nonFinite++;
+				break;
+			}
+		}
+	}
+
+	PxU32 passedScenarios = 0;
+	PxU32 foundScenarios = 0;
+	PxU32 lostScenarios = 0;
+	PxU32 negativeControlPasses = 0;
+	PxU32 removalScenarios = 0;
+	PxU32 triggerTriggerScenarios = 0;
+	PxU32 overlapActuationScenarios = 0;
+	PxU32 totalFound = 0;
+	PxU32 totalLost = 0;
+	PxU32 totalRemoved = 0;
+	PxU32 totalNonFinite = 0;
+	PxU32 totalFetchFailures = 0;
+	PxReal maxPositiveTriggerMinDistance = 0.0f;
+	for(PxU32 i=0; i<SCENARIO_COUNT; ++i)
+	{
+		const ScenarioMetrics& metrics = gScenarioMetrics[i];
+		const bool ccdNegativeControl = i == 3;
+		const bool triggerTriggerNegativeControl = i == 6;
+		const bool found = metrics.found > 0;
+		const bool lost = metrics.lost > 0 || metrics.filterLost > 0;
+		const bool complete =
+			metrics.completedFrames == gHeadlessOptions.frames;
+		const bool finite =
+			metrics.nonFinite == 0 && metrics.fetchFailures == 0;
+		const bool expectedEvents =
+			ccdNegativeControl ? !found : (found && lost);
+		const bool triggerTriggerSemantics =
+			i < 6 ||
+			(triggerTriggerNegativeControl ?
+				metrics.triggerTrigger == 0 :
+				metrics.triggerTrigger > 0);
+		const bool removalOk =
+			i < 6 || (metrics.removalIssued &&
+				lost);
+		const bool actuationOk =
+			i < 6 || metrics.overlapActuationIssued;
+		const bool passed = complete && finite && expectedEvents &&
+			triggerTriggerSemantics && removalOk && actuationOk;
+		passedScenarios += passed ? 1u : 0u;
+		foundScenarios += found ? 1u : 0u;
+		lostScenarios += lost ? 1u : 0u;
+		negativeControlPasses +=
+			((ccdNegativeControl && !found) ||
+			 (triggerTriggerNegativeControl &&
+			  metrics.triggerTrigger == 0)) ? 1u : 0u;
+		removalScenarios +=
+			i >= 6 && metrics.removalIssued && lost ? 1u : 0u;
+		triggerTriggerScenarios +=
+			metrics.triggerTrigger > 0 ? 1u : 0u;
+		overlapActuationScenarios +=
+			metrics.overlapActuationIssued ? 1u : 0u;
+		totalFound += metrics.found;
+		totalLost += metrics.lost + metrics.filterLost;
+		totalRemoved += metrics.objectRemoved;
+		totalNonFinite += metrics.nonFinite;
+		totalFetchFailures += metrics.fetchFailures;
+		if(i == 7 || i == 8)
+			maxPositiveTriggerMinDistance = PxMax(
+				maxPositiveTriggerMinDistance, metrics.minActorDistance);
+	}
+
+	const bool passed =
+		passedScenarios == SCENARIO_COUNT &&
+		negativeControlPasses == 2 &&
+		removalScenarios >= 2 &&
+		triggerTriggerScenarios == 2 &&
+		overlapActuationScenarios == 3 &&
+		maxPositiveTriggerMinDistance < 8.0f &&
+		totalRemoved >= 2 &&
+		gSolverReadbackMatched && totalNonFinite == 0 &&
+		totalFetchFailures == 0 && gErrorCallback.getFatalCount() == 0;
+	const PxU32 fatalErrors = gErrorCallback.getFatalCount();
+	cleanupPhysics(false);
+	printf("[AVBD_GATE] schema=1 snippet=SnippetTriggers solver=%s "
+		"case=trigger-matrix execution=%s frames=%u scenarios=9 "
+		"passedScenarios=%u foundScenarios=%u lostScenarios=%u "
+		"negativeControlPasses=%u removalScenarios=%u "
+		"triggerTriggerScenarios=%u overlapActuationScenarios=%u "
+		"totalFound=%u "
+		"totalLost=%u objectRemoved=%u maxPositiveTriggerMinDistance=%.9g "
+		"nonFinite=%u fetchFailures=%u "
+		"fatalErrors=%u cleanupComplete=%u pvd=0 status=%s reason=%s "
+		"validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		gHeadlessOptions.frames, passedScenarios, foundScenarios,
+		lostScenarios, negativeControlPasses, removalScenarios,
+		triggerTriggerScenarios, overlapActuationScenarios, totalFound,
+		totalLost, totalRemoved, maxPositiveTriggerMinDistance,
+		totalNonFinite, totalFetchFailures,
+		fatalErrors, gCleanupComplete, passed ? "PASS" : "FAIL",
+		passed ? "none" : "trigger_semantics");
+	return passed ? Snippets::eHEADLESS_PASS :
+		Snippets::eHEADLESS_GATE_FAILED;
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.frames = 240;
+	defaults.caseName = "trigger-matrix";
+	std::string error;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, error))
+	{
+		printf("[AVBD_GATE_CONFIG_ERROR] snippet=SnippetTriggers reason=%s\n",
+			error.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	if(gHeadlessOptions.headless)
+		return runHeadless();
 #ifdef RENDER_SNIPPET
 	extern void renderLoop();
 	renderLoop();
@@ -522,4 +833,3 @@ int snippetMain(int, const char*const*)
 
 	return 0;
 }
-

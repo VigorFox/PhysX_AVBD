@@ -50,11 +50,16 @@
 #include "PxAvbdSoftBody.h"
 #include "extensions/PxTetMakerExt.h"
 
+#include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
 #include "../snippetutils/SnippetUtils.h"
 
 #include "SnippetDeformableVolumeAVBD.h"
+
+#include <cfloat>
+#include <cstring>
+#include <string>
 
 using namespace physx;
 using namespace physx::Dy;
@@ -174,12 +179,14 @@ static void generateConeTetsViaTetMaker(
 // ---------------------------------------------------------------------------
 
 static PxDefaultAllocator      gAllocator;
-static PxDefaultErrorCallback  gErrorCallback;
+static Snippets::TrackingErrorCallback gErrorCallback;
 static PxFoundation*           gFoundation  = NULL;
 static PxPhysics*              gPhysics     = NULL;
 static PxDefaultCpuDispatcher* gDispatcher  = NULL;
 static PxMaterial*             gMaterial    = NULL;
 static PxPvd*                  gPvd         = NULL;
+static bool                    gExtensionsInitialized = false;
+static Snippets::HeadlessOptions gHeadlessOptions;
 
 PxScene*                       gScene       = NULL;
 
@@ -189,6 +196,69 @@ PxArray<SoftBodyRenderData>    gSoftBodyRenderData;
 
 static PxArray<AvbdSoftContact> gContacts;
 static PxArray<AvbdRigidBox>     gRigidBoxes;
+
+struct DeformableVolumeMetrics
+{
+	PxU32 initialized;
+	PxU32 completedFrames;
+	PxU32 fetchFailures;
+	PxU32 nonFiniteParticleSamples;
+	PxU32 invertedElementSamples;
+	PxU32 firstInversionFrame;
+	PxU32 firstInversionBody;
+	PxU32 firstInversionElement;
+	PxU32 invertedBodiesMask;
+	PxU32 particles;
+	PxU32 softBodies;
+	PxU32 tetElements;
+	PxU32 surfaceTriangles;
+	PxU32 rigidBoxes;
+	PxU32 sceneStatics;
+	PxU32 sceneDynamics;
+	PxU32 sceneDeformableVolumes;
+	PxU32 groundContactFrames;
+	PxU32 rigidContactFrames;
+	PxU32 softContactFrames;
+	PxU32 maxGroundContacts;
+	PxU32 maxRigidContacts;
+	PxU32 maxSoftContacts;
+	PxU32 finalInsideParticles;
+	PxU32 cleanupComplete;
+	PxReal minDetF;
+	PxReal maxDetF;
+	PxReal minBodyVolumeRatio;
+	PxReal maxBodyVolumeRatio;
+	PxReal minY;
+	PxReal maxY;
+	PxReal maxParticleSpeed;
+	PxReal finalMinY;
+	PxReal finalMaxY;
+	PxReal finalMaxParticleSpeed;
+	PxReal maxCentroidDrop;
+	bool solverReadbackMatched;
+
+	DeformableVolumeMetrics()
+	: initialized(0), completedFrames(0), fetchFailures(0),
+	  nonFiniteParticleSamples(0), invertedElementSamples(0),
+	  firstInversionFrame(PX_MAX_U32), firstInversionBody(PX_MAX_U32),
+	  firstInversionElement(PX_MAX_U32), invertedBodiesMask(0),
+	  particles(0), softBodies(0), tetElements(0), surfaceTriangles(0),
+	  rigidBoxes(0),
+	  sceneStatics(0), sceneDynamics(0), sceneDeformableVolumes(0),
+	  groundContactFrames(0), rigidContactFrames(0), softContactFrames(0),
+	  maxGroundContacts(0), maxRigidContacts(0), maxSoftContacts(0),
+	  finalInsideParticles(0), cleanupComplete(0), minDetF(FLT_MAX),
+	  maxDetF(-FLT_MAX), minBodyVolumeRatio(FLT_MAX),
+	  maxBodyVolumeRatio(-FLT_MAX), minY(FLT_MAX), maxY(-FLT_MAX),
+	  maxParticleSpeed(0.0f), finalMinY(FLT_MAX), finalMaxY(-FLT_MAX),
+	  finalMaxParticleSpeed(0.0f),
+	  maxCentroidDrop(0.0f), solverReadbackMatched(false)
+	{
+	}
+};
+
+static DeformableVolumeMetrics gMetrics;
+static PxArray<PxVec3> gInitialCentroids;
 
 // ---------------------------------------------------------------------------
 // Push AVBD soft-body surface triangles to PVD as debug geometry.
@@ -245,29 +315,126 @@ static void updateRenderData()
 	}
 }
 
-// ---------------------------------------------------------------------------
-void initPhysics(bool /*interactive*/)
+static PxVec3 getSoftBodyCentroid(const AvbdSoftBody& body)
 {
+	PxVec3 centroid(0.0f);
+	PxReal totalMass = 0.0f;
+	for(PxU32 localId = 0; localId < body.particleCount; ++localId)
+	{
+		const AvbdSoftParticle& particle =
+			gParticles[body.particleStart + localId];
+		centroid += particle.position * particle.mass;
+		totalMass += particle.mass;
+	}
+	return totalMass > 0.0f ?
+		centroid * (1.0f / totalMass) : PxVec3(0.0f);
+}
+
+static void addCubeSoftBody(
+	const PxVec3& center, PxReal halfExtent, PxU32 subdivisions,
+	PxReal youngsModulus = 2e5f, PxReal density = 500.0f,
+	PxReal damping = 0.015f)
+{
+	PxArray<PxVec3> verts;
+	PxArray<PxU32> tets;
+	avbdGenerateSubdividedCubeTets(
+		center, halfExtent, int(subdivisions), verts, tets);
+	avbdCreateSoftBody(
+		verts.begin(), verts.size(), tets.begin(), tets.size(), NULL, 0,
+		youngsModulus, 0.3f, density, damping, 0.0f, 0.01f,
+		gParticles, gSoftBodies);
+}
+
+static void addConeSoftBody(const PxVec3& baseCenter)
+{
+	PxArray<PxVec3> verts;
+	PxArray<PxU32> tets;
+	generateConeTetsViaTetMaker(
+		baseCenter, 0.8f, 3.0f, 14, verts, tets);
+	avbdCreateSoftBody(
+		verts.begin(), verts.size(), tets.begin(), tets.size(), NULL, 0,
+		2e5f, 0.3f, 100.0f, 0.015f, 0.0f, 0.01f,
+		gParticles, gSoftBodies);
+}
+
+static bool addRigidBox(
+	const PxVec3& center, const PxVec3& halfExtent)
+{
+	AvbdRigidBox rigidBox;
+	rigidBox.center = center;
+	rigidBox.halfExtent = halfExtent;
+	rigidBox.friction = 0.5f;
+	gRigidBoxes.pushBack(rigidBox);
+
+	PxRigidStatic* actor =
+		gPhysics->createRigidStatic(PxTransform(center));
+	if(!actor)
+		return false;
+	if(!PxRigidActorExt::createExclusiveShape(
+		*actor, PxBoxGeometry(halfExtent), *gMaterial))
+	{
+		actor->release();
+		return false;
+	}
+	gScene->addActor(*actor);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+static bool initPhysicsInternal(
+	bool interactive, const std::string& caseName)
+{
+	gMetrics = DeformableVolumeMetrics();
+	gErrorCallback.reset();
+	gParticles.clear();
+	gSoftBodies.clear();
+	gContacts.clear();
+	gRigidBoxes.clear();
+	gSoftBodyRenderData.clear();
+	gInitialCentroids.clear();
 	initOGCParams();
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+	if(!gFoundation)
+		return false;
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
-	gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
+	if(interactive)
+	{
+		gPvd = PxCreatePvd(*gFoundation);
+		if(gPvd)
+		{
+			PxPvdTransport* transport =
+				PxDefaultPvdSocketTransportCreate(PVD_HOST, 5425, 10);
+			if(transport)
+				gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
+		}
+	}
 
 	gPhysics    = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
-	PxInitExtensions(*gPhysics, gPvd);
+	if(!gPhysics)
+		return false;
+	gExtensionsInitialized = PxInitExtensions(*gPhysics, gPvd);
+	if(!gExtensionsInitialized)
+		return false;
 
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.gravity       = PxVec3(0.0f, -9.81f, 0.0f);
-	gDispatcher             = PxDefaultCpuDispatcherCreate(2);
+	sceneDesc.solverType = interactive ?
+		PxSolverType::eAVBD : gHeadlessOptions.solverType;
+	const PxU32 workerCount =
+		interactive ? 2u : gHeadlessOptions.dispatcherThreads;
+	gDispatcher = PxDefaultCpuDispatcherCreate(workerCount);
+	if(!gDispatcher)
+		return false;
 	sceneDesc.cpuDispatcher = gDispatcher;
 	sceneDesc.filterShader  = PxDefaultSimulationFilterShader;
-	sceneDesc.solverType    = PxSolverType::eAVBD;
 	gScene = gPhysics->createScene(sceneDesc);
+	if(!gScene)
+		return false;
+	gMetrics.solverReadbackMatched =
+		gScene->getSolverType() == sceneDesc.solverType;
 
 	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if (pvdClient)
+	if (interactive && pvdClient)
 	{
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
@@ -275,10 +442,40 @@ void initPhysics(bool /*interactive*/)
 	}
 
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.0f);
+	if(!gMaterial)
+		return false;
 
 	// Ground plane
 	PxRigidStatic* ground = PxCreatePlane(*gPhysics, PxPlane(0, 1, 0, 0), *gMaterial);
+	if(!ground)
+		return false;
 	gScene->addActor(*ground);
+
+	if(caseName == "volume-ground")
+	{
+		addCubeSoftBody(PxVec3(0.0f, 3.0f, 0.0f), 0.5f, 3);
+	}
+	else if(caseName == "volume-static-box")
+	{
+		addCubeSoftBody(PxVec3(0.0f, 4.0f, 0.0f), 0.5f, 3);
+		if(!addRigidBox(
+			PxVec3(0.0f, 0.5f, 0.0f),
+			PxVec3(2.0f, 0.5f, 2.0f)))
+		{
+			return false;
+		}
+	}
+	else if(caseName == "soft-soft")
+	{
+		addCubeSoftBody(PxVec3(0.0f, 1.0f, 0.0f), 0.5f, 3);
+		addCubeSoftBody(PxVec3(0.0f, 4.0f, 0.0f), 0.5f, 3);
+	}
+	else if(caseName == "cone-ground")
+	{
+		addConeSoftBody(PxVec3(-0.8f, 11.0f, 1.2f));
+	}
+	else
+	{
 
 	// ------------------------------------------------------------------
 	// Body 0: Tilted cuboid for visible soft-soft tumbling
@@ -319,18 +516,7 @@ void initPhysics(bool /*interactive*/)
 	// Body 2: Cone glancing into the left stack
 	//   Uses PxTetMaker conforming->voxel pipeline for uniform voxel tets.
 	// ------------------------------------------------------------------
-	{
-		PxArray<PxVec3> verts;
-		PxArray<PxU32> tets;
-		generateConeTetsViaTetMaker(PxVec3(-0.8f, 11.0f, 1.2f), 0.8f, 3.0f, 14, verts, tets);
-
-		avbdCreateSoftBody(
-			verts.begin(), verts.size(),
-			tets.begin(), tets.size(),
-			NULL, 0,
-			2e5f, 0.3f, 100.0f, 0.015f, 0.0f, 0.01f,
-			gParticles, gSoftBodies);
-	}
+	addConeSoftBody(PxVec3(-0.8f, 11.0f, 1.2f));
 
 	// ------------------------------------------------------------------
 	// Body 3: Tilted cuboid (rigid-soft toppling rotation)
@@ -373,25 +559,55 @@ void initPhysics(bool /*interactive*/)
 	// ------------------------------------------------------------------
 	// Rigid box obstacle (narrow support edge for Body 3)
 	// ------------------------------------------------------------------
+	if(!addRigidBox(
+		PxVec3(7.6f, 0.55f, 0.0f),
+		PxVec3(0.7f, 0.55f, 2.2f)))
 	{
-		AvbdRigidBox rb;
-		rb.center     = PxVec3(7.6f, 0.55f, 0.0f);
-		rb.halfExtent = PxVec3(0.7f, 0.55f, 2.2f);
-		rb.friction   = 0.5f;
-		gRigidBoxes.pushBack(rb);
-
-		// Also add as PxRigidStatic for rendering
-		PxRigidStatic* rigidBox = gPhysics->createRigidStatic(
-			PxTransform(PxVec3(7.6f, 0.55f, 0.0f)));
-		PxRigidActorExt::createExclusiveShape(
-			*rigidBox, PxBoxGeometry(0.7f, 0.55f, 2.2f), *gMaterial);
-		gScene->addActor(*rigidBox);
+		return false;
+	}
 	}
 
+	if(gSoftBodies.empty() || gParticles.empty())
+		return false;
+
 	updateRenderData();
+	gInitialCentroids.reserve(gSoftBodies.size());
+	for(PxU32 bodyId = 0; bodyId < gSoftBodies.size(); ++bodyId)
+		gInitialCentroids.pushBack(getSoftBodyCentroid(gSoftBodies[bodyId]));
+
+	gMetrics.initialized = 1;
+	gMetrics.particles = gParticles.size();
+	gMetrics.softBodies = gSoftBodies.size();
+	gMetrics.rigidBoxes = gRigidBoxes.size();
+	for(PxU32 bodyId = 0; bodyId < gSoftBodies.size(); ++bodyId)
+	{
+		gMetrics.tetElements += gSoftBodies[bodyId].tetElements.size();
+		gMetrics.surfaceTriangles +=
+			gSoftBodies[bodyId].surfaceTriangles.size() / 3;
+	}
+	gMetrics.sceneStatics =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+	gMetrics.sceneDynamics =
+		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+	gMetrics.sceneDeformableVolumes = gScene->getNbDeformableVolumes();
 
 	printf("SnippetDeformableVolumeAVBD: %u particles, %u soft bodies, %u rigid boxes\n",
 		gParticles.size(), gSoftBodies.size(), gRigidBoxes.size());
+	printf(
+		"[AVBD_COMPONENT_TOPOLOGY] particles=%u softBodies=%u "
+		"tetElements=%u surfaceTriangles=%u rigidBoxes=%u "
+		"sceneStatics=%u sceneDynamics=%u sceneDeformableVolumes=%u\n",
+		gMetrics.particles, gMetrics.softBodies, gMetrics.tetElements,
+		gMetrics.surfaceTriangles, gMetrics.rigidBoxes,
+		gMetrics.sceneStatics, gMetrics.sceneDynamics,
+		gMetrics.sceneDeformableVolumes);
+	return true;
+}
+
+void initPhysics(bool interactive)
+{
+	if(!initPhysicsInternal(interactive, "current-all"))
+		printf("SnippetDeformableVolumeAVBD initialization failed.\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -411,9 +627,121 @@ static void redetectContacts(
 		contacts, gOGCParams, 0.0f);
 }
 
-void stepPhysics(bool /*interactive*/)
+static void recordContactMetrics()
 {
-	PxReal dt = 1.0f / 60.0f;
+	PxU32 groundContacts = 0;
+	PxU32 rigidContacts = 0;
+	PxU32 softContacts = 0;
+	for(PxU32 contactId = 0; contactId < gContacts.size(); ++contactId)
+	{
+		const PxU32 rigidBodyId = gContacts[contactId].rigidBodyIdx;
+		if(rigidBodyId == PX_MAX_U32)
+			groundContacts++;
+		else if(rigidBodyId < gSoftBodies.size())
+			softContacts++;
+		else
+			rigidContacts++;
+	}
+	if(groundContacts)
+		gMetrics.groundContactFrames++;
+	if(rigidContacts)
+		gMetrics.rigidContactFrames++;
+	if(softContacts)
+		gMetrics.softContactFrames++;
+	gMetrics.maxGroundContacts =
+		PxMax(gMetrics.maxGroundContacts, groundContacts);
+	gMetrics.maxRigidContacts =
+		PxMax(gMetrics.maxRigidContacts, rigidContacts);
+	gMetrics.maxSoftContacts =
+		PxMax(gMetrics.maxSoftContacts, softContacts);
+}
+
+static void recordStateMetrics()
+{
+	for(PxU32 particleId = 0; particleId < gParticles.size(); ++particleId)
+	{
+		const AvbdSoftParticle& particle = gParticles[particleId];
+		if(!particle.position.isFinite() || !particle.velocity.isFinite())
+		{
+			gMetrics.nonFiniteParticleSamples++;
+			continue;
+		}
+		gMetrics.minY = PxMin(gMetrics.minY, particle.position.y);
+		gMetrics.maxY = PxMax(gMetrics.maxY, particle.position.y);
+		gMetrics.maxParticleSpeed =
+			PxMax(gMetrics.maxParticleSpeed, particle.velocity.magnitude());
+	}
+
+	for(PxU32 bodyId = 0; bodyId < gSoftBodies.size(); ++bodyId)
+	{
+		const AvbdSoftBody& body = gSoftBodies[bodyId];
+		PxReal restVolume = 0.0f;
+		PxReal currentVolume = 0.0f;
+		for(PxU32 elementId = 0;
+			elementId < body.tetElements.size(); ++elementId)
+		{
+			const AvbdTetElement& tet = body.tetElements[elementId];
+			const PxVec3& x0 = gParticles[tet.p0].position;
+			const PxMat33 ds(
+				gParticles[tet.p1].position - x0,
+				gParticles[tet.p2].position - x0,
+				gParticles[tet.p3].position - x0);
+			const PxReal detF = (ds * tet.DmInv).getDeterminant();
+			restVolume += tet.restVolume;
+			if(!PxIsFinite(detF))
+			{
+				gMetrics.invertedElementSamples++;
+				if(gMetrics.firstInversionFrame == PX_MAX_U32)
+				{
+					gMetrics.firstInversionFrame = gMetrics.completedFrames;
+					gMetrics.firstInversionBody = bodyId;
+					gMetrics.firstInversionElement = elementId;
+				}
+				if(bodyId < 32)
+					gMetrics.invertedBodiesMask |= 1u << bodyId;
+				continue;
+			}
+			gMetrics.minDetF = PxMin(gMetrics.minDetF, detF);
+			gMetrics.maxDetF = PxMax(gMetrics.maxDetF, detF);
+			if(detF <= 0.0f)
+			{
+				gMetrics.invertedElementSamples++;
+				if(gMetrics.firstInversionFrame == PX_MAX_U32)
+				{
+					gMetrics.firstInversionFrame = gMetrics.completedFrames;
+					gMetrics.firstInversionBody = bodyId;
+					gMetrics.firstInversionElement = elementId;
+				}
+				if(bodyId < 32)
+					gMetrics.invertedBodiesMask |= 1u << bodyId;
+			}
+			currentVolume += detF * tet.restVolume;
+		}
+		if(restVolume > 0.0f)
+		{
+			const PxReal ratio = currentVolume / restVolume;
+			if(PxIsFinite(ratio))
+			{
+				gMetrics.minBodyVolumeRatio =
+					PxMin(gMetrics.minBodyVolumeRatio, ratio);
+				gMetrics.maxBodyVolumeRatio =
+					PxMax(gMetrics.maxBodyVolumeRatio, ratio);
+			}
+			else
+				gMetrics.nonFiniteParticleSamples++;
+		}
+		const PxVec3 centroid = getSoftBodyCentroid(body);
+		if(centroid.isFinite() && bodyId < gInitialCentroids.size())
+		{
+			gMetrics.maxCentroidDrop = PxMax(
+				gMetrics.maxCentroidDrop,
+				gInitialCentroids[bodyId].y - centroid.y);
+		}
+	}
+}
+
+static bool stepPhysicsInternal(PxReal dt)
+{
 
 	// Initial contact detection: ground + soft-soft OGC + rigid-soft SDF.
 	avbdDetectAllOGCContacts(
@@ -422,6 +750,7 @@ void stepPhysics(bool /*interactive*/)
 		gRigidBoxes.begin(), gRigidBoxes.size(),
 		NULL, 0,
 		gContacts, gOGCParams, 0.0f);
+	recordContactMetrics();
 
 	// 8 outer iterations with contact re-detection between each.
 	// Contacts are re-detected via callback so surface-point anchors
@@ -434,9 +763,63 @@ void stepPhysics(bool /*interactive*/)
 		redetectContacts, &gContacts, NULL);
 
 	gScene->simulate(dt);
-	gScene->fetchResults(true);
+	if(!gScene->fetchResults(true))
+	{
+		gMetrics.fetchFailures++;
+		return false;
+	}
 
+	gMetrics.completedFrames++;
+	recordStateMetrics();
 	sendSoftBodiesToPvd();
+	return true;
+}
+
+void stepPhysics(bool /*interactive*/)
+{
+	stepPhysicsInternal(1.0f / 60.0f);
+}
+
+static void finalizeMetrics()
+{
+	gMetrics.finalInsideParticles = 0;
+	gMetrics.finalMinY = FLT_MAX;
+	gMetrics.finalMaxY = -FLT_MAX;
+	gMetrics.finalMaxParticleSpeed = 0.0f;
+	for(PxU32 particleId = 0; particleId < gParticles.size(); ++particleId)
+	{
+		const AvbdSoftParticle& particle = gParticles[particleId];
+		if(!particle.position.isFinite() || !particle.velocity.isFinite())
+			continue;
+		gMetrics.finalMinY =
+			PxMin(gMetrics.finalMinY, particle.position.y);
+		gMetrics.finalMaxY =
+			PxMax(gMetrics.finalMaxY, particle.position.y);
+		gMetrics.finalMaxParticleSpeed = PxMax(
+			gMetrics.finalMaxParticleSpeed, particle.velocity.magnitude());
+	}
+
+	for(PxU32 bodyA = 0; bodyA < gSoftBodies.size(); ++bodyA)
+	{
+		const AvbdSoftBody& source = gSoftBodies[bodyA];
+		for(PxU32 bodyB = 0; bodyB < gSoftBodies.size(); ++bodyB)
+		{
+			if(bodyA == bodyB)
+				continue;
+			const AvbdSoftBody& target = gSoftBodies[bodyB];
+			for(PxU32 localId = 0;
+				localId < source.particleCount; ++localId)
+			{
+				const PxU32 particleId = source.particleStart + localId;
+				if(avbdIsPointInsideTetMesh(
+					gParticles[particleId].position,
+					target.surfaceTriangles, gParticles.begin()))
+				{
+					gMetrics.finalInsideParticles++;
+				}
+			}
+		}
+	}
 }
 
 void cleanupPhysics(bool /*interactive*/)
@@ -446,9 +829,16 @@ void cleanupPhysics(bool /*interactive*/)
 	gRigidBoxes.reset();
 	gSoftBodies.reset();
 	gParticles.reset();
+	gInitialCentroids.reset();
 
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
+	PX_RELEASE(gMaterial);
+	if(gExtensionsInitialized)
+	{
+		PxCloseExtensions();
+		gExtensionsInitialized = false;
+	}
 	PX_RELEASE(gPhysics);
 	if (gPvd)
 	{
@@ -456,8 +846,10 @@ void cleanupPhysics(bool /*interactive*/)
 		PX_RELEASE(gPvd);
 		PX_RELEASE(transport);
 	}
-	PxCloseExtensions();
 	PX_RELEASE(gFoundation);
+	gMetrics.cleanupComplete =
+		!gScene && !gDispatcher && !gMaterial && !gPhysics &&
+		!gPvd && !gFoundation ? 1u : 0u;
 
 	printf("SnippetDeformableVolumeAVBD done.\n");
 }
@@ -466,8 +858,216 @@ void keyPress(unsigned char /*key*/, const PxTransform& /*camera*/)
 {
 }
 
-int snippetMain(int, const char*const*)
+static bool isKnownCase(const std::string& caseName)
 {
+	return caseName == "volume-ground" ||
+		caseName == "volume-static-box" ||
+		caseName == "soft-soft" ||
+		caseName == "cone-ground" ||
+		caseName == "current-all";
+}
+
+static bool validateHeadlessResult(const std::string& caseName)
+{
+	bool passed =
+		gMetrics.initialized == 1 &&
+		gMetrics.completedFrames == gHeadlessOptions.frames &&
+		gMetrics.fetchFailures == 0 &&
+		gMetrics.nonFiniteParticleSamples == 0 &&
+		gMetrics.invertedElementSamples == 0 &&
+		gMetrics.particles > 0 &&
+		gMetrics.softBodies > 0 &&
+		gMetrics.tetElements > 0 &&
+		gMetrics.surfaceTriangles > 0 &&
+		gMetrics.sceneStatics == gMetrics.rigidBoxes + 1 &&
+		gMetrics.sceneDynamics == 0 &&
+		gMetrics.sceneDeformableVolumes == 0 &&
+		gMetrics.solverReadbackMatched &&
+		gMetrics.cleanupComplete == 1 &&
+		PxIsFinite(gMetrics.minDetF) && gMetrics.minDetF > 0.0f &&
+		PxIsFinite(gMetrics.maxDetF) && gMetrics.maxDetF < 20.0f &&
+		PxIsFinite(gMetrics.minBodyVolumeRatio) &&
+		gMetrics.minBodyVolumeRatio > 0.01f &&
+		PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
+		gMetrics.maxBodyVolumeRatio < 20.0f &&
+		PxIsFinite(gMetrics.minY) && gMetrics.minY > -0.25f &&
+		PxIsFinite(gMetrics.maxY) && gMetrics.maxY < 100.0f &&
+		PxIsFinite(gMetrics.maxParticleSpeed) &&
+		gMetrics.maxParticleSpeed < 250.0f &&
+		gErrorCallback.getFatalCount() == 0;
+
+	if(caseName == "volume-ground")
+	{
+		passed = passed &&
+			gMetrics.softBodies == 1 &&
+			gMetrics.rigidBoxes == 0 &&
+			gMetrics.groundContactFrames > 0 &&
+			gMetrics.maxGroundContacts > 0 &&
+			gMetrics.rigidContactFrames == 0 &&
+			gMetrics.softContactFrames == 0 &&
+			gMetrics.maxCentroidDrop > 1.0f;
+	}
+	else if(caseName == "volume-static-box")
+	{
+		passed = passed &&
+			gMetrics.softBodies == 1 &&
+			gMetrics.rigidBoxes == 1 &&
+			gMetrics.rigidContactFrames > 0 &&
+			gMetrics.maxRigidContacts > 0 &&
+			gMetrics.softContactFrames == 0 &&
+			gMetrics.maxCentroidDrop > 1.0f &&
+			gMetrics.finalMinY > 0.70f;
+	}
+	else if(caseName == "soft-soft")
+	{
+		passed = passed &&
+			gMetrics.softBodies == 2 &&
+			gMetrics.rigidBoxes == 0 &&
+			gMetrics.softContactFrames > 0 &&
+			gMetrics.maxSoftContacts > 0 &&
+			gMetrics.finalInsideParticles == 0 &&
+			gMetrics.maxCentroidDrop > 1.0f;
+	}
+	else if(caseName == "cone-ground")
+	{
+		passed = passed &&
+			gMetrics.softBodies == 1 &&
+			gMetrics.rigidBoxes == 0 &&
+			gMetrics.groundContactFrames > 0 &&
+			gMetrics.maxGroundContacts > 0 &&
+			gMetrics.rigidContactFrames == 0 &&
+			gMetrics.softContactFrames == 0 &&
+			gMetrics.maxCentroidDrop > 5.0f;
+	}
+	else
+	{
+		passed = passed &&
+			gMetrics.softBodies == 5 &&
+			gMetrics.rigidBoxes == 1 &&
+			gMetrics.groundContactFrames > 0 &&
+			gMetrics.rigidContactFrames > 0 &&
+			gMetrics.softContactFrames > 0 &&
+			gMetrics.maxCentroidDrop > 1.0f;
+	}
+	return passed;
+}
+
+static void printHeadlessResult(bool passed)
+{
+	printf(
+		"[AVBD_GATE] schema=1 snippet=SnippetDeformableVolumeAVBD "
+		"case=%s solver=%s validation=COMPONENT_GATED "
+		"sceneSoftIntegration=0 status=%s initialized=%u "
+		"frames=%u fetchFailures=%u particles=%u softBodies=%u "
+		"tetElements=%u surfaceTriangles=%u rigidBoxes=%u "
+		"sceneStatics=%u sceneDynamics=%u sceneDeformableVolumes=%u "
+		"groundContactFrames=%u rigidContactFrames=%u "
+		"softContactFrames=%u maxGroundContacts=%u "
+		"maxRigidContacts=%u maxSoftContacts=%u "
+		"finalInsideParticles=%u nonFiniteParticleSamples=%u "
+		"invertedElementSamples=%u firstInversionFrame=%u "
+		"firstInversionBody=%u firstInversionElement=%u "
+		"invertedBodiesMask=%u minDetF=%.9g maxDetF=%.9g "
+		"minBodyVolumeRatio=%.9g maxBodyVolumeRatio=%.9g "
+		"minY=%.9g maxY=%.9g finalMinY=%.9g finalMaxY=%.9g "
+		"maxParticleSpeed=%.9g finalMaxParticleSpeed=%.9g "
+		"maxCentroidDrop=%.9g solverReadbackMatched=%u "
+		"fatalErrors=%u warningErrors=%u cleanupComplete=%u\n",
+		gHeadlessOptions.caseName.c_str(),
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		passed ? "PASS" : "FAIL", gMetrics.initialized,
+		gMetrics.completedFrames, gMetrics.fetchFailures,
+		gMetrics.particles, gMetrics.softBodies, gMetrics.tetElements,
+		gMetrics.surfaceTriangles, gMetrics.rigidBoxes,
+		gMetrics.sceneStatics, gMetrics.sceneDynamics,
+		gMetrics.sceneDeformableVolumes, gMetrics.groundContactFrames,
+		gMetrics.rigidContactFrames, gMetrics.softContactFrames,
+		gMetrics.maxGroundContacts, gMetrics.maxRigidContacts,
+		gMetrics.maxSoftContacts, gMetrics.finalInsideParticles,
+		gMetrics.nonFiniteParticleSamples, gMetrics.invertedElementSamples,
+		gMetrics.firstInversionFrame, gMetrics.firstInversionBody,
+		gMetrics.firstInversionElement, gMetrics.invertedBodiesMask,
+		double(gMetrics.minDetF), double(gMetrics.maxDetF),
+		double(gMetrics.minBodyVolumeRatio),
+		double(gMetrics.maxBodyVolumeRatio), double(gMetrics.minY),
+		double(gMetrics.maxY), double(gMetrics.finalMinY),
+		double(gMetrics.finalMaxY), double(gMetrics.maxParticleSpeed),
+		double(gMetrics.finalMaxParticleSpeed),
+		double(gMetrics.maxCentroidDrop),
+		gMetrics.solverReadbackMatched ? 1u : 0u,
+		gErrorCallback.getFatalCount(), gErrorCallback.getWarningCount(),
+		gMetrics.cleanupComplete);
+}
+
+int snippetMain(int argc, const char*const* argv)
+{
+	Snippets::HeadlessOptions defaults;
+	defaults.solverType = PxSolverType::eAVBD;
+	defaults.caseName = "current-all";
+	defaults.frames = 600;
+	defaults.dispatcherThreads = 2;
+	std::string parseError;
+	if(!Snippets::parseCommonHeadlessOptions(
+		argc, argv, defaults, gHeadlessOptions, parseError))
+	{
+		printf("[AVBD_GATE_CONFIG_ERROR] %s\n", parseError.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	for(int argId = 1; argId < argc; ++argId)
+	{
+		if(!Snippets::isCommonHeadlessOption(argv[argId]))
+		{
+			printf(
+				"[AVBD_GATE_CONFIG_ERROR] unknown option: %s\n",
+				argv[argId]);
+			return Snippets::eHEADLESS_CONFIG_ERROR;
+		}
+	}
+	if(gHeadlessOptions.headless)
+	{
+		if(gHeadlessOptions.solverType != PxSolverType::eAVBD)
+		{
+			printf(
+				"[AVBD_GATE_UNSUPPORTED] reason=component-is-avbd-only\n");
+			return Snippets::eHEADLESS_UNSUPPORTED;
+		}
+		if(!isKnownCase(gHeadlessOptions.caseName))
+		{
+			printf(
+				"[AVBD_GATE_CONFIG_ERROR] unknown case: %s\n",
+				gHeadlessOptions.caseName.c_str());
+			return Snippets::eHEADLESS_CONFIG_ERROR;
+		}
+		if(!Snippets::applyExecutionEnvironment(gHeadlessOptions))
+		{
+			printf(
+				"[AVBD_GATE_CONFIG_ERROR] "
+				"failed to apply execution environment\n");
+			return Snippets::eHEADLESS_CONFIG_ERROR;
+		}
+		Snippets::printHeadlessConfig(
+			"SnippetDeformableVolumeAVBD", gHeadlessOptions);
+		bool initialized = initPhysicsInternal(
+			false, gHeadlessOptions.caseName);
+		if(initialized)
+		{
+			for(PxU32 frame = 0;
+				frame < gHeadlessOptions.frames; ++frame)
+			{
+				if(!stepPhysicsInternal(gHeadlessOptions.dt))
+					break;
+			}
+			finalizeMetrics();
+		}
+		cleanupPhysics(false);
+		const bool passed =
+			initialized &&
+			validateHeadlessResult(gHeadlessOptions.caseName);
+		printHeadlessResult(passed);
+		return passed ?
+			Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
+	}
+
 #ifdef RENDER_SNIPPET
 	extern void renderLoop();
 	renderLoop();
