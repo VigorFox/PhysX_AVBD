@@ -33,6 +33,7 @@
 #include "foundation/PxQuat.h"
 #include "foundation/PxTransform.h"
 #include "foundation/PxVec3.h"
+#include "PxRigidDynamic.h"
 
 #pragma warning(push)
 #pragma warning(                                                               \
@@ -162,6 +163,77 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
     maxAngularVelocitySq = PX_MAX_F32;
   }
 
+  PX_FORCE_INLINE void projectLockedLinearVector(physx::PxVec3 &value) const {
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_X)
+      value.x = 0.0f;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_Y)
+      value.y = 0.0f;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_Z)
+      value.z = 0.0f;
+  }
+
+  PX_FORCE_INLINE void projectLockedAngularVector(physx::PxVec3 &value) const {
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_X)
+      value.x = 0.0f;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y)
+      value.y = 0.0f;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z)
+      value.z = 0.0f;
+  }
+
+  PX_FORCE_INLINE void projectLockedVelocities() {
+    if (lockFlags == 0)
+      return;
+    projectLockedLinearVector(linearVelocity);
+    projectLockedAngularVector(angularVelocity);
+  }
+
+  PX_FORCE_INLINE void
+  projectLockedPose(const physx::PxVec3 &referencePosition,
+                    const physx::PxQuat &referenceRotation) {
+    if (lockFlags == 0)
+      return;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_X)
+      position.x = referencePosition.x;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_Y)
+      position.y = referencePosition.y;
+    if (lockFlags & physx::PxRigidDynamicLockFlag::eLOCK_LINEAR_Z)
+      position.z = referencePosition.z;
+
+    const physx::PxU32 angularLocks =
+        physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+        physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y |
+        physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z;
+    if ((lockFlags & angularLocks) == 0)
+      return;
+
+    physx::PxQuat delta = rotation * referenceRotation.getConjugate();
+    if (delta.w < 0.0f)
+      delta = -delta;
+    delta.normalize();
+    const physx::PxReal cosine =
+        physx::PxClamp(delta.w, 0.0f, 1.0f);
+    const physx::PxReal sinHalf =
+        physx::PxSqrt(physx::PxMax(0.0f, 1.0f - cosine * cosine));
+    physx::PxVec3 rotationVector;
+    if (sinHalf > 1e-6f) {
+      const physx::PxReal angle = 2.0f * physx::PxAcos(cosine);
+      rotationVector =
+          physx::PxVec3(delta.x, delta.y, delta.z) * (angle / sinHalf);
+    } else {
+      rotationVector =
+          physx::PxVec3(delta.x, delta.y, delta.z) * 2.0f;
+    }
+    projectLockedAngularVector(rotationVector);
+
+    const physx::PxReal angle = rotationVector.magnitude();
+    const physx::PxQuat projectedDelta =
+        angle > 1e-8f
+            ? physx::PxQuat(angle, rotationVector / angle)
+            : physx::PxQuat(physx::PxIdentity);
+    rotation = (projectedDelta * referenceRotation).getNormalized();
+  }
+
   /**
    * @brief Compute predicted position from current velocity
    * x~ = x_n + h*v + h^2*gravity/m (if not static)
@@ -175,13 +247,27 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
       // previous frame. This is essential for the adaptive warmstart which
       // computes acceleration = (v_current - v_previous) / dt.
       // prevLinearVelocity is updated at end-of-solve, NOT here.
-      predictedPosition = position + (linearVelocity + gravity * dt) * dt;
+      projectLockedVelocities();
+      physx::PxVec3 stepLinearVelocity = linearVelocity + gravity * dt;
+      projectLockedLinearVector(stepLinearVelocity);
+      predictedPosition = position + stepLinearVelocity * dt;
 
       // Quaternion integration for rotation prediction
-      physx::PxVec3 angVelHalf = angularVelocity * (0.5f * dt);
+      physx::PxVec3 stepAngularVelocity = angularVelocity;
+      projectLockedAngularVector(stepAngularVelocity);
+      physx::PxVec3 angVelHalf = stepAngularVelocity * (0.5f * dt);
       physx::PxQuat deltaQ(angVelHalf.x, angVelHalf.y, angVelHalf.z, 0.0f);
       predictedRotation = rotation + deltaQ * rotation;
       predictedRotation.normalize();
+      const physx::PxVec3 currentPosition = position;
+      const physx::PxQuat currentRotation = rotation;
+      position = predictedPosition;
+      rotation = predictedRotation;
+      projectLockedPose(currentPosition, currentRotation);
+      predictedPosition = position;
+      predictedRotation = rotation;
+      position = currentPosition;
+      rotation = currentRotation;
 
       // Inertial target = pure prediction (same as predicted, used as RHS anchor)
       inertialPosition = predictedPosition;

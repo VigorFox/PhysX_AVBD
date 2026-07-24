@@ -290,6 +290,7 @@ void AvbdDynamicsContext::restoreAndUpdateBodyVelocityHistory(
   if (cached.bodyCoreKey == bodyCoreKey &&
       cached.lastSeenFrame + 1 == mBodyVelocityHistoryFrame) {
     solverBody.prevLinearVelocity = cached.linearVelocity;
+    solverBody.projectLockedLinearVector(solverBody.prevLinearVelocity);
   }
 
   // Gather is serial, so it is safe to prepare next frame's history here.

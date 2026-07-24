@@ -4051,6 +4051,8 @@ void AvbdSolver::solveWithJoints(
                                gravity * (accelWeight * dt * dt);
           bodies[i].rotation = bodies[i].inertialRotation;
         }
+        bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                    bodies[i].prevRotation);
       }
     }
 
@@ -4672,6 +4674,11 @@ void AvbdSolver::solveWithJoints(
           }
         }
 
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          if (bodies[i].invMass > 0.0f)
+            bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                        bodies[i].prevRotation);
+        }
         stats.totalIterations++;
       }
 
@@ -5513,6 +5520,11 @@ void AvbdSolver::solveWithJoints(
           bodies[i].rotation = qBlend.getNormalized();
         }
       }
+      for (physx::PxU32 i = 0; i < numBodies; ++i) {
+        if (bodies[i].invMass > 0.0f)
+          bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                      bodies[i].prevRotation);
+      }
 
       if (enableEarlyStop) {
         physx::PxReal maxPositionDelta = 0.0f;
@@ -5657,6 +5669,13 @@ void AvbdSolver::solveWithJoints(
       PX_PROFILE_ZONE("AVBD.projectArticulationMimicVelocity1D", 0);
       projectArticulationMimicVelocity1D(
           bodies, numBodies, d6Joints[i]);
+    }
+  }
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (bodies[i].invMass > 0.0f) {
+      bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                  bodies[i].prevRotation);
+      bodies[i].projectLockedVelocities();
     }
   }
 

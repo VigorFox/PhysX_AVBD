@@ -62,6 +62,7 @@ static Snippets::HeadlessOptions gHeadlessOptions;
 static bool gHeadlessMode = false;
 static bool gHeadlessBallShot = false;
 static bool gHeadlessSleepProbe = false;
+static bool gHeadlessLockProbe = false;
 static PxU32 gHeadlessFrameCount = 600;
 static PxU32 gBallShotFrame = 30;
 static PxU32 gSimFrame = 0;
@@ -73,6 +74,20 @@ enum HelloWorldSleepWitness {
 };
 static PxRigidDynamic *gSleepBodies[eHELLO_SLEEP_WITNESS_COUNT] = {NULL,
                                                                    NULL};
+enum HelloWorldLockWitness {
+  eHELLO_LOCK_LINEAR_X = 0,
+  eHELLO_LOCK_LINEAR_Y,
+  eHELLO_LOCK_LINEAR_Z,
+  eHELLO_LOCK_ANGULAR_X,
+  eHELLO_LOCK_ANGULAR_Y,
+  eHELLO_LOCK_ANGULAR_Z,
+  eHELLO_LOCK_WITNESS_COUNT
+};
+static PxRigidDynamic *gLockedBodies[eHELLO_LOCK_WITNESS_COUNT] = {
+    NULL, NULL, NULL, NULL, NULL, NULL};
+static PxRigidDynamic *gLockControlBodies[eHELLO_LOCK_WITNESS_COUNT] = {
+    NULL, NULL, NULL, NULL, NULL, NULL};
+static PxTransform gLockInitialPoses[eHELLO_LOCK_WITNESS_COUNT * 2];
 static std::vector<PxRigidDynamic *> gBoxes;
 static std::vector<PxVec3> gPreviousBoxVelocities;
 static std::vector<PxVec3> gPreviousBoxPositions;
@@ -104,6 +119,13 @@ static const PxReal gMaxAngularSpeedCap = 120.0f;
 static const PxReal gSleepBoxHalfExtent = 0.5f;
 static const PxU32 gSleepWakeFrame = 60;
 static const PxReal gSleepWakeTargetDeltaVelocity = 2.0f;
+static const PxReal gLockLinearSpeed = 3.0f;
+static const PxReal gLockAngularSpeed = 2.0f;
+static const PxU32 gLockImpulseFrame = 30u;
+static const PxReal gLockMotionTolerance = 1e-4f;
+static const PxReal gLockSpeedTolerance = 1e-4f;
+static const PxReal gLockControlMotionMinimum = 1.0f;
+static const PxReal gLockControlSpeedMinimum = 1.0f;
 
 struct HelloWorldMetrics {
   PxReal maxSpeedAll = 0.0f;
@@ -197,6 +219,26 @@ struct HelloWorldSleepProbeMetrics {
 };
 
 static HelloWorldSleepProbeMetrics gSleepMetrics;
+
+struct HelloWorldLockProbeMetrics {
+  PxReal lockedAxisMotion[eHELLO_LOCK_WITNESS_COUNT] = {};
+  PxReal lockedAxisSpeed[eHELLO_LOCK_WITNESS_COUNT] = {};
+  PxReal controlAxisMotion[eHELLO_LOCK_WITNESS_COUNT] = {};
+  PxReal controlAxisSpeed[eHELLO_LOCK_WITNESS_COUNT] = {};
+  PxReal maxLockedAxisMotion = 0.0f;
+  PxReal maxLockedAxisSpeed = 0.0f;
+  PxReal minControlAxisMotion = PX_MAX_F32;
+  PxReal minControlAxisSpeed = PX_MAX_F32;
+  PxReal maxControlAxisMotion = 0.0f;
+  PxReal maxControlAxisSpeed = 0.0f;
+  PxU32 actorCount = 0;
+  PxU32 lockFlagsReadback = 0;
+  PxU32 runtimeExcitations = 0;
+  PxU32 finiteSamples = 0;
+  PxU32 nonFiniteSamples = 0;
+};
+
+static HelloWorldLockProbeMetrics gLockMetrics;
 
 enum HelloWorldFilterKind {
   eHELLO_FILTER_UNTAGGED = 0,
@@ -359,7 +401,8 @@ enum HelloWorldHeadlessCase {
   eHELLO_CASE_BALL_SHOT,
   eHELLO_CASE_SLEEP_IDLE,
   eHELLO_CASE_SLEEP_WAKE,
-  eHELLO_CASE_SLEEP_DISABLED
+  eHELLO_CASE_SLEEP_DISABLED,
+  eHELLO_CASE_LOCK_FLAGS
 };
 
 static HelloWorldHeadlessCase gHeadlessCase = eHELLO_CASE_STACK_SETTLE;
@@ -387,6 +430,10 @@ static bool tryParseHeadlessCase(const char *value,
     headlessCase = eHELLO_CASE_SLEEP_DISABLED;
     return true;
   }
+  if (Snippets::equalsIgnoreCase(value, "lock-flags")) {
+    headlessCase = eHELLO_CASE_LOCK_FLAGS;
+    return true;
+  }
   return false;
 }
 
@@ -400,6 +447,8 @@ static const char *getHeadlessCaseName(HelloWorldHeadlessCase headlessCase) {
     return "sleep-wake";
   case eHELLO_CASE_SLEEP_DISABLED:
     return "sleep-disabled";
+  case eHELLO_CASE_LOCK_FLAGS:
+    return "lock-flags";
   default:
     return "stack-settle";
   }
@@ -411,14 +460,26 @@ static bool isSleepProbeCase(HelloWorldHeadlessCase headlessCase) {
          headlessCase == eHELLO_CASE_SLEEP_DISABLED;
 }
 
+static bool isLockProbeCase(HelloWorldHeadlessCase headlessCase) {
+  return headlessCase == eHELLO_CASE_LOCK_FLAGS;
+}
+
 static void resetRuntimeState() {
   stackZ = 10.0f;
   gSimFrame = 0;
   gShotBall = NULL;
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i)
     gSleepBodies[i] = NULL;
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    gLockedBodies[i] = NULL;
+    gLockControlBodies[i] = NULL;
+    gLockInitialPoses[i] = PxTransform(PxIdentity);
+    gLockInitialPoses[i + eHELLO_LOCK_WITNESS_COUNT] =
+        PxTransform(PxIdentity);
+  }
   gMetrics = HelloWorldMetrics();
   gSleepMetrics = HelloWorldSleepProbeMetrics();
+  gLockMetrics = HelloWorldLockProbeMetrics();
   gBoxes.clear();
   gPreviousBoxVelocities.clear();
   gPreviousBoxPositions.clear();
@@ -455,10 +516,18 @@ static PxRigidDynamic *createDynamic(const PxTransform &t,
 static void createSleepProbeFixture() {
   const PxBoxGeometry geometry(gSleepBoxHalfExtent, gSleepBoxHalfExtent,
                                gSleepBoxHalfExtent);
-  gSleepBodies[eHELLO_SLEEP_FREE] =
-      createDynamic(PxTransform(PxVec3(-2.0f, 4.0f, 0.0f)), geometry);
-  gSleepBodies[eHELLO_SLEEP_STATIC_TOUCH] = createDynamic(
-      PxTransform(PxVec3(2.0f, gSleepBoxHalfExtent - 0.01f, 0.0f)), geometry);
+  if (gHeadlessCase == eHELLO_CASE_SLEEP_WAKE) {
+    gSleepBodies[eHELLO_SLEEP_FREE] =
+        createDynamic(PxTransform(PxVec3(-0.49f, 4.0f, 0.0f)), geometry);
+    gSleepBodies[eHELLO_SLEEP_STATIC_TOUCH] =
+        createDynamic(PxTransform(PxVec3(0.49f, 4.0f, 0.0f)), geometry);
+  } else {
+    gSleepBodies[eHELLO_SLEEP_FREE] =
+        createDynamic(PxTransform(PxVec3(-2.0f, 4.0f, 0.0f)), geometry);
+    gSleepBodies[eHELLO_SLEEP_STATIC_TOUCH] = createDynamic(
+        PxTransform(PxVec3(2.0f, gSleepBoxHalfExtent - 0.01f, 0.0f)),
+        geometry);
+  }
 
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
     PxRigidDynamic *body = gSleepBodies[i];
@@ -467,15 +536,19 @@ static void createSleepProbeFixture() {
       continue;
     }
     body->setActorFlag(PxActorFlag::eSEND_SLEEP_NOTIFIES, true);
-    if (i == eHELLO_SLEEP_FREE) {
+    if (i == eHELLO_SLEEP_FREE ||
+        gHeadlessCase == eHELLO_CASE_SLEEP_WAKE) {
       body->setLinearDamping(2.0f);
     }
     gSleepMetrics.actorCount++;
   }
 
-  PxRigidDynamic *freeBody = gSleepBodies[eHELLO_SLEEP_FREE];
-  if (freeBody && gHeadlessCase == eHELLO_CASE_SLEEP_WAKE)
-    freeBody->putToSleep();
+  if (gHeadlessCase == eHELLO_CASE_SLEEP_WAKE) {
+    for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
+      if (gSleepBodies[i])
+        gSleepBodies[i]->putToSleep();
+    }
+  }
 
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
     PxRigidDynamic *body = gSleepBodies[i];
@@ -494,6 +567,98 @@ static void createSleepProbeFixture() {
       metrics.firstSleepFrame = 0;
     if (!pose.isValid() || !PxIsFinite(metrics.initialWakeCounter))
       metrics.finite = false;
+  }
+}
+
+static PxVec3 getLockAxis(PxU32 witness) {
+  const PxU32 axis = witness % 3u;
+  return axis == 0u ? PxVec3(1.0f, 0.0f, 0.0f)
+                    : axis == 1u ? PxVec3(0.0f, 1.0f, 0.0f)
+                                 : PxVec3(0.0f, 0.0f, 1.0f);
+}
+
+static PxRigidDynamicLockFlag::Enum getLockFlag(PxU32 witness) {
+  static const PxRigidDynamicLockFlag::Enum flags[eHELLO_LOCK_WITNESS_COUNT] = {
+      PxRigidDynamicLockFlag::eLOCK_LINEAR_X,
+      PxRigidDynamicLockFlag::eLOCK_LINEAR_Y,
+      PxRigidDynamicLockFlag::eLOCK_LINEAR_Z,
+      PxRigidDynamicLockFlag::eLOCK_ANGULAR_X,
+      PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y,
+      PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z};
+  return flags[witness];
+}
+
+static PxReal getOrientationDelta(const PxQuat &initial,
+                                  const PxQuat &current) {
+  const PxReal cosine =
+      PxMin(1.0f, PxMax(0.0f, PxAbs(initial.dot(current))));
+  return 2.0f * PxAcos(cosine);
+}
+
+static void createLockProbeFixture() {
+  const PxSphereGeometry geometry(0.25f);
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    const PxReal x = -30.0f + PxReal(i) * 12.0f;
+    PxRigidDynamic *locked =
+        createDynamic(PxTransform(PxVec3(x, 20.0f, 0.0f)), geometry);
+    PxRigidDynamic *control =
+        createDynamic(PxTransform(PxVec3(x, 32.0f, 0.0f)), geometry);
+    gLockedBodies[i] = locked;
+    gLockControlBodies[i] = control;
+    if (!locked || !control) {
+      gInitializationFailed = true;
+      continue;
+    }
+
+    const PxVec3 axis = getLockAxis(i);
+    const PxRigidDynamicLockFlag::Enum flag = getLockFlag(i);
+    PxRigidDynamic *bodies[2] = {locked, control};
+    for (PxU32 bodyIndex = 0; bodyIndex < 2; ++bodyIndex) {
+      PxRigidDynamic *body = bodies[bodyIndex];
+      body->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+      body->setLinearDamping(0.0f);
+      body->setAngularDamping(0.0f);
+      body->setSleepThreshold(0.0f);
+    }
+
+    locked->setRigidDynamicLockFlag(flag, true);
+    if (i < eHELLO_LOCK_ANGULAR_X) {
+      locked->setLinearVelocity(axis * gLockLinearSpeed);
+      control->setLinearVelocity(axis * gLockLinearSpeed);
+    } else {
+      locked->setAngularVelocity(axis * gLockAngularSpeed);
+      control->setAngularVelocity(axis * gLockAngularSpeed);
+    }
+
+    gLockInitialPoses[i] = locked->getGlobalPose();
+    gLockInitialPoses[i + eHELLO_LOCK_WITNESS_COUNT] =
+        control->getGlobalPose();
+    if (locked->getRigidDynamicLockFlags() ==
+            PxRigidDynamicLockFlags(flag) &&
+        control->getRigidDynamicLockFlags() == PxRigidDynamicLockFlags())
+      gLockMetrics.lockFlagsReadback++;
+    gLockMetrics.actorCount += 2u;
+  }
+}
+
+static void applyLockProbeRuntimeExcitation() {
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    const PxVec3 axis = getLockAxis(i);
+    PxRigidDynamic *bodies[2] = {gLockedBodies[i], gLockControlBodies[i]};
+    for (PxU32 bodyIndex = 0; bodyIndex < 2; ++bodyIndex) {
+      PxRigidDynamic *body = bodies[bodyIndex];
+      if (!body)
+        continue;
+      if (i < eHELLO_LOCK_ANGULAR_X) {
+        const PxReal impulse = body->getMass() * gLockLinearSpeed;
+        body->addForce(axis * impulse, PxForceMode::eIMPULSE, true);
+      } else {
+        const PxReal angularImpulse =
+            body->getMassSpaceInertiaTensor().dot(axis) * gLockAngularSpeed;
+        body->addTorque(axis * angularImpulse, PxForceMode::eIMPULSE, true);
+      }
+      gLockMetrics.runtimeExcitations++;
+    }
   }
 }
 
@@ -632,9 +797,11 @@ static void applySleepWakeImpulse() {
   if (!body || gSleepMetrics.wakeImpulseApplied)
     return;
 
-  HelloWorldSleepWitnessMetrics &metrics =
-      gSleepMetrics.witnesses[eHELLO_SLEEP_FREE];
-  metrics.wakePosition = body->getGlobalPose().p;
+  for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
+    if (gSleepBodies[i])
+      gSleepMetrics.witnesses[i].wakePosition =
+          gSleepBodies[i]->getGlobalPose().p;
+  }
   gSleepMetrics.sleepingBeforeWake = body->isSleeping();
   const PxReal impulse = body->getMass() * gSleepWakeTargetDeltaVelocity;
   body->addForce(PxVec3(impulse, 0.0f, 0.0f), PxForceMode::eIMPULSE, true);
@@ -693,12 +860,12 @@ static void sampleSleepProbeAfterFetch(PxU32 frameIndex) {
       metrics.sleepSamples++;
       if (metrics.firstSleepFrame == PX_MAX_U32)
         metrics.firstSleepFrame = completedFrame;
-      if (gSleepMetrics.wakeImpulseApplied && i == eHELLO_SLEEP_FREE &&
+      if (gSleepMetrics.wakeImpulseApplied &&
           metrics.firstSleepAfterWakeFrame == PX_MAX_U32)
         metrics.firstSleepAfterWakeFrame = completedFrame;
     } else {
       metrics.awakeSamples++;
-      if (gSleepMetrics.wakeImpulseApplied && i == eHELLO_SLEEP_FREE &&
+      if (gSleepMetrics.wakeImpulseApplied &&
           metrics.firstAwakeAfterWakeFrame == PX_MAX_U32)
         metrics.firstAwakeAfterWakeFrame = completedFrame;
     }
@@ -710,12 +877,12 @@ static void sampleSleepProbeAfterFetch(PxU32 frameIndex) {
     metrics.finalAngularSpeed = angularSpeed;
     metrics.finalWakeCounter = wakeCounter;
 
-    if (gSleepMetrics.wakeImpulseApplied && i == eHELLO_SLEEP_FREE) {
+    if (gSleepMetrics.wakeImpulseApplied) {
       metrics.maxWakeDisplacementX =
           PxMax(metrics.maxWakeDisplacementX,
-                pose.p.x - metrics.wakePosition.x);
+                PxAbs(pose.p.x - metrics.wakePosition.x));
       metrics.maxWakeVelocityX =
-          PxMax(metrics.maxWakeVelocityX, linearVelocity.x);
+          PxMax(metrics.maxWakeVelocityX, PxAbs(linearVelocity.x));
     }
   }
 
@@ -725,6 +892,50 @@ static void sampleSleepProbeAfterFetch(PxU32 frameIndex) {
       !gSleepBodies[eHELLO_SLEEP_FREE]->isSleeping())
     gSleepMetrics.freeAwakeBeforeWakeSamples++;
   gMetrics.completedFrames = completedFrame;
+}
+
+static void sampleLockProbeAfterFetch(PxU32 frameIndex) {
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    PxRigidDynamic *bodies[2] = {gLockedBodies[i], gLockControlBodies[i]};
+    for (PxU32 bodyIndex = 0; bodyIndex < 2; ++bodyIndex) {
+      PxRigidDynamic *body = bodies[bodyIndex];
+      if (!body) {
+        gLockMetrics.nonFiniteSamples++;
+        continue;
+      }
+
+      const PxTransform pose = body->getGlobalPose();
+      const PxVec3 linearVelocity = body->getLinearVelocity();
+      const PxVec3 angularVelocity = body->getAngularVelocity();
+      if (!pose.isValid() || !linearVelocity.isFinite() ||
+          !angularVelocity.isFinite()) {
+        gLockMetrics.nonFiniteSamples++;
+        continue;
+      }
+      gLockMetrics.finiteSamples++;
+
+      const PxVec3 axis = getLockAxis(i);
+      const PxTransform &initial =
+          gLockInitialPoses[i + bodyIndex * eHELLO_LOCK_WITNESS_COUNT];
+      const bool angular = i >= eHELLO_LOCK_ANGULAR_X;
+      const PxReal motion =
+          angular ? getOrientationDelta(initial.q, pose.q)
+                  : PxAbs((pose.p - initial.p).dot(axis));
+      const PxReal speed =
+          angular ? PxAbs(angularVelocity.dot(axis))
+                  : PxAbs(linearVelocity.dot(axis));
+
+      PxReal *motions = bodyIndex == 0u
+                            ? gLockMetrics.lockedAxisMotion
+                            : gLockMetrics.controlAxisMotion;
+      PxReal *speeds = bodyIndex == 0u
+                           ? gLockMetrics.lockedAxisSpeed
+                           : gLockMetrics.controlAxisSpeed;
+      motions[i] = PxMax(motions[i], motion);
+      speeds[i] = PxMax(speeds[i], speed);
+    }
+  }
+  gMetrics.completedFrames = frameIndex + 1u;
 }
 
 static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
@@ -951,9 +1162,10 @@ static const char *getSleepProbeFinding() {
     return "free-sleep-static-touch-awake";
   }
   if (gHeadlessCase == eHELLO_CASE_SLEEP_WAKE) {
-    return freeWitness.firstSleepAfterWakeFrame == PX_MAX_U32
+    return freeWitness.firstSleepAfterWakeFrame == PX_MAX_U32 ||
+                   staticWitness.firstSleepAfterWakeFrame == PX_MAX_U32
                ? "post-wake-resleep-missing"
-               : "post-wake-resleep-observed";
+               : "wake-propagation-resleep-observed";
   }
   return "sleep-disabled-control-ok";
 }
@@ -969,10 +1181,7 @@ static const char *getSleepWakeCounterFinding() {
 }
 
 static const char *getSleepCapability() {
-  // The ordinary free-body lifecycle is gated below.  The idle case remains
-  // PARTIAL because the deliberately overlapping static-touch witness exposes
-  // persistent AVBD contact motion and therefore does not yet auto-sleep.
-  return gHeadlessCase == eHELLO_CASE_SLEEP_IDLE ? "PARTIAL" : "SUPPORTED";
+  return "SUPPORTED";
 }
 
 static HelloWorldGateEvaluation evaluateSleepProbeGate() {
@@ -1028,8 +1237,13 @@ static HelloWorldGateEvaluation evaluateSleepProbeGate() {
         freeWitness.firstSleepFrame > 60u || !freeWitness.sleepSamples ||
         !freeWitness.sleepNotifications)
       setGateFailure(evaluation, "free_auto_sleep");
+    if (!staticWitness.finalSleeping ||
+        staticWitness.firstSleepFrame == PX_MAX_U32 ||
+        staticWitness.firstSleepFrame > 60u ||
+        !staticWitness.sleepSamples || !staticWitness.sleepNotifications)
+      setGateFailure(evaluation, "static_touch_auto_sleep");
   } else if (gHeadlessCase == eHELLO_CASE_SLEEP_WAKE) {
-    if (!freeWitness.initialSleeping ||
+    if (!freeWitness.initialSleeping || !staticWitness.initialSleeping ||
         gSleepMetrics.freeAwakeBeforeWakeSamples)
       setGateFailure(evaluation, "pre_wake_sleep_state");
     if (!gSleepMetrics.wakeImpulseApplied ||
@@ -1042,15 +1256,29 @@ static HelloWorldGateEvaluation evaluateSleepProbeGate() {
         !freeWitness.wakeNotifications ||
         freeWitness.firstWakeNotificationFrame > gSleepWakeFrame + 2u)
       setGateFailure(evaluation, "wake_observation");
-    if (freeWitness.maxWakeVelocityX < 1.0f ||
+    if (staticWitness.firstAwakeAfterWakeFrame == PX_MAX_U32 ||
+        staticWitness.firstAwakeAfterWakeFrame > gSleepWakeFrame + 2u ||
+        !staticWitness.wakeNotifications ||
+        staticWitness.firstWakeNotificationFrame > gSleepWakeFrame + 2u)
+      setGateFailure(evaluation, "wake_propagation");
+    if (freeWitness.maxWakeVelocityX < 0.5f ||
         freeWitness.maxWakeDisplacementX < 0.25f)
       setGateFailure(evaluation, "wake_response");
+    if (staticWitness.maxWakeVelocityX < 0.05f ||
+        staticWitness.maxWakeDisplacementX < 0.05f)
+      setGateFailure(evaluation, "propagated_wake_response");
     if (!freeWitness.finalSleeping ||
         freeWitness.firstSleepAfterWakeFrame == PX_MAX_U32 ||
         freeWitness.firstSleepAfterWakeFrame <= gSleepWakeFrame ||
         freeWitness.firstSleepAfterWakeFrame > gHeadlessOptions.frames ||
         freeWitness.sleepNotifications < 2u)
       setGateFailure(evaluation, "post_wake_resleep");
+    if (!staticWitness.finalSleeping ||
+        staticWitness.firstSleepAfterWakeFrame == PX_MAX_U32 ||
+        staticWitness.firstSleepAfterWakeFrame <= gSleepWakeFrame ||
+        staticWitness.firstSleepAfterWakeFrame > gHeadlessOptions.frames ||
+        staticWitness.sleepNotifications < 2u)
+      setGateFailure(evaluation, "propagated_post_wake_resleep");
   } else {
     for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
       const HelloWorldSleepWitnessMetrics &metrics =
@@ -1060,6 +1288,54 @@ static HelloWorldGateEvaluation evaluateSleepProbeGate() {
         setGateFailure(evaluation, "sleep_disabled_control");
     }
   }
+  return evaluation;
+}
+
+static HelloWorldGateEvaluation evaluateLockProbeGate() {
+  HelloWorldGateEvaluation evaluation;
+  evaluation.boxCount = gLockMetrics.actorCount;
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    gLockMetrics.maxLockedAxisMotion =
+        PxMax(gLockMetrics.maxLockedAxisMotion,
+              gLockMetrics.lockedAxisMotion[i]);
+    gLockMetrics.maxLockedAxisSpeed =
+        PxMax(gLockMetrics.maxLockedAxisSpeed,
+              gLockMetrics.lockedAxisSpeed[i]);
+    gLockMetrics.minControlAxisMotion =
+        PxMin(gLockMetrics.minControlAxisMotion,
+              gLockMetrics.controlAxisMotion[i]);
+    gLockMetrics.minControlAxisSpeed =
+        PxMin(gLockMetrics.minControlAxisSpeed,
+              gLockMetrics.controlAxisSpeed[i]);
+    gLockMetrics.maxControlAxisMotion =
+        PxMax(gLockMetrics.maxControlAxisMotion,
+              gLockMetrics.controlAxisMotion[i]);
+    gLockMetrics.maxControlAxisSpeed =
+        PxMax(gLockMetrics.maxControlAxisSpeed,
+              gLockMetrics.controlAxisSpeed[i]);
+  }
+
+  if (gMetrics.completedFrames != gHeadlessOptions.frames ||
+      gMetrics.fetchFailures)
+    setGateError(evaluation, "incomplete_simulation");
+  if (gLockMetrics.actorCount != eHELLO_LOCK_WITNESS_COUNT * 2u ||
+      gLockMetrics.lockFlagsReadback != eHELLO_LOCK_WITNESS_COUNT ||
+      gLockMetrics.runtimeExcitations != eHELLO_LOCK_WITNESS_COUNT * 2u)
+    setGateError(evaluation, "actor_or_flag_registry");
+  if (gLockMetrics.finiteSamples !=
+      gHeadlessOptions.frames * eHELLO_LOCK_WITNESS_COUNT * 2u)
+    setGateError(evaluation, "sample_registry");
+
+  if (gErrorCallback.getFatalCount() || gMetrics.fetchErrorState)
+    setGateFailure(evaluation, "physx_error");
+  if (gLockMetrics.nonFiniteSamples)
+    setGateFailure(evaluation, "non_finite");
+  if (gLockMetrics.minControlAxisMotion < gLockControlMotionMinimum ||
+      gLockMetrics.minControlAxisSpeed < gLockControlSpeedMinimum)
+    setGateFailure(evaluation, "control_response");
+  if (gLockMetrics.maxLockedAxisMotion > gLockMotionTolerance ||
+      gLockMetrics.maxLockedAxisSpeed > gLockSpeedTolerance)
+    setGateFailure(evaluation, "locked_axis_motion");
   return evaluation;
 }
 
@@ -1081,6 +1357,8 @@ static PxReal getTailWindowMean(const std::vector<PxReal> &values,
 static HelloWorldGateEvaluation evaluateGate() {
   if (gHeadlessSleepProbe)
     return evaluateSleepProbeGate();
+  if (gHeadlessLockProbe)
+    return evaluateLockProbeGate();
 
   HelloWorldGateEvaluation evaluation;
   evaluation.boxCount = static_cast<PxU32>(gBoxes.size());
@@ -1210,8 +1488,9 @@ void initPhysics(bool interactive) {
   }
 
   PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
-  sceneDesc.gravity =
-      gHeadlessSleepProbe ? PxVec3(0.0f) : PxVec3(0.0f, -9.81f, 0.0f);
+  sceneDesc.gravity = (gHeadlessSleepProbe || gHeadlessLockProbe)
+                          ? PxVec3(0.0f)
+                          : PxVec3(0.0f, -9.81f, 0.0f);
   if (gHeadlessCase == eHELLO_CASE_SLEEP_DISABLED)
     sceneDesc.flags |= PxSceneFlag::eDISABLE_SLEEPING;
   gDispatcher = PxDefaultCpuDispatcherCreate(
@@ -1241,8 +1520,9 @@ void initPhysics(bool interactive) {
     pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
     pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
   }
-  gMaterial = gPhysics->createMaterial(0.5f, 0.5f,
-                                       gHeadlessSleepProbe ? 0.0f : 0.6f);
+  gMaterial = gPhysics->createMaterial(
+      0.5f, 0.5f,
+      (gHeadlessSleepProbe || gHeadlessLockProbe) ? 0.0f : 0.6f);
   if (!gMaterial) {
     gInitializationFailed = true;
     return;
@@ -1261,8 +1541,15 @@ void initPhysics(bool interactive) {
     printf("[HelloWorld] init solver=%s sleepProbe=%s actors=%u "
            "gravity=zero ground=plane sleepingDisabled=%u headless=%s\n",
            Snippets::getSolverTypeName(gSolverType),
-           getHeadlessCaseName(gHeadlessCase), gSleepMetrics.actorCount,
-           gSleepMetrics.sceneSleepingDisabled ? 1u : 0u,
+            getHeadlessCaseName(gHeadlessCase), gSleepMetrics.actorCount,
+            gSleepMetrics.sceneSleepingDisabled ? 1u : 0u,
+            gHeadlessMode ? "yes" : "no");
+  } else if (gHeadlessLockProbe) {
+    createLockProbeFixture();
+    printf("[HelloWorld] init solver=%s lockProbe=%s actors=%u "
+           "gravity=zero ground=plane headless=%s\n",
+           Snippets::getSolverTypeName(gSolverType),
+           getHeadlessCaseName(gHeadlessCase), gLockMetrics.actorCount,
            gHeadlessMode ? "yes" : "no");
   } else {
     for (PxU32 i = 0; i < 5; i++)
@@ -1287,6 +1574,9 @@ void stepPhysics(bool interactive) {
   if (!interactive && gHeadlessCase == eHELLO_CASE_SLEEP_WAKE &&
       gSimFrame == gSleepWakeFrame)
     applySleepWakeImpulse();
+  if (!interactive && gHeadlessLockProbe &&
+      gSimFrame == gLockImpulseFrame)
+    applyLockProbeRuntimeExcitation();
   gScene->simulate(interactive ? (1.0f / 60.0f) : gHeadlessOptions.dt);
   PxU32 errorState = 0;
   if (!gScene->fetchResults(true, &errorState)) {
@@ -1301,6 +1591,8 @@ void stepPhysics(bool interactive) {
   if (!interactive) {
     if (gHeadlessSleepProbe)
       sampleSleepProbeAfterFetch(gSimFrame);
+    else if (gHeadlessLockProbe)
+      sampleLockProbeAfterFetch(gSimFrame);
     else
       sampleDynamics(gSimFrame, 120);
   }
@@ -1325,6 +1617,10 @@ void cleanupPhysics(bool interactive) {
   gShotBall = NULL;
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i)
     gSleepBodies[i] = NULL;
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    gLockedBodies[i] = NULL;
+    gLockControlBodies[i] = NULL;
+  }
   gBoxes.clear();
   gPreviousBoxVelocities.clear();
   gPreviousBoxPositions.clear();
@@ -1353,6 +1649,8 @@ void keyPress(unsigned char key, const PxTransform &camera) {
 #endif
 
 static const char *getSleepWitnessName(PxU32 witness) {
+  if (gHeadlessCase == eHELLO_CASE_SLEEP_WAKE)
+    return witness == eHELLO_SLEEP_FREE ? "wake-source" : "wake-peer";
   return witness == eHELLO_SLEEP_FREE ? "free" : "static-touch";
 }
 
@@ -1412,7 +1710,7 @@ static void printSleepProbeGateResult(
       "reason=%s nonFinite=%u physicsErrors=%u physicsWarnings=%u "
       "fetchFailures=%u fetchErrorState=%u actorCount=%u "
       "sceneSleepingDisabled=%u probeFinding=%s wakeCounterFinding=%s "
-      "freeSleepLifecycleGate=HARD staticTouchSleepGate=DIAGNOSTIC "
+      "freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD "
       "wakeCounterReset=%.9g "
       "wakeFrame=%u wakeImpulseApplied=%u sleepingBeforeWake=%u "
       "awakeImmediatelyAfterWake=%u wakeCounterAfterImpulse=%.9g "
@@ -1426,12 +1724,15 @@ static void printSleepProbeGateResult(
       "freeMaxAngularSpeed=%.9g freeMaxWakeVelocityX=%.9g "
       "freeMaxWakeDisplacementX=%.9g staticInitialSleeping=%u "
       "staticFinalSleeping=%u staticFirstSleepFrame=%u "
+      "staticFirstSleepAfterWakeFrame=%u "
       "staticSleepSamples=%u staticAwakeSamples=%u staticSleepNotify=%u "
-      "staticWakeNotify=%u staticInitialWakeCounter=%.9g "
+      "staticWakeNotify=%u staticFirstWakeNotifyFrame=%u "
+      "staticInitialWakeCounter=%.9g "
       "staticFinalWakeCounter=%.9g staticMinWakeCounter=%.9g "
       "staticMaxWakeCounter=%.9g staticInvalidWakeCounterSamples=%u "
       "staticMaxLinearSpeed=%.9g "
-      "staticMaxAngularSpeed=%.9g staticMinTopY=%.9g "
+      "staticMaxAngularSpeed=%.9g staticMaxWakeVelocityX=%.9g "
+      "staticMaxWakeDisplacementX=%.9g staticMinTopY=%.9g "
       "unexpectedNotifications=%u freeAwakeBeforeWakeSamples=%u\n",
       getHeadlessCaseName(gHeadlessCase),
       Snippets::getSolverTypeName(gHeadlessOptions.solverType),
@@ -1466,22 +1767,85 @@ static void printSleepProbeGateResult(
       double(freeWitness.maxWakeDisplacementX),
       staticWitness.initialSleeping ? 1u : 0u,
       staticWitness.finalSleeping ? 1u : 0u, staticWitness.firstSleepFrame,
+      staticWitness.firstSleepAfterWakeFrame,
       staticWitness.sleepSamples, staticWitness.awakeSamples,
       staticWitness.sleepNotifications, staticWitness.wakeNotifications,
+      staticWitness.firstWakeNotificationFrame,
       double(staticWitness.initialWakeCounter),
       double(staticWitness.finalWakeCounter),
       double(staticWitness.minWakeCounter),
       double(staticWitness.maxWakeCounter),
       staticWitness.invalidWakeCounterSamples,
       double(staticWitness.maxLinearSpeed),
-      double(staticWitness.maxAngularSpeed), double(staticWitness.minTopY),
+      double(staticWitness.maxAngularSpeed),
+      double(staticWitness.maxWakeVelocityX),
+      double(staticWitness.maxWakeDisplacementX),
+      double(staticWitness.minTopY),
       gSleepMetrics.unexpectedNotifications,
       gSleepMetrics.freeAwakeBeforeWakeSamples);
+}
+
+static const char *getLockWitnessName(PxU32 witness) {
+  static const char *names[eHELLO_LOCK_WITNESS_COUNT] = {
+      "linear-x",  "linear-y",  "linear-z",
+      "angular-x", "angular-y", "angular-z"};
+  return names[witness];
+}
+
+static void printLockProbeDetails() {
+  for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
+    printf("[SnippetHelloWorldLock] witness=%s lockedMotion=%.9g "
+           "lockedSpeed=%.9g controlMotion=%.9g controlSpeed=%.9g\n",
+           getLockWitnessName(i), double(gLockMetrics.lockedAxisMotion[i]),
+           double(gLockMetrics.lockedAxisSpeed[i]),
+           double(gLockMetrics.controlAxisMotion[i]),
+           double(gLockMetrics.controlAxisSpeed[i]));
+  }
+}
+
+static void printLockProbeGateResult(
+    const HelloWorldGateEvaluation &evaluation, PxU32 physicsErrors,
+    PxU32 physicsWarnings) {
+  printf(
+      "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=%s solver=%s "
+      "execution=%s requestedFrames=%u completedFrames=%u dt=%.9g seed=%u "
+      "dispatcherThreads=%u capability=SUPPORTED validation=GATED status=%s "
+      "reason=%s nonFinite=%u physicsErrors=%u physicsWarnings=%u "
+      "fetchFailures=%u fetchErrorState=%u actorCount=%u lockWitnessCount=%u "
+      "lockFlagsReadback=%u runtimeImpulseFrame=%u runtimeExcitations=%u "
+      "finiteSamples=%u maxLockedAxisMotion=%.9g "
+      "maxLockedAxisSpeed=%.9g minControlAxisMotion=%.9g "
+      "minControlAxisSpeed=%.9g maxControlAxisMotion=%.9g "
+      "maxControlAxisSpeed=%.9g lockMotionTolerance=%.9g "
+      "lockSpeedTolerance=%.9g controlMotionMinimum=%.9g "
+      "controlSpeedMinimum=%.9g\n",
+      getHeadlessCaseName(gHeadlessCase),
+      Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+      Snippets::getExecutionName(gHeadlessOptions.execution),
+      gHeadlessOptions.frames, gMetrics.completedFrames,
+      double(gHeadlessOptions.dt), gHeadlessOptions.seed,
+      gHeadlessOptions.dispatcherThreads, evaluation.status, evaluation.reason,
+      gLockMetrics.nonFiniteSamples ? 1u : 0u, physicsErrors, physicsWarnings,
+      gMetrics.fetchFailures, gMetrics.fetchErrorState, gLockMetrics.actorCount,
+      eHELLO_LOCK_WITNESS_COUNT, gLockMetrics.lockFlagsReadback,
+      gLockImpulseFrame, gLockMetrics.runtimeExcitations,
+      gLockMetrics.finiteSamples, double(gLockMetrics.maxLockedAxisMotion),
+      double(gLockMetrics.maxLockedAxisSpeed),
+      double(gLockMetrics.minControlAxisMotion),
+      double(gLockMetrics.minControlAxisSpeed),
+      double(gLockMetrics.maxControlAxisMotion),
+      double(gLockMetrics.maxControlAxisSpeed), double(gLockMotionTolerance),
+      double(gLockSpeedTolerance), double(gLockControlMotionMinimum),
+      double(gLockControlSpeedMinimum));
 }
 
 static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
   if (gHeadlessSleepProbe) {
     printSleepProbeDetails();
+    return;
+  }
+  if (gHeadlessLockProbe) {
+    printLockProbeDetails();
     return;
   }
   const PxReal tailAverageMaxBoxSpeed =
@@ -1520,6 +1884,10 @@ static void printGateResult(const HelloWorldGateEvaluation &evaluation,
                             PxU32 physicsErrors, PxU32 physicsWarnings) {
   if (gHeadlessSleepProbe) {
     printSleepProbeGateResult(evaluation, physicsErrors, physicsWarnings);
+    return;
+  }
+  if (gHeadlessLockProbe) {
+    printLockProbeGateResult(evaluation, physicsErrors, physicsWarnings);
     return;
   }
   const PxReal tailAverageMaxBoxSpeed =
@@ -1672,8 +2040,11 @@ int snippetMain(int argc, const char *const *argv) {
     return reportConfigurationError(options, "invalid_--case_value");
   options.caseName = getHeadlessCaseName(headlessCase);
   const bool sleepProbeCase = isSleepProbeCase(headlessCase);
+  const bool lockProbeCase = isLockProbeCase(headlessCase);
   if (sleepProbeCase && !options.framesExplicit)
     options.frames = headlessCase == eHELLO_CASE_SLEEP_WAKE ? 360u : 180u;
+  if (lockProbeCase && !options.framesExplicit)
+    options.frames = 120u;
 
   if (ballShotFrameSeen && headlessCase != eHELLO_CASE_BALL_SHOT)
     return reportConfigurationError(options,
@@ -1681,13 +2052,16 @@ int snippetMain(int argc, const char *const *argv) {
   if (!options.headless && headlessOnlyOptionSeen)
     return reportConfigurationError(options,
                                     "gate_option_requires_--headless");
-  if ((!sleepProbeCase && options.frames < 360) ||
+  if ((!sleepProbeCase && !lockProbeCase && options.frames < 360) ||
+      (lockProbeCase && options.frames < 120) ||
       (sleepProbeCase && headlessCase != eHELLO_CASE_SLEEP_WAKE &&
        options.frames < 180) ||
       (headlessCase == eHELLO_CASE_SLEEP_WAKE && options.frames < 300))
     return reportConfigurationError(options,
                                     headlessCase == eHELLO_CASE_SLEEP_WAKE
                                         ? "sleep-wake_frames_must_be_at_least_300"
+                                    : lockProbeCase
+                                        ? "lock_frames_must_be_at_least_120"
                                     : sleepProbeCase
                                         ? "sleep_frames_must_be_at_least_180"
                                         : "frames_must_be_at_least_360");
@@ -1709,6 +2083,7 @@ int snippetMain(int argc, const char *const *argv) {
   gHeadlessMode = options.headless;
   gHeadlessBallShot = headlessCase == eHELLO_CASE_BALL_SHOT;
   gHeadlessSleepProbe = sleepProbeCase;
+  gHeadlessLockProbe = lockProbeCase;
   gHeadlessFrameCount = options.frames;
   gBallShotFrame = ballShotFrame;
 
@@ -1731,6 +2106,14 @@ int snippetMain(int argc, const char *const *argv) {
            "validation=GATED\n",
            eHELLO_SLEEP_WITNESS_COUNT, gSleepWakeFrame,
            double(gSleepWakeTargetDeltaVelocity));
+  } else if (gHeadlessLockProbe) {
+    printf("[SnippetHelloWorldConfig] lockProbe=1 witnessCount=%u "
+           "actorCount=%u linearSpeed=%.9g angularSpeed=%.9g "
+           "runtimeImpulseFrame=%u "
+           "validation=GATED\n",
+           eHELLO_LOCK_WITNESS_COUNT, eHELLO_LOCK_WITNESS_COUNT * 2u,
+           double(gLockLinearSpeed), double(gLockAngularSpeed),
+           gLockImpulseFrame);
   }
 
   initPhysics(false);

@@ -85,6 +85,8 @@ PX_FORCE_INLINE void copyToAvbdSolverBody(const PxsBodyCore &core,
 
   // Initialize AVBD solver body
   body.initialize(pose, linVel, angVel, invMass, invInertiaTensor, bodyIndex);
+  body.lockFlags = core.lockFlags;
+  body.projectLockedVelocities();
 
   // Copy per-body damping and velocity caps
   body.linearDamping = core.linearDamping;

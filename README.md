@@ -35,8 +35,8 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Voxel Custom Geometry | ✅ Accepted | `SnippetCustomGeometry` gates voxel callback-generated drop and impact contacts through TGS plus AVBD parallel/sequential execution, with public nonzero impulses and complete teardown |
 | Custom Convex | ✅ Accepted | `SnippetCustomConvex` gates instrumented cylinder/cone callbacks through TGS plus AVBD parallel/sequential execution, with finite generated contacts, public nonzero impulses, no fall-through, and callback-safe teardown |
 | Articulation | ✅ Accepted | Pure AVBD penalty path passes the strengthened 31/31 suite; asymmetric angular limits and the multi-cycle scissor-lift gate are covered headlessly |
-| Sleep / Wake | 🔧 Integrated | Ordinary free-rigid-body idle sleep, wake, and disable-sleep behavior is headlessly gated; static-contact settling remains diagnostic |
-| Rigid-Body Lock Flags | ⏳ Pending | The six public linear/angular lock flags are the next correctness capability to validate and complete |
+| Sleep / Wake | ✅ Accepted | Free-body idle sleep, static-contact settling, contact-island wake propagation, re-sleep, and disable-sleep behavior are headlessly gated |
+| Rigid-Body Lock Flags | ✅ Accepted | All six public linear/angular lock flags are gated against TGS for initial velocity and runtime impulse excitation in AVBD parallel/sequential execution |
 
 **For research and evaluation only. Not production-ready.**
 
@@ -48,8 +48,9 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 - Aligned AVBD with the 5.9 allocator, pinnable bitmap, threshold stream, island-edge traversal, D6 angular-drive slots, and constraint metadata APIs.
 - Restored the upstream 16-bit low-level constraint flags. AVBD joint concrete types now use a solver-side table instead of consuming flag bits or changing the shared `Dy::Constraint` layout.
 - Synchronized AVBD articulation write-back with both 5.9 motion-velocity buffers, preventing driven and falling articulations from being put to sleep using stale velocity state.
-- Connected ordinary AVBD rigid-body write-back to the shared PhysX sleep lifecycle. Idle sleep, external-force wake, re-sleep, and `eDISABLE_SLEEPING` now have headless gates; static-touch sleep is not yet an accepted parity gate.
-- The post-migration checked gates pass: standalone `118/118`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
+- Connected ordinary AVBD rigid-body write-back to the shared PhysX sleep lifecycle. Idle sleep, static-contact settling, contact-island wake propagation, re-sleep, and `eDISABLE_SLEEPING` now have headless gates.
+- Copied and enforced all six `PxRigidDynamicLockFlag` axes through AVBD prediction, constraint stages, final pose, and velocity write-back. Initial-velocity and runtime-impulse witnesses pass in parallel and sequential execution.
+- The current checked gates pass: standalone `137/137`, cross-Snippet `14/14`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
 
 ### Moving Triangle-Mesh Contact Stability (2026-07)
 
@@ -152,7 +153,7 @@ The PhysX AVBD soft-body path is still in an early prototype stage, but its exis
 - Articulation coverage retains the strengthened **31/31** suite, the 3600-frame RC cycle gate, and the 10000-frame RC extension without stall or non-finite state.
 - Rigid contact coverage includes stack/impact, CCD, contact report/modification, custom geometry/convex, moving mesh, tolerance scaling, gyroscopic response, split simulation/fetch, serialization, multithreading, triggers, MBP, and CPU Vehicle Snippets.
 - Existing CPU soft-body components retain `SnippetSoftBodyAVBD` **66/66** and `SnippetDeformableVolumeAVBD` **10/10**. They do not represent a public CPU `PxScene` deformable backend.
-- Remaining correctness boundaries are explicit: rigid-body lock flags, static-contact sleep parity, wider native-joint topology, and selected extreme/contact-combined variants. Performance work remains deferred until these capability checks are resolved.
+- Remaining correctness boundaries are explicit: wider native-joint topology and selected extreme/contact-combined variants, including mixed lock-flag constraint topologies. Performance work remains deferred until the remaining capability checks are resolved.
 - Local handoff, audit, probe history, and per-iteration reports are intentionally not part of this checkpoint.
 
 ## SnippetChainmail Demo
@@ -284,7 +285,7 @@ PVD Profile Zones available:
 
 ## Known Limitations
 
-1. **Rigid-body lock flags and static-contact sleep** - Ordinary free-rigid-body sleep/wake is integrated, but the six public lock flags still require AVBD completion and static-touch settling remains diagnostic
+1. **Lock/sleep coverage boundary** - The six free-rigid-body lock axes, static-contact sleep, and two-body contact-island wake propagation are accepted; mixed lock flags with broader contact/joint topologies remain outside the current gate
 2. **Joint coverage boundaries** - generic custom modes are gated only for the accepted row packs; mimic remains limited to fixed-parent centered single-DOF siblings (including two disjoint equations), and rack-and-pinion remains limited to centered principal-axis topology
 3. **CPU only** - No GPU acceleration
 4. **Articulation low-budget edge cases** - The April validation floor was 10 iterations; the loaded Scissor Lift case still fails at 8

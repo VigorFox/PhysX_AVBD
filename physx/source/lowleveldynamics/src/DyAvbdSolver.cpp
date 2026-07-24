@@ -401,17 +401,20 @@ static void applyAvbdMaterialNormalVelocity(
           ((staticNow - cc.staticPrevWorldPoint) * invDt).dot(nd);
     }
 
+    const bool hasSolveStartVelocity =
+        linearVelAtSolveStart &&
+        linearVelAtSolveStart->size() == numBodies;
+    const physx::PxReal vn = bodies[i].linearVelocity.dot(nd);
+    const physx::PxReal relativeVn = vn - staticNormalVelocity;
+    physx::PxReal solveStartRelativeVn = relativeVn;
     physx::PxReal approach = 0.0f;
-    if (linearVelAtSolveStart && linearVelAtSolveStart->size() == numBodies) {
-      approach =
-          -((*linearVelAtSolveStart)[i].dot(nd) - staticNormalVelocity);
+    if (hasSolveStartVelocity) {
+      solveStartRelativeVn =
+          (*linearVelAtSolveStart)[i].dot(nd) - staticNormalVelocity;
+      approach = -solveStartRelativeVn;
       if (approach < 0.0f)
         approach = 0.0f;
     }
-
-    const physx::PxReal vn = bodies[i].linearVelocity.dot(nd);
-    const physx::PxReal relativeVn = vn - staticNormalVelocity;
-
     if (isDeform) {
       const physx::PxReal nearLim = kBodyStaticNearSurface;
       if (worstViolation >= nearLim)
@@ -444,15 +447,22 @@ static void applyAvbdMaterialNormalVelocity(
       const physx::PxReal desiredRelativeVn = e * approachEff;
       bodies[i].linearVelocity +=
           nd * (staticNormalVelocity + desiredRelativeVn - vn);
-    } else if (worstViolation < -1e-5f ||
-               splitDeepInitialDepenetration) {
-      // Inelastic / resting: kill separating relative to the static or
-      // kinematic contact anchor while still penetrating.  A deep initial
-      // overlap remains a split geometric correction even when the position
-      // solve clears the stale contact set in one step; it must not become
-      // launch velocity.
-      if (relativeVn > 0.0f)
-        bodies[i].linearVelocity -= nd * relativeVn;
+    } else {
+      // Inelastic / resting: the position solve may clear the narrow-phase
+      // overlap in this step, but that geometric correction is not impact
+      // velocity. Preserve any separating velocity the body already had at
+      // solve start (so an authored take-off is not cancelled), and remove
+      // only the separating speed created by the contact correction.
+      const physx::PxReal allowedRelativeVn =
+          hasSolveStartVelocity
+              ? physx::PxMax(solveStartRelativeVn, physx::PxReal(0.0f))
+              : physx::PxReal(0.0f);
+      const bool shouldClamp =
+          hasSolveStartVelocity || worstViolation < -1e-5f ||
+          splitDeepInitialDepenetration;
+      if (shouldClamp && relativeVn > allowedRelativeVn)
+        bodies[i].linearVelocity -=
+            nd * (relativeVn - allowedRelativeVn);
     }
   }
 
@@ -710,6 +720,8 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
                                gravity * (accelWeight * dt * dt);
           bodies[i].rotation = bodies[i].inertialRotation;
         }
+        bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                    bodies[i].prevRotation);
       }
     }
   }
@@ -959,6 +971,11 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
                               contactMap, colorBatches, numColors,
                               kinematicShellParticles, numKinematicShellParticles,
                               kinematicShellContacts, numKinematicShellContacts);
+        for (physx::PxU32 i = 0; i < numBodies; ++i) {
+          if (bodies[i].invMass > 0.0f)
+            bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                        bodies[i].prevRotation);
+        }
         stats.totalIterations++;
       }
       {
@@ -1104,6 +1121,11 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
               rejectBodyStaticOvershoot ? gsRotation : relaxedRotation;
         }
       }
+      for (physx::PxU32 i = 0; i < numBodies; ++i) {
+        if (bodies[i].invMass > 0.0f)
+          bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                      bodies[i].prevRotation);
+      }
 
       if (enableEarlyStop) {
         physx::PxReal maxPositionDelta = 0.0f;
@@ -1190,6 +1212,11 @@ void AvbdSolver::postAlStages(
     applyKinematicShellNormalDepenetrationSweeps(
         bodies, numBodies, shellParticles, numShellParticles, shellContacts,
         numShellContacts, gravity, dt, 8u);
+  }
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (bodies[i].invMass > 0.0f)
+      bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                  bodies[i].prevRotation);
   }
 
   physx::PxArray<physx::PxVec3> postDepenPos(numBodies);
@@ -1295,6 +1322,11 @@ void AvbdSolver::postAlStages(
         }
       }
     }
+  }
+  for (physx::PxU32 i = 0; i < numBodies; ++i) {
+    if (bodies[i].invMass > 0.0f)
+      bodies[i].projectLockedPose(bodies[i].prevPosition,
+                                  bodies[i].prevRotation);
   }
 
   // Finalize velocity: block motion + friction/motor tangents; exclude depen.
@@ -1450,6 +1482,10 @@ void AvbdSolver::postAlStages(
       clampKinematicShellInelasticNormalVelocities(
           bodies, numBodies, shellParticles, numShellParticles, shellContacts,
           numShellContacts, shellLinearVelAtSolveStart, dt);
+    }
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      if (bodies[i].invMass > 0.0f)
+        bodies[i].projectLockedVelocities();
     }
 
     if (softParticlesForVel && numSoftParticlesForVel > 0) {
