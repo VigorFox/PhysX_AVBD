@@ -80,33 +80,60 @@ struct ContactModificationMetrics
 	PxU32 reportPointCount;
 	PxU32 identityErrors;
 	PxU32 scaleReadbackErrors;
+	PxU32 maxImpulseReadbackErrors;
+	PxU32 targetVelocityReadbackErrors;
 	PxU32 nonFinite;
 	PxReal maxAbsBody0X;
 	PxReal peakAbsBody0VelocityX;
+	PxReal peakAbsBody0VelocityY;
 	PxReal maxBody0Y;
 	PxReal peakBody0VelocityY;
 	PxReal minBody0Y;
 	PxReal peakBody1Speed;
+	PxReal peakAbsBody1VelocityY;
+	PxReal peakBody0MinusBody1VelocityY;
 	PxReal minBody0SpeedAfterModify;
 	PxReal finalBody0Speed;
 	PxReal finalBody1Speed;
+	PxReal maxReportedImpulse;
+	PxReal expectedBody0LinearDelta;
+	PxReal expectedBody1LinearDelta;
+	PxReal expectedBody0AngularDelta;
+	PxReal expectedBody1AngularDelta;
+	PxReal actualBody0AngularDelta;
+	PxReal actualBody1AngularDelta;
+	PxReal scaleLinearVelocityResidual;
+	PxReal scaleAngularVelocityResidual;
 	PxU32 cleanupComplete;
 
 	ContactModificationMetrics()
 	: completedFrames(0), fetchFailures(0), modifyCallbackCount(0),
 	  modifiedPairCount(0), modifiedPointCount(0), reportCallbackCount(0),
 	  reportPointCount(0), identityErrors(0), scaleReadbackErrors(0),
+	  maxImpulseReadbackErrors(0), targetVelocityReadbackErrors(0),
 	  nonFinite(0), maxAbsBody0X(0.0f), peakAbsBody0VelocityX(0.0f),
+	  peakAbsBody0VelocityY(0.0f),
 	  maxBody0Y(-PX_MAX_F32), peakBody0VelocityY(-PX_MAX_F32),
 	  minBody0Y(PX_MAX_F32), peakBody1Speed(0.0f),
+	  peakAbsBody1VelocityY(0.0f),
+	  peakBody0MinusBody1VelocityY(-PX_MAX_F32),
 	  minBody0SpeedAfterModify(PX_MAX_F32), finalBody0Speed(0.0f),
-	  finalBody1Speed(0.0f), cleanupComplete(0)
+	  finalBody1Speed(0.0f), maxReportedImpulse(0.0f),
+	  expectedBody0LinearDelta(0.0f), expectedBody1LinearDelta(0.0f),
+	  expectedBody0AngularDelta(0.0f), expectedBody1AngularDelta(0.0f),
+	  actualBody0AngularDelta(0.0f), actualBody1AngularDelta(0.0f),
+	  scaleLinearVelocityResidual(0.0f),
+	  scaleAngularVelocityResidual(0.0f), cleanupComplete(0)
 	{
 	}
 };
 
 static Snippets::HeadlessOptions gHeadlessOptions;
 static ContactModificationMetrics gMetrics;
+static PxVec3 gHeadlessInitialLinearVelocity[2];
+static PxVec3 gHeadlessInitialAngularVelocity[2];
+static PxVec3 gExpectedLinearVelocityDelta[2];
+static PxVec3 gExpectedAngularVelocityDelta[2];
 
 PxArray<PxVec3> gContactPositions;
 PxArray<PxVec3> gContactImpulses;
@@ -116,6 +143,14 @@ PxArray<PxVec3> gContactAngularImpulses[2];
 static bool isHeadlessCase(const char* name)
 {
 	return Snippets::equalsIgnoreCase(gHeadlessOptions.caseName.c_str(), name);
+}
+
+static bool isDynamicPairCase()
+{
+	return isHeadlessCase("mass-scale") ||
+		isHeadlessCase("finite-scales-control") ||
+		isHeadlessCase("finite-scales") ||
+		isHeadlessCase("tangent-target");
 }
 
 static bool parseHeadlessOptions(
@@ -140,7 +175,12 @@ static bool parseHeadlessOptions(
 	if(!isHeadlessCase("normal") &&
 		!isHeadlessCase("target-velocity") &&
 		!isHeadlessCase("max-impulse") &&
-		!isHeadlessCase("mass-scale"))
+		!isHeadlessCase("mass-scale") &&
+		!isHeadlessCase("finite-max-impulse-control") &&
+		!isHeadlessCase("finite-max-impulse") &&
+		!isHeadlessCase("finite-scales-control") &&
+		!isHeadlessCase("finite-scales") &&
+		!isHeadlessCase("tangent-target"))
 	{
 		error = "unsupported --case";
 		return false;
@@ -187,7 +227,7 @@ class ContactModifyCallback: public PxContactModifyCallback
 					pairs[i].actor[0] == gHeadlessBody0;
 				const bool body0IsActor1 =
 					pairs[i].actor[1] == gHeadlessBody0;
-				const bool expectedPair = isHeadlessCase("mass-scale") ?
+				const bool expectedPair = isDynamicPairCase() ?
 					((body0IsActor0 &&
 					  pairs[i].actor[1] == gHeadlessBody1) ||
 					 (body0IsActor1 &&
@@ -211,12 +251,36 @@ class ContactModifyCallback: public PxContactModifyCallback
 					else if(isHeadlessCase("target-velocity"))
 					{
 						const PxVec3 body0Target(0.0f, 3.0f, 0.0f);
-						pairs[i].contacts.setTargetVelocity(
-							c, body0IsActor0 ? body0Target : -body0Target);
+						const PxVec3 authoredTarget =
+							body0IsActor0 ? body0Target : -body0Target;
+						pairs[i].contacts.setTargetVelocity(c, authoredTarget);
+						if((pairs[i].contacts.getTargetVelocity(c) -
+							authoredTarget).magnitudeSquared() > 1.0e-12f)
+							++gMetrics.targetVelocityReadbackErrors;
+					}
+					else if(isHeadlessCase("tangent-target"))
+					{
+						const PxVec3 body0Target(0.0f, 3.0f, 0.0f);
+						const PxVec3 authoredTarget =
+							body0IsActor0 ? body0Target : -body0Target;
+						pairs[i].contacts.setTargetVelocity(c, authoredTarget);
+						if((pairs[i].contacts.getTargetVelocity(c) -
+							authoredTarget).magnitudeSquared() > 1.0e-12f)
+							++gMetrics.targetVelocityReadbackErrors;
 					}
 					else if(isHeadlessCase("max-impulse"))
 					{
 						pairs[i].contacts.setMaxImpulse(c, 0.0f);
+						if(pairs[i].contacts.getMaxImpulse(c) != 0.0f)
+							++gMetrics.maxImpulseReadbackErrors;
+					}
+					else if(isHeadlessCase("finite-max-impulse"))
+					{
+						const PxReal maxImpulse = 0.25f;
+						pairs[i].contacts.setMaxImpulse(c, maxImpulse);
+						if(PxAbs(pairs[i].contacts.getMaxImpulse(c) -
+							maxImpulse) > 1.0e-6f)
+							++gMetrics.maxImpulseReadbackErrors;
 					}
 					else if(isHeadlessCase("mass-scale"))
 					{
@@ -238,6 +302,72 @@ class ContactModifyCallback: public PxContactModifyCallback
 								pairs[i].contacts.getInvInertiaScale1() != 0.0f)
 								++gMetrics.scaleReadbackErrors;
 						}
+					}
+					else if(isHeadlessCase("finite-scales"))
+					{
+						const bool body1IsActor0 =
+							pairs[i].actor[0] == gHeadlessBody1;
+						const PxReal body0InvMassScale = 0.25f;
+						const PxReal body0InvInertiaScale = 0.6f;
+						const PxReal body1InvMassScale = 1.5f;
+						const PxReal body1InvInertiaScale = 0.35f;
+						if(body0IsActor0)
+						{
+							pairs[i].contacts.setInvMassScale0(
+								body0InvMassScale);
+							pairs[i].contacts.setInvInertiaScale0(
+								body0InvInertiaScale);
+						}
+						else
+						{
+							pairs[i].contacts.setInvMassScale1(
+								body0InvMassScale);
+							pairs[i].contacts.setInvInertiaScale1(
+								body0InvInertiaScale);
+						}
+						if(body1IsActor0)
+						{
+							pairs[i].contacts.setInvMassScale0(
+								body1InvMassScale);
+							pairs[i].contacts.setInvInertiaScale0(
+								body1InvInertiaScale);
+						}
+						else
+						{
+							pairs[i].contacts.setInvMassScale1(
+								body1InvMassScale);
+							pairs[i].contacts.setInvInertiaScale1(
+								body1InvInertiaScale);
+						}
+						const PxReal actor0MassScale =
+							pairs[i].contacts.getInvMassScale0();
+						const PxReal actor0InertiaScale =
+							pairs[i].contacts.getInvInertiaScale0();
+						const PxReal actor1MassScale =
+							pairs[i].contacts.getInvMassScale1();
+						const PxReal actor1InertiaScale =
+							pairs[i].contacts.getInvInertiaScale1();
+						const PxReal expectedActor0MassScale =
+							body0IsActor0 ? body0InvMassScale :
+								body1InvMassScale;
+						const PxReal expectedActor0InertiaScale =
+							body0IsActor0 ? body0InvInertiaScale :
+								body1InvInertiaScale;
+						const PxReal expectedActor1MassScale =
+							body0IsActor1 ? body0InvMassScale :
+								body1InvMassScale;
+						const PxReal expectedActor1InertiaScale =
+							body0IsActor1 ? body0InvInertiaScale :
+								body1InvInertiaScale;
+						if(PxAbs(actor0MassScale -
+								expectedActor0MassScale) > 1.0e-6f ||
+							PxAbs(actor0InertiaScale -
+								expectedActor0InertiaScale) > 1.0e-6f ||
+							PxAbs(actor1MassScale -
+								expectedActor1MassScale) > 1.0e-6f ||
+							PxAbs(actor1InertiaScale -
+								expectedActor1InertiaScale) > 1.0e-6f)
+							++gMetrics.scaleReadbackErrors;
 					}
 					++gMetrics.modifiedPointCount;
 				}
@@ -292,7 +422,10 @@ class ContactModifyCallback: public PxContactModifyCallback
 
 ContactModifyCallback gContactModifyCallback;
 
-static PxU32 extractContactsWithMassScale(const PxContactPair& pair, PxContactPairPoint* userBuffer, PxU32 bufferSize, PxReal& invMassScale0, PxReal& invMassScale1)
+static PxU32 extractContactsWithMassScale(
+	const PxContactPair& pair, PxContactPairPoint* userBuffer,
+	PxU32 bufferSize, PxReal& invMassScale0, PxReal& invMassScale1,
+	PxReal& invInertiaScale0, PxReal& invInertiaScale1)
 {
 	const PxU8* contactStream = pair.contactPoints;
 	const PxU8* patchStream = pair.contactPatches;
@@ -312,6 +445,8 @@ static PxU32 extractContactsWithMassScale(const PxContactPair& pair, PxContactPa
 
 		invMassScale0 = iter.getInvMassScale0();
 		invMassScale1 = iter.getInvMassScale1();
+		invInertiaScale0 = iter.getInvInertiaScale0();
+		invInertiaScale1 = iter.getInvInertiaScale1();
 		while(iter.hasNextPatch())
 		{
 			iter.nextPatch();
@@ -366,7 +501,7 @@ class ContactReportCallback: public PxSimulationEventCallback
 				pairHeader.actors[0] == gHeadlessBody0;
 			const bool body0IsActor1 =
 				pairHeader.actors[1] == gHeadlessBody0;
-			const bool expectedPair = isHeadlessCase("mass-scale") ?
+			const bool expectedPair = isDynamicPairCase() ?
 				((body0IsActor0 &&
 				  pairHeader.actors[1] == gHeadlessBody1) ||
 				 (body0IsActor1 &&
@@ -384,8 +519,16 @@ class ContactReportCallback: public PxSimulationEventCallback
 				if(!pairs[i].contactCount)
 					continue;
 				points.resize(pairs[i].contactCount);
-				const PxU32 extracted = pairs[i].extractContacts(
-					points.begin(), points.size());
+				PxReal invMassScale0 = 1.0f;
+				PxReal invMassScale1 = 1.0f;
+				PxReal invInertiaScale0 = 1.0f;
+				PxReal invInertiaScale1 = 1.0f;
+				const PxU32 extracted = isHeadlessCase("finite-scales") ?
+					extractContactsWithMassScale(
+						pairs[i], points.begin(), points.size(),
+						invMassScale0, invMassScale1,
+						invInertiaScale0, invInertiaScale1) :
+					pairs[i].extractContacts(points.begin(), points.size());
 				gMetrics.reportPointCount += extracted;
 				for(PxU32 j = 0; j < extracted; ++j)
 				{
@@ -394,6 +537,45 @@ class ContactReportCallback: public PxSimulationEventCallback
 						!points[j].impulse.isFinite() ||
 						!PxIsFinite(points[j].separation))
 						++gMetrics.nonFinite;
+					gMetrics.maxReportedImpulse = PxMax(
+						gMetrics.maxReportedImpulse,
+						points[j].impulse.magnitude());
+					if(isHeadlessCase("finite-scales"))
+					{
+						for(PxU32 actorIndex = 0; actorIndex < 2;
+							++actorIndex)
+						{
+							const PxRigidDynamic* dynamic =
+								pairHeader.actors[actorIndex]->
+									is<PxRigidDynamic>();
+							if(!dynamic)
+								continue;
+							const PxVec3 signedImpulse = actorIndex == 0 ?
+								points[j].impulse : -points[j].impulse;
+							const PxReal invMassScale = actorIndex == 0 ?
+								invMassScale0 : invMassScale1;
+							const PxReal invInertiaScale = actorIndex == 0 ?
+								invInertiaScale0 : invInertiaScale1;
+							PxVec3 linearImpulse(0.0f);
+							PxVec3 angularImpulse(0.0f);
+							PxRigidBodyExt::computeLinearAngularImpulse(
+								*dynamic, dynamic->getGlobalPose(),
+								points[j].position, signedImpulse,
+								invMassScale, invInertiaScale,
+								linearImpulse, angularImpulse);
+							PxVec3 deltaLinearVelocity(0.0f);
+							PxVec3 deltaAngularVelocity(0.0f);
+							PxRigidBodyExt::computeVelocityDeltaFromImpulse(
+								*dynamic, linearImpulse, angularImpulse,
+								deltaLinearVelocity, deltaAngularVelocity);
+							const PxU32 physicalIndex =
+								dynamic == gHeadlessBody0 ? 0u : 1u;
+							gExpectedLinearVelocityDelta[physicalIndex] +=
+								deltaLinearVelocity;
+							gExpectedAngularVelocityDelta[physicalIndex] +=
+								deltaAngularVelocity;
+						}
+					}
 				}
 			}
 			return;
@@ -409,7 +591,11 @@ class ContactReportCallback: public PxSimulationEventCallback
 			{
 				contactPoints.resize(contactCount);
 				PxReal invMassScale[2];
-				extractContactsWithMassScale(pairs[i], &contactPoints[0], contactCount, invMassScale[0], invMassScale[1]);
+				PxReal invInertiaScale[2];
+				extractContactsWithMassScale(
+					pairs[i], &contactPoints[0], contactCount,
+					invMassScale[0], invMassScale[1],
+					invInertiaScale[0], invInertiaScale[1]);
 
 				for(PxU32 j=0;j<contactCount;j++)
 				{
@@ -426,7 +612,7 @@ class ContactReportCallback: public PxSimulationEventCallback
 						if(dynamic != NULL)
 						{
 							PxRigidBodyExt::computeLinearAngularImpulse(*dynamic, dynamic->getGlobalPose(), contactPoints[j].position, 
-								k == 0 ? contactPoints[j].impulse : -contactPoints[j].impulse, invMassScale[k], invMassScale[k], linImpulse, angImpulse);
+								k == 0 ? contactPoints[j].impulse : -contactPoints[j].impulse, invMassScale[k], invInertiaScale[k], linImpulse, angImpulse);
 						}
 						gContactLinearImpulses[k].pushBack(linImpulse);
 						gContactAngularImpulses[k].pushBack(angImpulse);
@@ -496,20 +682,43 @@ void initPhysics(bool /*interactive*/)
 	}
 
 	gMaterial = gHeadlessOptions.headless ?
-		gPhysics->createMaterial(0.0f, 0.0f, 0.0f) :
+		gPhysics->createMaterial(
+			isHeadlessCase("tangent-target") ? 1.0f : 0.0f,
+			isHeadlessCase("tangent-target") ? 1.0f : 0.0f, 0.0f) :
 		gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
 
 	if(gHeadlessOptions.headless)
 	{
-		if(isHeadlessCase("mass-scale"))
+		if(isDynamicPairCase())
 		{
-			gHeadlessBody0 = PxCreateDynamic(
-				*gPhysics, PxTransform(PxVec3(-3.0f, 0.0f, 0.0f)),
-				PxSphereGeometry(0.5f), *gMaterial, 1.0f);
-			gHeadlessBody1 = PxCreateDynamic(
-				*gPhysics, PxTransform(PxVec3(0.0f, 0.0f, 0.0f)),
-				PxSphereGeometry(0.5f), *gMaterial, 1.0f);
-			gHeadlessBody0->setLinearVelocity(PxVec3(10.0f, 0.0f, 0.0f));
+			if(isHeadlessCase("finite-scales-control") ||
+				isHeadlessCase("finite-scales"))
+			{
+				gHeadlessBody0 = PxCreateDynamic(
+					*gPhysics,
+					PxTransform(PxVec3(-3.0f, 0.75f, 0.0f)),
+					PxBoxGeometry(0.5f, 0.5f, 0.5f), *gMaterial, 1.0f);
+				gHeadlessBody1 = PxCreateDynamic(
+					*gPhysics, PxTransform(PxVec3(0.0f)),
+					PxBoxGeometry(0.5f, 0.5f, 0.5f), *gMaterial, 1.0f);
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(10.0f, 0.0f, 0.0f));
+			}
+			else
+			{
+				const PxReal initialX =
+					isHeadlessCase("tangent-target") ? -2.0f : -3.0f;
+				const PxReal initialSpeed =
+					isHeadlessCase("tangent-target") ? 5.0f : 10.0f;
+				gHeadlessBody0 = PxCreateDynamic(
+					*gPhysics, PxTransform(PxVec3(initialX, 0.0f, 0.0f)),
+					PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+				gHeadlessBody1 = PxCreateDynamic(
+					*gPhysics, PxTransform(PxVec3(0.0f)),
+					PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(initialSpeed, 0.0f, 0.0f));
+			}
 			gScene->addActor(*gHeadlessBody0);
 			gScene->addActor(*gHeadlessBody1);
 		}
@@ -519,13 +728,20 @@ void initPhysics(bool /*interactive*/)
 				PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
 			gScene->addActor(*gHeadlessGround);
 			const PxReal initialY = isHeadlessCase("target-velocity") ?
-				0.45f : (isHeadlessCase("normal") ? 2.0f : 3.0f);
+				0.45f :
+				(isHeadlessCase("normal") ||
+				 isHeadlessCase("finite-max-impulse-control") ||
+				 isHeadlessCase("finite-max-impulse") ? 2.0f : 3.0f);
 			gHeadlessBody0 = PxCreateDynamic(
 				*gPhysics, PxTransform(PxVec3(0.0f, initialY, 0.0f)),
 				PxSphereGeometry(0.5f), *gMaterial, 1.0f);
 			if(isHeadlessCase("normal"))
 				gHeadlessBody0->setLinearVelocity(
 					PxVec3(0.0f, -8.0f, 0.0f));
+			else if(isHeadlessCase("finite-max-impulse-control") ||
+				isHeadlessCase("finite-max-impulse"))
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -10.0f, 0.0f));
 			gScene->addActor(*gHeadlessBody0);
 		}
 		gHeadlessBody0->setLinearDamping(0.0f);
@@ -536,6 +752,17 @@ void initPhysics(bool /*interactive*/)
 			gHeadlessBody1->setLinearDamping(0.0f);
 			gHeadlessBody1->setAngularDamping(0.0f);
 			gHeadlessBody1->setSleepThreshold(0.0f);
+		}
+		gHeadlessInitialLinearVelocity[0] =
+			gHeadlessBody0->getLinearVelocity();
+		gHeadlessInitialAngularVelocity[0] =
+			gHeadlessBody0->getAngularVelocity();
+		if(gHeadlessBody1)
+		{
+			gHeadlessInitialLinearVelocity[1] =
+				gHeadlessBody1->getLinearVelocity();
+			gHeadlessInitialAngularVelocity[1] =
+				gHeadlessBody1->getAngularVelocity();
 		}
 	}
 	else
@@ -570,6 +797,8 @@ void stepPhysics(bool /*interactive*/)
 				PxMax(gMetrics.maxAbsBody0X, PxAbs(pose.p.x));
 			gMetrics.peakAbsBody0VelocityX =
 				PxMax(gMetrics.peakAbsBody0VelocityX, PxAbs(velocity.x));
+			gMetrics.peakAbsBody0VelocityY =
+				PxMax(gMetrics.peakAbsBody0VelocityY, PxAbs(velocity.y));
 			gMetrics.maxBody0Y = PxMax(gMetrics.maxBody0Y, pose.p.y);
 			gMetrics.peakBody0VelocityY =
 				PxMax(gMetrics.peakBody0VelocityY, velocity.y);
@@ -588,7 +817,17 @@ void stepPhysics(bool /*interactive*/)
 				++gMetrics.nonFinite;
 			gMetrics.peakBody1Speed =
 				PxMax(gMetrics.peakBody1Speed, velocity.magnitude());
+			gMetrics.peakAbsBody1VelocityY =
+				PxMax(gMetrics.peakAbsBody1VelocityY, PxAbs(velocity.y));
 			gMetrics.finalBody1Speed = velocity.magnitude();
+			if(gHeadlessBody0)
+			{
+				const PxReal relativeVelocityY =
+					gHeadlessBody0->getLinearVelocity().y - velocity.y;
+				gMetrics.peakBody0MinusBody1VelocityY = PxMax(
+					gMetrics.peakBody0MinusBody1VelocityY,
+					relativeVelocityY);
+			}
 		}
 		++gMetrics.completedFrames;
 	}
@@ -639,15 +878,55 @@ static int runHeadless()
 
 	initPhysics(false);
 	const bool massScaleCase = isHeadlessCase("mass-scale");
+	const bool dynamicPairCase = isDynamicPairCase();
 	const bool initialized =
 		gFoundation && gPhysics && gExtensionsInitialized && gDispatcher &&
 		gScene && gMaterial && gHeadlessBody0 &&
-		(massScaleCase ? (gHeadlessBody1 != NULL) :
+		(dynamicPairCase ? (gHeadlessBody1 != NULL) :
 			(gHeadlessGround != NULL));
 	if(initialized)
 	{
 		for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
 			stepPhysics(false);
+	}
+	if(initialized && (isHeadlessCase("finite-scales-control") ||
+		isHeadlessCase("finite-scales")))
+	{
+		const PxVec3 actualLinearDelta0 =
+			gHeadlessBody0->getLinearVelocity() -
+			gHeadlessInitialLinearVelocity[0];
+		const PxVec3 actualLinearDelta1 =
+			gHeadlessBody1->getLinearVelocity() -
+			gHeadlessInitialLinearVelocity[1];
+		const PxVec3 actualAngularDelta0 =
+			gHeadlessBody0->getAngularVelocity() -
+			gHeadlessInitialAngularVelocity[0];
+		const PxVec3 actualAngularDelta1 =
+			gHeadlessBody1->getAngularVelocity() -
+			gHeadlessInitialAngularVelocity[1];
+		gMetrics.actualBody0AngularDelta = actualAngularDelta0.magnitude();
+		gMetrics.actualBody1AngularDelta = actualAngularDelta1.magnitude();
+		if(isHeadlessCase("finite-scales"))
+		{
+			gMetrics.expectedBody0LinearDelta =
+				gExpectedLinearVelocityDelta[0].magnitude();
+			gMetrics.expectedBody1LinearDelta =
+				gExpectedLinearVelocityDelta[1].magnitude();
+			gMetrics.expectedBody0AngularDelta =
+				gExpectedAngularVelocityDelta[0].magnitude();
+			gMetrics.expectedBody1AngularDelta =
+				gExpectedAngularVelocityDelta[1].magnitude();
+			gMetrics.scaleLinearVelocityResidual = PxMax(
+				(actualLinearDelta0 -
+				 gExpectedLinearVelocityDelta[0]).magnitude(),
+				(actualLinearDelta1 -
+				 gExpectedLinearVelocityDelta[1]).magnitude());
+			gMetrics.scaleAngularVelocityResidual = PxMax(
+				(actualAngularDelta0 -
+				 gExpectedAngularVelocityDelta[0]).magnitude(),
+				(actualAngularDelta1 -
+				 gExpectedAngularVelocityDelta[1]).magnitude());
+		}
 	}
 
 	const char* reason = "none";
@@ -684,7 +963,9 @@ static int runHeadless()
 		reason = "missing_contact_report";
 	}
 	else if(gMetrics.identityErrors != 0 ||
-		gMetrics.scaleReadbackErrors != 0)
+		gMetrics.scaleReadbackErrors != 0 ||
+		gMetrics.maxImpulseReadbackErrors != 0 ||
+		gMetrics.targetVelocityReadbackErrors != 0)
 	{
 		passed = false;
 		reason = "callback_payload_error";
@@ -709,12 +990,47 @@ static int runHeadless()
 		passed = false;
 		reason = "max_impulse_not_consumed";
 	}
+	else if(isHeadlessCase("finite-max-impulse-control") &&
+		(gMetrics.maxReportedImpulse < 1.0f ||
+		 gMetrics.minBody0Y < 0.45f))
+	{
+		passed = false;
+		reason = "finite_impulse_control_not_stopped";
+	}
+	else if(isHeadlessCase("finite-max-impulse") &&
+		(gMetrics.maxReportedImpulse < 0.20f ||
+		 gMetrics.maxReportedImpulse > 0.251f ||
+		 gMetrics.minBody0Y > -1.0f))
+	{
+		passed = false;
+		reason = "finite_max_impulse_not_consumed";
+	}
 	else if(massScaleCase &&
 		(gMetrics.peakBody1Speed > 0.5f ||
 		 gMetrics.minBody0SpeedAfterModify > 2.0f))
 	{
 		passed = false;
 		reason = "mass_scale_not_consumed";
+	}
+	else if(isHeadlessCase("finite-scales") &&
+		(gMetrics.expectedBody0LinearDelta < 0.1f ||
+		 gMetrics.expectedBody1LinearDelta < 0.1f ||
+		 gMetrics.expectedBody0AngularDelta < 0.01f ||
+		 gMetrics.expectedBody1AngularDelta < 0.01f ||
+		 gMetrics.actualBody0AngularDelta < 0.1f ||
+		 gMetrics.actualBody1AngularDelta < 0.1f ||
+		 gMetrics.scaleLinearVelocityResidual > 0.1f))
+	{
+		passed = false;
+		reason = "finite_scales_not_consumed";
+	}
+	else if(isHeadlessCase("tangent-target") &&
+		(gMetrics.peakAbsBody0VelocityY < 0.1f ||
+		 gMetrics.peakAbsBody1VelocityY < 0.1f ||
+		 gMetrics.peakBody0MinusBody1VelocityY < 0.5f))
+	{
+		passed = false;
+		reason = "tangent_target_not_consumed";
 	}
 
 	cleanupPhysics(false);
@@ -725,16 +1041,26 @@ static int runHeadless()
 	}
 
 	std::printf(
-		"[AVBD_GATE] schema=1 snippet=SnippetContactModification solver=%s "
+		"[AVBD_GATE] schema=2 snippet=SnippetContactModification solver=%s "
 		"case=%s execution=%s frames=%u completedFrames=%u status=%s "
 		"reason=%s validation=GATED modifyCallbackCount=%u "
 		"modifiedPairCount=%u modifiedPointCount=%u "
 		"reportCallbackCount=%u reportPointCount=%u identityErrors=%u "
-		"scaleReadbackErrors=%u maxAbsBody0X=%.9g "
-		"peakAbsBody0VelocityX=%.9g maxBody0Y=%.9g "
+		"scaleReadbackErrors=%u maxImpulseReadbackErrors=%u "
+		"targetVelocityReadbackErrors=%u maxAbsBody0X=%.9g "
+		"peakAbsBody0VelocityX=%.9g peakAbsBody0VelocityY=%.9g "
+		"maxBody0Y=%.9g "
 		"peakBody0VelocityY=%.9g minBody0Y=%.9g peakBody1Speed=%.9g "
+		"peakAbsBody1VelocityY=%.9g "
+		"peakBody0MinusBody1VelocityY=%.9g maxReportedImpulse=%.9g "
 		"minBody0SpeedAfterModify=%.9g finalBody0Speed=%.9g "
-		"finalBody1Speed=%.9g nonFinite=%u fetchFailures=%u "
+		"finalBody1Speed=%.9g expectedBody0LinearDelta=%.9g "
+		"expectedBody1LinearDelta=%.9g expectedBody0AngularDelta=%.9g "
+		"expectedBody1AngularDelta=%.9g "
+		"actualBody0AngularDelta=%.9g actualBody1AngularDelta=%.9g "
+		"scaleLinearVelocityResidual=%.9g "
+		"scaleAngularVelocityResidual=%.9g "
+		"nonFinite=%u fetchFailures=%u "
 		"fatalErrors=%u cleanupComplete=%u pvd=0\n",
 		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
 		gHeadlessOptions.caseName.c_str(),
@@ -744,14 +1070,28 @@ static int runHeadless()
 		gMetrics.modifyCallbackCount, gMetrics.modifiedPairCount,
 		gMetrics.modifiedPointCount, gMetrics.reportCallbackCount,
 		gMetrics.reportPointCount, gMetrics.identityErrors,
-		gMetrics.scaleReadbackErrors, double(gMetrics.maxAbsBody0X),
+		gMetrics.scaleReadbackErrors, gMetrics.maxImpulseReadbackErrors,
+		gMetrics.targetVelocityReadbackErrors,
+		double(gMetrics.maxAbsBody0X),
 		double(gMetrics.peakAbsBody0VelocityX),
+		double(gMetrics.peakAbsBody0VelocityY),
 		double(gMetrics.maxBody0Y),
 		double(gMetrics.peakBody0VelocityY),
 		double(gMetrics.minBody0Y), double(gMetrics.peakBody1Speed),
+		double(gMetrics.peakAbsBody1VelocityY),
+		double(gMetrics.peakBody0MinusBody1VelocityY),
+		double(gMetrics.maxReportedImpulse),
 		double(gMetrics.minBody0SpeedAfterModify),
 		double(gMetrics.finalBody0Speed),
-		double(gMetrics.finalBody1Speed), gMetrics.nonFinite,
+		double(gMetrics.finalBody1Speed),
+		double(gMetrics.expectedBody0LinearDelta),
+		double(gMetrics.expectedBody1LinearDelta),
+		double(gMetrics.expectedBody0AngularDelta),
+		double(gMetrics.expectedBody1AngularDelta),
+		double(gMetrics.actualBody0AngularDelta),
+		double(gMetrics.actualBody1AngularDelta),
+		double(gMetrics.scaleLinearVelocityResidual),
+		double(gMetrics.scaleAngularVelocityResidual), gMetrics.nonFinite,
 		gMetrics.fetchFailures, gErrorCallback.getFatalCount(),
 		gMetrics.cleanupComplete);
 	return passed ? Snippets::eHEADLESS_PASS :

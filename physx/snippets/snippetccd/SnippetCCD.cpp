@@ -68,7 +68,14 @@ enum HeadlessCCDCase
 {
 	HEADLESS_LINEAR_CCD,
 	HEADLESS_SPECULATIVE_CCD,
-	HEADLESS_NO_CCD
+	HEADLESS_NO_CCD,
+	HEADLESS_ANGULAR_NO_CCD,
+	HEADLESS_ANGULAR_SPECULATIVE_CCD,
+	HEADLESS_FULL_CCD,
+	HEADLESS_RAYCAST_CCD,
+	HEADLESS_DYNAMIC_NO_CCD,
+	HEADLESS_DYNAMIC_LINEAR_CCD,
+	HEADLESS_RAYCAST_DYNAMIC_CCD
 };
 
 struct HeadlessCCDMetrics
@@ -79,15 +86,32 @@ struct HeadlessCCDMetrics
 	PxU32 crossedWall;
 	PxU32 responseSamples;
 	PxU32 ccdPairs;
-	PxReal minSphereZ;
-	PxReal finalSphereZ;
-	PxReal finalVelocityZ;
+	PxReal minMoverZ;
+	PxReal finalMoverZ;
+	PxReal finalMoverVelocityZ;
+	PxReal moverMaxAngularSpeed;
+	PxReal targetMaxDisplacement;
+	PxReal targetMaxLinearSpeed;
+	PxReal targetMaxAngularSpeed;
+	PxU32 sceneLinearCCD;
+	PxU32 sourceLinearCCD;
+	PxU32 sourceSpeculativeCCD;
+	PxU32 targetLinearCCD;
+	PxU32 targetSpeculativeCCD;
+	PxU32 targetDynamic;
+	PxU32 raycastRegistrations;
+	PxU32 raycastCorrections;
 	PxU32 cleanupComplete;
 
 	HeadlessCCDMetrics()
 	: completedFrames(0), fetchFailures(0), nonFinite(0), crossedWall(0),
-	  responseSamples(0), ccdPairs(0), minSphereZ(PX_MAX_F32),
-	  finalSphereZ(0.0f), finalVelocityZ(0.0f), cleanupComplete(0)
+	  responseSamples(0), ccdPairs(0), minMoverZ(PX_MAX_F32),
+	  finalMoverZ(0.0f), finalMoverVelocityZ(0.0f),
+	  moverMaxAngularSpeed(0.0f), targetMaxDisplacement(0.0f),
+	  targetMaxLinearSpeed(0.0f), targetMaxAngularSpeed(0.0f),
+	  sceneLinearCCD(0), sourceLinearCCD(0), sourceSpeculativeCCD(0),
+	  targetLinearCCD(0), targetSpeculativeCCD(0), targetDynamic(0),
+	  raycastRegistrations(0), raycastCorrections(0), cleanupComplete(0)
 	{
 	}
 };
@@ -95,8 +119,10 @@ struct HeadlessCCDMetrics
 static Snippets::HeadlessOptions gHeadlessOptions;
 static HeadlessCCDCase gHeadlessCase = HEADLESS_LINEAR_CCD;
 static HeadlessCCDMetrics gHeadlessMetrics;
-static PxRigidDynamic* gHeadlessSphere = NULL;
-static PxRigidStatic* gHeadlessWall = NULL;
+static PxRigidDynamic* gHeadlessMover = NULL;
+static PxRigidActor* gHeadlessObstacle = NULL;
+static PxRigidDynamic* gHeadlessResponseTarget = NULL;
+static PxVec3 gHeadlessTargetInitialPosition(0.0f);
 
 enum CCDAlgorithm
 {
@@ -139,9 +165,58 @@ static const char* getHeadlessCaseName()
 		return "speculative";
 	case HEADLESS_NO_CCD:
 		return "no-ccd";
+	case HEADLESS_ANGULAR_NO_CCD:
+		return "angular-no-ccd";
+	case HEADLESS_ANGULAR_SPECULATIVE_CCD:
+		return "angular-speculative";
+	case HEADLESS_FULL_CCD:
+		return "full";
+	case HEADLESS_RAYCAST_CCD:
+		return "raycast";
+	case HEADLESS_DYNAMIC_NO_CCD:
+		return "dynamic-no-ccd";
+	case HEADLESS_DYNAMIC_LINEAR_CCD:
+		return "dynamic-linear";
+	case HEADLESS_RAYCAST_DYNAMIC_CCD:
+		return "raycast-dynamic";
 	default:
 		return "unknown";
 	}
+}
+
+static bool isHeadlessAngularCase()
+{
+	return gHeadlessCase == HEADLESS_ANGULAR_NO_CCD ||
+		gHeadlessCase == HEADLESS_ANGULAR_SPECULATIVE_CCD ||
+		gHeadlessCase == HEADLESS_FULL_CCD;
+}
+
+static bool isHeadlessRaycastCase()
+{
+	return gHeadlessCase == HEADLESS_RAYCAST_CCD ||
+		gHeadlessCase == HEADLESS_RAYCAST_DYNAMIC_CCD;
+}
+
+static bool isHeadlessDynamicTargetCase()
+{
+	return isHeadlessAngularCase() ||
+		gHeadlessCase == HEADLESS_DYNAMIC_NO_CCD ||
+		gHeadlessCase == HEADLESS_DYNAMIC_LINEAR_CCD ||
+		gHeadlessCase == HEADLESS_RAYCAST_DYNAMIC_CCD;
+}
+
+static bool usesHeadlessLinearCCD()
+{
+	return gHeadlessCase == HEADLESS_LINEAR_CCD ||
+		gHeadlessCase == HEADLESS_FULL_CCD ||
+		gHeadlessCase == HEADLESS_DYNAMIC_LINEAR_CCD;
+}
+
+static bool usesHeadlessSpeculativeCCD()
+{
+	return gHeadlessCase == HEADLESS_SPECULATIVE_CCD ||
+		gHeadlessCase == HEADLESS_ANGULAR_SPECULATIVE_CCD ||
+		gHeadlessCase == HEADLESS_FULL_CCD;
 }
 
 static bool parseHeadlessCase(const char* value, HeadlessCCDCase& result)
@@ -159,6 +234,41 @@ static bool parseHeadlessCase(const char* value, HeadlessCCDCase& result)
 	if(Snippets::equalsIgnoreCase(value, "no-ccd"))
 	{
 		result = HEADLESS_NO_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "angular-no-ccd"))
+	{
+		result = HEADLESS_ANGULAR_NO_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "angular-speculative"))
+	{
+		result = HEADLESS_ANGULAR_SPECULATIVE_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "full"))
+	{
+		result = HEADLESS_FULL_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "raycast"))
+	{
+		result = HEADLESS_RAYCAST_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "dynamic-no-ccd"))
+	{
+		result = HEADLESS_DYNAMIC_NO_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "dynamic-linear"))
+	{
+		result = HEADLESS_DYNAMIC_LINEAR_CCD;
+		return true;
+	}
+	if(Snippets::equalsIgnoreCase(value, "raycast-dynamic"))
+	{
+		result = HEADLESS_RAYCAST_DYNAMIC_CCD;
 		return true;
 	}
 	return false;
@@ -185,7 +295,9 @@ static bool parseHeadlessOptions(
 	}
 	if(!parseHeadlessCase(gHeadlessOptions.caseName.c_str(), gHeadlessCase))
 	{
-		error = "unsupported --case (expected linear, speculative, or no-ccd)";
+		error = "unsupported --case (expected linear, speculative, no-ccd, "
+			"angular-no-ccd, angular-speculative, full, raycast, "
+			"dynamic-no-ccd, dynamic-linear, or raycast-dynamic)";
 		return false;
 	}
 	if(gHeadlessOptions.frames < 4 || gHeadlessOptions.frames > 120)
@@ -266,17 +378,45 @@ static PxFilterFlags ccdFilterShader(
 	return PxFilterFlags();
 }
 
-static void registerForRaycastCCD(PxRigidDynamic* actor)
+static bool registerForRaycastCCD(PxRigidDynamic* actor)
 {
-	if(actor)
+	if(!actor || !gRaycastCCD)
+		return false;
+
+	PxShape* shape = NULL;
+	if(actor->getShapes(&shape, 1) != 1 || !shape)
+		return false;
+
+	// Register each object for which raycast CCD should be enabled.
+	return gRaycastCCD->registerRaycastCCDObject(actor, shape);
+}
+
+static void recordHeadlessCCDFlags()
+{
+	if(!gScene || !gHeadlessMover)
+		return;
+
+	gHeadlessMetrics.sceneLinearCCD =
+		(gScene->getFlags() & PxSceneFlag::eENABLE_CCD) ? 1u : 0u;
+	const PxRigidBodyFlags sourceFlags = gHeadlessMover->getRigidBodyFlags();
+	gHeadlessMetrics.sourceLinearCCD =
+		(sourceFlags & PxRigidBodyFlag::eENABLE_CCD) ? 1u : 0u;
+	gHeadlessMetrics.sourceSpeculativeCCD =
+		(sourceFlags & PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD) ? 1u : 0u;
+	if(gHeadlessResponseTarget)
 	{
-		PxShape* shape = NULL;
-
-		actor->getShapes(&shape, 1);
-
-		// Register each object for which CCD should be enabled. In this snippet we only enable it for the sphere.
-		gRaycastCCD->registerRaycastCCDObject(actor, shape);
+		const PxRigidBodyFlags targetFlags =
+			gHeadlessResponseTarget->getRigidBodyFlags();
+		gHeadlessMetrics.targetLinearCCD =
+			(targetFlags & PxRigidBodyFlag::eENABLE_CCD) ? 1u : 0u;
+		gHeadlessMetrics.targetSpeculativeCCD =
+			(targetFlags & PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD) ?
+				1u : 0u;
 	}
+	gHeadlessMetrics.targetDynamic =
+		gHeadlessObstacle &&
+		gHeadlessObstacle->getConcreteType() == PxConcreteType::eRIGID_DYNAMIC ?
+			1u : 0u;
 }
 
 static void initHeadlessScene()
@@ -286,7 +426,7 @@ static void initHeadlessScene()
 	sceneDesc.cpuDispatcher = gDispatcher;
 	sceneDesc.filterShader = PxDefaultSimulationFilterShader;
 	sceneDesc.solverType = gHeadlessOptions.solverType;
-	if(gHeadlessCase == HEADLESS_LINEAR_CCD)
+	if(usesHeadlessLinearCCD())
 	{
 		sceneDesc.flags |= PxSceneFlag::eENABLE_CCD;
 		sceneDesc.filterShader = ccdFilterShader;
@@ -295,27 +435,116 @@ static void initHeadlessScene()
 	if(!gScene)
 		return;
 
-	gHeadlessWall = PxCreateStatic(
-		*gPhysics, PxTransform(PxVec3(0.0f)),
-		PxBoxGeometry(4.0f, 4.0f, 0.1f), *gMaterial);
-	gHeadlessSphere = PxCreateDynamic(
-		*gPhysics, PxTransform(PxVec3(0.0f, 0.0f, 20.0f)),
-		PxSphereGeometry(0.5f), *gMaterial, 10.0f);
-	if(!gHeadlessWall || !gHeadlessSphere)
-		return;
+	if(isHeadlessRaycastCase())
+		gRaycastCCD = new RaycastCCDManager(gScene);
 
-	gHeadlessSphere->setLinearDamping(0.0f);
-	gHeadlessSphere->setAngularDamping(0.0f);
-	gHeadlessSphere->setLinearVelocity(PxVec3(0.0f, 0.0f, -1000.0f));
-	gHeadlessSphere->setSleepThreshold(0.0f);
-	if(gHeadlessCase == HEADLESS_LINEAR_CCD)
-		gHeadlessSphere->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_CCD, true);
-	else if(gHeadlessCase == HEADLESS_SPECULATIVE_CCD)
-		gHeadlessSphere->setRigidBodyFlag(
-			PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+	if(isHeadlessAngularCase())
+	{
+		gHeadlessMover = PxCreateDynamic(
+			*gPhysics, PxTransform(PxVec3(0.0f)),
+			PxBoxGeometry(10.0f, 1.0f, 0.1f), *gMaterial, 10.0f);
+		gHeadlessResponseTarget = PxCreateDynamic(
+			*gPhysics, PxTransform(PxVec3(0.0f, 0.0f, 10.0f)),
+			PxBoxGeometry(0.1f, 1.0f, 1.0f), *gMaterial, 10.0f);
+		gHeadlessObstacle = gHeadlessResponseTarget;
+		if(!gHeadlessMover || !gHeadlessResponseTarget)
+			return;
 
-	gScene->addActor(*gHeadlessWall);
-	gScene->addActor(*gHeadlessSphere);
+		gHeadlessMover->setLinearDamping(0.0f);
+		gHeadlessMover->setAngularDamping(0.0f);
+		gHeadlessMover->setAngularVelocity(PxVec3(0.0f, 10.0f, 0.0f));
+		gHeadlessMover->setSleepThreshold(0.0f);
+		gHeadlessMover->setRigidDynamicLockFlag(
+			PxRigidDynamicLockFlag::eLOCK_LINEAR_X, true);
+		gHeadlessMover->setRigidDynamicLockFlag(
+			PxRigidDynamicLockFlag::eLOCK_LINEAR_Y, true);
+		gHeadlessMover->setRigidDynamicLockFlag(
+			PxRigidDynamicLockFlag::eLOCK_LINEAR_Z, true);
+		gHeadlessMover->setRigidDynamicLockFlag(
+			PxRigidDynamicLockFlag::eLOCK_ANGULAR_X, true);
+		gHeadlessMover->setRigidDynamicLockFlag(
+			PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z, true);
+
+		gHeadlessResponseTarget->setLinearDamping(0.0f);
+		gHeadlessResponseTarget->setAngularDamping(0.0f);
+		gHeadlessResponseTarget->setSleepThreshold(0.0f);
+		if(usesHeadlessLinearCCD())
+		{
+			gHeadlessMover->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_CCD, true);
+			gHeadlessResponseTarget->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_CCD, true);
+		}
+		if(usesHeadlessSpeculativeCCD())
+		{
+			gHeadlessMover->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+			gHeadlessResponseTarget->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+		}
+
+		gHeadlessTargetInitialPosition =
+			gHeadlessResponseTarget->getGlobalPose().p;
+		gScene->addActor(*gHeadlessMover);
+		gScene->addActor(*gHeadlessResponseTarget);
+	}
+	else
+	{
+		const bool dynamicTarget = isHeadlessDynamicTargetCase();
+		if(dynamicTarget)
+		{
+			PxRigidDynamic* target = PxCreateDynamic(
+				*gPhysics, PxTransform(PxVec3(0.0f)),
+				PxBoxGeometry(4.0f, 4.0f, 0.1f), *gMaterial, 1000.0f);
+			gHeadlessObstacle = target;
+			gHeadlessResponseTarget = target;
+			if(target)
+			{
+				target->setLinearDamping(0.0f);
+				target->setAngularDamping(0.0f);
+				target->setSleepThreshold(0.0f);
+				target->setRigidDynamicLockFlags(
+					PxRigidDynamicLockFlag::eLOCK_LINEAR_X |
+					PxRigidDynamicLockFlag::eLOCK_LINEAR_Y |
+					PxRigidDynamicLockFlag::eLOCK_LINEAR_Z |
+					PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+					PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y |
+					PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z);
+			}
+		}
+		else
+		{
+			gHeadlessObstacle = PxCreateStatic(
+				*gPhysics, PxTransform(PxVec3(0.0f)),
+				PxBoxGeometry(4.0f, 4.0f, 0.1f), *gMaterial);
+		}
+		gHeadlessMover = PxCreateDynamic(
+			*gPhysics, PxTransform(PxVec3(0.0f, 0.0f, 20.0f)),
+			PxSphereGeometry(0.5f), *gMaterial, 10.0f);
+		if(!gHeadlessObstacle || !gHeadlessMover)
+			return;
+
+		gHeadlessMover->setLinearDamping(0.0f);
+		gHeadlessMover->setAngularDamping(0.0f);
+		gHeadlessMover->setLinearVelocity(PxVec3(0.0f, 0.0f, -1000.0f));
+		gHeadlessMover->setSleepThreshold(0.0f);
+		if(usesHeadlessLinearCCD())
+			gHeadlessMover->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_CCD, true);
+		else if(usesHeadlessSpeculativeCCD())
+			gHeadlessMover->setRigidBodyFlag(
+				PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+
+		gHeadlessTargetInitialPosition =
+			gHeadlessObstacle->getGlobalPose().p;
+		gScene->addActor(*gHeadlessObstacle);
+		gScene->addActor(*gHeadlessMover);
+		if(isHeadlessRaycastCase() &&
+			registerForRaycastCCD(gHeadlessMover))
+			++gHeadlessMetrics.raycastRegistrations;
+	}
+
+	recordHeadlessCCDFlags();
 }
 
 static void initScene()
@@ -489,24 +718,71 @@ void stepPhysics(bool /*interactive*/)
 		gHeadlessOptions.dt : 1.0f/60.0f;
 	gScene->simulate(dt);
 	const bool fetched = gScene->fetchResults(true);
+
+	PxTransform raycastPoseBefore(PxIdentity);
+	if(gHeadlessOptions.headless && gRaycastCCD && gHeadlessMover)
+		raycastPoseBefore = gHeadlessMover->getGlobalPose();
+
+	// Raycast CCD is an Extensions post-process and must run after fetchResults
+	// but before the headless witness samples the corrected pose.
+	if(gRaycastCCD)
+		gRaycastCCD->doRaycastCCD(true);
+
 	if(gHeadlessOptions.headless)
 	{
 		if(!fetched)
 			++gHeadlessMetrics.fetchFailures;
-		if(gHeadlessSphere)
+		if(gRaycastCCD && gHeadlessMover)
 		{
-			const PxTransform pose = gHeadlessSphere->getGlobalPose();
-			const PxVec3 velocity = gHeadlessSphere->getLinearVelocity();
-			if(!pose.isFinite() || !velocity.isFinite())
+			const PxTransform poseAfter = gHeadlessMover->getGlobalPose();
+			if((poseAfter.p - raycastPoseBefore.p).magnitudeSquared() >
+				1.0e-12f)
+				++gHeadlessMetrics.raycastCorrections;
+		}
+		if(gHeadlessMover)
+		{
+			const PxTransform pose = gHeadlessMover->getGlobalPose();
+			const PxVec3 velocity = gHeadlessMover->getLinearVelocity();
+			const PxVec3 angularVelocity =
+				gHeadlessMover->getAngularVelocity();
+			if(!pose.isFinite() || !velocity.isFinite() ||
+				!angularVelocity.isFinite())
 				++gHeadlessMetrics.nonFinite;
-			gHeadlessMetrics.minSphereZ =
-				PxMin(gHeadlessMetrics.minSphereZ, pose.p.z);
-			gHeadlessMetrics.finalSphereZ = pose.p.z;
-			gHeadlessMetrics.finalVelocityZ = velocity.z;
-			if(pose.p.z < -0.6f)
-				++gHeadlessMetrics.crossedWall;
-			if(velocity.z > -100.0f)
-				++gHeadlessMetrics.responseSamples;
+			gHeadlessMetrics.moverMaxAngularSpeed = PxMax(
+				gHeadlessMetrics.moverMaxAngularSpeed,
+				angularVelocity.magnitude());
+			gHeadlessMetrics.minMoverZ =
+				PxMin(gHeadlessMetrics.minMoverZ, pose.p.z);
+			gHeadlessMetrics.finalMoverZ = pose.p.z;
+			gHeadlessMetrics.finalMoverVelocityZ = velocity.z;
+			if(!isHeadlessAngularCase())
+			{
+				if(pose.p.z < -0.6f)
+					++gHeadlessMetrics.crossedWall;
+				if(velocity.z > -100.0f)
+					++gHeadlessMetrics.responseSamples;
+			}
+		}
+		if(gHeadlessResponseTarget)
+		{
+			const PxTransform targetPose =
+				gHeadlessResponseTarget->getGlobalPose();
+			const PxVec3 targetLinearVelocity =
+				gHeadlessResponseTarget->getLinearVelocity();
+			const PxVec3 targetAngularVelocity =
+				gHeadlessResponseTarget->getAngularVelocity();
+			if(!targetPose.isFinite() || !targetLinearVelocity.isFinite() ||
+				!targetAngularVelocity.isFinite())
+				++gHeadlessMetrics.nonFinite;
+			gHeadlessMetrics.targetMaxDisplacement = PxMax(
+				gHeadlessMetrics.targetMaxDisplacement,
+				(targetPose.p - gHeadlessTargetInitialPosition).magnitude());
+			gHeadlessMetrics.targetMaxLinearSpeed = PxMax(
+				gHeadlessMetrics.targetMaxLinearSpeed,
+				targetLinearVelocity.magnitude());
+			gHeadlessMetrics.targetMaxAngularSpeed = PxMax(
+				gHeadlessMetrics.targetMaxAngularSpeed,
+				targetAngularVelocity.magnitude());
 		}
 		PxSimulationStatistics stats;
 		gScene->getSimulationStatistics(stats);
@@ -514,18 +790,15 @@ void stepPhysics(bool /*interactive*/)
 			stats.nbCCDPairs[PxGeometryType::eSPHERE][PxGeometryType::eBOX];
 		++gHeadlessMetrics.completedFrames;
 	}
-
-	// Simply call this after fetchResults to perform CCD raycasts.
-	if(gRaycastCCD)
-		gRaycastCCD->doRaycastCCD(true);
 }
 	
 static void releaseScene()
 {
 	PX_RELEASE(gScene);
 	PX_DELETE(gRaycastCCD);
-	gHeadlessSphere = NULL;
-	gHeadlessWall = NULL;
+	gHeadlessMover = NULL;
+	gHeadlessObstacle = NULL;
+	gHeadlessResponseTarget = NULL;
 }
 
 void cleanupPhysics(bool /*interactive*/)
@@ -579,7 +852,7 @@ void keyPress(unsigned char key, const PxTransform& /*camera*/)
 static int runHeadless()
 {
 	std::printf(
-		"[AVBD_GATE_CONFIG] schema=1 snippet=SnippetCCD solver=%s case=%s "
+		"[AVBD_GATE_CONFIG] schema=2 snippet=SnippetCCD solver=%s case=%s "
 		"execution=%s frames=%u dt=%.9g dispatcherThreads=%u seed=%u\n",
 		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
 		getHeadlessCaseName(),
@@ -590,7 +863,8 @@ static int runHeadless()
 	initPhysics(false);
 	const bool initialized =
 		gFoundation && gPhysics && gDispatcher && gMaterial && gScene &&
-		gHeadlessSphere && gHeadlessWall;
+		gHeadlessMover && gHeadlessObstacle &&
+		(!isHeadlessRaycastCase() || gRaycastCCD);
 	if(initialized)
 	{
 		for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
@@ -599,6 +873,13 @@ static int runHeadless()
 
 	const char* reason = "none";
 	bool passed = true;
+	const PxU32 expectedLinearCCD = usesHeadlessLinearCCD() ? 1u : 0u;
+	const PxU32 expectedSpeculativeCCD =
+		usesHeadlessSpeculativeCCD() ? 1u : 0u;
+	const PxU32 expectedTargetLinearCCD =
+		isHeadlessAngularCase() && usesHeadlessLinearCCD() ? 1u : 0u;
+	const PxU32 expectedTargetSpeculativeCCD =
+		isHeadlessAngularCase() && usesHeadlessSpeculativeCCD() ? 1u : 0u;
 	if(!initialized)
 	{
 		passed = false;
@@ -616,17 +897,88 @@ static int runHeadless()
 		passed = false;
 		reason = "runtime_error";
 	}
-	else if(gHeadlessCase == HEADLESS_NO_CCD)
+	else if(gHeadlessMetrics.sceneLinearCCD != expectedLinearCCD ||
+		gHeadlessMetrics.sourceLinearCCD != expectedLinearCCD ||
+		gHeadlessMetrics.sourceSpeculativeCCD != expectedSpeculativeCCD ||
+		gHeadlessMetrics.targetLinearCCD != expectedTargetLinearCCD ||
+		gHeadlessMetrics.targetSpeculativeCCD !=
+			expectedTargetSpeculativeCCD)
+	{
+		passed = false;
+		reason = "ccd_flag_readback_mismatch";
+	}
+	else if(gHeadlessMetrics.targetDynamic !=
+		(isHeadlessDynamicTargetCase() ? 1u : 0u))
+	{
+		passed = false;
+		reason = "target_type_mismatch";
+	}
+	else if(isHeadlessRaycastCase() &&
+		gHeadlessMetrics.raycastRegistrations != 1)
+	{
+		passed = false;
+		reason = "raycast_registration_failed";
+	}
+	else if(gHeadlessCase == HEADLESS_ANGULAR_NO_CCD)
+	{
+		if(gHeadlessMetrics.moverMaxAngularSpeed < 5.0f)
+		{
+			passed = false;
+			reason = "angular_negative_control_not_exercised";
+		}
+		else if(gHeadlessMetrics.targetMaxDisplacement > 0.02f ||
+			gHeadlessMetrics.targetMaxLinearSpeed > 0.05f ||
+			gHeadlessMetrics.targetMaxAngularSpeed > 0.05f)
+		{
+			passed = false;
+			reason = "angular_negative_control_detected_contact";
+		}
+	}
+	else if(isHeadlessAngularCase())
+	{
+		if(gHeadlessMetrics.moverMaxAngularSpeed < 1.0f)
+		{
+			passed = false;
+			reason = "angular_source_not_exercised";
+		}
+		else if(gHeadlessMetrics.targetMaxDisplacement < 0.05f ||
+			(gHeadlessMetrics.targetMaxLinearSpeed < 0.1f &&
+			 gHeadlessMetrics.targetMaxAngularSpeed < 0.1f))
+		{
+			passed = false;
+			reason = "missing_angular_ccd_response";
+		}
+	}
+	else if(gHeadlessCase == HEADLESS_NO_CCD ||
+		gHeadlessCase == HEADLESS_DYNAMIC_NO_CCD)
 	{
 		if(gHeadlessMetrics.crossedWall == 0 ||
-			gHeadlessMetrics.minSphereZ > -5.0f)
+			gHeadlessMetrics.minMoverZ > -5.0f)
 		{
 			passed = false;
 			reason = "negative_control_did_not_tunnel";
 		}
 	}
+	else if(isHeadlessRaycastCase())
+	{
+		if(gHeadlessMetrics.raycastCorrections == 0 ||
+			gHeadlessMetrics.crossedWall != 0 ||
+			gHeadlessMetrics.minMoverZ < -0.6f)
+		{
+			passed = false;
+			reason = "raycast_ccd_did_not_correct_pose";
+		}
+		else if(gHeadlessCase == HEADLESS_RAYCAST_DYNAMIC_CCD &&
+			(gHeadlessMetrics.targetMaxDisplacement > 1.0e-5f ||
+			 gHeadlessMetrics.targetMaxLinearSpeed > 1.0e-3f ||
+			 gHeadlessMetrics.targetMaxAngularSpeed > 1.0e-3f))
+		{
+			passed = false;
+			reason = "locked_dynamic_target_moved";
+		}
+	}
 	else if(gHeadlessMetrics.crossedWall != 0 ||
-		gHeadlessMetrics.minSphereZ < -0.6f)
+		gHeadlessMetrics.minMoverZ < -0.6f)
 	{
 		passed = false;
 		reason = "complete_tunneling";
@@ -636,11 +988,20 @@ static int runHeadless()
 		passed = false;
 		reason = "missing_impact_response";
 	}
-	else if(gHeadlessCase == HEADLESS_LINEAR_CCD &&
+	else if((gHeadlessCase == HEADLESS_LINEAR_CCD ||
+			 gHeadlessCase == HEADLESS_DYNAMIC_LINEAR_CCD) &&
 		gHeadlessMetrics.ccdPairs == 0)
 	{
 		passed = false;
 		reason = "missing_ccd_pair";
+	}
+	else if(gHeadlessCase == HEADLESS_DYNAMIC_LINEAR_CCD &&
+		(gHeadlessMetrics.targetMaxDisplacement > 1.0e-5f ||
+		 gHeadlessMetrics.targetMaxLinearSpeed > 1.0e-3f ||
+		 gHeadlessMetrics.targetMaxAngularSpeed > 1.0e-3f))
+	{
+		passed = false;
+		reason = "locked_dynamic_target_moved";
 	}
 
 	cleanupPhysics(false);
@@ -650,22 +1011,47 @@ static int runHeadless()
 		reason = "cleanup_incomplete";
 	}
 	std::printf(
-		"[AVBD_GATE] schema=1 snippet=SnippetCCD solver=%s case=%s "
+		"[AVBD_GATE] schema=2 snippet=SnippetCCD solver=%s case=%s "
 		"execution=%s frames=%u completedFrames=%u status=%s reason=%s "
-		"validation=GATED sphereRadius=0.5 wallHalfThickness=0.1 "
-		"initialZ=20 initialVelocityZ=-1000 crossedWall=%u "
-		"responseSamples=%u ccdPairs=%u minSphereZ=%.9g "
-		"finalSphereZ=%.9g finalVelocityZ=%.9g nonFinite=%u "
+		"validation=GATED fixture=%s sourceGeometry=%s "
+		"targetGeometry=box sphereRadius=0.5 plankHalfLength=10 "
+		"wallHalfThickness=0.1 sourceInitialZ=%.9g "
+		"sourceInitialVelocityZ=%.9g sourceInitialAngularVelocityY=%.9g "
+		"crossedWall=%u "
+		"responseSamples=%u ccdPairs=%u minMoverZ=%.9g "
+		"finalMoverZ=%.9g finalMoverVelocityZ=%.9g "
+		"moverMaxAngularSpeed=%.9g targetMaxDisplacement=%.9g "
+		"targetMaxLinearSpeed=%.9g targetMaxAngularSpeed=%.9g "
+		"sceneLinearCCD=%u sourceLinearCCD=%u sourceSpeculativeCCD=%u "
+		"targetLinearCCD=%u targetSpeculativeCCD=%u targetDynamic=%u "
+		"raycastRegistrations=%u raycastCorrections=%u nonFinite=%u "
 		"fetchFailures=%u fatalErrors=%u cleanupComplete=%u pvd=0\n",
 		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
 		getHeadlessCaseName(),
 		Snippets::getExecutionName(gHeadlessOptions.execution),
 		gHeadlessOptions.frames, gHeadlessMetrics.completedFrames,
 		passed ? "PASS" : "FAIL", reason,
+		isHeadlessAngularCase() ? "angular" : "linear",
+		isHeadlessAngularCase() ? "box" : "sphere",
+		isHeadlessAngularCase() ? 0.0 : 20.0,
+		isHeadlessAngularCase() ? 0.0 : -1000.0,
+		isHeadlessAngularCase() ? 10.0 : 0.0,
 		gHeadlessMetrics.crossedWall, gHeadlessMetrics.responseSamples,
-		gHeadlessMetrics.ccdPairs, double(gHeadlessMetrics.minSphereZ),
-		double(gHeadlessMetrics.finalSphereZ),
-		double(gHeadlessMetrics.finalVelocityZ),
+		gHeadlessMetrics.ccdPairs, double(gHeadlessMetrics.minMoverZ),
+		double(gHeadlessMetrics.finalMoverZ),
+		double(gHeadlessMetrics.finalMoverVelocityZ),
+		double(gHeadlessMetrics.moverMaxAngularSpeed),
+		double(gHeadlessMetrics.targetMaxDisplacement),
+		double(gHeadlessMetrics.targetMaxLinearSpeed),
+		double(gHeadlessMetrics.targetMaxAngularSpeed),
+		gHeadlessMetrics.sceneLinearCCD,
+		gHeadlessMetrics.sourceLinearCCD,
+		gHeadlessMetrics.sourceSpeculativeCCD,
+		gHeadlessMetrics.targetLinearCCD,
+		gHeadlessMetrics.targetSpeculativeCCD,
+		gHeadlessMetrics.targetDynamic,
+		gHeadlessMetrics.raycastRegistrations,
+		gHeadlessMetrics.raycastCorrections,
 		gHeadlessMetrics.nonFinite, gHeadlessMetrics.fetchFailures,
 		gErrorCallback.getFatalCount(), gHeadlessMetrics.cleanupComplete);
 	return passed ? Snippets::eHEADLESS_PASS :

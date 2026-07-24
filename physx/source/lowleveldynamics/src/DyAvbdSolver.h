@@ -242,8 +242,9 @@ private:
       physx::PxU32 numContacts, const AvbdBodyConstraintMap *contactMap,
       AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
       AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
-      physx::PxReal massInvDt2, AvbdBlock6x6 &A, physx::PxVec3 &gLinear,
-      physx::PxVec3 &gAngular, physx::PxU32 &numTouching);
+      physx::PxReal dt, physx::PxReal massInvDt2, AvbdBlock6x6 &A,
+      physx::PxVec3 &gLinear, physx::PxVec3 &gAngular,
+      physx::PxU32 &numTouching);
 
   /**
    * @brief Solve local 6x6 system for a single body

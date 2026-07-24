@@ -415,6 +415,14 @@ static void applyAvbdMaterialNormalVelocity(
       if (approach < 0.0f)
         approach = 0.0f;
     }
+    const bool hasFiniteMaxImpulse = cc.maxImpulse < PX_MAX_REAL;
+    const physx::PxReal maxImpulseRelativeVn =
+        hasSolveStartVelocity && hasFiniteMaxImpulse
+            ? solveStartRelativeVn +
+                  physx::PxMax(cc.maxImpulse, physx::PxReal(0.0f)) *
+                      bodies[i].invMass *
+                      (dynIsA ? cc.invMassScaleA : cc.invMassScaleB)
+            : PX_MAX_REAL;
     if (isDeform) {
       const physx::PxReal nearLim = kBodyStaticNearSurface;
       if (worstViolation >= nearLim)
@@ -444,7 +452,8 @@ static void applyAvbdMaterialNormalVelocity(
     if (e > 0.0f && relativeVn < 0.0f)
       approachEff = physx::PxMax(approachEff, -relativeVn);
     if (e > 0.0f && approachEff > bounceThreshold) {
-      const physx::PxReal desiredRelativeVn = e * approachEff;
+      const physx::PxReal desiredRelativeVn =
+          physx::PxMin(e * approachEff, maxImpulseRelativeVn);
       bodies[i].linearVelocity +=
           nd * (staticNormalVelocity + desiredRelativeVn - vn);
     } else {
@@ -455,7 +464,9 @@ static void applyAvbdMaterialNormalVelocity(
       // only the separating speed created by the contact correction.
       const physx::PxReal allowedRelativeVn =
           hasSolveStartVelocity
-              ? physx::PxMax(solveStartRelativeVn, physx::PxReal(0.0f))
+              ? physx::PxMin(
+                    physx::PxMax(solveStartRelativeVn, physx::PxReal(0.0f)),
+                    maxImpulseRelativeVn)
               : physx::PxReal(0.0f);
       const bool shouldClamp =
           hasSolveStartVelocity || worstViolation < -1e-5f ||
@@ -496,15 +507,28 @@ static void applyAvbdMaterialNormalVelocity(
 
     const physx::PxReal vrel =
         (bodies[bA].linearVelocity - bodies[bB].linearVelocity).dot(n);
-    const physx::PxReal desiredVrel = e * approach;
-    if (vrel >= desiredVrel)
-      continue;
-    const physx::PxReal invSum = bodies[bA].invMass + bodies[bB].invMass;
+    const physx::PxReal invMassA =
+        bodies[bA].invMass * cc.invMassScaleA;
+    const physx::PxReal invMassB =
+        bodies[bB].invMass * cc.invMassScaleB;
+    const physx::PxReal invSum = invMassA + invMassB;
     if (invSum < 1e-12f)
       continue;
-    const physx::PxReal j = (desiredVrel - vrel) / invSum;
-    bodies[bA].linearVelocity += n * (j * bodies[bA].invMass);
-    bodies[bB].linearVelocity -= n * (j * bodies[bB].invMass);
+    const physx::PxReal maxImpulseVrel =
+        cc.maxImpulse < PX_MAX_REAL
+            ? vrel0 + physx::PxMax(cc.maxImpulse, physx::PxReal(0.0f)) *
+                          invSum
+            : PX_MAX_REAL;
+    const physx::PxReal desiredVrel =
+        physx::PxMin(e * approach, maxImpulseVrel);
+    if (vrel >= desiredVrel)
+      continue;
+    physx::PxReal j = (desiredVrel - vrel) / invSum;
+    if (cc.maxImpulse < PX_MAX_REAL)
+      j = physx::PxMin(
+          j, physx::PxMax(cc.maxImpulse, physx::PxReal(0.0f)));
+    bodies[bA].linearVelocity += n * (j * invMassA);
+    bodies[bB].linearVelocity -= n * (j * invMassB);
   }
 }
 
@@ -1839,6 +1863,11 @@ void AvbdSolver::applyBodyStaticNormalDepenetrationSweeps(
                  : contacts[c].invMassScaleB;
       if (linearResponseScale <= 0.0f)
         continue;
+      // A finite contact impulse cannot also receive an unbounded split-pose
+      // correction.  Let the capped AL force determine the pose response so
+      // insufficient authored support can pass through, matching PhysX/TGS.
+      if (contacts[c].maxImpulse < PX_MAX_REAL)
+        continue;
       if (skipDepenForBodies && bi < skipDepenForBodies->size() &&
           (*skipDepenForBodies)[bi] &&
           hasDeformableStaticAnchor(contacts[c]))
@@ -2413,8 +2442,9 @@ void AvbdSolver::accumulateBodyContactRows(
     physx::PxU32 numContacts, const AvbdBodyConstraintMap *contactMap,
     AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
     AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
-    physx::PxReal massInvDt2, AvbdBlock6x6 &A, physx::PxVec3 &gLinear,
-    physx::PxVec3 &gAngular, physx::PxU32 &numTouching) {
+    physx::PxReal dt, physx::PxReal massInvDt2, AvbdBlock6x6 &A,
+    physx::PxVec3 &gLinear, physx::PxVec3 &gAngular,
+    physx::PxU32 &numTouching) {
 
   bool bodyUsesKinematicShellNormals = false;
   if (shellContacts && numShellContacts > 0) {
@@ -2511,12 +2541,26 @@ void AvbdSolver::accumulateBodyContactRows(
     physx::PxVec3 gradPos = normal * sign;
     physx::PxVec3 gradRot = rCrossN * sign;
 
-    A.addResponseScaledConstraintContribution(
-        gradPos, gradRot, pen, linearResponseScale, angularResponseScale);
+    // Normal force (unilateral) + optional Coulomb-cone tangents in 6x6.
+    const physx::PxReal rawForce =
+        physx::PxMin(0.0f, pen * violation + lambda);
+    physx::PxReal f = rawForce;
+    bool forceSaturated = false;
+    if (contacts[c].maxImpulse < PX_MAX_REAL && dt > 0.0f) {
+      const physx::PxReal maxNormalForce =
+          physx::PxMax(contacts[c].maxImpulse, physx::PxReal(0.0f)) / dt;
+      f = physx::PxMax(f, -maxNormalForce);
+      forceSaturated = rawForce < -maxNormalForce;
+    }
+    // The derivative of a clamped force is zero while saturated.  Keeping the
+    // contact penalty in the local Hessian here would enforce the unilateral
+    // row even though its authored impulse budget has already been exhausted.
+    if (!forceSaturated) {
+      A.addResponseScaledConstraintContribution(
+          gradPos, gradRot, pen, linearResponseScale, angularResponseScale);
+    }
     numTouching++;
 
-    // Normal force (unilateral) + optional Coulomb-cone tangents in 6x6.
-    physx::PxReal f = physx::PxMin(0.0f, pen * violation + lambda);
     if (f < 0.0f) {
       gLinear += gradPos * (f * linearResponseScale);
       gAngular += gradRot * (f * angularResponseScale);
@@ -2662,8 +2706,8 @@ void AvbdSolver::solveLocalSystem(AvbdSolverBody &body, AvbdSolverBody *bodies,
   accumulateBodyContactRows(
       body, bodyIndex, bodies, numBodies, contacts, numContacts, contactMap,
       kinematicShellParticles, numKinematicShellParticles,
-      kinematicShellContacts, numKinematicShellContacts, massInvDt2, A, gLinear,
-      gAngular, numTouching);
+      kinematicShellContacts, numKinematicShellContacts, dt, massInvDt2, A,
+      gLinear, gAngular, numTouching);
 
   // No contacts: snap to inertial target
   if (numTouching == 0) {

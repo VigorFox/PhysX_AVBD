@@ -2474,7 +2474,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
   accumulateBodyContactRows(
       body, bodyIndex, bodies, numBodies, contacts, numContacts, contactMap,
       softParticles, numSoftParticles, softContacts, numSoftContacts,
-      massInvDt2, A, gLinear, gAngular, numTouching);
+      dt, massInvDt2, A, gLinear, gAngular, numTouching);
 
   // Step 3e: Accumulate D6 JOINT contributions
 

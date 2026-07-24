@@ -25,21 +25,79 @@ class RunSpec:
     solver: str
     execution: str
     case_name: str
+    frames: int
 
 
-def specs() -> list[RunSpec]:
-    result = [RunSpec("no-ccd-tgs", "tgs", "parallel", "no-ccd")]
-    for case_name in ("linear", "speculative"):
-        result.append(RunSpec(f"{case_name}-tgs", "tgs", "parallel", case_name))
-        for execution in ("parallel", "sequential"):
-            result.append(
-                RunSpec(
-                    f"{case_name}-avbd-{execution}",
-                    "avbd",
-                    execution,
-                    case_name,
+NEGATIVE_CASES = (
+    "no-ccd",
+    "angular-no-ccd",
+    "dynamic-no-ccd",
+)
+
+POSITIVE_CASES = (
+    "linear",
+    "speculative",
+    "angular-speculative",
+    "full",
+    "raycast",
+    "dynamic-linear",
+    "raycast-dynamic",
+)
+
+CASE_EXPECTATIONS = {
+    "no-ccd": ("linear", "sphere", 0, 0, 0, 0, 0, 0, 0, 12),
+    "linear": ("linear", "sphere", 0, 1, 1, 0, 0, 0, 0, 12),
+    "speculative": ("linear", "sphere", 0, 0, 0, 1, 0, 0, 0, 12),
+    "angular-no-ccd": ("angular", "box", 1, 0, 0, 0, 0, 0, 0, 24),
+    "angular-speculative": (
+        "angular",
+        "box",
+        1,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        24,
+    ),
+    "full": ("angular", "box", 1, 1, 1, 1, 1, 1, 0, 24),
+    "raycast": ("linear", "sphere", 0, 0, 0, 0, 0, 0, 1, 12),
+    "dynamic-no-ccd": ("linear", "sphere", 1, 0, 0, 0, 0, 0, 0, 12),
+    "dynamic-linear": ("linear", "sphere", 1, 1, 1, 0, 0, 0, 0, 12),
+    "raycast-dynamic": (
+        "linear",
+        "sphere",
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        12,
+    ),
+}
+
+
+def specs(mode: str) -> list[RunSpec]:
+    result: list[RunSpec] = []
+    for case_name in NEGATIVE_CASES + POSITIVE_CASES:
+        frames = CASE_EXPECTATIONS[case_name][-1]
+        result.append(
+            RunSpec(f"{case_name}-tgs", "tgs", "parallel", case_name, frames)
+        )
+        if mode != "authority" and case_name in POSITIVE_CASES:
+            for execution in ("parallel", "sequential"):
+                result.append(
+                    RunSpec(
+                        f"{case_name}-avbd-{execution}",
+                        "avbd",
+                        execution,
+                        case_name,
+                        frames,
+                    )
                 )
-            )
     return result
 
 
@@ -67,7 +125,7 @@ def run_one(
         f"--solver={spec.solver}",
         f"--case={spec.case_name}",
         f"--execution={spec.execution}",
-        "--frames=12",
+        f"--frames={spec.frames}",
         "--dt=0.0166666675",
         "--dispatcher-threads=2",
         "--seed=1",
@@ -75,7 +133,7 @@ def run_one(
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
     env["PHYSX_SNIPPET_SOLVER"] = spec.solver
-    env["PHYSX_SNIPPET_FRAME_COUNT"] = "12"
+    env["PHYSX_SNIPPET_FRAME_COUNT"] = str(spec.frames)
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout_seconds
     )
@@ -105,18 +163,44 @@ def run_one(
         fields, parse_errors = parse_authority(authority_lines[0])
         errors.extend(parse_errors)
 
+    (
+        fixture,
+        source_geometry,
+        target_dynamic,
+        scene_linear_ccd,
+        source_linear_ccd,
+        source_speculative_ccd,
+        target_linear_ccd,
+        target_speculative_ccd,
+        raycast_registrations,
+        _,
+    ) = CASE_EXPECTATIONS[spec.case_name]
     required = {
-        "schema": "1",
+        "schema": "2",
         "snippet": "SnippetCCD",
         "solver": spec.solver,
         "case": spec.case_name,
         "execution": spec.execution,
-        "frames": "12",
-        "completedFrames": "12",
+        "frames": str(spec.frames),
+        "completedFrames": str(spec.frames),
+        "fixture": fixture,
+        "sourceGeometry": source_geometry,
+        "targetGeometry": "box",
         "sphereRadius": "0.5",
+        "plankHalfLength": "10",
         "wallHalfThickness": "0.1",
-        "initialZ": "20",
-        "initialVelocityZ": "-1000",
+        "sourceInitialZ": "0" if fixture == "angular" else "20",
+        "sourceInitialVelocityZ": "0" if fixture == "angular" else "-1000",
+        "sourceInitialAngularVelocityY": (
+            "10" if fixture == "angular" else "0"
+        ),
+        "sceneLinearCCD": str(scene_linear_ccd),
+        "sourceLinearCCD": str(source_linear_ccd),
+        "sourceSpeculativeCCD": str(source_speculative_ccd),
+        "targetLinearCCD": str(target_linear_ccd),
+        "targetSpeculativeCCD": str(target_speculative_ccd),
+        "targetDynamic": str(target_dynamic),
+        "raycastRegistrations": str(raycast_registrations),
         "nonFinite": "0",
         "fetchFailures": "0",
         "fatalErrors": "0",
@@ -128,7 +212,10 @@ def run_one(
         if actual != expected:
             errors.append(f"{key}={actual!r}, expected {expected!r}")
 
-    if mode == "acceptance":
+    requires_physics_pass = mode in ("authority", "acceptance") or (
+        spec.solver == "tgs"
+    )
+    if requires_physics_pass:
         if result.returncode != 0:
             errors.append(f"exit code {result.returncode}, expected 0")
         if fields.get("status") != "PASS":
@@ -173,7 +260,9 @@ def run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", choices=("probe", "acceptance"), default="probe"
+        "--mode",
+        choices=("authority", "probe", "acceptance"),
+        default="probe",
     )
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -191,7 +280,7 @@ def main() -> int:
     all_infrastructure_passed = True
     physics_passes = 0
     physics_failures = 0
-    for spec in specs():
+    for spec in specs(args.mode):
         passed, fields = run_one(spec, args.mode, bin_dir, args.timeout)
         all_infrastructure_passed = all_infrastructure_passed and passed
         physics_passes += fields.get("status") == "PASS"

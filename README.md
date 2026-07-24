@@ -29,7 +29,8 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Mimic Joint | ✅ Accepted | `SnippetMimicJoint` retains its hard ratio/offset/bidirectional matrix (`12/12`) and adds compliant response plus two simultaneous mimic equations (`12/12`); shared-endpoint and wider topology remain pending |
 | Fixed Tendon | ✅ Accepted | `SnippetFixedTendon` gates fixed-root serial angular plus sibling branch angular/linear tendons, rest spring/damping, runtime offset actuation and branch length limits; asymmetric reciprocal coefficients and wider trees remain pending |
 | Spatial Tendon | ✅ Accepted | `SnippetSpatialTendon` gates fixed/moving intermediate paths, shared-root multi-leaf rows, angular/linear endpoints, rest spring/damping and leaf-local limits (`12/12` new modes plus `6/6` legacy); moving-root, contact and wider topology remain pending |
-| Contact Modification | ✅ Accepted | `SnippetContactModification` gates modified normal, target velocity, zero max-impulse response, and contact-local zero mass/inertia scale for TGS plus AVBD parallel/sequential execution |
+| Contact Modification | ✅ Accepted | `SnippetContactModification` gates modified normal, normal/tangent target velocity, zero and finite max-impulse response, and zero plus finite asymmetric local mass/inertia scales against unit-scale controls for TGS plus AVBD parallel/sequential execution (`27/27`) |
+| Continuous Collision Detection | ✅ Accepted | `SnippetCCD` gates built-in linear, speculative/angular and combined full CCD, linear dynamic-dynamic CCD, and the raycast extension against static/dynamic targets, with three no-CCD tunneling controls (`24/24`) |
 | CCD Contact Report | ✅ Accepted | `SnippetContactReportCCD` gates three CCD TOI events, event poses, contact points, and nonzero impulses in one step, plus a no-CCD tunneling negative control |
 | Custom Geometry Collision | ✅ Accepted | `SnippetCustomGeometryCollision` gates callback-generated falling, sliding, and impact contacts through TGS plus AVBD parallel/sequential execution, with nonzero solver response and no fall-through |
 | Voxel Custom Geometry | ✅ Accepted | `SnippetCustomGeometry` gates voxel callback-generated drop and impact contacts through TGS plus AVBD parallel/sequential execution, with public nonzero impulses and complete teardown |
@@ -50,7 +51,9 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 - Synchronized AVBD articulation write-back with both 5.9 motion-velocity buffers, preventing driven and falling articulations from being put to sleep using stale velocity state.
 - Connected ordinary AVBD rigid-body write-back to the shared PhysX sleep lifecycle. Idle sleep, static-contact settling, contact-island wake propagation, re-sleep, and `eDISABLE_SLEEPING` now have headless gates.
 - Copied and enforced all six `PxRigidDynamicLockFlag` axes through AVBD prediction, constraint stages, final pose, and velocity write-back. Initial-velocity and runtime-impulse witnesses pass in parallel and sequential execution.
-- The current checked gates pass: standalone `137/137`, cross-Snippet `14/14`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
+- Expanded `SnippetCCD` from a static-wall smoke into a `24/24` matrix covering angular/full CCD, built-in and raycast dynamic-dynamic paths, public flag readback, real negative controls, finite response, and cleanup. The review found no additional AVBD solver defect.
+- Expanded `SnippetContactModification` to a `27/27` matrix and fixed AVBD finite `maxImpulse` semantics across the primal solve, split depenetration, and final normal-velocity response; a `0.25` impulse cap now matches the TGS pass-through witness.
+- The current checked gates pass: standalone `137/137`, cross-Snippet `14/14`, Contact Modification `27/27`, CCD `24/24`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
 
 ### Moving Triangle-Mesh Contact Stability (2026-07)
 

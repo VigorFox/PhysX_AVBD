@@ -27,17 +27,27 @@ class RunSpec:
     case_name: str
 
 
-def specs() -> list[RunSpec]:
+CASES = (
+    "normal",
+    "target-velocity",
+    "max-impulse",
+    "mass-scale",
+    "finite-max-impulse-control",
+    "finite-max-impulse",
+    "finite-scales-control",
+    "finite-scales",
+    "tangent-target",
+)
+
+
+def specs(mode: str) -> list[RunSpec]:
     result: list[RunSpec] = []
-    for case_name in (
-        "normal",
-        "target-velocity",
-        "max-impulse",
-        "mass-scale",
-    ):
+    for case_name in CASES:
         result.append(
             RunSpec(f"{case_name}-tgs", "tgs", "parallel", case_name)
         )
+        if mode == "authority":
+            continue
         for execution in ("parallel", "sequential"):
             result.append(
                 RunSpec(
@@ -112,7 +122,7 @@ def run_one(
         errors.extend(parse_errors)
 
     required = {
-        "schema": "1",
+        "schema": "2",
         "snippet": "SnippetContactModification",
         "solver": spec.solver,
         "case": spec.case_name,
@@ -121,6 +131,8 @@ def run_one(
         "completedFrames": "120",
         "identityErrors": "0",
         "scaleReadbackErrors": "0",
+        "maxImpulseReadbackErrors": "0",
+        "targetVelocityReadbackErrors": "0",
         "nonFinite": "0",
         "fetchFailures": "0",
         "fatalErrors": "0",
@@ -132,7 +144,10 @@ def run_one(
         if actual != expected:
             errors.append(f"{key}={actual!r}, expected {expected!r}")
 
-    if mode == "acceptance":
+    gate_required = mode in ("authority", "acceptance") or (
+        mode == "probe" and spec.solver == "tgs"
+    )
+    if gate_required:
         if result.returncode != 0:
             errors.append(f"exit code {result.returncode}, expected 0")
         if fields.get("status") != "PASS":
@@ -177,10 +192,56 @@ def run_one(
     return not errors, fields
 
 
+def validate_scale_controls(
+    observed: dict[tuple[str, str, str], dict[str, str]]
+) -> bool:
+    passed = True
+    combinations = sorted(
+        (solver, execution)
+        for solver, execution, case_name in observed
+        if case_name == "finite-scales"
+    )
+    for solver, execution in combinations:
+        control = observed.get(
+            (solver, execution, "finite-scales-control"), {}
+        )
+        scaled = observed.get((solver, execution, "finite-scales"), {})
+        errors: list[str] = []
+        for field in (
+            "finalBody0Speed",
+            "finalBody1Speed",
+            "actualBody0AngularDelta",
+            "actualBody1AngularDelta",
+        ):
+            try:
+                difference = abs(float(scaled[field]) - float(control[field]))
+            except (KeyError, ValueError):
+                errors.append(f"missing/non-numeric {field}")
+                continue
+            if difference <= 1.0:
+                errors.append(
+                    f"{field} delta={difference:.9g}, expected > 1"
+                )
+        print(
+            "[CONTACT_MODIFICATION_SCALE_COMPARISON] "
+            f"solver={solver} execution={execution} "
+            f"status={'PASS' if not errors else 'FAIL'}"
+        )
+        for error in errors:
+            print(
+                "[CONTACT_MODIFICATION_SCALE_COMPARISON_ERROR] "
+                f"solver={solver} execution={execution} error={error}"
+            )
+        passed = passed and not errors
+    return passed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", choices=("probe", "acceptance"), default="probe"
+        "--mode",
+        choices=("authority", "probe", "acceptance"),
+        default="probe",
     )
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -204,16 +265,21 @@ def main() -> int:
     all_infrastructure_passed = True
     physics_passes = 0
     physics_failures = 0
-    for spec in specs():
+    observed: dict[tuple[str, str, str], dict[str, str]] = {}
+    for spec in specs(args.mode):
         passed, fields = run_one(
             spec, args.mode, bin_dir, args.timeout
         )
+        observed[(spec.solver, spec.execution, spec.case_name)] = fields
         all_infrastructure_passed = all_infrastructure_passed and passed
         physics_passes += fields.get("status") == "PASS"
         physics_failures += fields.get("status") == "FAIL"
         if not passed:
             break
 
+    all_infrastructure_passed = (
+        validate_scale_controls(observed) and all_infrastructure_passed
+    )
     print(
         f"[CONTACT_MODIFICATION_MATRIX] mode={args.mode} "
         f"physicsPasses={physics_passes} "
