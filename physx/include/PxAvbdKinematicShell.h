@@ -31,14 +31,17 @@
 
 namespace physx {
 
-/** Publish deformable-mesh grid vertices for AVBD kinematic-shell contact prep. */
+/** Publish deformable-mesh grid vertices for AVBD NP normal/history alignment. */
 PX_C_EXPORT PX_PHYSX_CORE_API void PX_CALL_CONV PxAvbdKinematicShellUpdateFromMeshGrid(
     const PxVec3 *localVerts, PxU32 gridSize, PxReal gridStep,
     const PxTransform &actorPose);
 
 PX_C_EXPORT PX_PHYSX_CORE_API void PX_CALL_CONV PxAvbdKinematicShellReset();
 
-/** Enable box-corner shell rows (mass>=5). Default off; stress harness enables. */
+/**
+ * Compatibility no-op. The synthesized NP-backed box-corner shell has been
+ * retired; retained NP contact rows are authoritative.
+ */
 PX_C_EXPORT PX_PHYSX_CORE_API void PX_CALL_CONV
 PxAvbdKinematicShellSetBoxCornerShellEnabled(bool enabled);
 

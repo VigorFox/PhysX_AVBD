@@ -24,14 +24,50 @@ class RunSpec:
     name: str
     solver: str
     execution: str
+    case_name: str
 
 
-def specs() -> tuple[RunSpec, ...]:
-    return (
-        RunSpec("drop-tgs", "tgs", "parallel"),
-        RunSpec("drop-avbd-parallel", "avbd", "parallel"),
-        RunSpec("drop-avbd-sequential", "avbd", "sequential"),
-    )
+def specs(mode: str) -> list[RunSpec]:
+    # PxPairFlag::eNOTIFY_THRESHOLD_FORCE_* is documented as CPU PGS-only.
+    # Keep that public API contract separate from the TGS-to-AVBD contact
+    # response comparison instead of treating the missing TGS/AVBD event
+    # stream as an AVBD solver defect.
+    result = [
+        RunSpec("drop-tgs", "tgs", "parallel", "drop"),
+        RunSpec(
+            "force-threshold-pgs", "pgs", "parallel", "force-threshold"
+        ),
+        RunSpec(
+            "friction-anchor-tgs",
+            "tgs",
+            "parallel",
+            "friction-anchor",
+        ),
+        RunSpec(
+            "dynamic-friction-anchor-tgs",
+            "tgs",
+            "parallel",
+            "dynamic-friction-anchor",
+        ),
+    ]
+    if mode == "authority":
+        return result
+
+    for case_name in (
+        "drop",
+        "friction-anchor",
+        "dynamic-friction-anchor",
+    ):
+        for execution in ("parallel", "sequential"):
+            result.append(
+                RunSpec(
+                    f"{case_name}-avbd-{execution}",
+                    "avbd",
+                    execution,
+                    case_name,
+                )
+            )
+    return result
 
 
 def parse_authority(line: str) -> tuple[dict[str, str], list[str]]:
@@ -55,7 +91,7 @@ def run_one(
         str(bin_dir / EXECUTABLE),
         "--headless",
         f"--solver={spec.solver}",
-        "--case=drop",
+        f"--case={spec.case_name}",
         f"--execution={spec.execution}",
         "--frames=240",
         "--dt=0.0166666675",
@@ -96,13 +132,16 @@ def run_one(
         errors.extend(parse_errors)
 
     required = {
-        "schema": "1",
+        "schema": "2",
         "snippet": "SnippetContactReport",
         "solver": spec.solver,
-        "case": "drop",
+        "case": spec.case_name,
         "execution": spec.execution,
         "frames": "240",
         "completedFrames": "240",
+        "identityErrors": "0",
+        "unexpectedTouchEventCount": "0",
+        "thresholdReadbackErrors": "0",
         "nonFinite": "0",
         "fetchFailures": "0",
         "fatalErrors": "0",
@@ -114,7 +153,10 @@ def run_one(
         if actual != expected:
             errors.append(f"{key}={actual!r}, expected {expected!r}")
 
-    if mode == "acceptance":
+    gate_required = mode in ("authority", "acceptance") or (
+        mode == "probe" and spec.solver == "tgs"
+    )
+    if gate_required:
         if result.returncode != 0:
             errors.append(f"exit code {result.returncode}, expected 0")
         if fields.get("status") != "PASS":
@@ -161,7 +203,9 @@ def run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", choices=("probe", "acceptance"), default="probe"
+        "--mode",
+        choices=("authority", "probe", "acceptance"),
+        default="probe",
     )
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -184,7 +228,7 @@ def main() -> int:
     all_infrastructure_passed = True
     physics_passes = 0
     physics_failures = 0
-    for spec in specs():
+    for spec in specs(args.mode):
         passed, fields = run_one(
             spec, args.mode, bin_dir, args.timeout
         )

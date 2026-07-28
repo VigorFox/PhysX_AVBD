@@ -82,19 +82,39 @@ struct ContactModificationMetrics
 	PxU32 scaleReadbackErrors;
 	PxU32 maxImpulseReadbackErrors;
 	PxU32 targetVelocityReadbackErrors;
+	PxU32 body0Actor0Count;
+	PxU32 body0Actor1Count;
 	PxU32 nonFinite;
 	PxReal maxAbsBody0X;
 	PxReal peakAbsBody0VelocityX;
 	PxReal peakAbsBody0VelocityY;
+	PxReal peakBody0AngularSpeed;
+	PxU32 peakBody0AngularFrame;
 	PxReal maxBody0Y;
 	PxReal peakBody0VelocityY;
 	PxReal minBody0Y;
 	PxReal peakBody1Speed;
 	PxReal peakAbsBody1VelocityY;
+	PxReal peakBody1VelocityY;
+	PxReal minBody1VelocityY;
+	PxReal peakBody1AngularSpeed;
 	PxReal peakBody0MinusBody1VelocityY;
 	PxReal minBody0SpeedAfterModify;
 	PxReal finalBody0Speed;
+	PxReal finalBody0AngularSpeed;
+	PxReal finalBody0VelocityX;
+	PxVec3 finalBody0AngularVelocity;
+	PxReal finalBody0ContactVelocityX;
 	PxReal finalBody1Speed;
+	PxReal finalBody1AngularSpeed;
+	PxReal finalBody1VelocityX;
+	PxVec3 finalBody1AngularVelocity;
+	PxReal minBody1Y;
+	PxReal maxBody1Y;
+	PxReal finiteCheckpointVelocityY;
+	PxReal finiteCheckpointAngularSpeed;
+	PxReal body0Mass;
+	PxReal body0InertiaZ;
 	PxReal maxReportedImpulse;
 	PxReal expectedBody0LinearDelta;
 	PxReal expectedBody1LinearDelta;
@@ -111,14 +131,25 @@ struct ContactModificationMetrics
 	  modifiedPairCount(0), modifiedPointCount(0), reportCallbackCount(0),
 	  reportPointCount(0), identityErrors(0), scaleReadbackErrors(0),
 	  maxImpulseReadbackErrors(0), targetVelocityReadbackErrors(0),
-	  nonFinite(0), maxAbsBody0X(0.0f), peakAbsBody0VelocityX(0.0f),
-	  peakAbsBody0VelocityY(0.0f),
+	  body0Actor0Count(0), body0Actor1Count(0), nonFinite(0),
+	  maxAbsBody0X(0.0f), peakAbsBody0VelocityX(0.0f),
+	  peakAbsBody0VelocityY(0.0f), peakBody0AngularSpeed(0.0f),
+	  peakBody0AngularFrame(0),
 	  maxBody0Y(-PX_MAX_F32), peakBody0VelocityY(-PX_MAX_F32),
 	  minBody0Y(PX_MAX_F32), peakBody1Speed(0.0f),
-	  peakAbsBody1VelocityY(0.0f),
+	  peakAbsBody1VelocityY(0.0f), peakBody1VelocityY(-PX_MAX_F32),
+	  minBody1VelocityY(PX_MAX_F32), peakBody1AngularSpeed(0.0f),
 	  peakBody0MinusBody1VelocityY(-PX_MAX_F32),
 	  minBody0SpeedAfterModify(PX_MAX_F32), finalBody0Speed(0.0f),
-	  finalBody1Speed(0.0f), maxReportedImpulse(0.0f),
+	  finalBody0AngularSpeed(0.0f), finalBody0VelocityX(0.0f),
+	  finalBody0AngularVelocity(0.0f), finalBody0ContactVelocityX(0.0f),
+	  finalBody1Speed(0.0f), finalBody1AngularSpeed(0.0f),
+	  finalBody1VelocityX(0.0f), finalBody1AngularVelocity(0.0f),
+	  minBody1Y(PX_MAX_F32), maxBody1Y(-PX_MAX_F32),
+	  finiteCheckpointVelocityY(PX_MAX_F32),
+	  finiteCheckpointAngularSpeed(PX_MAX_F32),
+	  body0Mass(0.0f), body0InertiaZ(0.0f),
+	  maxReportedImpulse(0.0f),
 	  expectedBody0LinearDelta(0.0f), expectedBody1LinearDelta(0.0f),
 	  expectedBody0AngularDelta(0.0f), expectedBody1AngularDelta(0.0f),
 	  actualBody0AngularDelta(0.0f), actualBody1AngularDelta(0.0f),
@@ -143,6 +174,221 @@ PxArray<PxVec3> gContactAngularImpulses[2];
 static bool isHeadlessCase(const char* name)
 {
 	return Snippets::equalsIgnoreCase(gHeadlessOptions.caseName.c_str(), name);
+}
+
+static bool isTargetOwnershipAuthorityCase()
+{
+	return isHeadlessCase("ownership-target-normal-mu0") ||
+		isHeadlessCase("ownership-target-normal-mu0-reverse") ||
+		isHeadlessCase("ownership-target-normal-mu1") ||
+		isHeadlessCase("ownership-target-normal-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu0") ||
+		isHeadlessCase("ownership-target-tangent-mu0-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1") ||
+		isHeadlessCase("ownership-target-tangent-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component") ||
+		isHeadlessCase("ownership-passive-friction-component-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component") ||
+		isHeadlessCase("ownership-restitution-friction-component-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool isTargetOwnershipReverseCase()
+{
+	return isHeadlessCase("ownership-target-normal-mu0-reverse") ||
+		isHeadlessCase("ownership-target-normal-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu0-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool targetOwnershipHasFriction()
+{
+	return isHeadlessCase("ownership-target-normal-mu1") ||
+		isHeadlessCase("ownership-target-normal-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1") ||
+		isHeadlessCase("ownership-target-tangent-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component") ||
+		isHeadlessCase("ownership-passive-friction-component-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component") ||
+		isHeadlessCase("ownership-restitution-friction-component-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool targetOwnershipHasNormalTarget()
+{
+	return isHeadlessCase("ownership-target-normal-mu0") ||
+		isHeadlessCase("ownership-target-normal-mu0-reverse") ||
+		isHeadlessCase("ownership-target-normal-mu1") ||
+		isHeadlessCase("ownership-target-normal-mu1-reverse") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool targetOwnershipHasTangentTarget()
+{
+	return isHeadlessCase("ownership-target-tangent-mu0") ||
+		isHeadlessCase("ownership-target-tangent-mu0-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1") ||
+		isHeadlessCase("ownership-target-tangent-mu1-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free") ||
+		isHeadlessCase("ownership-target-tangent-mu1-free-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool targetOwnershipLocksAngularMotion()
+{
+	return !isHeadlessCase("ownership-target-tangent-mu1-free") &&
+		!isHeadlessCase("ownership-target-tangent-mu1-free-reverse") &&
+		!isHeadlessCase("ownership-target-tangent-mu1-manifold") &&
+		!isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") &&
+		!isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") &&
+		!isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") &&
+		!isHeadlessCase("ownership-passive-friction-mu1-manifold") &&
+		!isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") &&
+		!isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") &&
+		!isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse") &&
+		!isHeadlessCase("ownership-passive-friction-component") &&
+		!isHeadlessCase("ownership-passive-friction-component-reverse") &&
+		!isHeadlessCase("ownership-passive-friction-component-yaw") &&
+		!isHeadlessCase("ownership-passive-friction-component-yaw-reverse") &&
+		!isHeadlessCase("ownership-restitution-friction-component") &&
+		!isHeadlessCase("ownership-restitution-friction-component-reverse") &&
+		!isHeadlessCase("ownership-restitution-friction-component-yaw") &&
+		!isHeadlessCase("ownership-restitution-friction-component-yaw-reverse");
+}
+
+static bool isTargetOwnershipManifoldCase()
+{
+	return isHeadlessCase("ownership-target-tangent-mu1-manifold") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse");
+}
+
+static bool isTargetOwnershipManifoldYawCase()
+{
+	return isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-target-tangent-mu1-manifold-yaw-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse");
+}
+
+static bool isPassiveFrictionManifoldCase()
+{
+	return isHeadlessCase("ownership-passive-friction-mu1-manifold") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-reverse") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw") ||
+		isHeadlessCase("ownership-passive-friction-mu1-manifold-yaw-reverse");
+}
+
+static bool isPassiveFrictionComponentCase()
+{
+	return isHeadlessCase("ownership-passive-friction-component") ||
+		isHeadlessCase("ownership-passive-friction-component-reverse") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component") ||
+		isHeadlessCase("ownership-restitution-friction-component-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse");
+}
+
+static bool isRestitutionFrictionComponentCase()
+{
+	return isHeadlessCase("ownership-restitution-friction-component") ||
+		isHeadlessCase("ownership-restitution-friction-component-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse");
+}
+
+static bool isPassiveFrictionComponentYawCase()
+{
+	return isHeadlessCase("ownership-passive-friction-component-yaw") ||
+		isHeadlessCase("ownership-passive-friction-component-yaw-reverse") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw") ||
+		isHeadlessCase("ownership-restitution-friction-component-yaw-reverse");
+}
+
+static bool targetOwnershipHasFiniteCap()
+{
+	return isHeadlessCase("ownership-target-combined-mu1-finite") ||
+		isHeadlessCase("ownership-target-combined-mu1-finite-reverse");
+}
+
+static bool isRestitutionThresholdCase()
+{
+	return isHeadlessCase("restitution-threshold-below") ||
+		isHeadlessCase("restitution-threshold-above");
+}
+
+static bool isTiltedRestitutionCase()
+{
+	return isHeadlessCase("restitution-tilted");
+}
+
+static bool isTiltedFiniteImpulseCase()
+{
+	return isHeadlessCase("finite-max-impulse-tilted");
+}
+
+static bool isOffCenterFiniteImpulseCase()
+{
+	return isHeadlessCase("finite-max-impulse-offcenter");
+}
+
+static bool isSpatialFiniteImpulseCase()
+{
+	return isTiltedFiniteImpulseCase() ||
+		isOffCenterFiniteImpulseCase();
 }
 
 static bool isDynamicPairCase()
@@ -175,12 +421,22 @@ static bool parseHeadlessOptions(
 	if(!isHeadlessCase("normal") &&
 		!isHeadlessCase("target-velocity") &&
 		!isHeadlessCase("max-impulse") &&
+		!isHeadlessCase("ownership-shallow") &&
+		!isHeadlessCase("ownership-deep") &&
+		!isHeadlessCase("ownership-deep-tilted") &&
+		!isHeadlessCase("ownership-bounce") &&
+		!isHeadlessCase("restitution-threshold-below") &&
+		!isHeadlessCase("restitution-threshold-above") &&
+		!isHeadlessCase("restitution-tilted") &&
 		!isHeadlessCase("mass-scale") &&
 		!isHeadlessCase("finite-max-impulse-control") &&
 		!isHeadlessCase("finite-max-impulse") &&
+		!isHeadlessCase("finite-max-impulse-tilted") &&
+		!isHeadlessCase("finite-max-impulse-offcenter") &&
 		!isHeadlessCase("finite-scales-control") &&
 		!isHeadlessCase("finite-scales") &&
-		!isHeadlessCase("tangent-target"))
+		!isHeadlessCase("tangent-target") &&
+		!isTargetOwnershipAuthorityCase())
 	{
 		error = "unsupported --case";
 		return false;
@@ -213,6 +469,31 @@ static PxFilterFlags contactReportFilterShader(	PxFilterObjectAttributes attribu
 	return PxFilterFlag::eDEFAULT;
 }
 
+static bool isUnorderedActorPair(
+	const PxActor* actor0, const PxActor* actor1,
+	const PxActor* expected0, const PxActor* expected1)
+{
+	return (actor0 == expected0 && actor1 == expected1) ||
+		(actor0 == expected1 && actor1 == expected0);
+}
+
+static bool isExpectedHeadlessPair(
+	const PxActor* actor0, const PxActor* actor1)
+{
+	if(isPassiveFrictionComponentCase())
+	{
+		return isUnorderedActorPair(
+				actor0, actor1, gHeadlessBody0, gHeadlessGround) ||
+			isUnorderedActorPair(
+				actor0, actor1, gHeadlessBody0, gHeadlessBody1);
+	}
+	if(isDynamicPairCase())
+		return isUnorderedActorPair(
+			actor0, actor1, gHeadlessBody0, gHeadlessBody1);
+	return isUnorderedActorPair(
+		actor0, actor1, gHeadlessBody0, gHeadlessGround);
+}
+
 class ContactModifyCallback: public PxContactModifyCallback
 {
 	void onContactModify(PxContactModifyPair* const pairs, PxU32 count)
@@ -227,15 +508,10 @@ class ContactModifyCallback: public PxContactModifyCallback
 					pairs[i].actor[0] == gHeadlessBody0;
 				const bool body0IsActor1 =
 					pairs[i].actor[1] == gHeadlessBody0;
-				const bool expectedPair = isDynamicPairCase() ?
-					((body0IsActor0 &&
-					  pairs[i].actor[1] == gHeadlessBody1) ||
-					 (body0IsActor1 &&
-					  pairs[i].actor[0] == gHeadlessBody1)) :
-					((body0IsActor0 &&
-					  pairs[i].actor[1] == gHeadlessGround) ||
-					 (body0IsActor1 &&
-					  pairs[i].actor[0] == gHeadlessGround));
+				gMetrics.body0Actor0Count += body0IsActor0 ? 1u : 0u;
+				gMetrics.body0Actor1Count += body0IsActor1 ? 1u : 0u;
+				const bool expectedPair = isExpectedHeadlessPair(
+					pairs[i].actor[0], pairs[i].actor[1]);
 				if(!expectedPair)
 				++gMetrics.identityErrors;
 
@@ -268,18 +544,53 @@ class ContactModifyCallback: public PxContactModifyCallback
 							authoredTarget).magnitudeSquared() > 1.0e-12f)
 							++gMetrics.targetVelocityReadbackErrors;
 					}
+					else if(isTargetOwnershipAuthorityCase())
+					{
+						PxVec3 body0Target(0.0f);
+						if(targetOwnershipHasNormalTarget())
+							body0Target.y = 3.0f;
+						if(targetOwnershipHasTangentTarget())
+							body0Target.x = 3.0f;
+						const PxVec3 authoredTarget =
+							body0IsActor0 ? body0Target : -body0Target;
+						pairs[i].contacts.setTargetVelocity(c, authoredTarget);
+						if((pairs[i].contacts.getTargetVelocity(c) -
+							authoredTarget).magnitudeSquared() > 1.0e-12f)
+							++gMetrics.targetVelocityReadbackErrors;
+						if(targetOwnershipHasFiniteCap())
+						{
+							const PxReal maxImpulse = 0.25f;
+							pairs[i].contacts.setMaxImpulse(c, maxImpulse);
+							if(PxAbs(pairs[i].contacts.getMaxImpulse(c) -
+								maxImpulse) > 1.0e-6f)
+								++gMetrics.maxImpulseReadbackErrors;
+						}
+					}
 					else if(isHeadlessCase("max-impulse"))
 					{
 						pairs[i].contacts.setMaxImpulse(c, 0.0f);
 						if(pairs[i].contacts.getMaxImpulse(c) != 0.0f)
 							++gMetrics.maxImpulseReadbackErrors;
 					}
-					else if(isHeadlessCase("finite-max-impulse"))
+					else if(isHeadlessCase("finite-max-impulse") ||
+						isSpatialFiniteImpulseCase())
 					{
-						const PxReal maxImpulse = 0.25f;
+						const PxReal maxImpulse =
+							isSpatialFiniteImpulseCase() ? 1.0f : 0.25f;
 						pairs[i].contacts.setMaxImpulse(c, maxImpulse);
 						if(PxAbs(pairs[i].contacts.getMaxImpulse(c) -
 							maxImpulse) > 1.0e-6f)
+							++gMetrics.maxImpulseReadbackErrors;
+					}
+					else if(isHeadlessCase("ownership-shallow") ||
+						isHeadlessCase("ownership-deep") ||
+						isHeadlessCase("ownership-deep-tilted") ||
+						isHeadlessCase("ownership-bounce") ||
+						isRestitutionThresholdCase() ||
+						isTiltedRestitutionCase())
+					{
+						pairs[i].contacts.setMaxImpulse(c, PX_MAX_REAL);
+						if(pairs[i].contacts.getMaxImpulse(c) != PX_MAX_REAL)
 							++gMetrics.maxImpulseReadbackErrors;
 					}
 					else if(isHeadlessCase("mass-scale"))
@@ -497,19 +808,8 @@ class ContactReportCallback: public PxSimulationEventCallback
 		if(gHeadlessOptions.headless)
 		{
 			++gMetrics.reportCallbackCount;
-			const bool body0IsActor0 =
-				pairHeader.actors[0] == gHeadlessBody0;
-			const bool body0IsActor1 =
-				pairHeader.actors[1] == gHeadlessBody0;
-			const bool expectedPair = isDynamicPairCase() ?
-				((body0IsActor0 &&
-				  pairHeader.actors[1] == gHeadlessBody1) ||
-				 (body0IsActor1 &&
-				  pairHeader.actors[0] == gHeadlessBody1)) :
-				((body0IsActor0 &&
-				  pairHeader.actors[1] == gHeadlessGround) ||
-				 (body0IsActor1 &&
-				  pairHeader.actors[0] == gHeadlessGround));
+			const bool expectedPair = isExpectedHeadlessPair(
+				pairHeader.actors[0], pairHeader.actors[1]);
 			if(!expectedPair)
 				++gMetrics.identityErrors;
 
@@ -665,12 +965,16 @@ void initPhysics(bool /*interactive*/)
 	PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
 	sceneDesc.cpuDispatcher = gDispatcher;
 	sceneDesc.gravity =
-		gHeadlessOptions.headless && !isHeadlessCase("max-impulse") ?
+		gHeadlessOptions.headless && !isHeadlessCase("max-impulse") &&
+			!isTargetOwnershipAuthorityCase() ?
 			PxVec3(0.0f) : PxVec3(0, -9.81f, 0);
 	sceneDesc.filterShader	= contactReportFilterShader;			
 	sceneDesc.simulationEventCallback = &gContactReportCallback;	
 	sceneDesc.contactModifyCallback = &gContactModifyCallback;
 	sceneDesc.solverType = gHeadlessOptions.solverType;
+	if(isRestitutionThresholdCase() || isTiltedRestitutionCase() ||
+		isSpatialFiniteImpulseCase() || isRestitutionFrictionComponentCase())
+		sceneDesc.bounceThresholdVelocity = 2.0f;
 	gScene = gPhysics->createScene(sceneDesc);
 
 	if(!gHeadlessOptions.headless)
@@ -683,13 +987,98 @@ void initPhysics(bool /*interactive*/)
 
 	gMaterial = gHeadlessOptions.headless ?
 		gPhysics->createMaterial(
-			isHeadlessCase("tangent-target") ? 1.0f : 0.0f,
-			isHeadlessCase("tangent-target") ? 1.0f : 0.0f, 0.0f) :
+			(isHeadlessCase("tangent-target") ||
+			 targetOwnershipHasFriction()) ? 1.0f : 0.0f,
+			(isHeadlessCase("tangent-target") ||
+			 targetOwnershipHasFriction()) ? 1.0f : 0.0f,
+			(isHeadlessCase("ownership-bounce") ||
+			 isRestitutionThresholdCase() ||
+			 isTiltedRestitutionCase() ||
+			 isSpatialFiniteImpulseCase() ||
+			 isRestitutionFrictionComponentCase()) ? 0.5f : 0.0f) :
 		gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
 
 	if(gHeadlessOptions.headless)
 	{
-		if(isDynamicPairCase())
+		if(isPassiveFrictionComponentCase())
+		{
+			const bool restitutionComponent =
+				isRestitutionFrictionComponentCase();
+			const PxQuat rotation = isPassiveFrictionComponentYawCase() ?
+				PxQuat(PxPi * 0.25f, PxVec3(0.0f, 1.0f, 0.0f)) :
+				PxQuat(PxIdentity);
+			// Keep the intended ground--lower--upper contact component connected
+			// for the full audit.  The broad square footprint is rotationally
+			// symmetric about Y and prevents the legacy friction mismatch from
+			// changing the fixture topology by simply throwing the upper body
+			// onto the ground.
+			const PxBoxGeometry boxGeometry(PxVec3(2.0f, 0.5f, 2.0f));
+			gHeadlessGround =
+				PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+			gHeadlessBody0 = PxCreateDynamic(
+				*gPhysics, PxTransform(PxVec3(0.0f, 0.49f, 0.0f), rotation),
+				boxGeometry, *gMaterial, 1.0f);
+			gHeadlessBody1 = PxCreateDynamic(
+				*gPhysics,
+				PxTransform(
+					PxVec3(
+						0.0f, restitutionComponent ? 2.0f : 1.48f, 0.0f),
+					rotation),
+				boxGeometry, *gMaterial, 1.0f);
+			if(isTargetOwnershipReverseCase())
+			{
+				gScene->addActor(*gHeadlessBody1);
+				gScene->addActor(*gHeadlessBody0);
+				gScene->addActor(*gHeadlessGround);
+			}
+			else
+			{
+				gScene->addActor(*gHeadlessGround);
+				gScene->addActor(*gHeadlessBody0);
+				gScene->addActor(*gHeadlessBody1);
+			}
+			gHeadlessBody0->setLinearVelocity(
+				PxVec3(3.0f, 0.0f, 0.0f));
+			gHeadlessBody1->setLinearVelocity(
+				PxVec3(3.0f, restitutionComponent ? -4.0f : 0.0f, 0.0f));
+		}
+		else if(isTargetOwnershipAuthorityCase())
+		{
+			const PxTransform targetPose(
+				PxVec3(0.0f, 0.45f, 0.0f),
+				isTargetOwnershipManifoldYawCase() ?
+					PxQuat(PxPi, PxVec3(0.0f, 1.0f, 0.0f)) :
+					PxQuat(PxIdentity));
+			if(isTargetOwnershipReverseCase())
+			{
+				gHeadlessBody0 = isTargetOwnershipManifoldCase() ?
+					PxCreateDynamic(
+						*gPhysics, targetPose,
+						PxBoxGeometry(PxVec3(0.5f)), *gMaterial, 1.0f) :
+					PxCreateDynamic(
+						*gPhysics, targetPose,
+						PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+				gScene->addActor(*gHeadlessBody0);
+				gHeadlessGround =
+					PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+				gScene->addActor(*gHeadlessGround);
+			}
+			else
+			{
+				gHeadlessGround =
+					PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+				gScene->addActor(*gHeadlessGround);
+				gHeadlessBody0 = isTargetOwnershipManifoldCase() ?
+					PxCreateDynamic(
+						*gPhysics, targetPose,
+						PxBoxGeometry(PxVec3(0.5f)), *gMaterial, 1.0f) :
+					PxCreateDynamic(
+						*gPhysics, targetPose,
+						PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+				gScene->addActor(*gHeadlessBody0);
+			}
+		}
+		else if(isDynamicPairCase())
 		{
 			if(isHeadlessCase("finite-scales-control") ||
 				isHeadlessCase("finite-scales"))
@@ -724,26 +1113,87 @@ void initPhysics(bool /*interactive*/)
 		}
 		else
 		{
-			gHeadlessGround =
+			gHeadlessGround = isOffCenterFiniteImpulseCase() ?
+				PxCreateStatic(
+					*gPhysics, PxTransform(PxVec3(-0.6f, 0.0f, 0.0f)),
+					PxSphereGeometry(0.25f), *gMaterial) :
 				PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
 			gScene->addActor(*gHeadlessGround);
-			const PxReal initialY = isHeadlessCase("target-velocity") ?
-				0.45f :
+			const PxReal initialY =
+				isHeadlessCase("target-velocity") ? 0.45f :
+				isHeadlessCase("ownership-shallow") ? 0.49f :
+				isHeadlessCase("ownership-deep") ? 0.30f :
+				isHeadlessCase("ownership-deep-tilted") ? 0.25f :
+				isTiltedRestitutionCase() ? 0.90f :
+				isTiltedFiniteImpulseCase() ? 0.90f :
+				isOffCenterFiniteImpulseCase() ? 1.35f :
+				isRestitutionThresholdCase() ? 0.55f :
 				(isHeadlessCase("normal") ||
+				 isHeadlessCase("ownership-bounce") ||
 				 isHeadlessCase("finite-max-impulse-control") ||
 				 isHeadlessCase("finite-max-impulse") ? 2.0f : 3.0f);
-			gHeadlessBody0 = PxCreateDynamic(
-				*gPhysics, PxTransform(PxVec3(0.0f, initialY, 0.0f)),
-				PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+			if(isHeadlessCase("ownership-deep-tilted") ||
+				isTiltedRestitutionCase() ||
+				isTiltedFiniteImpulseCase())
+			{
+				const PxTransform pose(
+					PxVec3(0.0f, initialY, 0.0f),
+					PxQuat(PxPi * 0.125f, PxVec3(0.0f, 0.0f, 1.0f)));
+				gHeadlessBody0 = PxCreateDynamic(
+					*gPhysics, pose,
+					PxBoxGeometry(PxVec3(1.0f, 0.5f, 0.5f)),
+					*gMaterial, 1.0f);
+			}
+			else if(isOffCenterFiniteImpulseCase())
+			{
+				gHeadlessBody0 = PxCreateDynamic(
+					*gPhysics, PxTransform(PxVec3(0.0f, initialY, 0.0f)),
+					PxBoxGeometry(PxVec3(1.0f, 0.5f, 0.5f)),
+					*gMaterial, 1.0f);
+			}
+			else
+			{
+				gHeadlessBody0 = PxCreateDynamic(
+					*gPhysics, PxTransform(PxVec3(0.0f, initialY, 0.0f)),
+					PxSphereGeometry(0.5f), *gMaterial, 1.0f);
+			}
 			if(isHeadlessCase("normal"))
 				gHeadlessBody0->setLinearVelocity(
 					PxVec3(0.0f, -8.0f, 0.0f));
+			else if(isHeadlessCase("ownership-bounce"))
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -8.0f, 0.0f));
+			else if(isHeadlessCase("restitution-threshold-below"))
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -1.0f, 0.0f));
+			else if(isHeadlessCase("restitution-threshold-above"))
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -6.0f, 0.0f));
+			else if(isTiltedRestitutionCase())
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -6.0f, 0.0f));
+			else if(isTiltedFiniteImpulseCase())
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -6.0f, 0.0f));
+			else if(isOffCenterFiniteImpulseCase())
+				gHeadlessBody0->setLinearVelocity(
+					PxVec3(0.0f, -6.0f, 0.0f));
 			else if(isHeadlessCase("finite-max-impulse-control") ||
 				isHeadlessCase("finite-max-impulse"))
 				gHeadlessBody0->setLinearVelocity(
 					PxVec3(0.0f, -10.0f, 0.0f));
 			gScene->addActor(*gHeadlessBody0);
 		}
+		if(isTargetOwnershipAuthorityCase() &&
+			targetOwnershipLocksAngularMotion())
+		{
+			gHeadlessBody0->setRigidDynamicLockFlags(
+				PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+				PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y |
+				PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z);
+		}
+		if(isPassiveFrictionManifoldCase())
+			gHeadlessBody0->setLinearVelocity(PxVec3(3.0f, 0.0f, 0.0f));
 		gHeadlessBody0->setLinearDamping(0.0f);
 		gHeadlessBody0->setAngularDamping(0.0f);
 		gHeadlessBody0->setSleepThreshold(0.0f);
@@ -757,6 +1207,9 @@ void initPhysics(bool /*interactive*/)
 			gHeadlessBody0->getLinearVelocity();
 		gHeadlessInitialAngularVelocity[0] =
 			gHeadlessBody0->getAngularVelocity();
+		gMetrics.body0Mass = gHeadlessBody0->getMass();
+		gMetrics.body0InertiaZ =
+			gHeadlessBody0->getMassSpaceInertiaTensor().z;
 		if(gHeadlessBody1)
 		{
 			gHeadlessInitialLinearVelocity[1] =
@@ -791,7 +1244,10 @@ void stepPhysics(bool /*interactive*/)
 		{
 			const PxTransform pose = gHeadlessBody0->getGlobalPose();
 			const PxVec3 velocity = gHeadlessBody0->getLinearVelocity();
-			if(!pose.isFinite() || !velocity.isFinite())
+			const PxVec3 angularVelocity =
+				gHeadlessBody0->getAngularVelocity();
+			if(!pose.isFinite() || !velocity.isFinite() ||
+				!angularVelocity.isFinite())
 				++gMetrics.nonFinite;
 			gMetrics.maxAbsBody0X =
 				PxMax(gMetrics.maxAbsBody0X, PxAbs(pose.p.x));
@@ -799,11 +1255,42 @@ void stepPhysics(bool /*interactive*/)
 				PxMax(gMetrics.peakAbsBody0VelocityX, PxAbs(velocity.x));
 			gMetrics.peakAbsBody0VelocityY =
 				PxMax(gMetrics.peakAbsBody0VelocityY, PxAbs(velocity.y));
+			const PxReal angularSpeed = angularVelocity.magnitude();
+			if(angularSpeed > gMetrics.peakBody0AngularSpeed)
+			{
+				gMetrics.peakBody0AngularSpeed = angularSpeed;
+				gMetrics.peakBody0AngularFrame = gMetrics.completedFrames;
+			}
 			gMetrics.maxBody0Y = PxMax(gMetrics.maxBody0Y, pose.p.y);
 			gMetrics.peakBody0VelocityY =
 				PxMax(gMetrics.peakBody0VelocityY, velocity.y);
 			gMetrics.minBody0Y = PxMin(gMetrics.minBody0Y, pose.p.y);
 			gMetrics.finalBody0Speed = velocity.magnitude();
+			gMetrics.finalBody0AngularSpeed =
+				angularVelocity.magnitude();
+			gMetrics.finalBody0VelocityX = velocity.x;
+			gMetrics.finalBody0AngularVelocity = angularVelocity;
+			if(isTargetOwnershipAuthorityCase())
+			{
+				const PxVec3 bottomOffset(0.0f, -0.5f, 0.0f);
+				gMetrics.finalBody0ContactVelocityX =
+					(velocity + angularVelocity.cross(bottomOffset)).x;
+			}
+			if(isOffCenterFiniteImpulseCase() &&
+				gMetrics.completedFrames == 6)
+			{
+				gMetrics.finiteCheckpointVelocityY = velocity.y;
+				gMetrics.finiteCheckpointAngularSpeed = angularSpeed;
+			}
+			if(isSpatialFiniteImpulseCase() &&
+				gMetrics.completedFrames <= 16)
+			{
+				std::printf(
+					"[FINITE_SPATIAL_FRAME] frame=%u y=%.9g vy=%.9g "
+					"angular=%.9g\n",
+					gMetrics.completedFrames, double(pose.p.y),
+					double(velocity.y), double(angularSpeed));
+			}
 			if(gMetrics.modifyCallbackCount > 0)
 				gMetrics.minBody0SpeedAfterModify = PxMin(
 					gMetrics.minBody0SpeedAfterModify,
@@ -813,13 +1300,29 @@ void stepPhysics(bool /*interactive*/)
 		{
 			const PxTransform pose = gHeadlessBody1->getGlobalPose();
 			const PxVec3 velocity = gHeadlessBody1->getLinearVelocity();
-			if(!pose.isFinite() || !velocity.isFinite())
+			const PxVec3 angularVelocity =
+				gHeadlessBody1->getAngularVelocity();
+			if(!pose.isFinite() || !velocity.isFinite() ||
+				!angularVelocity.isFinite())
 				++gMetrics.nonFinite;
 			gMetrics.peakBody1Speed =
 				PxMax(gMetrics.peakBody1Speed, velocity.magnitude());
 			gMetrics.peakAbsBody1VelocityY =
 				PxMax(gMetrics.peakAbsBody1VelocityY, PxAbs(velocity.y));
+			gMetrics.peakBody1VelocityY =
+				PxMax(gMetrics.peakBody1VelocityY, velocity.y);
+			gMetrics.minBody1VelocityY =
+				PxMin(gMetrics.minBody1VelocityY, velocity.y);
+			gMetrics.peakBody1AngularSpeed = PxMax(
+				gMetrics.peakBody1AngularSpeed,
+				angularVelocity.magnitude());
 			gMetrics.finalBody1Speed = velocity.magnitude();
+			gMetrics.finalBody1AngularSpeed =
+				angularVelocity.magnitude();
+			gMetrics.finalBody1VelocityX = velocity.x;
+			gMetrics.finalBody1AngularVelocity = angularVelocity;
+			gMetrics.minBody1Y = PxMin(gMetrics.minBody1Y, pose.p.y);
+			gMetrics.maxBody1Y = PxMax(gMetrics.maxBody1Y, pose.p.y);
 			if(gHeadlessBody0)
 			{
 				const PxReal relativeVelocityY =
@@ -879,11 +1382,15 @@ static int runHeadless()
 	initPhysics(false);
 	const bool massScaleCase = isHeadlessCase("mass-scale");
 	const bool dynamicPairCase = isDynamicPairCase();
+	const bool passiveFrictionComponentCase =
+		isPassiveFrictionComponentCase();
 	const bool initialized =
 		gFoundation && gPhysics && gExtensionsInitialized && gDispatcher &&
 		gScene && gMaterial && gHeadlessBody0 &&
 		(dynamicPairCase ? (gHeadlessBody1 != NULL) :
-			(gHeadlessGround != NULL));
+			(passiveFrictionComponentCase ?
+				(gHeadlessBody1 != NULL && gHeadlessGround != NULL) :
+				(gHeadlessGround != NULL)));
 	if(initialized)
 	{
 		for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
@@ -970,6 +1477,36 @@ static int runHeadless()
 		passed = false;
 		reason = "callback_payload_error";
 	}
+	else if(isTargetOwnershipAuthorityCase() &&
+		targetOwnershipHasNormalTarget() &&
+		gMetrics.peakBody0VelocityY < 0.25f)
+	{
+		passed = false;
+		reason = "ownership_normal_target_missing";
+	}
+	else if(isTargetOwnershipAuthorityCase() &&
+		targetOwnershipHasTangentTarget() &&
+		!targetOwnershipHasFriction() &&
+		gMetrics.peakAbsBody0VelocityX > 0.05f)
+	{
+		passed = false;
+		reason = "ownership_zero_friction_leaked_tangent_target";
+	}
+	else if(isTargetOwnershipAuthorityCase() &&
+		targetOwnershipHasTangentTarget() &&
+		targetOwnershipHasFriction() &&
+		gMetrics.peakAbsBody0VelocityX < 0.25f)
+	{
+		passed = false;
+		reason = "ownership_friction_tangent_target_missing";
+	}
+	else if(targetOwnershipHasFiniteCap() &&
+		(gMetrics.maxReportedImpulse <= 0.0f ||
+		 gMetrics.maxReportedImpulse > 0.36f))
+	{
+		passed = false;
+		reason = "ownership_finite_cap_not_consumed";
+	}
 	else if(isHeadlessCase("normal") &&
 		(gMetrics.peakAbsBody0VelocityX < 0.5f ||
 		 gMetrics.maxAbsBody0X < 0.25f))
@@ -990,6 +1527,60 @@ static int runHeadless()
 		passed = false;
 		reason = "max_impulse_not_consumed";
 	}
+	else if(isHeadlessCase("ownership-shallow") &&
+		(gMetrics.maxBody0Y < 0.49f ||
+		 gMetrics.minBody0Y < 0.20f ||
+		 gMetrics.peakAbsBody0VelocityY > 20.0f))
+	{
+		passed = false;
+		reason = "shallow_overlap_unstable";
+	}
+	else if(isHeadlessCase("ownership-deep") &&
+		(gMetrics.maxBody0Y < 0.45f ||
+		 gMetrics.minBody0Y < 0.20f ||
+		 gMetrics.peakAbsBody0VelocityY > 20.0f))
+	{
+		passed = false;
+		reason = "deep_overlap_unstable";
+	}
+	else if(isHeadlessCase("ownership-deep-tilted") &&
+		(gMetrics.maxBody0Y < 0.45f ||
+		 gMetrics.minBody0Y < 0.10f ||
+		 gMetrics.peakAbsBody0VelocityY > 40.0f ||
+		 gMetrics.peakBody0AngularSpeed > 100.0f))
+	{
+		passed = false;
+		reason = "deep_tilted_overlap_unstable";
+	}
+	else if(isHeadlessCase("ownership-bounce") &&
+		(gMetrics.peakBody0VelocityY < 2.0f ||
+		 gMetrics.maxBody0Y < 2.0f))
+	{
+		passed = false;
+		reason = "material_bounce_missing";
+	}
+	else if(isHeadlessCase("restitution-threshold-below") &&
+		(gMetrics.peakBody0VelocityY > 0.25f ||
+		 gMetrics.maxBody0Y > 0.60f))
+	{
+		passed = false;
+		reason = "below_threshold_restitution_applied";
+	}
+	else if(isHeadlessCase("restitution-threshold-above") &&
+		(gMetrics.peakBody0VelocityY < 2.5f ||
+		 gMetrics.maxBody0Y < 2.0f))
+	{
+		passed = false;
+		reason = "above_threshold_restitution_missing";
+	}
+	else if(isTiltedRestitutionCase() &&
+		(gMetrics.peakBody0VelocityY < 0.25f ||
+		 gMetrics.peakBody0AngularSpeed < 0.05f ||
+		 gMetrics.peakBody0AngularSpeed > 100.0f))
+	{
+		passed = false;
+		reason = "tilted_restitution_not_exercised";
+	}
 	else if(isHeadlessCase("finite-max-impulse-control") &&
 		(gMetrics.maxReportedImpulse < 1.0f ||
 		 gMetrics.minBody0Y < 0.45f))
@@ -1004,6 +1595,28 @@ static int runHeadless()
 	{
 		passed = false;
 		reason = "finite_max_impulse_not_consumed";
+	}
+	else if(isTiltedFiniteImpulseCase() &&
+		(gMetrics.maxReportedImpulse < 0.75f ||
+		 gMetrics.maxReportedImpulse > 1.001f ||
+		 gMetrics.peakBody0AngularSpeed < 0.05f ||
+		 gMetrics.peakBody0AngularSpeed > 100.0f))
+	{
+		passed = false;
+		reason = "tilted_finite_impulse_not_exercised";
+	}
+	else if(isOffCenterFiniteImpulseCase() &&
+		(gMetrics.maxReportedImpulse < 0.75f ||
+		 gMetrics.maxReportedImpulse > 1.001f ||
+		 gMetrics.finiteCheckpointVelocityY < -5.52f ||
+		 gMetrics.finiteCheckpointVelocityY > -5.48f ||
+		 gMetrics.finiteCheckpointAngularSpeed < 0.70f ||
+		 gMetrics.finiteCheckpointAngularSpeed > 0.74f ||
+		 gMetrics.peakBody0AngularSpeed < 0.05f ||
+		 gMetrics.peakBody0AngularSpeed > 100.0f))
+	{
+		passed = false;
+		reason = "offcenter_finite_impulse_not_exercised";
 	}
 	else if(massScaleCase &&
 		(gMetrics.peakBody1Speed > 0.5f ||
@@ -1032,6 +1645,28 @@ static int runHeadless()
 		passed = false;
 		reason = "tangent_target_not_consumed";
 	}
+	else if(isRestitutionFrictionComponentCase() &&
+		(gMetrics.minBody1VelocityY > -3.0f ||
+		 gMetrics.peakBody1VelocityY < 1.0f ||
+		 gMetrics.minBody0Y < 0.20f ||
+		 gMetrics.minBody1Y < 0.80f ||
+		 gMetrics.peakBody0AngularSpeed > 50.0f ||
+		 gMetrics.peakBody1AngularSpeed > 50.0f))
+	{
+		passed = false;
+		reason = "restitution_friction_component_not_exercised";
+	}
+	else if(passiveFrictionComponentCase &&
+		(gMetrics.minBody0Y < 0.20f ||
+		 gMetrics.minBody1Y < 0.80f ||
+		 gMetrics.peakBody0AngularSpeed > 50.0f ||
+		 gMetrics.peakBody1AngularSpeed > 50.0f ||
+		 gMetrics.finalBody0Speed > 10.0f ||
+		 gMetrics.finalBody1Speed > 10.0f))
+	{
+		passed = false;
+		reason = "passive_friction_component_unstable";
+	}
 
 	cleanupPhysics(false);
 	if(!gMetrics.cleanupComplete && passed)
@@ -1046,15 +1681,29 @@ static int runHeadless()
 		"reason=%s validation=GATED modifyCallbackCount=%u "
 		"modifiedPairCount=%u modifiedPointCount=%u "
 		"reportCallbackCount=%u reportPointCount=%u identityErrors=%u "
+		"body0Actor0Count=%u body0Actor1Count=%u "
 		"scaleReadbackErrors=%u maxImpulseReadbackErrors=%u "
 		"targetVelocityReadbackErrors=%u maxAbsBody0X=%.9g "
 		"peakAbsBody0VelocityX=%.9g peakAbsBody0VelocityY=%.9g "
+		"peakBody0AngularSpeed=%.9g peakBody0AngularFrame=%u "
 		"maxBody0Y=%.9g "
 		"peakBody0VelocityY=%.9g minBody0Y=%.9g peakBody1Speed=%.9g "
 		"peakAbsBody1VelocityY=%.9g "
 		"peakBody0MinusBody1VelocityY=%.9g maxReportedImpulse=%.9g "
 		"minBody0SpeedAfterModify=%.9g finalBody0Speed=%.9g "
-		"finalBody1Speed=%.9g expectedBody0LinearDelta=%.9g "
+		"finalBody0AngularSpeed=%.9g finalBody0VelocityX=%.9g "
+		"finalBody0AngularX=%.9g finalBody0AngularY=%.9g "
+		"finalBody0AngularZ=%.9g finalBody0ContactVelocityX=%.9g "
+		"finalBody1Speed=%.9g peakBody1AngularSpeed=%.9g "
+		"finalBody1AngularSpeed=%.9g finalBody1VelocityX=%.9g "
+		"finalBody1AngularX=%.9g finalBody1AngularY=%.9g "
+		"finalBody1AngularZ=%.9g minBody1Y=%.9g "
+		"maxBody1Y=%.9g peakBody1VelocityY=%.9g "
+		"minBody1VelocityY=%.9g "
+		"finiteCheckpointVelocityY=%.9g "
+		"finiteCheckpointAngularSpeed=%.9g "
+		"body0Mass=%.9g body0InertiaZ=%.9g "
+		"expectedBody0LinearDelta=%.9g "
 		"expectedBody1LinearDelta=%.9g expectedBody0AngularDelta=%.9g "
 		"expectedBody1AngularDelta=%.9g "
 		"actualBody0AngularDelta=%.9g actualBody1AngularDelta=%.9g "
@@ -1070,11 +1719,14 @@ static int runHeadless()
 		gMetrics.modifyCallbackCount, gMetrics.modifiedPairCount,
 		gMetrics.modifiedPointCount, gMetrics.reportCallbackCount,
 		gMetrics.reportPointCount, gMetrics.identityErrors,
+		gMetrics.body0Actor0Count, gMetrics.body0Actor1Count,
 		gMetrics.scaleReadbackErrors, gMetrics.maxImpulseReadbackErrors,
 		gMetrics.targetVelocityReadbackErrors,
 		double(gMetrics.maxAbsBody0X),
 		double(gMetrics.peakAbsBody0VelocityX),
 		double(gMetrics.peakAbsBody0VelocityY),
+		double(gMetrics.peakBody0AngularSpeed),
+		gMetrics.peakBody0AngularFrame,
 		double(gMetrics.maxBody0Y),
 		double(gMetrics.peakBody0VelocityY),
 		double(gMetrics.minBody0Y), double(gMetrics.peakBody1Speed),
@@ -1083,7 +1735,26 @@ static int runHeadless()
 		double(gMetrics.maxReportedImpulse),
 		double(gMetrics.minBody0SpeedAfterModify),
 		double(gMetrics.finalBody0Speed),
+		double(gMetrics.finalBody0AngularSpeed),
+		double(gMetrics.finalBody0VelocityX),
+		double(gMetrics.finalBody0AngularVelocity.x),
+		double(gMetrics.finalBody0AngularVelocity.y),
+		double(gMetrics.finalBody0AngularVelocity.z),
+		double(gMetrics.finalBody0ContactVelocityX),
 		double(gMetrics.finalBody1Speed),
+		double(gMetrics.peakBody1AngularSpeed),
+		double(gMetrics.finalBody1AngularSpeed),
+		double(gMetrics.finalBody1VelocityX),
+		double(gMetrics.finalBody1AngularVelocity.x),
+		double(gMetrics.finalBody1AngularVelocity.y),
+		double(gMetrics.finalBody1AngularVelocity.z),
+		double(gMetrics.minBody1Y),
+		double(gMetrics.maxBody1Y),
+		double(gMetrics.peakBody1VelocityY),
+		double(gMetrics.minBody1VelocityY),
+		double(gMetrics.finiteCheckpointVelocityY),
+		double(gMetrics.finiteCheckpointAngularSpeed),
+		double(gMetrics.body0Mass), double(gMetrics.body0InertiaZ),
 		double(gMetrics.expectedBody0LinearDelta),
 		double(gMetrics.expectedBody1LinearDelta),
 		double(gMetrics.expectedBody0AngularDelta),

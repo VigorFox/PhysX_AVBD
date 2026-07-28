@@ -32,10 +32,9 @@
 // AVBD vs TGS on this scene:
 //   - Sphere shot and settle speed: aligned with TGS (headless sphere-shot gate).
 //   - --headless-stress: flat grid of boxes + periodic sphere shots on wavy mesh.
-//   - AVBD kinematic shell (default on): snippet publishes mesh grid each substep;
-//     prep applies shell normal+prev on NP deformable rows; per-island box
-//     dominant rows drive solve() via AvbdSoftContact in solveLocalSystem.
-//     AVBD_KINEMATIC_SHELL=0 disables the shell.
+//   - AVBD publishes the mesh grid each substep so NP deformable rows receive
+//     coherent surface normal/history. Synthesized box-corner shell replacement
+//     is retired: retained NP rows own the contact (P3F/P3G).
 //   - Box stack on a heaving mesh: AVBD may spread wider than TGS over long runs.
 //     This is a known limitation of the current position-based AVBD penalty
 //     contact model on fast-moving geometry, not a snippet bug.
@@ -88,6 +87,12 @@ static PxSolverType::Enum gSolverType = PxSolverType::eAVBD;
 static bool gHeadlessMode = false;
 static bool gHeadlessSphereShot = false;
 static bool gHeadlessStress = false;
+static bool gHeadlessOwnershipProbe = false;
+static bool gOwnershipProbeHeavy = false;
+static bool gShellPostOwnershipProbe = false;
+static bool gSurfaceHistoryProbe = false;
+static bool gNormalPostOwnershipProbe = false;
+static bool gBroadAuthorityProbe = false;
 static bool gCreateStack = true;
 static PxU32 gHeadlessFrameCount = 180;
 static PxU32 gSimFrame = 0;
@@ -97,6 +102,7 @@ static const PxReal gFastImpactSpeedThreshold = 80.0f;
 static const PxU32 gFastImpactSubstepHoldFrames = 45;
 
 static PxRigidDynamic *gShotSphere = NULL;
+static PxRigidDynamic *gOwnershipProbeBox = NULL;
 static const PxReal gShotSphereRadius = 3.0f;
 static const PxReal gShotSpawnY = 55.0f;
 static const PxReal gShotSpeedY = 200.0f;
@@ -107,13 +113,20 @@ enum DeformableFilterTag {
   eFILTER_MOVING_MESH = 1,
   eFILTER_BOX = 2,
   eFILTER_SPHERE_SHOT = 3,
-  eFILTER_STRESS_SHOT = 4
+  eFILTER_STRESS_SHOT = 4,
+  eFILTER_OWNERSHIP_PROBE = 5
 };
 
 enum DeformableHeadlessCase {
   eCASE_MOVING_MESH_STACK,
   eCASE_SPHERE_SHOT,
-  eCASE_STRESS_DIAGNOSTIC
+  eCASE_STRESS_DIAGNOSTIC,
+  eCASE_SURFACE_OWNER_LIGHT,
+  eCASE_SURFACE_OWNER_HEAVY,
+  eCASE_SHELL_POST_OWNERSHIP,
+  eCASE_SURFACE_HISTORY,
+  eCASE_NORMAL_POST_OWNERSHIP,
+  eCASE_BROAD_COMPONENT_AUTHORITY
 };
 
 static DeformableHeadlessCase gHeadlessCase = eCASE_MOVING_MESH_STACK;
@@ -227,6 +240,56 @@ struct StressHeadlessMetrics {
 };
 static StressHeadlessMetrics gStressMetrics;
 
+static const PxReal gOwnershipProbeLightMass = 39.0f;
+static const PxReal gOwnershipProbeHeavyMass = 41.0f;
+static const PxReal gShellPostProbeMass = 10.0f;
+static const PxReal gSurfaceHistoryProbeMass = 10.0f;
+static const PxU32 gSurfaceHistoryWarmupFrames = 60;
+static const PxU32 gSurfaceHistoryMotionFrames = 60;
+static const PxReal gSurfaceHistorySpeed = 1.0f;
+static PxReal gSurfaceHistoryOffset = 0.0f;
+struct OwnershipProbeMetrics {
+  PxVec3 initialPosition;
+  PxVec3 finalPosition;
+  PxReal maxHorizontalSpeed;
+  PxReal maxAngularSpeed;
+  PxReal minBottomGap;
+  PxReal maxBottomGap;
+  PxU32 outOfFootprintFrames;
+
+  OwnershipProbeMetrics()
+      : initialPosition(0.0f), finalPosition(0.0f),
+        maxHorizontalSpeed(0.0f), maxAngularSpeed(0.0f),
+        minBottomGap(PX_MAX_F32), maxBottomGap(-PX_MAX_F32),
+        outOfFootprintFrames(0) {}
+};
+static OwnershipProbeMetrics gOwnershipProbeMetrics;
+
+struct SurfaceHistoryMetrics {
+  PxU32 contactEvents;
+  PxU32 contactPoints;
+  PxU32 motionSamples;
+  PxReal surfaceYAtMotionStart;
+  PxReal surfaceYAtMotionEnd;
+  PxReal bodyYAtMotionStart;
+  PxReal bodyYAtMotionEnd;
+  PxReal sumBodyVelocityY;
+  PxReal sumAbsRelativeVelocityY;
+  PxReal minBodyVelocityY;
+  PxReal maxBodyVelocityY;
+  PxReal maxAbsRelativeVelocityY;
+  bool motionStartCaptured;
+
+  SurfaceHistoryMetrics()
+      : contactEvents(0), contactPoints(0), motionSamples(0),
+        surfaceYAtMotionStart(0.0f), surfaceYAtMotionEnd(0.0f),
+        bodyYAtMotionStart(0.0f), bodyYAtMotionEnd(0.0f),
+        sumBodyVelocityY(0.0f), sumAbsRelativeVelocityY(0.0f),
+        minBodyVelocityY(PX_MAX_F32), maxBodyVelocityY(-PX_MAX_F32),
+        maxAbsRelativeVelocityY(0.0f), motionStartCaptured(false) {}
+};
+static SurfaceHistoryMetrics gSurfaceHistoryMetrics;
+
 static void setShapeTag(PxShape &shape, DeformableFilterTag tag) {
   // The default interactive filter shader interprets word0 as a collision
   // group.  Gate tags are needed only by the headless custom shader.
@@ -282,12 +345,27 @@ public:
          pairHeader.actors[0] == gActor);
     const bool containsMeshActor = pairHeader.actors[0] == gActor ||
                                    pairHeader.actors[1] == gActor;
+    const bool historyActorPairMatches =
+        gSurfaceHistoryProbe &&
+        ((pairHeader.actors[0] == gOwnershipProbeBox &&
+          pairHeader.actors[1] == gActor) ||
+         (pairHeader.actors[1] == gOwnershipProbeBox &&
+          pairHeader.actors[0] == gActor));
     for (PxU32 i = 0; i < nbPairs; ++i) {
       const PxContactPair &pair = pairs[i];
       if (pair.flags & (PxContactPairFlag::eREMOVED_SHAPE_0 |
                         PxContactPairFlag::eREMOVED_SHAPE_1))
         continue;
-      if (!pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_FOUND))
+      const bool historyPair =
+          historyActorPairMatches &&
+          isShotMeshPair(pair.shapes[0], pair.shapes[1],
+                         eFILTER_OWNERSHIP_PROBE);
+      const bool historyEvent =
+          historyPair &&
+          (pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_FOUND) ||
+           pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_PERSISTS));
+      if (!pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_FOUND) &&
+          !historyEvent)
         continue;
       const bool spherePair =
           sphereActorPairMatches &&
@@ -297,11 +375,23 @@ public:
           containsMeshActor &&
           isShotMeshPair(pair.shapes[0], pair.shapes[1],
                          eFILTER_STRESS_SHOT);
-      if (!spherePair && !stressPair)
+      if (!spherePair && !stressPair && !historyPair)
         continue;
 
       PxContactPairPoint points[32];
       const PxU32 pointCount = pair.extractContacts(points, 32);
+      if (historyPair) {
+        gSurfaceHistoryMetrics.contactEvents++;
+        for (PxU32 p = 0; p < pointCount; ++p) {
+          if (points[p].position.isFinite() && points[p].normal.isFinite() &&
+              PxIsFinite(points[p].separation) &&
+              points[p].impulse.isFinite())
+            gSurfaceHistoryMetrics.contactPoints++;
+          else
+            gRuntimeMetrics.nonFinite++;
+        }
+        continue;
+      }
       if (stressPair) {
         gStressMetrics.contactEvents++;
         for (PxU32 p = 0; p < pointCount; ++p) {
@@ -364,8 +454,18 @@ static PxFilterFlags deformableGateFilterShader(
        filterData1.word0 == eFILTER_MOVING_MESH) ||
       (filterData1.word0 == eFILTER_STRESS_SHOT &&
        filterData0.word0 == eFILTER_MOVING_MESH);
+  const bool historyMesh =
+      gSurfaceHistoryProbe &&
+      ((filterData0.word0 == eFILTER_OWNERSHIP_PROBE &&
+        filterData1.word0 == eFILTER_MOVING_MESH) ||
+       (filterData1.word0 == eFILTER_OWNERSHIP_PROBE &&
+        filterData0.word0 == eFILTER_MOVING_MESH));
   if (sphereMesh || stressMesh)
     pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_CONTACT_POINTS;
+  if (historyMesh)
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
                  PxPairFlag::eNOTIFY_CONTACT_POINTS;
   return PxFilterFlag::eDEFAULT;
 }
@@ -441,6 +541,94 @@ static void resetStressHeadlessMetrics() {
   gStressActiveShots = 0;
 }
 
+static void resetOwnershipProbeMetrics() {
+  gOwnershipProbeMetrics = OwnershipProbeMetrics();
+}
+
+static PxReal getOwnershipProbeMass() {
+  return (gSurfaceHistoryProbe || gNormalPostOwnershipProbe)
+             ? gSurfaceHistoryProbeMass
+             : gShellPostOwnershipProbe
+             ? gShellPostProbeMass
+             : (gOwnershipProbeHeavy ? gOwnershipProbeHeavyMass
+                                     : gOwnershipProbeLightMass);
+}
+
+static bool measureBoxBottomRelToSurface(const PxTransform &pose,
+                                         PxReal &relativeHeight);
+
+static void updateOwnershipProbeMetrics() {
+  if (!gHeadlessOwnershipProbe || !gOwnershipProbeBox)
+    return;
+  const PxTransform pose = gOwnershipProbeBox->getGlobalPose();
+  const PxVec3 linearVelocity = gOwnershipProbeBox->getLinearVelocity();
+  const PxVec3 angularVelocity = gOwnershipProbeBox->getAngularVelocity();
+  if (!pose.p.isFinite() || !linearVelocity.isFinite() ||
+      !angularVelocity.isFinite()) {
+    gRuntimeMetrics.nonFinite++;
+    return;
+  }
+  gOwnershipProbeMetrics.finalPosition = pose.p;
+  gOwnershipProbeMetrics.maxHorizontalSpeed = PxMax(
+      gOwnershipProbeMetrics.maxHorizontalSpeed,
+      PxSqrt(linearVelocity.x * linearVelocity.x +
+             linearVelocity.z * linearVelocity.z));
+  gOwnershipProbeMetrics.maxAngularSpeed = PxMax(
+      gOwnershipProbeMetrics.maxAngularSpeed, angularVelocity.magnitude());
+  PxReal bottomGap = 0.0f;
+  if (measureBoxBottomRelToSurface(pose, bottomGap)) {
+    gOwnershipProbeMetrics.minBottomGap =
+        PxMin(gOwnershipProbeMetrics.minBottomGap, bottomGap);
+    gOwnershipProbeMetrics.maxBottomGap =
+        PxMax(gOwnershipProbeMetrics.maxBottomGap, bottomGap);
+  } else {
+    gOwnershipProbeMetrics.outOfFootprintFrames++;
+  }
+}
+
+static void updateSurfaceHistoryMetrics() {
+  if (!gSurfaceHistoryProbe || !gOwnershipProbeBox)
+    return;
+
+  const PxTransform pose = gOwnershipProbeBox->getGlobalPose();
+  const PxVec3 linearVelocity = gOwnershipProbeBox->getLinearVelocity();
+  if (!pose.p.isFinite() || !linearVelocity.isFinite()) {
+    gRuntimeMetrics.nonFinite++;
+    return;
+  }
+
+  const PxReal surfaceY = sampleMeshSurfaceY(pose.p);
+  if (!gSurfaceHistoryMetrics.motionStartCaptured &&
+      gSimFrame == gSurfaceHistoryWarmupFrames) {
+    gSurfaceHistoryMetrics.surfaceYAtMotionStart = surfaceY;
+    gSurfaceHistoryMetrics.surfaceYAtMotionEnd = surfaceY;
+    gSurfaceHistoryMetrics.bodyYAtMotionStart = pose.p.y;
+    gSurfaceHistoryMetrics.bodyYAtMotionEnd = pose.p.y;
+    gSurfaceHistoryMetrics.motionStartCaptured = true;
+  }
+
+  if (gSurfaceHistoryMetrics.motionStartCaptured &&
+      gSimFrame > gSurfaceHistoryWarmupFrames &&
+      gSimFrame <=
+          gSurfaceHistoryWarmupFrames + gSurfaceHistoryMotionFrames) {
+    const PxReal relativeVelocityY =
+        linearVelocity.y - gSurfaceHistorySpeed;
+    gSurfaceHistoryMetrics.surfaceYAtMotionEnd = surfaceY;
+    gSurfaceHistoryMetrics.bodyYAtMotionEnd = pose.p.y;
+    gSurfaceHistoryMetrics.sumBodyVelocityY += linearVelocity.y;
+    gSurfaceHistoryMetrics.sumAbsRelativeVelocityY +=
+        PxAbs(relativeVelocityY);
+    gSurfaceHistoryMetrics.minBodyVelocityY =
+        PxMin(gSurfaceHistoryMetrics.minBodyVelocityY, linearVelocity.y);
+    gSurfaceHistoryMetrics.maxBodyVelocityY =
+        PxMax(gSurfaceHistoryMetrics.maxBodyVelocityY, linearVelocity.y);
+    gSurfaceHistoryMetrics.maxAbsRelativeVelocityY =
+        PxMax(gSurfaceHistoryMetrics.maxAbsRelativeVelocityY,
+              PxAbs(relativeVelocityY));
+    gSurfaceHistoryMetrics.motionSamples++;
+  }
+}
+
 static bool isBoxInsideMeshFootprint(const PxTransform &pose) {
   for (PxU32 corner = 0; corner < 8; ++corner) {
     const PxVec3 local((corner & 1u) ? gStackHalfExtent : -gStackHalfExtent,
@@ -470,7 +658,7 @@ static bool isCompletelyBelowMovingMesh(const PxTransform &pose,
     return pose.p.y + gShotSphereRadius <
            sampleMeshSurfaceY(pose.p) - margin;
   }
-  if (tag != eFILTER_BOX)
+  if (tag != eFILTER_BOX && tag != eFILTER_OWNERSHIP_PROBE)
     return false;
   if (!isBoxInsideMeshFootprint(pose))
     return false;
@@ -1088,6 +1276,90 @@ static void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent)
 	shape->release();
 }
 
+static void createBroadAuthorityCompound() {
+	// Each patch independently produces roughly 80 supported surface rows.
+	// Their connector shapes touch each other, so the real rigid-contact graph
+	// assembles both bodies into one component above the 128-row matrix-free
+	// boundary.  This validates multi-body component authority rather than a
+	// synthetic wide matrix on one body.
+	const PxU32 side = 9;
+	const PxReal spacing = 1.1f;
+	const PxReal bodyCenterX = 5.0f;
+	// Keep the top of every box above the one-sided triangle surface while
+	// the contact settles toward the mesh's -0.5 m rest offset.  A thinner
+	// compound can pass completely through the surface before reaching that
+	// authored rest depth, which invalidates both the TGS control and the AVBD
+	// authority probe.
+	const PxVec3 halfExtents(0.45f, 0.75f, 0.45f);
+	for (PxU32 bodyIndex = 0;
+	     bodyIndex < 2 && !gInitializationFailed; ++bodyIndex) {
+		const PxReal centerX =
+		    bodyIndex == 0 ? -bodyCenterX : bodyCenterX;
+		PxVec3 position(centerX, 0.0f, 0.0f);
+		position.y = sampleMeshSurfaceY(position) + halfExtents.y;
+		PxRigidDynamic* body =
+		    gPhysics->createRigidDynamic(PxTransform(position));
+		if (!body) {
+			gInitializationFailed = true;
+			break;
+		}
+		for (PxU32 z = 0; z < side && !gInitializationFailed; ++z) {
+			for (PxU32 x = 0; x < side; ++x) {
+				PxShape* shape = gPhysics->createShape(
+				    PxBoxGeometry(halfExtents), *gMaterial);
+				if (!shape) {
+					gInitializationFailed = true;
+					break;
+				}
+				const PxReal localX =
+				    (PxReal(x) - PxReal(side - 1) * 0.5f) *
+				    spacing;
+				const PxReal localZ =
+				    (PxReal(z) - PxReal(side - 1) * 0.5f) *
+				    spacing;
+				const PxVec3 samplePoint(
+				    centerX + localX, 0.0f, localZ);
+				const PxReal localY =
+				    sampleMeshSurfaceY(samplePoint) +
+				    halfExtents.y - position.y;
+				shape->setLocalPose(PxTransform(
+				    PxVec3(localX, localY, localZ)));
+				shape->setContactOffset(0.05f);
+				setShapeTag(*shape, eFILTER_OWNERSHIP_PROBE);
+				body->attachShape(*shape);
+				shape->release();
+			}
+		}
+		PxShape* connector = gPhysics->createShape(
+		    PxBoxGeometry(0.30f, 0.25f, 0.30f), *gMaterial);
+		if (!connector) {
+			gInitializationFailed = true;
+		} else {
+			const PxReal connectorWorldX =
+			    bodyIndex == 0 ? -0.30f : 0.30f;
+			const PxReal connectorLocalY =
+			    sampleMeshSurfaceY(PxVec3(0.0f)) + 1.50f -
+			    position.y;
+			connector->setLocalPose(PxTransform(PxVec3(
+			    connectorWorldX - centerX, connectorLocalY, 0.0f)));
+			connector->setContactOffset(0.05f);
+			setShapeTag(*connector, eFILTER_OWNERSHIP_PROBE);
+			body->attachShape(*connector);
+			connector->release();
+		}
+		if (gInitializationFailed ||
+		    !PxRigidBodyExt::setMassAndUpdateInertia(*body, 200.0f)) {
+			body->release();
+			gInitializationFailed = true;
+			break;
+		}
+		gScene->addActor(*body);
+	}
+	printf("[DeformableMeshBroadAuthority] bodies=2 patch=%ux%u "
+	       "shapesPerBody=%u totalMass=400\n",
+	       side, side, side * side + 1);
+}
+
 struct Triangle
 {
 	PxU32 ind0, ind1, ind2;
@@ -1108,6 +1380,17 @@ static void updateVertices(PxVec3* verts, float amplitude=0.0f)
 			const float y = 20.0f + sinf(coeffA*PxTwoPi)*cosf(coeffB*PxTwoPi)*amplitude;
 
 			verts[a * gridSize + b] = PxVec3(gGridMinimum + b*gridStep, y, gGridMinimum + a*gridStep);
+		}
+	}
+}
+
+static void updateFlatVertices(PxVec3 *verts, PxReal verticalOffset) {
+	const PxReal y = 20.0f + verticalOffset;
+	for (PxU32 a = 0; a < gGridSize; ++a) {
+		for (PxU32 b = 0; b < gGridSize; ++b) {
+			verts[a * gGridSize + b] =
+			    PxVec3(gGridMinimum + b * gGridStep, y,
+			           gGridMinimum + a * gGridStep);
 		}
 	}
 }
@@ -1169,14 +1452,18 @@ static void resetRuntimeState() {
   gMesh = NULL;
   gActor = NULL;
   gShotSphere = NULL;
+  gOwnershipProbeBox = NULL;
   gStressShots.clear();
   gTime = 0.0f;
   gSimFrame = 0;
   gFastImpactSubstepFrames = 0;
+  gSurfaceHistoryOffset = 0.0f;
   gRuntimeMetrics = RuntimeMetrics();
   resetStackHeadlessMetrics();
   resetSphereShotMetrics();
   resetStressHeadlessMetrics();
+  resetOwnershipProbeMetrics();
+  gSurfaceHistoryMetrics = SurfaceHistoryMetrics();
 }
 
 void initPhysics(bool interactive)
@@ -1288,6 +1575,37 @@ void initPhysics(bool interactive)
 		printf("[DeformableMeshSphereShot] spawn frame=0 pos=(0,%.2f,0) vel=(0,-%.1f,0) "
 		       "radius=%.2f\n",
 		       gShotSpawnY, gShotSpeedY, gShotSphereRadius);
+	} else if (gHeadlessOwnershipProbe) {
+		PxVec3 position(0.0f);
+		position.y =
+		    sampleMeshSurfaceY(position) + gStackHalfExtent +
+		    ((gShellPostOwnershipProbe || gNormalPostOwnershipProbe)
+		         ? -0.20f
+		         : 0.05f);
+		if (gShellPostOwnershipProbe)
+			PxAvbdKinematicShellSetBoxCornerShellEnabled(true);
+		const PxVec3 initialVelocity =
+		    (gShellPostOwnershipProbe || gNormalPostOwnershipProbe)
+		        ? PxVec3(8.0f, 6.0f, 0.0f)
+		        : PxVec3(0.0f);
+		gOwnershipProbeBox = createDynamic(
+		    PxTransform(position),
+		    PxBoxGeometry(gStackHalfExtent, gStackHalfExtent, gStackHalfExtent),
+		    initialVelocity, 1.0f, eFILTER_OWNERSHIP_PROBE);
+		if (!gOwnershipProbeBox ||
+		    !PxRigidBodyExt::setMassAndUpdateInertia(
+		        *gOwnershipProbeBox, getOwnershipProbeMass())) {
+			gInitializationFailed = true;
+		} else {
+			gOwnershipProbeMetrics.initialPosition = position;
+			gOwnershipProbeMetrics.finalPosition = position;
+		}
+		printf("[DeformableMeshOwnershipProbe] init solver=%s mass=%.3f "
+		       "position=(%.3f,%.3f,%.3f) surfaceHistory=%u\n",
+		       Snippets::getSolverTypeName(gSolverType),
+		       double(getOwnershipProbeMass()), double(position.x),
+		       double(position.y), double(position.z),
+		       gSurfaceHistoryProbe ? 1u : 0u);
 	} else if (gHeadlessStress) {
 		PxAvbdKinematicShellSetBoxCornerShellEnabled(true);
 		createStressBoxGrid();
@@ -1295,6 +1613,8 @@ void initPhysics(bool interactive)
 		       "shotInterval=%u substeps=%u\n",
 		       Snippets::getSolverTypeName(gSolverType), gStressShotIntervalFrames,
 		       gDeformSubsteps);
+	} else if (gBroadAuthorityProbe) {
+		createBroadAuthorityCompound();
 	} else if (gCreateStack) {
 		createStack(PxTransform(PxVec3(0, 22, 0)), 10, 2.0f);
 	}
@@ -1395,8 +1715,23 @@ void stepPhysics(bool interactive)
 	const PxReal waveStep = 0.01f / PxReal(substeps);
 	for (PxU32 sub = 0; sub < substeps; ++sub) {
 		PxVec3 *verts = gMesh->getVerticesForModification();
-		gTime += waveStep;
-		updateVertices(verts, sinf(gTime) * 20.0f);
+		if (gSurfaceHistoryProbe) {
+			if (gSimFrame >= gSurfaceHistoryWarmupFrames &&
+			    gSimFrame <
+			        gSurfaceHistoryWarmupFrames + gSurfaceHistoryMotionFrames)
+				gSurfaceHistoryOffset += gSurfaceHistorySpeed * subDt;
+			updateFlatVertices(verts, gSurfaceHistoryOffset);
+		} else if (gBroadAuthorityProbe) {
+			// Retain the production wave/refit history that forms usable AL
+			// budgets, but reduce its amplitude so the compound contacts enter
+			// the rest band together and the first solvable component remains
+			// above the matrix-free boundary.
+			gTime += waveStep;
+			updateVertices(verts, sinf(gTime) * 10.0f);
+		} else {
+			gTime += waveStep;
+			updateVertices(verts, sinf(gTime) * 20.0f);
+		}
 		gBounds = gMesh->refitBVH();
 		gScene->resetFiltering(*gActor);
 		if (gSolverType == PxSolverType::eAVBD) {
@@ -1428,6 +1763,11 @@ void stepPhysics(bool interactive)
 		updateSphereShotMetrics();
 	else if (gHeadlessStress)
 		updateStressHeadlessMetrics();
+	else if (gHeadlessOwnershipProbe)
+	{
+		updateOwnershipProbeMetrics();
+		updateSurfaceHistoryMetrics();
+	}
 	else if (gHeadlessMode && gCreateStack)
 		updateStackHeadlessMetrics();
 }
@@ -1500,6 +1840,18 @@ static const char *getHeadlessCaseName(DeformableHeadlessCase headlessCase) {
     return "sphere-shot";
   case eCASE_STRESS_DIAGNOSTIC:
     return "stress-diagnostic";
+  case eCASE_SURFACE_OWNER_LIGHT:
+    return "surface-owner-light";
+  case eCASE_SURFACE_OWNER_HEAVY:
+    return "surface-owner-heavy";
+  case eCASE_SHELL_POST_OWNERSHIP:
+    return "shell-post-ownership";
+  case eCASE_SURFACE_HISTORY:
+    return "surface-history";
+  case eCASE_NORMAL_POST_OWNERSHIP:
+    return "normal-post-ownership";
+  case eCASE_BROAD_COMPONENT_AUTHORITY:
+    return "broad-component-authority";
   default:
     return "unknown";
   }
@@ -1517,6 +1869,30 @@ static bool tryParseHeadlessCase(const char *value,
   }
   if (Snippets::equalsIgnoreCase(value, "stress-diagnostic")) {
     headlessCase = eCASE_STRESS_DIAGNOSTIC;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "surface-owner-light")) {
+    headlessCase = eCASE_SURFACE_OWNER_LIGHT;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "surface-owner-heavy")) {
+    headlessCase = eCASE_SURFACE_OWNER_HEAVY;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "shell-post-ownership")) {
+    headlessCase = eCASE_SHELL_POST_OWNERSHIP;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "surface-history")) {
+    headlessCase = eCASE_SURFACE_HISTORY;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "normal-post-ownership")) {
+    headlessCase = eCASE_NORMAL_POST_OWNERSHIP;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "broad-component-authority")) {
+    headlessCase = eCASE_BROAD_COMPONENT_AUTHORITY;
     return true;
   }
   return false;
@@ -1613,6 +1989,9 @@ static GateEvaluation evaluateGate(bool sceneQueriesAllowed = true) {
       setGateFailure(evaluation, "settled_sink");
     if (gStackMetrics.maxOutOfFootprintBoxes)
       setGateFailure(evaluation, "stack_out_of_footprint");
+  } else if (gHeadlessCase == eCASE_BROAD_COMPONENT_AUTHORITY) {
+    if (evaluation.dynamicBodies != 2)
+      setGateError(evaluation, "broad_authority_body_count");
   } else if (gHeadlessCase == eCASE_SPHERE_SHOT) {
     if (evaluation.dynamicBodies != 1 || !gShotSphere)
       setGateError(evaluation, "sphere_body_count");
@@ -1640,6 +2019,28 @@ static GateEvaluation evaluateGate(bool sceneQueriesAllowed = true) {
     if (evaluation.finalSphereGap > 3.0f ||
         gSphereShotMetrics.maxSettledAirborneGap > 8.0f)
       setGateFailure(evaluation, "airborne");
+  } else if (gHeadlessOwnershipProbe) {
+    if (evaluation.dynamicBodies != 1 || !gOwnershipProbeBox)
+      setGateError(evaluation, "ownership_probe_body_count");
+    if (gOwnershipProbeMetrics.minBottomGap == PX_MAX_F32 ||
+        gOwnershipProbeMetrics.maxBottomGap == -PX_MAX_F32)
+      setGateError(evaluation, "ownership_probe_missing_sample");
+    if (gOwnershipProbeMetrics.outOfFootprintFrames)
+      setGateFailure(evaluation, "ownership_probe_out_of_footprint");
+    if (gSurfaceHistoryProbe) {
+      if (!gSurfaceHistoryMetrics.motionStartCaptured ||
+          gSurfaceHistoryMetrics.motionSamples !=
+              gSurfaceHistoryMotionFrames)
+        setGateError(evaluation, "surface_history_motion_samples");
+      if (!gSurfaceHistoryMetrics.contactEvents ||
+          !gSurfaceHistoryMetrics.contactPoints)
+        setGateError(evaluation, "surface_history_contact_witness");
+      const PxReal surfaceRise =
+          gSurfaceHistoryMetrics.surfaceYAtMotionEnd -
+          gSurfaceHistoryMetrics.surfaceYAtMotionStart;
+      if (!PxIsFinite(surfaceRise) || surfaceRise < 0.9f)
+        setGateError(evaluation, "surface_history_mesh_motion");
+    }
   } else {
     if (evaluation.dynamicBodies !=
         gStressGridX * gStressGridZ + gStressMetrics.totalShotsFired)
@@ -1655,6 +2056,52 @@ static GateEvaluation evaluateGate(bool sceneQueriesAllowed = true) {
 static void printGateDetails(const GateEvaluation &evaluation) {
   if (gHeadlessCase == eCASE_SPHERE_SHOT) {
     printSphereShotSummary();
+  } else if (gSurfaceHistoryProbe) {
+    const PxReal invSamples =
+        gSurfaceHistoryMetrics.motionSamples
+            ? 1.0f / PxReal(gSurfaceHistoryMetrics.motionSamples)
+            : 0.0f;
+    const PxReal surfaceRise =
+        gSurfaceHistoryMetrics.surfaceYAtMotionEnd -
+        gSurfaceHistoryMetrics.surfaceYAtMotionStart;
+    const PxReal bodyRise = gSurfaceHistoryMetrics.bodyYAtMotionEnd -
+                            gSurfaceHistoryMetrics.bodyYAtMotionStart;
+    const PxReal meanBodyVelocityY =
+        gSurfaceHistoryMetrics.sumBodyVelocityY * invSamples;
+    printf("[DeformableMeshSurfaceHistory] solver=%s contactEvents=%u "
+           "contactPoints=%u motionSamples=%u targetVelocityY=%.9g "
+           "surfaceRise=%.9g bodyRise=%.9g poseFollowError=%.9g "
+           "meanBodyVelocityY=%.9g meanAbsRelativeVelocityY=%.9g "
+           "minBodyVelocityY=%.9g maxBodyVelocityY=%.9g "
+           "maxAbsRelativeVelocityY=%.9g velocityFollowRatio=%.9g\n",
+           Snippets::getSolverTypeName(gSolverType),
+           gSurfaceHistoryMetrics.contactEvents,
+           gSurfaceHistoryMetrics.contactPoints,
+           gSurfaceHistoryMetrics.motionSamples,
+           double(gSurfaceHistorySpeed), double(surfaceRise), double(bodyRise),
+           double(PxAbs(bodyRise - surfaceRise)), double(meanBodyVelocityY),
+           double(gSurfaceHistoryMetrics.sumAbsRelativeVelocityY * invSamples),
+           double(gSurfaceHistoryMetrics.minBodyVelocityY),
+           double(gSurfaceHistoryMetrics.maxBodyVelocityY),
+           double(gSurfaceHistoryMetrics.maxAbsRelativeVelocityY),
+           double(meanBodyVelocityY / gSurfaceHistorySpeed));
+  } else if (gHeadlessOwnershipProbe) {
+    const PxVec3 displacement =
+        gOwnershipProbeMetrics.finalPosition -
+        gOwnershipProbeMetrics.initialPosition;
+    printf("[DeformableMeshOwnershipProbe] solver=%s mass=%.3f "
+           "maxHorizontalSpeed=%.9g maxAngularSpeed=%.9g "
+           "minBottomGap=%.9g maxBottomGap=%.9g "
+           "finalDisplacement=(%.9g,%.9g,%.9g) outOfFootprintFrames=%u\n",
+           Snippets::getSolverTypeName(gSolverType),
+           double(getOwnershipProbeMass()),
+           double(gOwnershipProbeMetrics.maxHorizontalSpeed),
+           double(gOwnershipProbeMetrics.maxAngularSpeed),
+           double(gOwnershipProbeMetrics.minBottomGap),
+           double(gOwnershipProbeMetrics.maxBottomGap),
+           double(displacement.x), double(displacement.y),
+           double(displacement.z),
+           gOwnershipProbeMetrics.outOfFootprintFrames);
   } else if (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC) {
     printStressHeadlessSummary();
   } else {
@@ -1680,7 +2127,9 @@ static PxReal printableMetric(PxReal value) {
 
 static void printGateResult(const GateEvaluation &evaluation,
                             PxU32 physicsErrors, PxU32 physicsWarnings) {
-  const char *validation = gHeadlessCase == eCASE_STRESS_DIAGNOSTIC
+  const char *validation =
+      (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC ||
+       gHeadlessOwnershipProbe || gBroadAuthorityProbe)
                                ? "PROBE"
                                : "GATED";
   const bool stressDeepSinkObserved =
@@ -1689,7 +2138,11 @@ static void printGateResult(const GateEvaluation &evaluation,
        gStressMetrics.maxPassThroughShots ||
        gRuntimeMetrics.maxFullFallThroughBodies);
   const char *probeFinding =
-      stressDeepSinkObserved
+      gSurfaceHistoryProbe
+          ? "moving-surface-point-history"
+          : gNormalPostOwnershipProbe
+          ? "normal-post-stage-overlap"
+          : stressDeepSinkObserved
           ? "deep-sink-observed"
           : (gHeadlessCase == eCASE_STRESS_DIAGNOSTIC &&
                      (gStressMetrics.maxOutOfFootprintShots ||
@@ -1705,6 +2158,26 @@ static void printGateResult(const GateEvaluation &evaluation,
       sphereContactObserved ? gSphereShotMetrics.firstContactFrame : 0u;
   const PxReal stressWorstMinRel =
       stressMetricsObserved ? gStressMetrics.worstMinRelToSurface : 0.0f;
+  const bool ownershipMetricsObserved =
+      gHeadlessOwnershipProbe && gRuntimeMetrics.completedFrames > 0;
+  const PxVec3 ownershipDisplacement =
+      ownershipMetricsObserved
+          ? gOwnershipProbeMetrics.finalPosition -
+                gOwnershipProbeMetrics.initialPosition
+          : PxVec3(0.0f);
+  const PxReal historyInvSamples =
+      gSurfaceHistoryMetrics.motionSamples
+          ? 1.0f / PxReal(gSurfaceHistoryMetrics.motionSamples)
+          : 0.0f;
+  const PxReal historySurfaceRise =
+      gSurfaceHistoryMetrics.surfaceYAtMotionEnd -
+      gSurfaceHistoryMetrics.surfaceYAtMotionStart;
+  const PxReal historyBodyRise = gSurfaceHistoryMetrics.bodyYAtMotionEnd -
+                                 gSurfaceHistoryMetrics.bodyYAtMotionStart;
+  const PxReal historyMeanBodyVelocityY =
+      gSurfaceHistoryMetrics.sumBodyVelocityY * historyInvSamples;
+  const PxReal historyMeanAbsRelativeVelocityY =
+      gSurfaceHistoryMetrics.sumAbsRelativeVelocityY * historyInvSamples;
   printf(
       "[AVBD_GATE] schema=1 snippet=SnippetDeformableMesh case=%s solver=%s "
       "execution=%s requestedFrames=%u completedFrames=%u dt=%.9g seed=%u "
@@ -1734,6 +2207,20 @@ static void printGateResult(const GateEvaluation &evaluation,
       "stressMetricsObserved=%u stressWorstMinRelToSurface=%.9g "
       "stressMaxPassThroughShots=%u stressMaxOutOfFootprintShots=%u "
       "stressMaxOutOfFootprintBoxes=%u "
+      "ownershipMetricsObserved=%u ownershipProbeMass=%.9g "
+      "ownershipMaxHorizontalSpeed=%.9g ownershipMaxAngularSpeed=%.9g "
+      "ownershipMinBottomGap=%.9g ownershipMaxBottomGap=%.9g "
+      "ownershipFinalDx=%.9g ownershipFinalDy=%.9g ownershipFinalDz=%.9g "
+      "ownershipOutOfFootprintFrames=%u "
+      "historyMetricsObserved=%u historyContactEvents=%u "
+      "historyContactPoints=%u historyMotionSamples=%u "
+      "historyTargetVelocityY=%.9g historySurfaceRise=%.9g "
+      "historyBodyRise=%.9g historyPoseFollowError=%.9g "
+      "historyMeanBodyVelocityY=%.9g "
+      "historyMeanAbsRelativeVelocityY=%.9g "
+      "historyMinBodyVelocityY=%.9g historyMaxBodyVelocityY=%.9g "
+      "historyMaxAbsRelativeVelocityY=%.9g "
+      "historyVelocityFollowRatio=%.9g "
       "minSphereResponseFraction=%.9g responseWindowFrames=%u\n",
       getHeadlessCaseName(gHeadlessCase),
       Snippets::getSolverTypeName(gHeadlessOptions.solverType),
@@ -1776,14 +2263,62 @@ static void printGateResult(const GateEvaluation &evaluation,
       gStressMetrics.maxPassThroughShots,
       gStressMetrics.maxOutOfFootprintShots,
       gStressMetrics.maxOutOfFootprintBoxes,
+      ownershipMetricsObserved ? 1u : 0u,
+      double(ownershipMetricsObserved ? getOwnershipProbeMass() : 0.0f),
+      double(ownershipMetricsObserved
+                 ? gOwnershipProbeMetrics.maxHorizontalSpeed
+                 : 0.0f),
+      double(ownershipMetricsObserved ? gOwnershipProbeMetrics.maxAngularSpeed
+                                      : 0.0f),
+      double(ownershipMetricsObserved ? gOwnershipProbeMetrics.minBottomGap
+                                      : 0.0f),
+      double(ownershipMetricsObserved ? gOwnershipProbeMetrics.maxBottomGap
+                                      : 0.0f),
+      double(ownershipDisplacement.x), double(ownershipDisplacement.y),
+      double(ownershipDisplacement.z),
+      ownershipMetricsObserved
+          ? gOwnershipProbeMetrics.outOfFootprintFrames
+          : 0u,
+      gSurfaceHistoryProbe && gRuntimeMetrics.completedFrames > 0 ? 1u : 0u,
+      gSurfaceHistoryMetrics.contactEvents,
+      gSurfaceHistoryMetrics.contactPoints,
+      gSurfaceHistoryMetrics.motionSamples,
+      double(gSurfaceHistoryProbe ? gSurfaceHistorySpeed : 0.0f),
+      double(printableMetric(historySurfaceRise)),
+      double(printableMetric(historyBodyRise)),
+      double(printableMetric(PxAbs(historyBodyRise - historySurfaceRise))),
+      double(printableMetric(historyMeanBodyVelocityY)),
+      double(printableMetric(historyMeanAbsRelativeVelocityY)),
+      double(gSurfaceHistoryProbe
+                 ? printableMetric(gSurfaceHistoryMetrics.minBodyVelocityY)
+                 : 0.0f),
+      double(gSurfaceHistoryProbe
+                 ? printableMetric(gSurfaceHistoryMetrics.maxBodyVelocityY)
+                 : 0.0f),
+      double(printableMetric(
+          gSurfaceHistoryMetrics.maxAbsRelativeVelocityY)),
+      double(printableMetric(
+          historyMeanBodyVelocityY / gSurfaceHistorySpeed)),
       double(gMinSphereResponseFraction), gSphereResponseWindowFrames);
 }
 
 static int reportConfigurationError(const Snippets::HeadlessOptions &options,
                                     const char *message) {
   const char *validation =
-      Snippets::equalsIgnoreCase(options.caseName.c_str(),
-                                 "stress-diagnostic")
+      (Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "stress-diagnostic") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "surface-owner-light") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "surface-owner-heavy") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "shell-post-ownership") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "surface-history") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "normal-post-ownership") ||
+       Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                  "broad-component-authority"))
           ? "PROBE"
           : "GATED";
   printf("[AVBD_GATE_ERROR] snippet=SnippetDeformableMesh message=%s\n",
@@ -1882,6 +2417,16 @@ int snippetMain(int argc, const char *const *argv) {
       options.frames = 180;
     else if (headlessCase == eCASE_STRESS_DIAGNOSTIC)
       options.frames = 600;
+    else if (headlessCase == eCASE_SURFACE_OWNER_LIGHT ||
+             headlessCase == eCASE_SURFACE_OWNER_HEAVY ||
+             headlessCase == eCASE_SHELL_POST_OWNERSHIP)
+      options.frames = 240;
+    else if (headlessCase == eCASE_SURFACE_HISTORY)
+      options.frames = 180;
+    else if (headlessCase == eCASE_NORMAL_POST_OWNERSHIP)
+      options.frames = 240;
+    else if (headlessCase == eCASE_BROAD_COMPONENT_AUTHORITY)
+      options.frames = 16;
     else
       options.frames = 7200;
   }
@@ -1894,6 +2439,22 @@ int snippetMain(int argc, const char *const *argv) {
   if (headlessCase == eCASE_STRESS_DIAGNOSTIC && options.frames < 600)
     return reportConfigurationError(options,
                                     "stress_frames_must_be_at_least_600");
+  if ((headlessCase == eCASE_SURFACE_OWNER_LIGHT ||
+       headlessCase == eCASE_SURFACE_OWNER_HEAVY ||
+       headlessCase == eCASE_SHELL_POST_OWNERSHIP) &&
+      options.frames < 240)
+    return reportConfigurationError(
+        options, "surface_owner_frames_must_be_at_least_240");
+  if (headlessCase == eCASE_SURFACE_HISTORY && options.frames < 180)
+    return reportConfigurationError(
+        options, "surface_history_frames_must_be_at_least_180");
+  if (headlessCase == eCASE_NORMAL_POST_OWNERSHIP && options.frames < 240)
+    return reportConfigurationError(
+        options, "normal_post_frames_must_be_at_least_240");
+	if (headlessCase == eCASE_BROAD_COMPONENT_AUTHORITY &&
+	    options.frames < 16)
+		return reportConfigurationError(
+		    options, "broad_authority_frames_must_be_at_least_16");
   if (options.execution == Snippets::eHEADLESS_SEQUENTIAL &&
       options.solverType != PxSolverType::eAVBD)
     return reportConfigurationError(options, "sequential_requires_avbd");
@@ -1908,6 +2469,19 @@ int snippetMain(int argc, const char *const *argv) {
   gHeadlessMode = options.headless;
   gHeadlessSphereShot = headlessCase == eCASE_SPHERE_SHOT;
   gHeadlessStress = headlessCase == eCASE_STRESS_DIAGNOSTIC;
+  gHeadlessOwnershipProbe =
+      headlessCase == eCASE_SURFACE_OWNER_LIGHT ||
+      headlessCase == eCASE_SURFACE_OWNER_HEAVY ||
+      headlessCase == eCASE_SHELL_POST_OWNERSHIP ||
+      headlessCase == eCASE_SURFACE_HISTORY ||
+      headlessCase == eCASE_NORMAL_POST_OWNERSHIP;
+  gOwnershipProbeHeavy = headlessCase == eCASE_SURFACE_OWNER_HEAVY;
+  gShellPostOwnershipProbe = headlessCase == eCASE_SHELL_POST_OWNERSHIP;
+  gSurfaceHistoryProbe = headlessCase == eCASE_SURFACE_HISTORY;
+  gNormalPostOwnershipProbe =
+      headlessCase == eCASE_NORMAL_POST_OWNERSHIP;
+  gBroadAuthorityProbe =
+      headlessCase == eCASE_BROAD_COMPONENT_AUTHORITY;
   gCreateStack = headlessCase == eCASE_MOVING_MESH_STACK;
   gHeadlessFrameCount = options.frames;
   resetRuntimeState();

@@ -86,7 +86,21 @@ enum JointHeadlessCase {
   eCASE_SPHERICAL_CONE_OUTSIDE,
   eCASE_NATIVE_REACTION,
   eCASE_NATIVE_NO_BREAK,
-  eCASE_NATIVE_BREAK
+  eCASE_NATIVE_BREAK,
+  eCASE_REVOLUTE_MOTOR,
+  eCASE_REVOLUTE_MOTOR_LIMIT,
+  eCASE_REVOLUTE_MOTOR_DYNAMIC_LIMIT,
+  eCASE_REVOLUTE_MOTOR_FREESPIN,
+  eCASE_REVOLUTE_MOTOR_DYNAMIC_FREESPIN,
+  eCASE_REVOLUTE_MOTOR_RATIO,
+  eCASE_REVOLUTE_MOTOR_CONTACT,
+  eCASE_REVOLUTE_MOTOR_KINEMATIC,
+  eCASE_REVOLUTE_MOTOR_OFF_PRINCIPAL,
+  eCASE_REVOLUTE_MOTOR_OFF_CENTER,
+  eCASE_REVOLUTE_MOTOR_SPATIAL,
+  eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_PRINCIPAL,
+  eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_CENTER,
+  eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL
 };
 
 enum EndpointKind {
@@ -629,6 +643,573 @@ static const PxReal gDisabledPairReactionMaximum = 1e-4f;
 static const PxReal gDisabledPairCenterOfMassErrorMaximum = 1e-2f;
 static const PxReal gDisabledPairTotalMomentumMaximum = 5e-2f;
 
+struct RevoluteMotorStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal finalRelativeVelocity;
+  PxReal finalRelativeError;
+  PxReal maximumLateRelativeError;
+  PxReal maximumAngularMomentumDrift;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorStats()
+      : stateSamples(0), nonFiniteSamples(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), finalRelativeVelocity(0.0f),
+        finalRelativeError(PX_MAX_F32),
+        maximumLateRelativeError(0.0f),
+        maximumAngularMomentumDrift(0.0f), maximumAnchorError(0.0f),
+        maximumAxisMisalignment(0.0f), driveEnabledReadback(false),
+        actorOrderValid(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorStats gRevoluteMotorStats;
+static PxRigidDynamic *gRevoluteMotorBodyA = NULL;
+static PxRigidDynamic *gRevoluteMotorBodyB = NULL;
+static PxRevoluteJoint *gRevoluteMotorJoint = NULL;
+static const PxReal gRevoluteMotorTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorForceLimit = 1000.0f;
+static const PxReal gRevoluteMotorInertiaA = 1.0f;
+static const PxReal gRevoluteMotorInertiaB = 3.0f;
+static const PxU32 gRevoluteMotorLateBeginFrame = 30;
+static const PxReal gRevoluteMotorRelativeErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorMomentumDriftMaximum = 1e-3f;
+static const PxReal gRevoluteMotorAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorLimitStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 reverseEvents;
+  PxU32 upperBoundSamples;
+  PxU32 lowerBoundSamples;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal finalTargetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal lowerLimitReadback;
+  PxReal upperLimitReadback;
+  PxReal initialAngle;
+  PxReal finalAngle;
+  PxReal minimumAngle;
+  PxReal maximumAngle;
+  PxReal maximumUpperViolation;
+  PxReal maximumLowerViolation;
+  PxReal maximumLateOutwardVelocity;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool limitEnabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorLimitStats()
+      : stateSamples(0), nonFiniteSamples(0), reverseEvents(0),
+        upperBoundSamples(0), lowerBoundSamples(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        finalTargetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), lowerLimitReadback(0.0f),
+        upperLimitReadback(0.0f), initialAngle(0.0f), finalAngle(0.0f),
+        minimumAngle(PX_MAX_F32), maximumAngle(-PX_MAX_F32),
+        maximumUpperViolation(0.0f), maximumLowerViolation(0.0f),
+        maximumLateOutwardVelocity(0.0f), maximumAnchorError(0.0f),
+        maximumAxisMisalignment(0.0f), driveEnabledReadback(false),
+        limitEnabledReadback(false), actorOrderValid(false),
+        cleanupComplete(false) {}
+};
+
+static RevoluteMotorLimitStats gRevoluteMotorLimitStats;
+static PxRigidDynamic *gRevoluteMotorLimitBodyA = NULL;
+static PxRigidDynamic *gRevoluteMotorLimitBody = NULL;
+static PxRevoluteJoint *gRevoluteMotorLimitJoint = NULL;
+static const PxReal gRevoluteMotorLimitTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorLimitForceLimit = 1000.0f;
+static const PxReal gRevoluteMotorLimitLower = -0.5f;
+static const PxReal gRevoluteMotorLimitUpper = 0.5f;
+static const PxU32 gRevoluteMotorLimitReverseFrame = 180;
+static const PxReal gRevoluteMotorLimitTravelMinimum = 0.4f;
+static const PxReal gRevoluteMotorLimitRangeMinimum = 0.9f;
+static const PxU32 gRevoluteMotorLimitBoundarySettleSamples = 8;
+static const PxReal gRevoluteMotorLimitFinalTolerance = 0.05f;
+static const PxReal gRevoluteMotorLimitViolationMaximum = 0.02f;
+static const PxReal gRevoluteMotorLimitOutwardVelocityMaximum = 0.05f;
+static const PxReal gRevoluteMotorLimitAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorLimitAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorFreeSpinStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 boostEvents;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal boostVelocityReadback;
+  PxReal preBoostFinalVelocity;
+  PxReal maximumLatePreBoostError;
+  PxReal finalVelocity;
+  PxReal minimumPostBoostVelocity;
+  PxReal maximumPostBoostVelocityDrop;
+  PxReal maximumAngularMomentumDrift;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool freeSpinEnabledReadback;
+  bool limitDisabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorFreeSpinStats()
+      : stateSamples(0), nonFiniteSamples(0), boostEvents(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), boostVelocityReadback(0.0f),
+        preBoostFinalVelocity(0.0f),
+        maximumLatePreBoostError(0.0f), finalVelocity(0.0f),
+        minimumPostBoostVelocity(PX_MAX_F32),
+        maximumPostBoostVelocityDrop(0.0f),
+        maximumAngularMomentumDrift(0.0f), maximumAnchorError(0.0f),
+        maximumAxisMisalignment(0.0f), driveEnabledReadback(false),
+        freeSpinEnabledReadback(false), limitDisabledReadback(false),
+        actorOrderValid(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorFreeSpinStats gRevoluteMotorFreeSpinStats;
+static PxRigidDynamic *gRevoluteMotorFreeSpinBodyA = NULL;
+static PxRigidDynamic *gRevoluteMotorFreeSpinBody = NULL;
+static PxRevoluteJoint *gRevoluteMotorFreeSpinJoint = NULL;
+static const PxReal gRevoluteMotorFreeSpinTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorFreeSpinForceLimit = 1000.0f;
+static const PxReal gRevoluteMotorFreeSpinBoostVelocity = 5.0f;
+static const PxU32 gRevoluteMotorFreeSpinLateBeginFrame = 30;
+static const PxU32 gRevoluteMotorFreeSpinBoostFrame = 120;
+static const PxReal gRevoluteMotorFreeSpinTargetErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorFreeSpinMinimumCoastVelocity = 4.9f;
+static const PxReal gRevoluteMotorFreeSpinVelocityDropMaximum = 0.1f;
+static const PxReal gRevoluteMotorFreeSpinAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorFreeSpinAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorRatioStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal driveGearRatioReadback;
+  PxReal finalVelocityA;
+  PxReal finalVelocityB;
+  PxReal finalWeightedVelocity;
+  PxReal finalWeightedVelocityError;
+  PxReal maximumLateWeightedVelocityError;
+  PxReal initialOffPrincipalResponseA;
+  PxReal initialOffPrincipalResponseB;
+  PxReal maximumLateRelativeSwingVelocity;
+  PxReal maximumInitialGeneralizedMomentumDrift;
+  PxReal maximumGeneralizedMomentumDrift;
+  PxReal initialPerpendicularLeverArmA;
+  PxReal initialPerpendicularLeverArmB;
+  PxReal finalRelativeAnchorPointSpeed;
+  PxReal maximumLateRelativeAnchorPointSpeed;
+  PxReal maximumTotalLinearMomentum;
+  PxReal maximumInitialTotalAngularMomentum;
+  PxReal maximumLinearSpeed;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool freeSpinDisabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorRatioStats()
+      : stateSamples(0), nonFiniteSamples(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), driveGearRatioReadback(0.0f),
+        finalVelocityA(0.0f), finalVelocityB(0.0f),
+        finalWeightedVelocity(0.0f),
+        finalWeightedVelocityError(PX_MAX_F32),
+        maximumLateWeightedVelocityError(0.0f),
+        initialOffPrincipalResponseA(0.0f),
+        initialOffPrincipalResponseB(0.0f),
+        maximumLateRelativeSwingVelocity(0.0f),
+        maximumInitialGeneralizedMomentumDrift(0.0f),
+        maximumGeneralizedMomentumDrift(0.0f),
+        initialPerpendicularLeverArmA(0.0f),
+        initialPerpendicularLeverArmB(0.0f),
+        finalRelativeAnchorPointSpeed(PX_MAX_F32),
+        maximumLateRelativeAnchorPointSpeed(0.0f),
+        maximumTotalLinearMomentum(0.0f),
+        maximumInitialTotalAngularMomentum(0.0f),
+        maximumLinearSpeed(0.0f),
+        maximumAnchorError(0.0f), maximumAxisMisalignment(0.0f),
+        driveEnabledReadback(false), freeSpinDisabledReadback(false),
+        actorOrderValid(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorRatioStats gRevoluteMotorRatioStats;
+static PxRigidDynamic *gRevoluteMotorRatioBodyA = NULL;
+static PxRigidDynamic *gRevoluteMotorRatioBodyB = NULL;
+static PxRevoluteJoint *gRevoluteMotorRatioJoint = NULL;
+static PxVec3 gRevoluteMotorRatioConfiguredAnchorA(0.0f);
+static PxVec3 gRevoluteMotorRatioConfiguredAnchorB(0.0f);
+static const PxReal gRevoluteMotorRatioTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorRatioForceLimit = 1000.0f;
+static const PxReal gRevoluteMotorRatioDriveGearRatio = 2.5f;
+static const PxReal gRevoluteMotorRatioInertiaA = 1.0f;
+static const PxReal gRevoluteMotorRatioInertiaB = 3.0f;
+static const PxVec3 gRevoluteMotorDynamicOffPrincipalInertiaA(
+    1.0f, 4.0f, 7.0f);
+static const PxVec3 gRevoluteMotorDynamicOffPrincipalInertiaB(
+    2.0f, 5.0f, 8.0f);
+static const PxU32 gRevoluteMotorRatioLateBeginFrame = 30;
+static const PxU32
+    gRevoluteMotorDynamicOffPrincipalMomentumWindowFrames = 12;
+static const PxReal gRevoluteMotorRatioVelocityErrorMaximum = 0.05f;
+static const PxReal
+    gRevoluteMotorDynamicOffPrincipalResponseMinimum = 0.05f;
+static const PxReal
+    gRevoluteMotorDynamicOffPrincipalSwingVelocityMaximum = 0.05f;
+static const PxReal gRevoluteMotorRatioMomentumDriftMaximum = 1e-3f;
+static const PxReal
+    gRevoluteMotorDynamicOffPrincipalInitialMomentumDriftMaximum =
+        0.25f;
+static const PxReal
+    gRevoluteMotorDynamicOffCenterLeverArmMinimum = 0.5f;
+static const PxReal
+    gRevoluteMotorDynamicOffCenterAnchorSpeedMaximum = 0.05f;
+static const PxReal
+    gRevoluteMotorDynamicOffCenterLinearMomentumMaximum = 1e-3f;
+static const PxReal
+    gRevoluteMotorDynamicOffCenterInitialAngularMomentumMaximum =
+        0.25f;
+static const PxReal
+    gRevoluteMotorDynamicOffCenterLinearSpeedMinimum = 0.5f;
+static const PxReal gRevoluteMotorRatioAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorRatioAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorContactStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 contactEvents;
+  PxU32 contactPointCount;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal finalVelocityA;
+  PxReal finalVelocityB;
+  PxReal finalRelativeVelocity;
+  PxReal finalRelativeError;
+  PxReal maximumLateRelativeError;
+  PxU32 lateDriveReactionSamples;
+  PxReal lateDriveReactionSum;
+  PxReal maximumLateDriveReaction;
+  PxReal totalNormalImpulse;
+  PxReal totalTangentialImpulse;
+  PxReal maximumTangentialImpulse;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  PxReal maximumCenterHeightError;
+  bool driveEnabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorContactStats()
+      : stateSamples(0), nonFiniteSamples(0), contactEvents(0),
+        contactPointCount(0), initialDynamicActors(PX_MAX_U32),
+        initialStaticActors(PX_MAX_U32), initialConstraints(PX_MAX_U32),
+        finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), finalVelocityA(0.0f),
+        finalVelocityB(0.0f), finalRelativeVelocity(0.0f),
+        finalRelativeError(PX_MAX_F32),
+        maximumLateRelativeError(0.0f), lateDriveReactionSamples(0),
+        lateDriveReactionSum(0.0f), maximumLateDriveReaction(0.0f),
+        totalNormalImpulse(0.0f),
+        totalTangentialImpulse(0.0f), maximumTangentialImpulse(0.0f),
+        maximumAnchorError(0.0f), maximumAxisMisalignment(0.0f),
+        maximumCenterHeightError(0.0f), driveEnabledReadback(false),
+        actorOrderValid(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorContactStats gRevoluteMotorContactStats;
+static PxRigidDynamic *gRevoluteMotorContactBodyA = NULL;
+static PxRigidDynamic *gRevoluteMotorContactBodyB = NULL;
+static PxRigidStatic *gRevoluteMotorContactGround = NULL;
+static PxRevoluteJoint *gRevoluteMotorContactJoint = NULL;
+static const PxReal gRevoluteMotorContactTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorContactForceLimit = 1000.0f;
+static const PxReal gRevoluteMotorContactRadius = 0.5f;
+static const PxReal gRevoluteMotorContactHalfHeight = 0.5f;
+static const PxReal gRevoluteMotorContactCenterHeight = 0.5f;
+static const PxU32 gRevoluteMotorContactLateBeginFrame = 60;
+static const PxReal gRevoluteMotorContactVelocityErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorContactDriveReactionMinimum = 1e-3f;
+static const PxReal gRevoluteMotorContactAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorContactAxisMisalignmentMaximum = 1e-3f;
+static const PxReal gRevoluteMotorContactCenterHeightErrorMaximum = 0.02f;
+
+struct RevoluteMotorKinematicStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 targetUpdates;
+  PxU32 targetUpdateFailures;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal finalKinematicVelocity;
+  PxReal finalDynamicVelocity;
+  PxReal finalRelativeVelocity;
+  PxReal finalRelativeError;
+  PxReal maximumLateRelativeError;
+  PxReal maximumLateKinematicVelocityError;
+  PxReal maximumLateDynamicVelocityError;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool actorOrderValid;
+  bool kinematicFlagReadback;
+  bool cleanupComplete;
+
+  RevoluteMotorKinematicStats()
+      : stateSamples(0), nonFiniteSamples(0), targetUpdates(0),
+        targetUpdateFailures(0), initialDynamicActors(PX_MAX_U32),
+        initialStaticActors(PX_MAX_U32), initialConstraints(PX_MAX_U32),
+        finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), finalKinematicVelocity(0.0f),
+        finalDynamicVelocity(0.0f), finalRelativeVelocity(0.0f),
+        finalRelativeError(PX_MAX_F32),
+        maximumLateRelativeError(0.0f),
+        maximumLateKinematicVelocityError(0.0f),
+        maximumLateDynamicVelocityError(0.0f),
+        maximumAnchorError(0.0f), maximumAxisMisalignment(0.0f),
+        driveEnabledReadback(false), actorOrderValid(false),
+        kinematicFlagReadback(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorKinematicStats gRevoluteMotorKinematicStats;
+static PxRigidDynamic *gRevoluteMotorKinematicBody = NULL;
+static PxRigidDynamic *gRevoluteMotorKinematicDynamicBody = NULL;
+static PxRevoluteJoint *gRevoluteMotorKinematicJoint = NULL;
+static const PxTransform gRevoluteMotorKinematicInitialPose(
+    PxVec3(0.0f, 10.0f, 0.0f));
+static const PxReal gRevoluteMotorKinematicEndpointVelocity = 1.0f;
+static const PxReal gRevoluteMotorKinematicTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorKinematicExpectedDynamicVelocity = 3.0f;
+static const PxReal gRevoluteMotorKinematicForceLimit = 1000.0f;
+static const PxU32 gRevoluteMotorKinematicLateBeginFrame = 60;
+static const PxReal gRevoluteMotorKinematicVelocityErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorKinematicAnchorErrorMaximum = 1e-3f;
+static const PxReal gRevoluteMotorKinematicAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorOffPrincipalStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal initialOffPrincipalResponse;
+  PxReal finalHingeVelocity;
+  PxReal finalHingeVelocityError;
+  PxReal maximumLateHingeVelocityError;
+  PxReal maximumLateSwingVelocity;
+  PxReal maximumSwingReaction;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorOffPrincipalStats()
+      : stateSamples(0), nonFiniteSamples(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f), initialOffPrincipalResponse(0.0f),
+        finalHingeVelocity(0.0f),
+        finalHingeVelocityError(PX_MAX_F32),
+        maximumLateHingeVelocityError(0.0f),
+        maximumLateSwingVelocity(0.0f),
+        maximumSwingReaction(0.0f), maximumAnchorError(0.0f),
+        maximumAxisMisalignment(0.0f), driveEnabledReadback(false),
+        actorOrderValid(false), cleanupComplete(false) {}
+};
+
+static RevoluteMotorOffPrincipalStats
+    gRevoluteMotorOffPrincipalStats;
+static PxRigidDynamic *gRevoluteMotorOffPrincipalBody = NULL;
+static PxRevoluteJoint *gRevoluteMotorOffPrincipalJoint = NULL;
+static const PxVec3 gRevoluteMotorOffPrincipalInertia(1.0f, 4.0f, 7.0f);
+static const PxReal gRevoluteMotorOffPrincipalAngle = PxPi / 6.0f;
+static const PxReal gRevoluteMotorOffPrincipalTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorOffPrincipalForceLimit = 1000.0f;
+static const PxU32 gRevoluteMotorOffPrincipalLateBeginFrame = 60;
+static const PxReal gRevoluteMotorOffPrincipalResponseMinimum = 0.05f;
+static const PxReal gRevoluteMotorOffPrincipalVelocityErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorOffPrincipalSwingVelocityMaximum = 0.05f;
+static const PxReal gRevoluteMotorOffPrincipalAnchorErrorMaximum = 1e-3f;
+static const PxReal
+    gRevoluteMotorOffPrincipalAxisMisalignmentMaximum = 1e-3f;
+
+struct RevoluteMotorOffCenterStats {
+  PxU32 stateSamples;
+  PxU32 nonFiniteSamples;
+  PxU32 initialDynamicActors;
+  PxU32 initialStaticActors;
+  PxU32 initialConstraints;
+  PxU32 finalDynamicActors;
+  PxU32 finalStaticActors;
+  PxU32 finalConstraints;
+  PxU32 cleanupDynamicActors;
+  PxU32 cleanupStaticActors;
+  PxU32 cleanupConstraints;
+  PxReal targetVelocityReadback;
+  PxReal forceLimitReadback;
+  PxReal initialPerpendicularLeverArm;
+  PxReal initialOffPrincipalResponse;
+  PxReal finalHingeVelocity;
+  PxReal finalHingeVelocityError;
+  PxReal maximumLateHingeVelocityError;
+  PxReal maximumLateSwingVelocity;
+  PxReal finalAnchorPointSpeed;
+  PxReal maximumLateAnchorPointSpeed;
+  PxReal maximumLinearSpeed;
+  PxReal maximumLinearReaction;
+  PxReal maximumAnchorError;
+  PxReal maximumAxisMisalignment;
+  bool driveEnabledReadback;
+  bool actorOrderValid;
+  bool cleanupComplete;
+
+  RevoluteMotorOffCenterStats()
+      : stateSamples(0), nonFiniteSamples(0),
+        initialDynamicActors(PX_MAX_U32), initialStaticActors(PX_MAX_U32),
+        initialConstraints(PX_MAX_U32), finalDynamicActors(PX_MAX_U32),
+        finalStaticActors(PX_MAX_U32), finalConstraints(PX_MAX_U32),
+        cleanupDynamicActors(PX_MAX_U32),
+        cleanupStaticActors(PX_MAX_U32),
+        cleanupConstraints(PX_MAX_U32), targetVelocityReadback(0.0f),
+        forceLimitReadback(0.0f),
+        initialPerpendicularLeverArm(0.0f),
+        initialOffPrincipalResponse(0.0f),
+        finalHingeVelocity(0.0f),
+        finalHingeVelocityError(PX_MAX_F32),
+        maximumLateHingeVelocityError(0.0f),
+        maximumLateSwingVelocity(0.0f),
+        finalAnchorPointSpeed(PX_MAX_F32),
+        maximumLateAnchorPointSpeed(0.0f),
+        maximumLinearSpeed(0.0f), maximumLinearReaction(0.0f),
+        maximumAnchorError(0.0f), maximumAxisMisalignment(0.0f),
+        driveEnabledReadback(false), actorOrderValid(false),
+        cleanupComplete(false) {}
+};
+
+static RevoluteMotorOffCenterStats gRevoluteMotorOffCenterStats;
+static PxRigidDynamic *gRevoluteMotorOffCenterBody = NULL;
+static PxRevoluteJoint *gRevoluteMotorOffCenterJoint = NULL;
+static const PxTransform gRevoluteMotorOffCenterInitialPose(
+    PxVec3(0.0f, 11.0f, 0.0f));
+static const PxVec3 gRevoluteMotorOffCenterLocalAnchor(0.0f, -1.0f, 0.0f);
+static PxVec3 gRevoluteMotorOffCenterConfiguredLocalAnchor(
+    gRevoluteMotorOffCenterLocalAnchor);
+static const PxReal gRevoluteMotorOffCenterTargetVelocity = 2.0f;
+static const PxReal gRevoluteMotorOffCenterForceLimit = 1000.0f;
+static const PxU32 gRevoluteMotorOffCenterLateBeginFrame = 60;
+static const PxReal gRevoluteMotorOffCenterLeverArmMinimum = 0.5f;
+static const PxReal gRevoluteMotorOffCenterVelocityErrorMaximum = 0.05f;
+static const PxReal gRevoluteMotorOffCenterAnchorSpeedMaximum = 0.05f;
+static const PxReal gRevoluteMotorOffCenterAnchorErrorMaximum = 2e-3f;
+static const PxReal gRevoluteMotorOffCenterAxisMisalignmentMaximum = 1e-3f;
+
 struct NativeBreakReactionStats {
   PxU32 stateSamples;
   PxU32 forceReads;
@@ -872,6 +1453,45 @@ static bool tryParseHeadlessCase(const char *value,
     headlessCase = eCASE_NATIVE_NO_BREAK;
   else if (Snippets::equalsIgnoreCase(value, "native-break"))
     headlessCase = eCASE_NATIVE_BREAK;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor"))
+    headlessCase = eCASE_REVOLUTE_MOTOR;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor-limit"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_LIMIT;
+  else if (Snippets::equalsIgnoreCase(
+               value, "revolute-motor-dynamic-limit"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_DYNAMIC_LIMIT;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor-freespin"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_FREESPIN;
+  else if (Snippets::equalsIgnoreCase(
+               value, "revolute-motor-dynamic-freespin"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_DYNAMIC_FREESPIN;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor-ratio"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_RATIO;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor-contact"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_CONTACT;
+  else if (Snippets::equalsIgnoreCase(value, "revolute-motor-kinematic"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_KINEMATIC;
+  else if (Snippets::equalsIgnoreCase(value,
+                                      "revolute-motor-off-principal"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_OFF_PRINCIPAL;
+  else if (Snippets::equalsIgnoreCase(value,
+                                      "revolute-motor-off-center"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_OFF_CENTER;
+  else if (Snippets::equalsIgnoreCase(value,
+                                      "revolute-motor-spatial"))
+    headlessCase = eCASE_REVOLUTE_MOTOR_SPATIAL;
+  else if (Snippets::equalsIgnoreCase(
+               value, "revolute-motor-dynamic-off-principal"))
+    headlessCase =
+        eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_PRINCIPAL;
+  else if (Snippets::equalsIgnoreCase(
+               value, "revolute-motor-dynamic-off-center"))
+    headlessCase =
+        eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_CENTER;
+  else if (Snippets::equalsIgnoreCase(
+               value, "revolute-motor-dynamic-spatial"))
+    headlessCase =
+        eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL;
   else
     return false;
   return true;
@@ -907,6 +1527,34 @@ static const char *getHeadlessCaseName(JointHeadlessCase headlessCase) {
     return "native-no-break";
   case eCASE_NATIVE_BREAK:
     return "native-break";
+  case eCASE_REVOLUTE_MOTOR:
+    return "revolute-motor";
+  case eCASE_REVOLUTE_MOTOR_LIMIT:
+    return "revolute-motor-limit";
+  case eCASE_REVOLUTE_MOTOR_DYNAMIC_LIMIT:
+    return "revolute-motor-dynamic-limit";
+  case eCASE_REVOLUTE_MOTOR_FREESPIN:
+    return "revolute-motor-freespin";
+  case eCASE_REVOLUTE_MOTOR_DYNAMIC_FREESPIN:
+    return "revolute-motor-dynamic-freespin";
+  case eCASE_REVOLUTE_MOTOR_RATIO:
+    return "revolute-motor-ratio";
+  case eCASE_REVOLUTE_MOTOR_CONTACT:
+    return "revolute-motor-contact";
+  case eCASE_REVOLUTE_MOTOR_KINEMATIC:
+    return "revolute-motor-kinematic";
+  case eCASE_REVOLUTE_MOTOR_OFF_PRINCIPAL:
+    return "revolute-motor-off-principal";
+  case eCASE_REVOLUTE_MOTOR_OFF_CENTER:
+    return "revolute-motor-off-center";
+  case eCASE_REVOLUTE_MOTOR_SPATIAL:
+    return "revolute-motor-spatial";
+  case eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_PRINCIPAL:
+    return "revolute-motor-dynamic-off-principal";
+  case eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_CENTER:
+    return "revolute-motor-dynamic-off-center";
+  case eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL:
+    return "revolute-motor-dynamic-spatial";
   default:
     return "unknown";
   }
@@ -929,6 +1577,88 @@ static bool isNativeBreakReactionCase() {
 
 static bool isNativeBreakCase() {
   return gHeadlessCase == eCASE_NATIVE_BREAK;
+}
+
+static bool isRevoluteMotorCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR;
+}
+
+static bool isRevoluteMotorLimitCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_LIMIT ||
+         gHeadlessCase == eCASE_REVOLUTE_MOTOR_DYNAMIC_LIMIT;
+}
+
+static bool isRevoluteMotorDynamicLimitCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_DYNAMIC_LIMIT;
+}
+
+static bool isRevoluteMotorFreeSpinCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_FREESPIN ||
+         gHeadlessCase == eCASE_REVOLUTE_MOTOR_DYNAMIC_FREESPIN;
+}
+
+static bool isRevoluteMotorDynamicFreeSpinCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_DYNAMIC_FREESPIN;
+}
+
+static bool isRevoluteMotorRatioCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_RATIO ||
+         gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_PRINCIPAL ||
+         gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_CENTER ||
+         gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL;
+}
+
+static bool isRevoluteMotorDynamicOffPrincipalCase() {
+  return gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_PRINCIPAL ||
+         gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL;
+}
+
+static bool isRevoluteMotorDynamicOffCenterCase() {
+  return gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_OFF_CENTER ||
+         gHeadlessCase ==
+             eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL;
+}
+
+static bool isRevoluteMotorDynamicSpatialCase() {
+  return gHeadlessCase ==
+         eCASE_REVOLUTE_MOTOR_DYNAMIC_SPATIAL;
+}
+
+static bool isRevoluteMotorContactCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_CONTACT;
+}
+
+static bool isRevoluteMotorKinematicCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_KINEMATIC;
+}
+
+static bool isRevoluteMotorOffPrincipalCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_OFF_PRINCIPAL;
+}
+
+static bool isRevoluteMotorOffCenterCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_OFF_CENTER ||
+         gHeadlessCase == eCASE_REVOLUTE_MOTOR_SPATIAL;
+}
+
+static bool isRevoluteMotorSpatialCase() {
+  return gHeadlessCase == eCASE_REVOLUTE_MOTOR_SPATIAL;
+}
+
+static bool isRevoluteMotorFamilyCase() {
+  return isRevoluteMotorCase() || isRevoluteMotorLimitCase() ||
+         isRevoluteMotorFreeSpinCase() ||
+         isRevoluteMotorRatioCase() ||
+         isRevoluteMotorContactCase() ||
+         isRevoluteMotorKinematicCase() ||
+         isRevoluteMotorOffPrincipalCase() ||
+         isRevoluteMotorOffCenterCase();
 }
 
 static bool isNativeAngularReactionCase() {
@@ -1105,6 +1835,8 @@ static const char *getAuthorityTargetResponseGateName(
 }
 
 static const char *getGateJointName() {
+  if (isRevoluteMotorFamilyCase())
+    return "revolute";
   if (isSphericalConeCase())
     return "spherical";
   if (isNativeBreakReactionCase())
@@ -1149,6 +1881,44 @@ static void resetRuntimeState() {
   gForceStaticJoint = NULL;
   gForceStaticInitialPose = PxTransform(PxIdentity);
   gForcePairBody1InitialPose = PxTransform(PxIdentity);
+  gRevoluteMotorStats = RevoluteMotorStats();
+  gRevoluteMotorBodyA = NULL;
+  gRevoluteMotorBodyB = NULL;
+  gRevoluteMotorJoint = NULL;
+  gRevoluteMotorLimitStats = RevoluteMotorLimitStats();
+  gRevoluteMotorLimitBodyA = NULL;
+  gRevoluteMotorLimitBody = NULL;
+  gRevoluteMotorLimitJoint = NULL;
+  gRevoluteMotorFreeSpinStats = RevoluteMotorFreeSpinStats();
+  gRevoluteMotorFreeSpinBodyA = NULL;
+  gRevoluteMotorFreeSpinBody = NULL;
+  gRevoluteMotorFreeSpinJoint = NULL;
+  gRevoluteMotorRatioStats = RevoluteMotorRatioStats();
+  gRevoluteMotorRatioBodyA = NULL;
+  gRevoluteMotorRatioBodyB = NULL;
+  gRevoluteMotorRatioJoint = NULL;
+  gRevoluteMotorRatioConfiguredAnchorA = PxVec3(0.0f);
+  gRevoluteMotorRatioConfiguredAnchorB = PxVec3(0.0f);
+  gRevoluteMotorContactStats = RevoluteMotorContactStats();
+  gRevoluteMotorContactBodyA = NULL;
+  gRevoluteMotorContactBodyB = NULL;
+  gRevoluteMotorContactGround = NULL;
+  gRevoluteMotorContactJoint = NULL;
+  gRevoluteMotorKinematicStats =
+      RevoluteMotorKinematicStats();
+  gRevoluteMotorKinematicBody = NULL;
+  gRevoluteMotorKinematicDynamicBody = NULL;
+  gRevoluteMotorKinematicJoint = NULL;
+  gRevoluteMotorOffPrincipalStats =
+      RevoluteMotorOffPrincipalStats();
+  gRevoluteMotorOffPrincipalBody = NULL;
+  gRevoluteMotorOffPrincipalJoint = NULL;
+  gRevoluteMotorOffCenterStats =
+      RevoluteMotorOffCenterStats();
+  gRevoluteMotorOffCenterBody = NULL;
+  gRevoluteMotorOffCenterJoint = NULL;
+  gRevoluteMotorOffCenterConfiguredLocalAnchor =
+      gRevoluteMotorOffCenterLocalAnchor;
   gEndpointStats = EndpointProbeStats();
   gEndpointAngularStats = EndpointAngularProbeStats();
   gEndpointTarget = NULL;
@@ -1160,7 +1930,9 @@ static void resetRuntimeState() {
 enum GateFilterKind {
   eFILTER_UNTAGGED = 0,
   eFILTER_CHAIN_BODY = 1,
-  eFILTER_PROJECTILE = 2
+  eFILTER_PROJECTILE = 2,
+  eFILTER_MOTOR_CONTACT_BODY = 3,
+  eFILTER_MOTOR_CONTACT_GROUND = 4
 };
 
 static bool findChainBody(const PxActor *actor, PxU32 &chainIndex,
@@ -1255,6 +2027,51 @@ public:
   virtual void onContact(const PxContactPairHeader &pairHeader,
                          const PxContactPair *pairs,
                          PxU32 pairCount) PX_OVERRIDE {
+    const PxActor *actor0 = pairHeader.actors[0];
+    const PxActor *actor1 = pairHeader.actors[1];
+    const bool actor0IsMotorBody =
+        actor0 == gRevoluteMotorContactBodyA ||
+        actor0 == gRevoluteMotorContactBodyB;
+    const bool actor1IsMotorBody =
+        actor1 == gRevoluteMotorContactBodyA ||
+        actor1 == gRevoluteMotorContactBodyB;
+    const bool motorContactPair =
+        isRevoluteMotorContactCase() &&
+        ((actor0IsMotorBody &&
+          actor1 == gRevoluteMotorContactGround) ||
+         (actor1IsMotorBody &&
+          actor0 == gRevoluteMotorContactGround));
+    if (motorContactPair) {
+      RevoluteMotorContactStats &stats =
+          gRevoluteMotorContactStats;
+      stats.contactEvents += pairCount;
+      for (PxU32 i = 0; i < pairCount; ++i) {
+        std::vector<PxContactPairPoint> points(pairs[i].contactCount);
+        const PxU32 extracted =
+            pairs[i].extractContacts(points.data(),
+                                     pairs[i].contactCount);
+        stats.contactPointCount += extracted;
+        for (PxU32 pointIndex = 0; pointIndex < extracted;
+             ++pointIndex) {
+          const PxContactPairPoint &point = points[pointIndex];
+          if (!point.impulse.isFinite() || !point.normal.isFinite()) {
+            stats.nonFiniteSamples++;
+            continue;
+          }
+          const PxReal normalImpulse =
+              PxAbs(point.impulse.dot(point.normal));
+          const PxVec3 tangentImpulse =
+              point.impulse - point.normal * point.impulse.dot(point.normal);
+          const PxReal tangentialImpulse = tangentImpulse.magnitude();
+          stats.totalNormalImpulse += normalImpulse;
+          stats.totalTangentialImpulse += tangentialImpulse;
+          stats.maximumTangentialImpulse =
+              PxMax(stats.maximumTangentialImpulse,
+                    tangentialImpulse);
+        }
+      }
+    }
+
     PxI32 projectileIndex = findProjectile(pairHeader.actors[0]);
     const PxActor *chainActor = pairHeader.actors[1];
     if (projectileIndex < 0) {
@@ -1335,6 +2152,15 @@ static PxFilterFlags jointGateFilterShader(
        filterData0.word0 == eFILTER_CHAIN_BODY);
   if (projectileAndChain)
     pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_CONTACT_POINTS;
+  const bool motorBodyAndGround =
+      (filterData0.word0 == eFILTER_MOTOR_CONTACT_BODY &&
+       filterData1.word0 == eFILTER_MOTOR_CONTACT_GROUND) ||
+      (filterData1.word0 == eFILTER_MOTOR_CONTACT_BODY &&
+       filterData0.word0 == eFILTER_MOTOR_CONTACT_GROUND);
+  if (motorBodyAndGround)
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
                  PxPairFlag::eNOTIFY_CONTACT_POINTS;
   return PxFilterFlag::eDEFAULT;
 }
@@ -1766,6 +2592,708 @@ static void createForcePairTarget() {
   gForceStaticStats.topologyStaticActors =
       gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
   gForceStaticStats.topologyConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorTarget() {
+  const PxTransform poseA(PxVec3(-1.0f, 10.0f, 0.0f));
+  const PxTransform poseB(PxVec3(1.0f, 10.0f, 0.0f));
+  gRevoluteMotorBodyA = PxCreateDynamic(
+      *gPhysics, poseA, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  gRevoluteMotorBodyB = PxCreateDynamic(
+      *gPhysics, poseB, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  if (!gRevoluteMotorBodyA || !gRevoluteMotorBodyB) {
+    PX_RELEASE(gRevoluteMotorBodyA);
+    PX_RELEASE(gRevoluteMotorBodyB);
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorBodyA->setMassSpaceInertiaTensor(
+      PxVec3(gRevoluteMotorInertiaA, 2.0f, 3.0f));
+  gRevoluteMotorBodyB->setMassSpaceInertiaTensor(
+      PxVec3(gRevoluteMotorInertiaB, 4.0f, 5.0f));
+  gRevoluteMotorBodyA->setLinearDamping(0.0f);
+  gRevoluteMotorBodyA->setAngularDamping(0.0f);
+  gRevoluteMotorBodyB->setLinearDamping(0.0f);
+  gRevoluteMotorBodyB->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorBodyA);
+  gScene->addActor(*gRevoluteMotorBodyB);
+
+  gRevoluteMotorJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorBodyA,
+      PxTransform(PxVec3(1.0f, 0.0f, 0.0f)),
+      gRevoluteMotorBodyB,
+      PxTransform(PxVec3(-1.0f, 0.0f, 0.0f)));
+  if (!gRevoluteMotorJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorJoint->setDriveVelocity(
+      gRevoluteMotorTargetVelocity, false);
+  gRevoluteMotorJoint->setDriveForceLimit(
+      gRevoluteMotorForceLimit);
+  gRevoluteMotorJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorJoint->getActors(actor0, actor1);
+  gRevoluteMotorStats.actorOrderValid =
+      actor0 == gRevoluteMotorBodyA &&
+      actor1 == gRevoluteMotorBodyB;
+  gRevoluteMotorStats.targetVelocityReadback =
+      gRevoluteMotorJoint->getDriveVelocity();
+  gRevoluteMotorStats.forceLimitReadback =
+      gRevoluteMotorJoint->getDriveForceLimit();
+  gRevoluteMotorStats.driveEnabledReadback =
+      gRevoluteMotorJoint->getRevoluteJointFlags().isSet(
+          PxRevoluteJointFlag::eDRIVE_ENABLED);
+  gRevoluteMotorStats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  gRevoluteMotorStats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  gRevoluteMotorStats.initialConstraints =
+      gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorLimitTarget() {
+  const PxTransform pose(PxVec3(0.0f, 10.0f, 0.0f));
+  if (isRevoluteMotorDynamicLimitCase()) {
+    gRevoluteMotorLimitBodyA = PxCreateDynamic(
+        *gPhysics, pose, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+        *gMaterial, 1.0f);
+  }
+  gRevoluteMotorLimitBody = PxCreateDynamic(
+      *gPhysics, pose, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  if (!gRevoluteMotorLimitBody ||
+      (isRevoluteMotorDynamicLimitCase() &&
+       !gRevoluteMotorLimitBodyA)) {
+    PX_RELEASE(gRevoluteMotorLimitBodyA);
+    PX_RELEASE(gRevoluteMotorLimitBody);
+    gInitializationFailed = true;
+    return;
+  }
+
+  if (gRevoluteMotorLimitBodyA) {
+    gRevoluteMotorLimitBodyA->setMassSpaceInertiaTensor(
+        PxVec3(1.0f, 2.0f, 3.0f));
+    gRevoluteMotorLimitBodyA->setLinearDamping(0.0f);
+    gRevoluteMotorLimitBodyA->setAngularDamping(0.0f);
+    gScene->addActor(*gRevoluteMotorLimitBodyA);
+  }
+  gRevoluteMotorLimitBody->setMassSpaceInertiaTensor(
+      isRevoluteMotorDynamicLimitCase()
+          ? PxVec3(3.0f, 4.0f, 5.0f)
+          : PxVec3(1.0f, 2.0f, 3.0f));
+  gRevoluteMotorLimitBody->setLinearDamping(0.0f);
+  gRevoluteMotorLimitBody->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorLimitBody);
+
+  gRevoluteMotorLimitJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorLimitBodyA,
+      gRevoluteMotorLimitBodyA ? PxTransform(PxIdentity) : pose,
+      gRevoluteMotorLimitBody,
+      PxTransform(PxIdentity));
+  if (!gRevoluteMotorLimitJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorLimitJoint->setLimit(
+      PxJointAngularLimitPair(gRevoluteMotorLimitLower,
+                              gRevoluteMotorLimitUpper));
+  gRevoluteMotorLimitJoint->setDriveVelocity(
+      gRevoluteMotorLimitTargetVelocity, false);
+  gRevoluteMotorLimitJoint->setDriveForceLimit(
+      gRevoluteMotorLimitForceLimit);
+  gRevoluteMotorLimitJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eLIMIT_ENABLED, true);
+  gRevoluteMotorLimitJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorLimitJoint->getActors(actor0, actor1);
+  const PxJointAngularLimitPair limit =
+      gRevoluteMotorLimitJoint->getLimit();
+  const PxRevoluteJointFlags flags =
+      gRevoluteMotorLimitJoint->getRevoluteJointFlags();
+  RevoluteMotorLimitStats &stats = gRevoluteMotorLimitStats;
+  stats.actorOrderValid = isRevoluteMotorDynamicLimitCase()
+                              ? actor0 == gRevoluteMotorLimitBodyA &&
+                                    actor1 == gRevoluteMotorLimitBody
+                              : actor0 == NULL &&
+                                    actor1 == gRevoluteMotorLimitBody;
+  stats.targetVelocityReadback =
+      gRevoluteMotorLimitJoint->getDriveVelocity();
+  stats.finalTargetVelocityReadback = stats.targetVelocityReadback;
+  stats.forceLimitReadback =
+      gRevoluteMotorLimitJoint->getDriveForceLimit();
+  stats.lowerLimitReadback = limit.lower;
+  stats.upperLimitReadback = limit.upper;
+  stats.initialAngle = gRevoluteMotorLimitJoint->getAngle();
+  stats.finalAngle = stats.initialAngle;
+  stats.minimumAngle = stats.initialAngle;
+  stats.maximumAngle = stats.initialAngle;
+  stats.driveEnabledReadback =
+      flags.isSet(PxRevoluteJointFlag::eDRIVE_ENABLED);
+  stats.limitEnabledReadback =
+      flags.isSet(PxRevoluteJointFlag::eLIMIT_ENABLED);
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorFreeSpinTarget() {
+  const PxTransform pose(PxVec3(0.0f, 10.0f, 0.0f));
+  if (isRevoluteMotorDynamicFreeSpinCase()) {
+    gRevoluteMotorFreeSpinBodyA = PxCreateDynamic(
+        *gPhysics, pose, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+        *gMaterial, 1.0f);
+  }
+  gRevoluteMotorFreeSpinBody = PxCreateDynamic(
+      *gPhysics, pose, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  if (!gRevoluteMotorFreeSpinBody ||
+      (isRevoluteMotorDynamicFreeSpinCase() &&
+       !gRevoluteMotorFreeSpinBodyA)) {
+    PX_RELEASE(gRevoluteMotorFreeSpinBodyA);
+    PX_RELEASE(gRevoluteMotorFreeSpinBody);
+    gInitializationFailed = true;
+    return;
+  }
+
+  if (gRevoluteMotorFreeSpinBodyA) {
+    gRevoluteMotorFreeSpinBodyA->setMassSpaceInertiaTensor(
+        PxVec3(1.0f, 2.0f, 3.0f));
+    gRevoluteMotorFreeSpinBodyA->setLinearDamping(0.0f);
+    gRevoluteMotorFreeSpinBodyA->setAngularDamping(0.0f);
+    gScene->addActor(*gRevoluteMotorFreeSpinBodyA);
+  }
+  gRevoluteMotorFreeSpinBody->setMassSpaceInertiaTensor(
+      isRevoluteMotorDynamicFreeSpinCase()
+          ? PxVec3(3.0f, 4.0f, 5.0f)
+          : PxVec3(1.0f, 2.0f, 3.0f));
+  gRevoluteMotorFreeSpinBody->setLinearDamping(0.0f);
+  gRevoluteMotorFreeSpinBody->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorFreeSpinBody);
+
+  gRevoluteMotorFreeSpinJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorFreeSpinBodyA,
+      gRevoluteMotorFreeSpinBodyA
+          ? PxTransform(PxIdentity)
+          : pose,
+      gRevoluteMotorFreeSpinBody,
+      PxTransform(PxIdentity));
+  if (!gRevoluteMotorFreeSpinJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorFreeSpinJoint->setDriveVelocity(
+      gRevoluteMotorFreeSpinTargetVelocity, false);
+  gRevoluteMotorFreeSpinJoint->setDriveForceLimit(
+      gRevoluteMotorFreeSpinForceLimit);
+  gRevoluteMotorFreeSpinJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+  gRevoluteMotorFreeSpinJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_FREESPIN, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorFreeSpinJoint->getActors(actor0, actor1);
+  const PxRevoluteJointFlags flags =
+      gRevoluteMotorFreeSpinJoint->getRevoluteJointFlags();
+  RevoluteMotorFreeSpinStats &stats = gRevoluteMotorFreeSpinStats;
+  stats.actorOrderValid =
+      isRevoluteMotorDynamicFreeSpinCase()
+          ? actor0 == gRevoluteMotorFreeSpinBodyA &&
+                actor1 == gRevoluteMotorFreeSpinBody
+          : actor0 == NULL &&
+                actor1 == gRevoluteMotorFreeSpinBody;
+  stats.targetVelocityReadback =
+      gRevoluteMotorFreeSpinJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorFreeSpinJoint->getDriveForceLimit();
+  stats.driveEnabledReadback =
+      flags.isSet(PxRevoluteJointFlag::eDRIVE_ENABLED);
+  stats.freeSpinEnabledReadback =
+      flags.isSet(PxRevoluteJointFlag::eDRIVE_FREESPIN);
+  stats.limitDisabledReadback =
+      !flags.isSet(PxRevoluteJointFlag::eLIMIT_ENABLED);
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorRatioTarget() {
+  const bool dynamicOffPrincipal =
+      isRevoluteMotorDynamicOffPrincipalCase();
+  const bool dynamicOffCenter =
+      isRevoluteMotorDynamicOffCenterCase();
+  const bool dynamicSpatial =
+      isRevoluteMotorDynamicSpatialCase();
+  const PxTransform poseA =
+      dynamicSpatial
+          ? PxTransform(
+                PxVec3(0.0f, 9.0f, 0.0f),
+                PxQuat(PxPi / 6.0f, PxVec3(0.0f, 0.0f, 1.0f)))
+          : (dynamicOffPrincipal
+          ? PxTransform(
+                PxVec3(0.0f, 10.0f, 0.0f),
+                PxQuat(PxPi / 6.0f, PxVec3(0.0f, 0.0f, 1.0f)))
+          : (dynamicOffCenter
+                 ? PxTransform(PxVec3(0.0f, 9.0f, 0.0f))
+                 : PxTransform(PxVec3(-1.0f, 10.0f, 0.0f))));
+  const PxTransform poseB =
+      dynamicSpatial
+          ? PxTransform(
+                PxVec3(0.0f, 11.0f, 0.0f),
+                PxQuat(-PxPi / 5.0f, PxVec3(0.0f, 0.0f, 1.0f)))
+          : (dynamicOffPrincipal
+          ? PxTransform(
+                PxVec3(0.0f, 10.0f, 0.0f),
+                PxQuat(-PxPi / 5.0f, PxVec3(0.0f, 0.0f, 1.0f)))
+          : (dynamicOffCenter
+                 ? PxTransform(PxVec3(0.0f, 11.0f, 0.0f))
+                 : PxTransform(PxVec3(1.0f, 10.0f, 0.0f))));
+  const PxTransform worldFrame(PxVec3(0.0f, 10.0f, 0.0f));
+  const PxVec3 inertiaA =
+      dynamicOffPrincipal
+          ? gRevoluteMotorDynamicOffPrincipalInertiaA
+          : PxVec3(gRevoluteMotorRatioInertiaA, 2.0f, 3.0f);
+  const PxVec3 inertiaB =
+      dynamicOffPrincipal
+          ? gRevoluteMotorDynamicOffPrincipalInertiaB
+          : PxVec3(gRevoluteMotorRatioInertiaB, 4.0f, 5.0f);
+  const PxReal driveGearRatio =
+      (dynamicOffPrincipal || dynamicOffCenter)
+          ? 1.0f
+          : gRevoluteMotorRatioDriveGearRatio;
+  gRevoluteMotorRatioConfiguredAnchorA =
+      poseA.transformInv(worldFrame).p;
+  gRevoluteMotorRatioConfiguredAnchorB =
+      poseB.transformInv(worldFrame).p;
+  gRevoluteMotorRatioBodyA = PxCreateDynamic(
+      *gPhysics, poseA, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  gRevoluteMotorRatioBodyB = PxCreateDynamic(
+      *gPhysics, poseB, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  if (!gRevoluteMotorRatioBodyA || !gRevoluteMotorRatioBodyB) {
+    PX_RELEASE(gRevoluteMotorRatioBodyA);
+    PX_RELEASE(gRevoluteMotorRatioBodyB);
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorRatioBodyA->setMassSpaceInertiaTensor(
+      inertiaA);
+  gRevoluteMotorRatioBodyB->setMassSpaceInertiaTensor(
+      inertiaB);
+  if (dynamicOffCenter) {
+    gRevoluteMotorRatioBodyA->setMass(1.0f);
+    gRevoluteMotorRatioBodyB->setMass(1.0f);
+  }
+  gRevoluteMotorRatioBodyA->setLinearDamping(0.0f);
+  gRevoluteMotorRatioBodyA->setAngularDamping(0.0f);
+  gRevoluteMotorRatioBodyB->setLinearDamping(0.0f);
+  gRevoluteMotorRatioBodyB->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorRatioBodyA);
+  gScene->addActor(*gRevoluteMotorRatioBodyB);
+
+  gRevoluteMotorRatioJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorRatioBodyA,
+      poseA.transformInv(worldFrame),
+      gRevoluteMotorRatioBodyB,
+      poseB.transformInv(worldFrame));
+  if (!gRevoluteMotorRatioJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorRatioJoint->setDriveVelocity(
+      gRevoluteMotorRatioTargetVelocity, false);
+  gRevoluteMotorRatioJoint->setDriveForceLimit(
+      gRevoluteMotorRatioForceLimit);
+  gRevoluteMotorRatioJoint->setDriveGearRatio(
+      driveGearRatio);
+  gRevoluteMotorRatioJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorRatioJoint->getActors(actor0, actor1);
+  const PxRevoluteJointFlags flags =
+      gRevoluteMotorRatioJoint->getRevoluteJointFlags();
+  RevoluteMotorRatioStats &stats = gRevoluteMotorRatioStats;
+  stats.actorOrderValid =
+      actor0 == gRevoluteMotorRatioBodyA &&
+      actor1 == gRevoluteMotorRatioBodyB;
+  stats.targetVelocityReadback =
+      gRevoluteMotorRatioJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorRatioJoint->getDriveForceLimit();
+  stats.driveGearRatioReadback =
+      gRevoluteMotorRatioJoint->getDriveGearRatio();
+  stats.driveEnabledReadback =
+      flags.isSet(PxRevoluteJointFlag::eDRIVE_ENABLED);
+  stats.freeSpinDisabledReadback =
+      !flags.isSet(PxRevoluteJointFlag::eDRIVE_FREESPIN);
+  if (dynamicOffPrincipal) {
+    const PxVec3 worldAxis(1.0f, 0.0f, 0.0f);
+    const PxVec3 localAxisA = poseA.q.rotateInv(worldAxis);
+    const PxVec3 localAxisB = poseB.q.rotateInv(worldAxis);
+    const PxVec3 worldResponseA = poseA.q.rotate(PxVec3(
+        localAxisA.x / inertiaA.x, localAxisA.y / inertiaA.y,
+        localAxisA.z / inertiaA.z));
+    const PxVec3 worldResponseB = poseB.q.rotate(PxVec3(
+        localAxisB.x / inertiaB.x, localAxisB.y / inertiaB.y,
+        localAxisB.z / inertiaB.z));
+    stats.initialOffPrincipalResponseA =
+        (worldResponseA -
+         worldAxis * worldResponseA.dot(worldAxis))
+            .magnitude();
+    stats.initialOffPrincipalResponseB =
+        (worldResponseB -
+         worldAxis * worldResponseB.dot(worldAxis))
+            .magnitude();
+  }
+  if (dynamicOffCenter) {
+    const PxVec3 worldAxis(1.0f, 0.0f, 0.0f);
+    const PxVec3 leverA =
+        poseA.q.rotate(gRevoluteMotorRatioConfiguredAnchorA);
+    const PxVec3 leverB =
+        poseB.q.rotate(gRevoluteMotorRatioConfiguredAnchorB);
+    stats.initialPerpendicularLeverArmA =
+        (leverA - worldAxis * leverA.dot(worldAxis)).magnitude();
+    stats.initialPerpendicularLeverArmB =
+        (leverB - worldAxis * leverB.dot(worldAxis)).magnitude();
+  }
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static bool setSingleShapeFilterData(PxRigidActor &actor,
+                                     PxU32 tag) {
+  PxShape *shape = NULL;
+  if (actor.getNbShapes() != 1 ||
+      actor.getShapes(&shape, 1) != 1 || !shape)
+    return false;
+  PxFilterData filterData;
+  filterData.word0 = tag;
+  shape->setSimulationFilterData(filterData);
+  return true;
+}
+
+static void createRevoluteMotorContactTarget() {
+  const PxTransform poseA(
+      PxVec3(-1.0f, gRevoluteMotorContactCenterHeight, 0.0f));
+  const PxTransform poseB(
+      PxVec3(1.0f, gRevoluteMotorContactCenterHeight, 0.0f));
+  const PxCapsuleGeometry geometry(gRevoluteMotorContactRadius,
+                                   gRevoluteMotorContactHalfHeight);
+  gRevoluteMotorContactBodyA = PxCreateDynamic(
+      *gPhysics, poseA, geometry, *gMaterial, 1.0f);
+  gRevoluteMotorContactBodyB = PxCreateDynamic(
+      *gPhysics, poseB, geometry, *gMaterial, 1.0f);
+  gRevoluteMotorContactGround =
+      PxCreatePlane(*gPhysics, PxPlane(0, 1, 0, 0),
+                    *gMaterial);
+  if (!gRevoluteMotorContactBodyA ||
+      !gRevoluteMotorContactBodyB ||
+      !gRevoluteMotorContactGround) {
+    PX_RELEASE(gRevoluteMotorContactBodyA);
+    PX_RELEASE(gRevoluteMotorContactBodyB);
+    PX_RELEASE(gRevoluteMotorContactGround);
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorContactBodyA->setMass(1.0f);
+  gRevoluteMotorContactBodyB->setMass(1.0f);
+  gRevoluteMotorContactBodyA->setMassSpaceInertiaTensor(
+      PxVec3(1.0f, 2.0f, 3.0f));
+  gRevoluteMotorContactBodyB->setMassSpaceInertiaTensor(
+      PxVec3(3.0f, 4.0f, 5.0f));
+  gRevoluteMotorContactBodyA->setLinearDamping(0.0f);
+  gRevoluteMotorContactBodyA->setAngularDamping(0.0f);
+  gRevoluteMotorContactBodyB->setLinearDamping(0.0f);
+  gRevoluteMotorContactBodyB->setAngularDamping(0.0f);
+  if (!setSingleShapeFilterData(
+          *gRevoluteMotorContactBodyA,
+          eFILTER_MOTOR_CONTACT_BODY) ||
+      !setSingleShapeFilterData(
+          *gRevoluteMotorContactBodyB,
+          eFILTER_MOTOR_CONTACT_BODY) ||
+      !setSingleShapeFilterData(
+          *gRevoluteMotorContactGround,
+          eFILTER_MOTOR_CONTACT_GROUND)) {
+    gInitializationFailed = true;
+    return;
+  }
+  gScene->addActor(*gRevoluteMotorContactGround);
+  gScene->addActor(*gRevoluteMotorContactBodyA);
+  gScene->addActor(*gRevoluteMotorContactBodyB);
+
+  gRevoluteMotorContactJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorContactBodyA,
+      PxTransform(PxVec3(1.0f, 0.0f, 0.0f)),
+      gRevoluteMotorContactBodyB,
+      PxTransform(PxVec3(-1.0f, 0.0f, 0.0f)));
+  if (!gRevoluteMotorContactJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorContactJoint->setDriveVelocity(
+      gRevoluteMotorContactTargetVelocity, false);
+  gRevoluteMotorContactJoint->setDriveForceLimit(
+      gRevoluteMotorContactForceLimit);
+  gRevoluteMotorContactJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorContactJoint->getActors(actor0, actor1);
+  RevoluteMotorContactStats &stats =
+      gRevoluteMotorContactStats;
+  stats.actorOrderValid =
+      actor0 == gRevoluteMotorContactBodyA &&
+      actor1 == gRevoluteMotorContactBodyB;
+  stats.targetVelocityReadback =
+      gRevoluteMotorContactJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorContactJoint->getDriveForceLimit();
+  stats.driveEnabledReadback =
+      gRevoluteMotorContactJoint->getRevoluteJointFlags().isSet(
+          PxRevoluteJointFlag::eDRIVE_ENABLED);
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorKinematicTarget() {
+  gRevoluteMotorKinematicBody = PxCreateDynamic(
+      *gPhysics, gRevoluteMotorKinematicInitialPose,
+      PxBoxGeometry(0.25f, 0.25f, 0.25f), *gMaterial, 1.0f);
+  gRevoluteMotorKinematicDynamicBody = PxCreateDynamic(
+      *gPhysics, gRevoluteMotorKinematicInitialPose,
+      PxBoxGeometry(0.25f, 0.25f, 0.25f), *gMaterial, 1.0f);
+  if (!gRevoluteMotorKinematicBody ||
+      !gRevoluteMotorKinematicDynamicBody) {
+    PX_RELEASE(gRevoluteMotorKinematicBody);
+    PX_RELEASE(gRevoluteMotorKinematicDynamicBody);
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorKinematicBody->setRigidBodyFlag(
+      PxRigidBodyFlag::eKINEMATIC, true);
+  gRevoluteMotorKinematicBody->setLinearDamping(0.0f);
+  gRevoluteMotorKinematicBody->setAngularDamping(0.0f);
+  gRevoluteMotorKinematicDynamicBody->setMass(1.0f);
+  gRevoluteMotorKinematicDynamicBody->setMassSpaceInertiaTensor(
+      PxVec3(1.0f, 2.0f, 3.0f));
+  gRevoluteMotorKinematicDynamicBody->setLinearDamping(0.0f);
+  gRevoluteMotorKinematicDynamicBody->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorKinematicBody);
+  gScene->addActor(*gRevoluteMotorKinematicDynamicBody);
+
+  gRevoluteMotorKinematicJoint = PxRevoluteJointCreate(
+      *gPhysics, gRevoluteMotorKinematicBody,
+      PxTransform(PxIdentity),
+      gRevoluteMotorKinematicDynamicBody,
+      PxTransform(PxIdentity));
+  if (!gRevoluteMotorKinematicJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorKinematicJoint->setDriveVelocity(
+      gRevoluteMotorKinematicTargetVelocity, false);
+  gRevoluteMotorKinematicJoint->setDriveForceLimit(
+      gRevoluteMotorKinematicForceLimit);
+  gRevoluteMotorKinematicJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorKinematicJoint->getActors(actor0, actor1);
+  RevoluteMotorKinematicStats &stats =
+      gRevoluteMotorKinematicStats;
+  stats.actorOrderValid =
+      actor0 == gRevoluteMotorKinematicBody &&
+      actor1 == gRevoluteMotorKinematicDynamicBody;
+  stats.targetVelocityReadback =
+      gRevoluteMotorKinematicJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorKinematicJoint->getDriveForceLimit();
+  stats.driveEnabledReadback =
+      gRevoluteMotorKinematicJoint->getRevoluteJointFlags().isSet(
+          PxRevoluteJointFlag::eDRIVE_ENABLED);
+  stats.kinematicFlagReadback =
+      gRevoluteMotorKinematicBody->getRigidBodyFlags().isSet(
+          PxRigidBodyFlag::eKINEMATIC);
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorOffPrincipalTarget() {
+  const PxTransform bodyPose(
+      PxVec3(0.0f, 10.0f, 0.0f),
+      PxQuat(gRevoluteMotorOffPrincipalAngle, PxVec3(0.0f, 0.0f, 1.0f)));
+  const PxTransform worldFrame(bodyPose.p);
+  gRevoluteMotorOffPrincipalBody = PxCreateDynamic(
+      *gPhysics, bodyPose, PxBoxGeometry(0.25f, 0.25f, 0.25f),
+      *gMaterial, 1.0f);
+  if (!gRevoluteMotorOffPrincipalBody) {
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorOffPrincipalBody->setMass(1.0f);
+  gRevoluteMotorOffPrincipalBody->setMassSpaceInertiaTensor(
+      gRevoluteMotorOffPrincipalInertia);
+  gRevoluteMotorOffPrincipalBody->setLinearDamping(0.0f);
+  gRevoluteMotorOffPrincipalBody->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorOffPrincipalBody);
+
+  gRevoluteMotorOffPrincipalJoint = PxRevoluteJointCreate(
+      *gPhysics, NULL, worldFrame, gRevoluteMotorOffPrincipalBody,
+      bodyPose.transformInv(worldFrame));
+  if (!gRevoluteMotorOffPrincipalJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorOffPrincipalJoint->setDriveVelocity(
+      gRevoluteMotorOffPrincipalTargetVelocity, false);
+  gRevoluteMotorOffPrincipalJoint->setDriveForceLimit(
+      gRevoluteMotorOffPrincipalForceLimit);
+  gRevoluteMotorOffPrincipalJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  RevoluteMotorOffPrincipalStats &stats =
+      gRevoluteMotorOffPrincipalStats;
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorOffPrincipalJoint->getActors(actor0, actor1);
+  stats.actorOrderValid =
+      actor0 == NULL && actor1 == gRevoluteMotorOffPrincipalBody;
+  stats.targetVelocityReadback =
+      gRevoluteMotorOffPrincipalJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorOffPrincipalJoint->getDriveForceLimit();
+  stats.driveEnabledReadback =
+      gRevoluteMotorOffPrincipalJoint->getRevoluteJointFlags().isSet(
+          PxRevoluteJointFlag::eDRIVE_ENABLED);
+
+  const PxVec3 worldAxis(1.0f, 0.0f, 0.0f);
+  const PxVec3 localAxis = bodyPose.q.rotateInv(worldAxis);
+  const PxVec3 localResponse(
+      localAxis.x / gRevoluteMotorOffPrincipalInertia.x,
+      localAxis.y / gRevoluteMotorOffPrincipalInertia.y,
+      localAxis.z / gRevoluteMotorOffPrincipalInertia.z);
+  const PxVec3 worldResponse = bodyPose.q.rotate(localResponse);
+  stats.initialOffPrincipalResponse =
+      (worldResponse -
+       worldAxis * worldResponse.dot(worldAxis)).magnitude();
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
+}
+
+static void createRevoluteMotorOffCenterTarget() {
+  const bool spatial = isRevoluteMotorSpatialCase();
+  const PxTransform bodyPose =
+      spatial
+          ? PxTransform(
+                gRevoluteMotorOffCenterInitialPose.p,
+                PxQuat(gRevoluteMotorOffPrincipalAngle,
+                       PxVec3(0.0f, 0.0f, 1.0f)))
+          : gRevoluteMotorOffCenterInitialPose;
+  const PxTransform worldFrame(PxVec3(0.0f, 10.0f, 0.0f));
+  const PxTransform bodyFrame = bodyPose.transformInv(worldFrame);
+  const PxVec3 inertia =
+      spatial ? gRevoluteMotorOffPrincipalInertia
+              : PxVec3(1.0f, 2.0f, 3.0f);
+  gRevoluteMotorOffCenterConfiguredLocalAnchor = bodyFrame.p;
+  gRevoluteMotorOffCenterBody = PxCreateDynamic(
+      *gPhysics, bodyPose,
+      PxBoxGeometry(0.25f, 0.25f, 0.25f), *gMaterial, 1.0f);
+  if (!gRevoluteMotorOffCenterBody) {
+    gInitializationFailed = true;
+    return;
+  }
+
+  gRevoluteMotorOffCenterBody->setMass(1.0f);
+  gRevoluteMotorOffCenterBody->setMassSpaceInertiaTensor(
+      inertia);
+  gRevoluteMotorOffCenterBody->setLinearDamping(0.0f);
+  gRevoluteMotorOffCenterBody->setAngularDamping(0.0f);
+  gScene->addActor(*gRevoluteMotorOffCenterBody);
+
+  gRevoluteMotorOffCenterJoint = PxRevoluteJointCreate(
+      *gPhysics, NULL, worldFrame, gRevoluteMotorOffCenterBody,
+      bodyFrame);
+  if (!gRevoluteMotorOffCenterJoint) {
+    gInitializationFailed = true;
+    return;
+  }
+  gRevoluteMotorOffCenterJoint->setDriveVelocity(
+      gRevoluteMotorOffCenterTargetVelocity, false);
+  gRevoluteMotorOffCenterJoint->setDriveForceLimit(
+      gRevoluteMotorOffCenterForceLimit);
+  gRevoluteMotorOffCenterJoint->setRevoluteJointFlag(
+      PxRevoluteJointFlag::eDRIVE_ENABLED, true);
+
+  RevoluteMotorOffCenterStats &stats =
+      gRevoluteMotorOffCenterStats;
+  PxRigidActor *actor0 = NULL;
+  PxRigidActor *actor1 = NULL;
+  gRevoluteMotorOffCenterJoint->getActors(actor0, actor1);
+  stats.actorOrderValid =
+      actor0 == NULL && actor1 == gRevoluteMotorOffCenterBody;
+  stats.targetVelocityReadback =
+      gRevoluteMotorOffCenterJoint->getDriveVelocity();
+  stats.forceLimitReadback =
+      gRevoluteMotorOffCenterJoint->getDriveForceLimit();
+  stats.driveEnabledReadback =
+      gRevoluteMotorOffCenterJoint->getRevoluteJointFlags().isSet(
+          PxRevoluteJointFlag::eDRIVE_ENABLED);
+  const PxVec3 worldAxis(1.0f, 0.0f, 0.0f);
+  const PxVec3 worldLeverArm =
+      bodyPose.q.rotate(gRevoluteMotorOffCenterConfiguredLocalAnchor);
+  stats.initialPerpendicularLeverArm =
+      (worldLeverArm -
+       worldAxis * worldLeverArm.dot(worldAxis))
+          .magnitude();
+  const PxVec3 localAxis = bodyPose.q.rotateInv(worldAxis);
+  const PxVec3 localResponse(
+      localAxis.x / inertia.x,
+      localAxis.y / inertia.y,
+      localAxis.z / inertia.z);
+  const PxVec3 worldResponse = bodyPose.q.rotate(localResponse);
+  stats.initialOffPrincipalResponse =
+      (worldResponse -
+       worldAxis * worldResponse.dot(worldAxis)).magnitude();
+  stats.initialDynamicActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+  stats.initialStaticActors =
+      gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+  stats.initialConstraints = gScene->getNbConstraints();
 }
 
 static void createNativeBreakReactionTarget() {
@@ -2297,6 +3825,38 @@ static void createJointChain(JointKind kind, PxReal z) {
 
 static void createConfiguredJointScene() {
   gChains.reserve(5);
+  if (isRevoluteMotorCase()) {
+    createRevoluteMotorTarget();
+    return;
+  }
+  if (isRevoluteMotorLimitCase()) {
+    createRevoluteMotorLimitTarget();
+    return;
+  }
+  if (isRevoluteMotorFreeSpinCase()) {
+    createRevoluteMotorFreeSpinTarget();
+    return;
+  }
+  if (isRevoluteMotorRatioCase()) {
+    createRevoluteMotorRatioTarget();
+    return;
+  }
+  if (isRevoluteMotorContactCase()) {
+    createRevoluteMotorContactTarget();
+    return;
+  }
+  if (isRevoluteMotorKinematicCase()) {
+    createRevoluteMotorKinematicTarget();
+    return;
+  }
+  if (isRevoluteMotorOffPrincipalCase()) {
+    createRevoluteMotorOffPrincipalTarget();
+    return;
+  }
+  if (isRevoluteMotorOffCenterCase()) {
+    createRevoluteMotorOffCenterTarget();
+    return;
+  }
   if (isSphericalConeCase()) {
     createSphericalConeTarget();
     return;
@@ -3038,10 +4598,12 @@ void initPhysics(bool interactive) {
   PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
   sceneDesc.gravity =
       (isEndpointProbe() || isForcePairCase() || isSphericalConeCase() ||
-       isNativeBreakReactionCase())
+       isNativeBreakReactionCase() ||
+       (isRevoluteMotorFamilyCase() &&
+        !isRevoluteMotorContactCase()))
                           ? PxVec3(0.0f)
                           : PxVec3(0.0f, -9.81f, 0.0f);
-  if (isSphericalConeCase())
+  if (isSphericalConeCase() || isRevoluteMotorFamilyCase())
     sceneDesc.flags |= PxSceneFlag::eDISABLE_SLEEPING;
   const PxU32 dispatcherThreads =
       interactive ? 2 : gHeadlessOptions.dispatcherThreads;
@@ -3076,7 +4638,8 @@ void initPhysics(bool interactive) {
   }
 
   if (!isForceReactionCase() && !isEndpointProbe() &&
-      !isSphericalConeCase() && !isNativeBreakReactionCase()) {
+      !isSphericalConeCase() && !isNativeBreakReactionCase() &&
+      !isRevoluteMotorFamilyCase()) {
     PxRigidStatic *groundPlane =
         PxCreatePlane(*gPhysics, PxPlane(0, 1, 0, 0), *gMaterial);
     if (!groundPlane) {
@@ -3086,7 +4649,181 @@ void initPhysics(bool interactive) {
     gScene->addActor(*groundPlane);
   }
   createConfiguredJointScene();
-  if (isSphericalConeCase()) {
+  if (isRevoluteMotorCase()) {
+    if (!gRevoluteMotorBodyA || !gRevoluteMotorBodyB ||
+        !gRevoluteMotorJoint || !gChains.empty() ||
+        !gRevoluteMotorStats.actorOrderValid ||
+        !gRevoluteMotorStats.driveEnabledReadback ||
+        gRevoluteMotorStats.initialDynamicActors != 2 ||
+        gRevoluteMotorStats.initialStaticActors != 0 ||
+        gRevoluteMotorStats.initialConstraints != 1 ||
+        gRevoluteMotorStats.targetVelocityReadback !=
+            gRevoluteMotorTargetVelocity ||
+        gRevoluteMotorStats.forceLimitReadback !=
+            gRevoluteMotorForceLimit ||
+        gRevoluteMotorBodyA->getMassSpaceInertiaTensor().x !=
+            gRevoluteMotorInertiaA ||
+        gRevoluteMotorBodyB->getMassSpaceInertiaTensor().x !=
+            gRevoluteMotorInertiaB)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorLimitCase()) {
+    const PxU32 expectedDynamicActors =
+        isRevoluteMotorDynamicLimitCase() ? 2u : 1u;
+    if (!gRevoluteMotorLimitBody || !gRevoluteMotorLimitJoint ||
+        (isRevoluteMotorDynamicLimitCase() &&
+         !gRevoluteMotorLimitBodyA) ||
+        !gChains.empty() ||
+        !gRevoluteMotorLimitStats.actorOrderValid ||
+        !gRevoluteMotorLimitStats.driveEnabledReadback ||
+        !gRevoluteMotorLimitStats.limitEnabledReadback ||
+        gRevoluteMotorLimitStats.initialDynamicActors !=
+            expectedDynamicActors ||
+        gRevoluteMotorLimitStats.initialStaticActors != 0 ||
+        gRevoluteMotorLimitStats.initialConstraints != 1 ||
+        gRevoluteMotorLimitStats.targetVelocityReadback !=
+            gRevoluteMotorLimitTargetVelocity ||
+        gRevoluteMotorLimitStats.forceLimitReadback !=
+            gRevoluteMotorLimitForceLimit ||
+        gRevoluteMotorLimitStats.lowerLimitReadback !=
+            gRevoluteMotorLimitLower ||
+        gRevoluteMotorLimitStats.upperLimitReadback !=
+            gRevoluteMotorLimitUpper)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorFreeSpinCase()) {
+    RevoluteMotorFreeSpinStats &stats = gRevoluteMotorFreeSpinStats;
+    const PxU32 expectedDynamicActors =
+        isRevoluteMotorDynamicFreeSpinCase() ? 2u : 1u;
+    if (!gRevoluteMotorFreeSpinBody ||
+        (isRevoluteMotorDynamicFreeSpinCase() &&
+         !gRevoluteMotorFreeSpinBodyA) ||
+        !gRevoluteMotorFreeSpinJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.freeSpinEnabledReadback ||
+        !stats.limitDisabledReadback ||
+        stats.initialDynamicActors != expectedDynamicActors ||
+        stats.initialStaticActors != 0 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorFreeSpinTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorFreeSpinForceLimit)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorRatioCase()) {
+    const bool dynamicOffPrincipal =
+        isRevoluteMotorDynamicOffPrincipalCase();
+    const bool dynamicOffCenter =
+        isRevoluteMotorDynamicOffCenterCase();
+    const PxReal expectedDriveGearRatio =
+        (dynamicOffPrincipal || dynamicOffCenter)
+            ? 1.0f
+            : gRevoluteMotorRatioDriveGearRatio;
+    const PxVec3 expectedInertiaA =
+        dynamicOffPrincipal
+            ? gRevoluteMotorDynamicOffPrincipalInertiaA
+            : PxVec3(gRevoluteMotorRatioInertiaA, 2.0f, 3.0f);
+    const PxVec3 expectedInertiaB =
+        dynamicOffPrincipal
+            ? gRevoluteMotorDynamicOffPrincipalInertiaB
+            : PxVec3(gRevoluteMotorRatioInertiaB, 4.0f, 5.0f);
+    RevoluteMotorRatioStats &stats = gRevoluteMotorRatioStats;
+    if (!gRevoluteMotorRatioBodyA || !gRevoluteMotorRatioBodyB ||
+        !gRevoluteMotorRatioJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.freeSpinDisabledReadback ||
+        stats.initialDynamicActors != 2 ||
+        stats.initialStaticActors != 0 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorRatioTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorRatioForceLimit ||
+        stats.driveGearRatioReadback !=
+            expectedDriveGearRatio ||
+        (gRevoluteMotorRatioBodyA->getMassSpaceInertiaTensor() -
+         expectedInertiaA)
+                .magnitude() >
+            1e-5f ||
+        (gRevoluteMotorRatioBodyB->getMassSpaceInertiaTensor() -
+         expectedInertiaB)
+                .magnitude() >
+            1e-5f ||
+        (dynamicOffCenter &&
+         (PxAbs(gRevoluteMotorRatioBodyA->getMass() - 1.0f) >
+              1e-6f ||
+          PxAbs(gRevoluteMotorRatioBodyB->getMass() - 1.0f) >
+              1e-6f))) {
+      gInitializationFailed = true;
+    }
+  } else if (isRevoluteMotorContactCase()) {
+    RevoluteMotorContactStats &stats =
+        gRevoluteMotorContactStats;
+    if (!gRevoluteMotorContactBodyA ||
+        !gRevoluteMotorContactBodyB ||
+        !gRevoluteMotorContactGround ||
+        !gRevoluteMotorContactJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.initialDynamicActors != 2 ||
+        stats.initialStaticActors != 1 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorContactTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorContactForceLimit ||
+        gRevoluteMotorContactBodyA->getMass() != 1.0f ||
+        gRevoluteMotorContactBodyB->getMass() != 1.0f)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorKinematicCase()) {
+    RevoluteMotorKinematicStats &stats =
+        gRevoluteMotorKinematicStats;
+    if (!gRevoluteMotorKinematicBody ||
+        !gRevoluteMotorKinematicDynamicBody ||
+        !gRevoluteMotorKinematicJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.kinematicFlagReadback ||
+        stats.initialDynamicActors != 2 ||
+        stats.initialStaticActors != 0 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorKinematicTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorKinematicForceLimit)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorOffPrincipalCase()) {
+    RevoluteMotorOffPrincipalStats &stats =
+        gRevoluteMotorOffPrincipalStats;
+    if (!gRevoluteMotorOffPrincipalBody ||
+        !gRevoluteMotorOffPrincipalJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.initialDynamicActors != 1 ||
+        stats.initialStaticActors != 0 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorOffPrincipalTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorOffPrincipalForceLimit ||
+        stats.initialOffPrincipalResponse <
+            gRevoluteMotorOffPrincipalResponseMinimum)
+      gInitializationFailed = true;
+  } else if (isRevoluteMotorOffCenterCase()) {
+    RevoluteMotorOffCenterStats &stats =
+        gRevoluteMotorOffCenterStats;
+    if (!gRevoluteMotorOffCenterBody ||
+        !gRevoluteMotorOffCenterJoint || !gChains.empty() ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.initialDynamicActors != 1 ||
+        stats.initialStaticActors != 0 ||
+        stats.initialConstraints != 1 ||
+        stats.targetVelocityReadback !=
+            gRevoluteMotorOffCenterTargetVelocity ||
+        stats.forceLimitReadback !=
+            gRevoluteMotorOffCenterForceLimit ||
+        stats.initialPerpendicularLeverArm <
+            gRevoluteMotorOffCenterLeverArmMinimum ||
+        (isRevoluteMotorSpatialCase() &&
+         stats.initialOffPrincipalResponse <
+             gRevoluteMotorOffPrincipalResponseMinimum))
+      gInitializationFailed = true;
+  } else if (isSphericalConeCase()) {
     const PxU32 expectedDynamicActors =
         gSphericalConeTopology == eSPHERICAL_CONE_DYNAMIC_DYNAMIC ? 2u : 1u;
     const PxU32 expectedStaticActors =
@@ -3720,6 +5457,598 @@ static void sampleEndpointAngularState() {
       apiVelocityMagnitudeMismatch);
 }
 
+static void sampleRevoluteMotorState() {
+  if (!gRevoluteMotorBodyA || !gRevoluteMotorBodyB ||
+      !gRevoluteMotorJoint)
+    return;
+
+  RevoluteMotorStats &stats = gRevoluteMotorStats;
+  stats.stateSamples++;
+  const PxTransform poseA = gRevoluteMotorBodyA->getGlobalPose();
+  const PxTransform poseB = gRevoluteMotorBodyB->getGlobalPose();
+  const PxVec3 angularA = gRevoluteMotorBodyA->getAngularVelocity();
+  const PxVec3 angularB = gRevoluteMotorBodyB->getAngularVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorJoint->getRelativeTransform();
+  if (!poseA.isValid() || !poseB.isValid() ||
+      !angularA.isFinite() || !angularB.isFinite() ||
+      !axisA.isFinite() || !axisB.isFinite() ||
+      !relative.isValid()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal relativeVelocity =
+      (angularB - angularA).dot(axisA);
+  const PxReal relativeError =
+      PxAbs(relativeVelocity - gRevoluteMotorTargetVelocity);
+  stats.finalRelativeVelocity = relativeVelocity;
+  stats.finalRelativeError = relativeError;
+  if (stats.stateSamples > gRevoluteMotorLateBeginFrame)
+    stats.maximumLateRelativeError =
+        PxMax(stats.maximumLateRelativeError, relativeError);
+
+  const PxVec3 localAngularA = poseA.q.rotateInv(angularA);
+  const PxVec3 localAngularB = poseB.q.rotateInv(angularB);
+  const PxVec3 localMomentumA =
+      localAngularA.multiply(
+          gRevoluteMotorBodyA->getMassSpaceInertiaTensor());
+  const PxVec3 localMomentumB =
+      localAngularB.multiply(
+          gRevoluteMotorBodyB->getMassSpaceInertiaTensor());
+  const PxVec3 totalMomentum =
+      poseA.q.rotate(localMomentumA) +
+      poseB.q.rotate(localMomentumB);
+  stats.maximumAngularMomentumDrift =
+      PxMax(stats.maximumAngularMomentumDrift,
+            totalMomentum.magnitude());
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+}
+
+static void sampleRevoluteMotorLimitState() {
+  if (!gRevoluteMotorLimitBody || !gRevoluteMotorLimitJoint)
+    return;
+
+  RevoluteMotorLimitStats &stats = gRevoluteMotorLimitStats;
+  stats.stateSamples++;
+  const PxTransform pose = gRevoluteMotorLimitBody->getGlobalPose();
+  const PxTransform poseA =
+      gRevoluteMotorLimitBodyA
+          ? gRevoluteMotorLimitBodyA->getGlobalPose()
+          : PxTransform(PxIdentity);
+  const PxVec3 angularVelocity =
+      gRevoluteMotorLimitBody->getAngularVelocity();
+  const PxVec3 angularVelocityA =
+      gRevoluteMotorLimitBodyA
+          ? gRevoluteMotorLimitBodyA->getAngularVelocity()
+          : PxVec3(0.0f);
+  PxVec3 axis0, axis1;
+  getJointWorldAxes(gRevoluteMotorLimitJoint, axis0, axis1);
+  const PxTransform relative =
+      gRevoluteMotorLimitJoint->getRelativeTransform();
+  const PxReal angle = gRevoluteMotorLimitJoint->getAngle();
+  const PxReal jointVelocity =
+      gRevoluteMotorLimitJoint->getVelocity();
+  if (!pose.isValid() || !poseA.isValid() ||
+      !angularVelocity.isFinite() || !angularVelocityA.isFinite() ||
+      !axis0.isFinite() || !axis1.isFinite() ||
+      !relative.isValid() || !PxIsFinite(angle) ||
+      !PxIsFinite(jointVelocity)) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  stats.finalAngle = angle;
+  stats.minimumAngle = PxMin(stats.minimumAngle, angle);
+  stats.maximumAngle = PxMax(stats.maximumAngle, angle);
+  stats.maximumUpperViolation =
+      PxMax(stats.maximumUpperViolation,
+            PxMax(0.0f, angle - gRevoluteMotorLimitUpper));
+  stats.maximumLowerViolation =
+      PxMax(stats.maximumLowerViolation,
+            PxMax(0.0f, gRevoluteMotorLimitLower - angle));
+  stats.finalTargetVelocityReadback =
+      gRevoluteMotorLimitJoint->getDriveVelocity();
+  if (stats.finalTargetVelocityReadback > 0.0f &&
+      angle >=
+          gRevoluteMotorLimitUpper -
+              gRevoluteMotorLimitFinalTolerance) {
+    stats.upperBoundSamples++;
+    stats.lowerBoundSamples = 0;
+    if (stats.upperBoundSamples >
+        gRevoluteMotorLimitBoundarySettleSamples)
+      stats.maximumLateOutwardVelocity =
+          PxMax(stats.maximumLateOutwardVelocity,
+                PxMax(0.0f, jointVelocity));
+  } else if (stats.finalTargetVelocityReadback < 0.0f &&
+             angle <=
+                 gRevoluteMotorLimitLower +
+                     gRevoluteMotorLimitFinalTolerance) {
+    stats.lowerBoundSamples++;
+    stats.upperBoundSamples = 0;
+    if (stats.lowerBoundSamples >
+        gRevoluteMotorLimitBoundarySettleSamples)
+      stats.maximumLateOutwardVelocity =
+          PxMax(stats.maximumLateOutwardVelocity,
+                PxMax(0.0f, -jointVelocity));
+  } else {
+    stats.upperBoundSamples = 0;
+    stats.lowerBoundSamples = 0;
+  }
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axis0.cross(axis1).magnitude());
+}
+
+static void sampleRevoluteMotorFreeSpinState() {
+  if (!gRevoluteMotorFreeSpinBody || !gRevoluteMotorFreeSpinJoint)
+    return;
+
+  RevoluteMotorFreeSpinStats &stats = gRevoluteMotorFreeSpinStats;
+  stats.stateSamples++;
+  const PxTransform pose =
+      gRevoluteMotorFreeSpinBody->getGlobalPose();
+  const PxTransform poseA =
+      gRevoluteMotorFreeSpinBodyA
+          ? gRevoluteMotorFreeSpinBodyA->getGlobalPose()
+          : PxTransform(PxIdentity);
+  const PxVec3 angularVelocity =
+      gRevoluteMotorFreeSpinBody->getAngularVelocity();
+  const PxVec3 angularVelocityA =
+      gRevoluteMotorFreeSpinBodyA
+          ? gRevoluteMotorFreeSpinBodyA->getAngularVelocity()
+          : PxVec3(0.0f);
+  PxVec3 axis0, axis1;
+  getJointWorldAxes(gRevoluteMotorFreeSpinJoint, axis0, axis1);
+  const PxTransform relative =
+      gRevoluteMotorFreeSpinJoint->getRelativeTransform();
+  const PxReal velocity =
+      gRevoluteMotorFreeSpinJoint->getVelocity();
+  if (!pose.isValid() || !poseA.isValid() ||
+      !angularVelocity.isFinite() || !angularVelocityA.isFinite() ||
+      !axis0.isFinite() || !axis1.isFinite() ||
+      !relative.isValid() || !PxIsFinite(velocity)) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  stats.finalVelocity = velocity;
+  if (stats.stateSamples <= gRevoluteMotorFreeSpinBoostFrame) {
+    stats.preBoostFinalVelocity = velocity;
+    if (stats.stateSamples > gRevoluteMotorFreeSpinLateBeginFrame)
+      stats.maximumLatePreBoostError =
+          PxMax(stats.maximumLatePreBoostError,
+                PxAbs(velocity -
+                      gRevoluteMotorFreeSpinTargetVelocity));
+  } else {
+    stats.minimumPostBoostVelocity =
+        PxMin(stats.minimumPostBoostVelocity, velocity);
+    stats.maximumPostBoostVelocityDrop =
+        PxMax(stats.maximumPostBoostVelocityDrop,
+              PxMax(0.0f,
+                    stats.boostVelocityReadback - velocity));
+  }
+  if (gRevoluteMotorFreeSpinBodyA) {
+    const PxVec3 localAngularA =
+        poseA.q.rotateInv(angularVelocityA);
+    const PxVec3 localAngularB =
+        pose.q.rotateInv(angularVelocity);
+    const PxVec3 localMomentumA =
+        localAngularA.multiply(
+            gRevoluteMotorFreeSpinBodyA
+                ->getMassSpaceInertiaTensor());
+    const PxVec3 localMomentumB =
+        localAngularB.multiply(
+            gRevoluteMotorFreeSpinBody
+                ->getMassSpaceInertiaTensor());
+    const PxVec3 totalMomentum =
+        poseA.q.rotate(localMomentumA) +
+        pose.q.rotate(localMomentumB);
+    stats.maximumAngularMomentumDrift =
+        PxMax(stats.maximumAngularMomentumDrift,
+              totalMomentum.magnitude());
+  }
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axis0.cross(axis1).magnitude());
+}
+
+static void sampleRevoluteMotorRatioState() {
+  if (!gRevoluteMotorRatioBodyA || !gRevoluteMotorRatioBodyB ||
+      !gRevoluteMotorRatioJoint)
+    return;
+
+  RevoluteMotorRatioStats &stats = gRevoluteMotorRatioStats;
+  stats.stateSamples++;
+  const PxTransform poseA =
+      gRevoluteMotorRatioBodyA->getGlobalPose();
+  const PxTransform poseB =
+      gRevoluteMotorRatioBodyB->getGlobalPose();
+  const PxVec3 angularA =
+      gRevoluteMotorRatioBodyA->getAngularVelocity();
+  const PxVec3 angularB =
+      gRevoluteMotorRatioBodyB->getAngularVelocity();
+  const PxVec3 linearA =
+      gRevoluteMotorRatioBodyA->getLinearVelocity();
+  const PxVec3 linearB =
+      gRevoluteMotorRatioBodyB->getLinearVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorRatioJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorRatioJoint->getRelativeTransform();
+  if (!poseA.isValid() || !poseB.isValid() ||
+      !angularA.isFinite() || !angularB.isFinite() ||
+      !linearA.isFinite() || !linearB.isFinite() ||
+      !axisA.isFinite() || !axisB.isFinite() ||
+      !relative.isValid()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal velocityA = angularA.dot(axisA);
+  const PxReal velocityB = angularB.dot(axisA);
+  const PxReal driveGearRatio =
+      gRevoluteMotorRatioStats.driveGearRatioReadback;
+  const PxReal weightedVelocity =
+      driveGearRatio * velocityB - velocityA;
+  const PxReal weightedVelocityError =
+      PxAbs(weightedVelocity -
+            gRevoluteMotorRatioTargetVelocity);
+  stats.finalVelocityA = velocityA;
+  stats.finalVelocityB = velocityB;
+  stats.finalWeightedVelocity = weightedVelocity;
+  stats.finalWeightedVelocityError = weightedVelocityError;
+  if (stats.stateSamples > gRevoluteMotorRatioLateBeginFrame)
+    stats.maximumLateWeightedVelocityError =
+        PxMax(stats.maximumLateWeightedVelocityError,
+              weightedVelocityError);
+  const PxVec3 relativeAngular = angularB - angularA;
+  const PxVec3 relativeSwing =
+      relativeAngular -
+      axisA * relativeAngular.dot(axisA);
+  if (stats.stateSamples > gRevoluteMotorRatioLateBeginFrame)
+    stats.maximumLateRelativeSwingVelocity =
+        PxMax(stats.maximumLateRelativeSwingVelocity,
+              relativeSwing.magnitude());
+  const PxVec3 worldLeverA =
+      poseA.q.rotate(gRevoluteMotorRatioConfiguredAnchorA);
+  const PxVec3 worldLeverB =
+      poseB.q.rotate(gRevoluteMotorRatioConfiguredAnchorB);
+  const PxVec3 anchorVelocityA =
+      linearA + angularA.cross(worldLeverA);
+  const PxVec3 anchorVelocityB =
+      linearB + angularB.cross(worldLeverB);
+  const PxReal relativeAnchorPointSpeed =
+      (anchorVelocityB - anchorVelocityA).magnitude();
+  stats.finalRelativeAnchorPointSpeed =
+      relativeAnchorPointSpeed;
+  if (stats.stateSamples > gRevoluteMotorRatioLateBeginFrame)
+    stats.maximumLateRelativeAnchorPointSpeed =
+        PxMax(stats.maximumLateRelativeAnchorPointSpeed,
+              relativeAnchorPointSpeed);
+  stats.maximumLinearSpeed =
+      PxMax(stats.maximumLinearSpeed,
+            PxMax(linearA.magnitude(), linearB.magnitude()));
+
+  const PxVec3 localAngularA = poseA.q.rotateInv(angularA);
+  const PxVec3 localAngularB = poseB.q.rotateInv(angularB);
+  const PxVec3 localMomentumA =
+      localAngularA.multiply(
+          gRevoluteMotorRatioBodyA->getMassSpaceInertiaTensor());
+  const PxVec3 localMomentumB =
+      localAngularB.multiply(
+          gRevoluteMotorRatioBodyB->getMassSpaceInertiaTensor());
+  const PxVec3 generalizedMomentum =
+      poseA.q.rotate(localMomentumA) *
+          driveGearRatio +
+      poseB.q.rotate(localMomentumB);
+  const PxReal massA = gRevoluteMotorRatioBodyA->getMass();
+  const PxReal massB = gRevoluteMotorRatioBodyB->getMass();
+  const PxVec3 totalLinearMomentum =
+      linearA * massA + linearB * massB;
+  const PxVec3 totalAngularMomentum =
+      poseA.p.cross(linearA * massA) +
+      poseA.q.rotate(localMomentumA) +
+      poseB.p.cross(linearB * massB) +
+      poseB.q.rotate(localMomentumB);
+  stats.maximumTotalLinearMomentum =
+      PxMax(stats.maximumTotalLinearMomentum,
+            totalLinearMomentum.magnitude());
+  if (stats.stateSamples <=
+      gRevoluteMotorDynamicOffPrincipalMomentumWindowFrames)
+    stats.maximumInitialTotalAngularMomentum =
+        PxMax(stats.maximumInitialTotalAngularMomentum,
+              totalAngularMomentum.magnitude());
+  if (stats.stateSamples <=
+      gRevoluteMotorDynamicOffPrincipalMomentumWindowFrames)
+    stats.maximumInitialGeneralizedMomentumDrift =
+        PxMax(stats.maximumInitialGeneralizedMomentumDrift,
+              generalizedMomentum.magnitude());
+  stats.maximumGeneralizedMomentumDrift =
+      PxMax(stats.maximumGeneralizedMomentumDrift,
+            generalizedMomentum.magnitude());
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+}
+
+static void sampleRevoluteMotorContactState() {
+  if (!gRevoluteMotorContactBodyA ||
+      !gRevoluteMotorContactBodyB ||
+      !gRevoluteMotorContactJoint)
+    return;
+
+  RevoluteMotorContactStats &stats =
+      gRevoluteMotorContactStats;
+  stats.stateSamples++;
+  const PxTransform poseA =
+      gRevoluteMotorContactBodyA->getGlobalPose();
+  const PxTransform poseB =
+      gRevoluteMotorContactBodyB->getGlobalPose();
+  const PxVec3 angularA =
+      gRevoluteMotorContactBodyA->getAngularVelocity();
+  const PxVec3 angularB =
+      gRevoluteMotorContactBodyB->getAngularVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorContactJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorContactJoint->getRelativeTransform();
+  if (!poseA.isValid() || !poseB.isValid() ||
+      !angularA.isFinite() || !angularB.isFinite() ||
+      !axisA.isFinite() || !axisB.isFinite() ||
+      !relative.isValid()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal relativeVelocity =
+      (angularB - angularA).dot(axisA);
+  const PxReal relativeError =
+      PxAbs(relativeVelocity -
+            gRevoluteMotorContactTargetVelocity);
+  stats.finalVelocityA = angularA.dot(axisA);
+  stats.finalVelocityB = angularB.dot(axisA);
+  stats.finalRelativeVelocity = relativeVelocity;
+  stats.finalRelativeError = relativeError;
+  if (stats.stateSamples > gRevoluteMotorContactLateBeginFrame)
+    stats.maximumLateRelativeError =
+        PxMax(stats.maximumLateRelativeError, relativeError);
+  PxConstraint *constraint =
+      gRevoluteMotorContactJoint->getConstraint();
+  if (!constraint) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+  PxVec3 linearForce(0.0f), angularForce(0.0f);
+  constraint->getForce(linearForce, angularForce);
+  if (!linearForce.isFinite() || !angularForce.isFinite()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+  if (stats.stateSamples > gRevoluteMotorContactLateBeginFrame) {
+    const PxReal driveReaction =
+        PxAbs(angularForce.dot(axisA));
+    stats.lateDriveReactionSamples++;
+    stats.lateDriveReactionSum += driveReaction;
+    stats.maximumLateDriveReaction =
+        PxMax(stats.maximumLateDriveReaction, driveReaction);
+  }
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+  stats.maximumCenterHeightError =
+      PxMax(stats.maximumCenterHeightError,
+            PxMax(PxAbs(poseA.p.y -
+                        gRevoluteMotorContactCenterHeight),
+                  PxAbs(poseB.p.y -
+                        gRevoluteMotorContactCenterHeight)));
+}
+
+static void sampleRevoluteMotorKinematicState() {
+  if (!gRevoluteMotorKinematicBody ||
+      !gRevoluteMotorKinematicDynamicBody ||
+      !gRevoluteMotorKinematicJoint)
+    return;
+
+  RevoluteMotorKinematicStats &stats =
+      gRevoluteMotorKinematicStats;
+  stats.stateSamples++;
+  const PxTransform kinematicPose =
+      gRevoluteMotorKinematicBody->getGlobalPose();
+  const PxTransform dynamicPose =
+      gRevoluteMotorKinematicDynamicBody->getGlobalPose();
+  const PxVec3 kinematicAngular =
+      gRevoluteMotorKinematicBody->getAngularVelocity();
+  const PxVec3 dynamicAngular =
+      gRevoluteMotorKinematicDynamicBody->getAngularVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorKinematicJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorKinematicJoint->getRelativeTransform();
+  if (!kinematicPose.isValid() || !dynamicPose.isValid() ||
+      !kinematicAngular.isFinite() || !dynamicAngular.isFinite() ||
+      !axisA.isFinite() || !axisB.isFinite() ||
+      !relative.isValid()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal kinematicVelocity =
+      kinematicAngular.dot(axisA);
+  const PxReal dynamicVelocity =
+      dynamicAngular.dot(axisA);
+  const PxReal relativeVelocity =
+      dynamicVelocity - kinematicVelocity;
+  const PxReal relativeError =
+      PxAbs(relativeVelocity -
+            gRevoluteMotorKinematicTargetVelocity);
+  stats.finalKinematicVelocity = kinematicVelocity;
+  stats.finalDynamicVelocity = dynamicVelocity;
+  stats.finalRelativeVelocity = relativeVelocity;
+  stats.finalRelativeError = relativeError;
+  if (stats.stateSamples > gRevoluteMotorKinematicLateBeginFrame) {
+    stats.maximumLateRelativeError =
+        PxMax(stats.maximumLateRelativeError, relativeError);
+    stats.maximumLateKinematicVelocityError =
+        PxMax(stats.maximumLateKinematicVelocityError,
+              PxAbs(kinematicVelocity -
+                    gRevoluteMotorKinematicEndpointVelocity));
+    stats.maximumLateDynamicVelocityError =
+        PxMax(stats.maximumLateDynamicVelocityError,
+              PxAbs(dynamicVelocity -
+                    gRevoluteMotorKinematicExpectedDynamicVelocity));
+  }
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+}
+
+static void sampleRevoluteMotorOffPrincipalState() {
+  if (!gRevoluteMotorOffPrincipalBody ||
+      !gRevoluteMotorOffPrincipalJoint)
+    return;
+
+  RevoluteMotorOffPrincipalStats &stats =
+      gRevoluteMotorOffPrincipalStats;
+  stats.stateSamples++;
+  const PxTransform pose =
+      gRevoluteMotorOffPrincipalBody->getGlobalPose();
+  const PxVec3 angularVelocity =
+      gRevoluteMotorOffPrincipalBody->getAngularVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorOffPrincipalJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorOffPrincipalJoint->getRelativeTransform();
+  PxConstraint *constraint =
+      gRevoluteMotorOffPrincipalJoint->getConstraint();
+  if (!pose.isValid() || !angularVelocity.isFinite() ||
+      !axisA.isFinite() || !axisB.isFinite() ||
+      !relative.isValid() || !constraint) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  PxVec3 linearForce(0.0f), angularForce(0.0f);
+  constraint->getForce(linearForce, angularForce);
+  if (!linearForce.isFinite() || !angularForce.isFinite()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal hingeVelocity = angularVelocity.dot(axisA);
+  const PxReal hingeVelocityError =
+      PxAbs(hingeVelocity -
+            gRevoluteMotorOffPrincipalTargetVelocity);
+  const PxReal swingVelocity =
+      (angularVelocity - axisA * hingeVelocity).magnitude();
+  const PxReal axialReaction = angularForce.dot(axisA);
+  const PxReal swingReaction =
+      (angularForce - axisA * axialReaction).magnitude();
+  stats.finalHingeVelocity = hingeVelocity;
+  stats.finalHingeVelocityError = hingeVelocityError;
+  if (stats.stateSamples >
+      gRevoluteMotorOffPrincipalLateBeginFrame) {
+    stats.maximumLateHingeVelocityError =
+        PxMax(stats.maximumLateHingeVelocityError,
+              hingeVelocityError);
+    stats.maximumLateSwingVelocity =
+        PxMax(stats.maximumLateSwingVelocity, swingVelocity);
+  }
+  stats.maximumSwingReaction =
+      PxMax(stats.maximumSwingReaction, swingReaction);
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+}
+
+static void sampleRevoluteMotorOffCenterState() {
+  if (!gRevoluteMotorOffCenterBody ||
+      !gRevoluteMotorOffCenterJoint)
+    return;
+
+  RevoluteMotorOffCenterStats &stats =
+      gRevoluteMotorOffCenterStats;
+  stats.stateSamples++;
+  const PxTransform pose =
+      gRevoluteMotorOffCenterBody->getGlobalPose();
+  const PxVec3 linearVelocity =
+      gRevoluteMotorOffCenterBody->getLinearVelocity();
+  const PxVec3 angularVelocity =
+      gRevoluteMotorOffCenterBody->getAngularVelocity();
+  PxVec3 axisA, axisB;
+  getJointWorldAxes(gRevoluteMotorOffCenterJoint, axisA, axisB);
+  const PxTransform relative =
+      gRevoluteMotorOffCenterJoint->getRelativeTransform();
+  PxConstraint *constraint =
+      gRevoluteMotorOffCenterJoint->getConstraint();
+  if (!pose.isValid() || !linearVelocity.isFinite() ||
+      !angularVelocity.isFinite() || !axisA.isFinite() ||
+      !axisB.isFinite() || !relative.isValid() || !constraint) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  PxVec3 linearForce(0.0f), angularForce(0.0f);
+  constraint->getForce(linearForce, angularForce);
+  if (!linearForce.isFinite() || !angularForce.isFinite()) {
+    stats.nonFiniteSamples++;
+    return;
+  }
+
+  const PxReal hingeVelocity = angularVelocity.dot(axisA);
+  const PxReal hingeVelocityError =
+      PxAbs(hingeVelocity -
+            gRevoluteMotorOffCenterTargetVelocity);
+  const PxReal swingVelocity =
+      (angularVelocity - axisA * hingeVelocity).magnitude();
+  const PxVec3 worldLeverArm =
+      pose.q.rotate(gRevoluteMotorOffCenterConfiguredLocalAnchor);
+  const PxVec3 anchorPointVelocity =
+      linearVelocity + angularVelocity.cross(worldLeverArm);
+  const PxReal anchorPointSpeed =
+      anchorPointVelocity.magnitude();
+  stats.finalHingeVelocity = hingeVelocity;
+  stats.finalHingeVelocityError = hingeVelocityError;
+  stats.finalAnchorPointSpeed = anchorPointSpeed;
+  if (stats.stateSamples > gRevoluteMotorOffCenterLateBeginFrame) {
+    stats.maximumLateHingeVelocityError =
+        PxMax(stats.maximumLateHingeVelocityError,
+              hingeVelocityError);
+    stats.maximumLateSwingVelocity =
+        PxMax(stats.maximumLateSwingVelocity, swingVelocity);
+    stats.maximumLateAnchorPointSpeed =
+        PxMax(stats.maximumLateAnchorPointSpeed,
+              anchorPointSpeed);
+  }
+  stats.maximumLinearSpeed =
+      PxMax(stats.maximumLinearSpeed, linearVelocity.magnitude());
+  stats.maximumLinearReaction =
+      PxMax(stats.maximumLinearReaction, linearForce.magnitude());
+  stats.maximumAnchorError =
+      PxMax(stats.maximumAnchorError, relative.p.magnitude());
+  stats.maximumAxisMisalignment =
+      PxMax(stats.maximumAxisMisalignment,
+            axisA.cross(axisB).magnitude());
+}
+
 static void sampleEndpointState() {
   if (isRevoluteEndpointProbe()) {
     sampleEndpointAngularState();
@@ -3854,6 +6183,47 @@ static void sampleEndpointState() {
 }
 
 void stepPhysics(bool interactive) {
+  if (!interactive && isRevoluteMotorKinematicCase() &&
+      gRevoluteMotorKinematicBody) {
+    const PxReal targetTime =
+        PxReal(gGateStats.completedFrames + 1) *
+        gHeadlessOptions.dt;
+    const PxQuat targetRotation(
+        gRevoluteMotorKinematicEndpointVelocity * targetTime,
+        PxVec3(1.0f, 0.0f, 0.0f));
+    gRevoluteMotorKinematicBody->setKinematicTarget(
+        PxTransform(gRevoluteMotorKinematicInitialPose.p,
+                    targetRotation));
+    gRevoluteMotorKinematicStats.targetUpdates++;
+  }
+  if (!interactive && isRevoluteMotorFreeSpinCase() &&
+      gRevoluteMotorFreeSpinBody &&
+      gGateStats.completedFrames ==
+          gRevoluteMotorFreeSpinBoostFrame) {
+    if (isRevoluteMotorDynamicFreeSpinCase() &&
+        gRevoluteMotorFreeSpinBodyA) {
+      gRevoluteMotorFreeSpinBodyA->setAngularVelocity(
+          PxVec3(-3.75f, 0.0f, 0.0f), true);
+      gRevoluteMotorFreeSpinBody->setAngularVelocity(
+          PxVec3(1.25f, 0.0f, 0.0f), true);
+    } else {
+      gRevoluteMotorFreeSpinBody->setAngularVelocity(
+          PxVec3(gRevoluteMotorFreeSpinBoostVelocity, 0.0f, 0.0f),
+          true);
+    }
+    gRevoluteMotorFreeSpinStats.boostVelocityReadback =
+        gRevoluteMotorFreeSpinJoint
+            ? gRevoluteMotorFreeSpinJoint->getVelocity()
+            : 0.0f;
+    gRevoluteMotorFreeSpinStats.boostEvents++;
+  }
+  if (!interactive && isRevoluteMotorLimitCase() &&
+      gRevoluteMotorLimitJoint &&
+      gGateStats.completedFrames == gRevoluteMotorLimitReverseFrame) {
+    gRevoluteMotorLimitJoint->setDriveVelocity(
+        -gRevoluteMotorLimitTargetVelocity, false);
+    gRevoluteMotorLimitStats.reverseEvents++;
+  }
   if (!interactive && isNativeBreakReactionCase() &&
       gNativeBreakReactionBody) {
     if (isNativeAngularReactionCase())
@@ -3890,6 +6260,22 @@ void stepPhysics(bool interactive) {
 
   gGateStats.fetchErrorState |= errorState;
   sampleGateState();
+  if (isRevoluteMotorCase())
+    sampleRevoluteMotorState();
+  if (isRevoluteMotorLimitCase())
+    sampleRevoluteMotorLimitState();
+  if (isRevoluteMotorFreeSpinCase())
+    sampleRevoluteMotorFreeSpinState();
+  if (isRevoluteMotorRatioCase())
+    sampleRevoluteMotorRatioState();
+  if (isRevoluteMotorContactCase())
+    sampleRevoluteMotorContactState();
+  if (isRevoluteMotorKinematicCase())
+    sampleRevoluteMotorKinematicState();
+  if (isRevoluteMotorOffPrincipalCase())
+    sampleRevoluteMotorOffPrincipalState();
+  if (isRevoluteMotorOffCenterCase())
+    sampleRevoluteMotorOffCenterState();
   if (isSphericalConeCase())
     sampleSphericalConeState();
   if (isNativeBreakReactionCase())
@@ -4515,7 +6901,8 @@ static GateEvaluation evaluateGate() {
 
   if (gErrorCallback.getFatalCount() || gGateStats.fetchErrorState) {
     if (isEndpointProbe() || isForceReactionCase() ||
-        isSphericalConeCase() || isNativeBreakReactionCase())
+        isSphericalConeCase() || isNativeBreakReactionCase() ||
+        isRevoluteMotorFamilyCase())
       setInfrastructureErrorOverFailure(evaluation, "physx_error");
     else
       setGateFailure(evaluation, "physx_error");
@@ -4528,6 +6915,402 @@ static GateEvaluation evaluateGate() {
       gGateStats.maxLinearSpeed > 10000.0f ||
       gGateStats.maxAngularSpeed > 10000.0f)
     setGateFailure(evaluation, "runaway");
+
+  if (isRevoluteMotorCase()) {
+    if (gScene) {
+      gRevoluteMotorStats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      gRevoluteMotorStats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      gRevoluteMotorStats.finalConstraints =
+          gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorJoint || !gRevoluteMotorBodyA ||
+        !gRevoluteMotorBodyB ||
+        !gRevoluteMotorStats.actorOrderValid ||
+        !gRevoluteMotorStats.driveEnabledReadback ||
+        gRevoluteMotorStats.stateSamples != gHeadlessOptions.frames ||
+        gRevoluteMotorStats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_fixture");
+    if (gRevoluteMotorStats.finalRelativeError >
+            gRevoluteMotorRelativeErrorMaximum ||
+        gRevoluteMotorStats.maximumLateRelativeError >
+            gRevoluteMotorRelativeErrorMaximum)
+      setGateFailure(evaluation, "revolute_motor_relative_velocity");
+    if (gRevoluteMotorStats.maximumAngularMomentumDrift >
+        gRevoluteMotorMomentumDriftMaximum)
+      setGateFailure(evaluation, "revolute_motor_momentum");
+    if (gRevoluteMotorStats.maximumAnchorError >
+            gRevoluteMotorAnchorErrorMaximum ||
+        gRevoluteMotorStats.maximumAxisMisalignment >
+            gRevoluteMotorAxisMisalignmentMaximum)
+      setGateFailure(evaluation, "revolute_motor_joint_error");
+  }
+  if (isRevoluteMotorLimitCase()) {
+    RevoluteMotorLimitStats &stats = gRevoluteMotorLimitStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorLimitJoint || !gRevoluteMotorLimitBody ||
+        (isRevoluteMotorDynamicLimitCase() &&
+         !gRevoluteMotorLimitBodyA) ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.limitEnabledReadback ||
+        stats.reverseEvents != 1 ||
+        stats.finalTargetVelocityReadback !=
+            -gRevoluteMotorLimitTargetVelocity ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_limit_fixture");
+
+    const PxReal upperTravel =
+        stats.maximumAngle - stats.initialAngle;
+    const PxReal range = stats.maximumAngle - stats.minimumAngle;
+    if (upperTravel < gRevoluteMotorLimitTravelMinimum ||
+        range < gRevoluteMotorLimitRangeMinimum ||
+        stats.finalAngle >
+            gRevoluteMotorLimitLower +
+                gRevoluteMotorLimitFinalTolerance)
+      setGateFailure(evaluation, "revolute_motor_limit_travel");
+    if (stats.maximumUpperViolation >
+            gRevoluteMotorLimitViolationMaximum ||
+        stats.maximumLowerViolation >
+            gRevoluteMotorLimitViolationMaximum)
+      setGateFailure(evaluation, "revolute_motor_limit_violation");
+    if (stats.maximumLateOutwardVelocity >
+        gRevoluteMotorLimitOutwardVelocityMaximum)
+      setGateFailure(evaluation,
+                     "revolute_motor_limit_outward_velocity");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorLimitAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorLimitAxisMisalignmentMaximum)
+      setGateFailure(evaluation,
+                     "revolute_motor_limit_joint_error");
+  }
+  if (isRevoluteMotorFreeSpinCase()) {
+    RevoluteMotorFreeSpinStats &stats =
+        gRevoluteMotorFreeSpinStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorFreeSpinJoint ||
+        !gRevoluteMotorFreeSpinBody ||
+        (isRevoluteMotorDynamicFreeSpinCase() &&
+         !gRevoluteMotorFreeSpinBodyA) ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.freeSpinEnabledReadback ||
+        !stats.limitDisabledReadback || stats.boostEvents != 1 ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0 ||
+        stats.minimumPostBoostVelocity == PX_MAX_F32)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_freespin_fixture");
+    if (PxAbs(stats.preBoostFinalVelocity -
+              gRevoluteMotorFreeSpinTargetVelocity) >
+            gRevoluteMotorFreeSpinTargetErrorMaximum ||
+        stats.maximumLatePreBoostError >
+            gRevoluteMotorFreeSpinTargetErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_freespin_acceleration");
+    if (stats.minimumPostBoostVelocity <
+            gRevoluteMotorFreeSpinMinimumCoastVelocity ||
+        stats.finalVelocity <
+            gRevoluteMotorFreeSpinMinimumCoastVelocity ||
+        stats.maximumPostBoostVelocityDrop >
+            gRevoluteMotorFreeSpinVelocityDropMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_freespin_braking");
+    if (isRevoluteMotorDynamicFreeSpinCase() &&
+        stats.maximumAngularMomentumDrift >
+            gRevoluteMotorMomentumDriftMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_freespin_momentum");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorFreeSpinAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorFreeSpinAxisMisalignmentMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_freespin_joint_error");
+  }
+  if (isRevoluteMotorRatioCase()) {
+    RevoluteMotorRatioStats &stats = gRevoluteMotorRatioStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorRatioJoint ||
+        !gRevoluteMotorRatioBodyA || !gRevoluteMotorRatioBodyB ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.freeSpinDisabledReadback ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_ratio_fixture");
+    if (stats.finalWeightedVelocityError >
+            gRevoluteMotorRatioVelocityErrorMaximum ||
+        stats.maximumLateWeightedVelocityError >
+            gRevoluteMotorRatioVelocityErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_ratio_weighted_velocity");
+    const PxReal gatedMomentumDrift =
+        isRevoluteMotorDynamicOffCenterCase()
+            ? stats.maximumInitialTotalAngularMomentum
+            : (isRevoluteMotorDynamicOffPrincipalCase()
+                   ? stats.maximumInitialGeneralizedMomentumDrift
+                   : stats.maximumGeneralizedMomentumDrift);
+    const PxReal momentumDriftMaximum =
+        isRevoluteMotorDynamicOffCenterCase()
+            ? gRevoluteMotorDynamicOffCenterInitialAngularMomentumMaximum
+            : (isRevoluteMotorDynamicOffPrincipalCase()
+                   ? gRevoluteMotorDynamicOffPrincipalInitialMomentumDriftMaximum
+                   : gRevoluteMotorRatioMomentumDriftMaximum);
+    if (gatedMomentumDrift >
+        momentumDriftMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_ratio_generalized_momentum");
+    if (isRevoluteMotorDynamicOffPrincipalCase() &&
+        (stats.initialOffPrincipalResponseA <
+             gRevoluteMotorDynamicOffPrincipalResponseMinimum ||
+         stats.initialOffPrincipalResponseB <
+             gRevoluteMotorDynamicOffPrincipalResponseMinimum))
+      setInfrastructureErrorOverFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_principal_fixture");
+    if (isRevoluteMotorDynamicOffPrincipalCase() &&
+        stats.maximumLateRelativeSwingVelocity >
+            gRevoluteMotorDynamicOffPrincipalSwingVelocityMaximum)
+      setGateFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_principal_swing");
+    if (isRevoluteMotorDynamicOffCenterCase() &&
+        stats.maximumLateRelativeSwingVelocity >
+            gRevoluteMotorDynamicOffPrincipalSwingVelocityMaximum)
+      setGateFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_center_swing");
+    if (isRevoluteMotorDynamicOffCenterCase() &&
+        (stats.initialPerpendicularLeverArmA <
+             gRevoluteMotorDynamicOffCenterLeverArmMinimum ||
+         stats.initialPerpendicularLeverArmB <
+             gRevoluteMotorDynamicOffCenterLeverArmMinimum))
+      setInfrastructureErrorOverFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_center_fixture");
+    if (isRevoluteMotorDynamicOffCenterCase() &&
+        (stats.finalRelativeAnchorPointSpeed >
+             gRevoluteMotorDynamicOffCenterAnchorSpeedMaximum ||
+         stats.maximumLateRelativeAnchorPointSpeed >
+             gRevoluteMotorDynamicOffCenterAnchorSpeedMaximum))
+      setGateFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_center_anchor_velocity");
+    if (isRevoluteMotorDynamicOffCenterCase() &&
+        stats.maximumTotalLinearMomentum >
+            gRevoluteMotorDynamicOffCenterLinearMomentumMaximum)
+      setGateFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_center_linear_momentum");
+    if (isRevoluteMotorDynamicOffCenterCase() &&
+        stats.maximumLinearSpeed <
+            gRevoluteMotorDynamicOffCenterLinearSpeedMinimum)
+      setGateFailure(
+          evaluation,
+          "revolute_motor_dynamic_off_center_motion");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorRatioAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorRatioAxisMisalignmentMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_ratio_joint_error");
+  }
+  if (isRevoluteMotorContactCase()) {
+    RevoluteMotorContactStats &stats =
+        gRevoluteMotorContactStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorContactJoint ||
+        !gRevoluteMotorContactBodyA ||
+        !gRevoluteMotorContactBodyB ||
+        !gRevoluteMotorContactGround ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0 ||
+        stats.contactEvents == 0 || stats.contactPointCount == 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_contact_fixture");
+    if (stats.finalRelativeError >
+            gRevoluteMotorContactVelocityErrorMaximum ||
+        stats.maximumLateRelativeError >
+            gRevoluteMotorContactVelocityErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_contact_relative_velocity");
+    const PxReal meanLateDriveReaction =
+        stats.lateDriveReactionSamples
+            ? stats.lateDriveReactionSum /
+                  PxReal(stats.lateDriveReactionSamples)
+            : 0.0f;
+    if (stats.lateDriveReactionSamples == 0 ||
+        meanLateDriveReaction <
+            gRevoluteMotorContactDriveReactionMinimum)
+      setGateFailure(
+          evaluation, "revolute_motor_contact_drive_reaction");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorContactAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorContactAxisMisalignmentMaximum ||
+        stats.maximumCenterHeightError >
+            gRevoluteMotorContactCenterHeightErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_contact_joint_error");
+  }
+  if (isRevoluteMotorKinematicCase()) {
+    RevoluteMotorKinematicStats &stats =
+        gRevoluteMotorKinematicStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorKinematicJoint ||
+        !gRevoluteMotorKinematicBody ||
+        !gRevoluteMotorKinematicDynamicBody ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        !stats.kinematicFlagReadback ||
+        stats.targetUpdates != gHeadlessOptions.frames ||
+        stats.targetUpdateFailures != 0 ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_kinematic_fixture");
+    if (stats.finalRelativeError >
+            gRevoluteMotorKinematicVelocityErrorMaximum ||
+        stats.maximumLateRelativeError >
+            gRevoluteMotorKinematicVelocityErrorMaximum ||
+        stats.maximumLateKinematicVelocityError >
+            gRevoluteMotorKinematicVelocityErrorMaximum ||
+        stats.maximumLateDynamicVelocityError >
+            gRevoluteMotorKinematicVelocityErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_kinematic_velocity");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorKinematicAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorKinematicAxisMisalignmentMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_kinematic_joint_error");
+  }
+  if (isRevoluteMotorOffPrincipalCase()) {
+    RevoluteMotorOffPrincipalStats &stats =
+        gRevoluteMotorOffPrincipalStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorOffPrincipalJoint ||
+        !gRevoluteMotorOffPrincipalBody ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.initialOffPrincipalResponse <
+            gRevoluteMotorOffPrincipalResponseMinimum ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_off_principal_fixture");
+    if (stats.finalHingeVelocityError >
+            gRevoluteMotorOffPrincipalVelocityErrorMaximum ||
+        stats.maximumLateHingeVelocityError >
+            gRevoluteMotorOffPrincipalVelocityErrorMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_off_principal_velocity");
+    if (stats.maximumLateSwingVelocity >
+        gRevoluteMotorOffPrincipalSwingVelocityMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_off_principal_swing");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorOffPrincipalAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorOffPrincipalAxisMisalignmentMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_off_principal_joint_error");
+  }
+  if (isRevoluteMotorOffCenterCase()) {
+    RevoluteMotorOffCenterStats &stats =
+        gRevoluteMotorOffCenterStats;
+    if (gScene) {
+      stats.finalDynamicActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+      stats.finalStaticActors =
+          gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+      stats.finalConstraints = gScene->getNbConstraints();
+    }
+    if (!gRevoluteMotorOffCenterJoint ||
+        !gRevoluteMotorOffCenterBody ||
+        !stats.actorOrderValid || !stats.driveEnabledReadback ||
+        stats.initialPerpendicularLeverArm <
+            gRevoluteMotorOffCenterLeverArmMinimum ||
+        (isRevoluteMotorSpatialCase() &&
+         stats.initialOffPrincipalResponse <
+             gRevoluteMotorOffPrincipalResponseMinimum) ||
+        stats.stateSamples != gHeadlessOptions.frames ||
+        stats.nonFiniteSamples != 0)
+      setInfrastructureErrorOverFailure(
+          evaluation, "revolute_motor_off_center_fixture");
+    if (stats.finalHingeVelocityError >
+            gRevoluteMotorOffCenterVelocityErrorMaximum ||
+        stats.maximumLateHingeVelocityError >
+            gRevoluteMotorOffCenterVelocityErrorMaximum)
+      setGateFailure(
+          evaluation,
+          isRevoluteMotorSpatialCase()
+              ? "revolute_motor_spatial_velocity"
+              : "revolute_motor_off_center_velocity");
+    if (isRevoluteMotorSpatialCase() &&
+        stats.maximumLateSwingVelocity >
+            gRevoluteMotorOffPrincipalSwingVelocityMaximum)
+      setGateFailure(
+          evaluation, "revolute_motor_spatial_swing");
+    if (stats.finalAnchorPointSpeed >
+            gRevoluteMotorOffCenterAnchorSpeedMaximum ||
+        stats.maximumLateAnchorPointSpeed >
+            gRevoluteMotorOffCenterAnchorSpeedMaximum)
+      setGateFailure(
+          evaluation,
+          isRevoluteMotorSpatialCase()
+              ? "revolute_motor_spatial_anchor_velocity"
+              : "revolute_motor_off_center_anchor_velocity");
+    if (stats.maximumAnchorError >
+            gRevoluteMotorOffCenterAnchorErrorMaximum ||
+        stats.maximumAxisMisalignment >
+            gRevoluteMotorOffCenterAxisMisalignmentMaximum)
+      setGateFailure(
+          evaluation,
+          isRevoluteMotorSpatialCase()
+              ? "revolute_motor_spatial_joint_error"
+              : "revolute_motor_off_center_joint_error");
+  }
   if (isImpactCase() &&
       (gGateStats.maxLinearSpeed > gImpactLinearSpeedCap ||
        gGateStats.maxAngularSpeed > gImpactAngularSpeedCap))
@@ -5074,7 +7857,435 @@ static GateEvaluation evaluateGate() {
 }
 
 static void printGateDetails() {
-  if (isNativeBreakReactionCase()) {
+  if (isRevoluteMotorOffCenterCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorOffCenter] "
+        "case=%s topology=world-dynamic "
+        "actorOrderValid=%u driveEnabled=%u "
+        "targetVelocity=%.9g forceLimit=%.9g "
+        "initialPerpendicularLeverArm=%.9g "
+        "initialOffPrincipalResponse=%.9g "
+        "inertiaX=%.9g inertiaY=%.9g inertiaZ=%.9g "
+        "bodyAngle=%.9g "
+        "stateSamples=%u nonFiniteSamples=%u "
+        "finalHingeVelocity=%.9g finalHingeVelocityError=%.9g "
+        "maximumLateHingeVelocityError=%.9g "
+        "maximumLateSwingVelocity=%.9g "
+        "finalAnchorPointSpeed=%.9g "
+        "maximumLateAnchorPointSpeed=%.9g "
+        "maximumLinearSpeed=%.9g maximumLinearReaction=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        gRevoluteMotorOffCenterStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorOffCenterStats.driveEnabledReadback ? 1u : 0u,
+        double(gRevoluteMotorOffCenterStats.targetVelocityReadback),
+        double(gRevoluteMotorOffCenterStats.forceLimitReadback),
+        double(gRevoluteMotorOffCenterStats
+                   .initialPerpendicularLeverArm),
+        double(gRevoluteMotorOffCenterStats
+                   .initialOffPrincipalResponse),
+        double(isRevoluteMotorSpatialCase()
+                   ? gRevoluteMotorOffPrincipalInertia.x
+                   : 1.0f),
+        double(isRevoluteMotorSpatialCase()
+                   ? gRevoluteMotorOffPrincipalInertia.y
+                   : 2.0f),
+        double(isRevoluteMotorSpatialCase()
+                   ? gRevoluteMotorOffPrincipalInertia.z
+                   : 3.0f),
+        double(isRevoluteMotorSpatialCase()
+                   ? gRevoluteMotorOffPrincipalAngle
+                   : 0.0f),
+        gRevoluteMotorOffCenterStats.stateSamples,
+        gRevoluteMotorOffCenterStats.nonFiniteSamples,
+        double(gRevoluteMotorOffCenterStats.finalHingeVelocity),
+        double(gRevoluteMotorOffCenterStats.finalHingeVelocityError),
+        double(gRevoluteMotorOffCenterStats
+                   .maximumLateHingeVelocityError),
+        double(gRevoluteMotorOffCenterStats
+                   .maximumLateSwingVelocity),
+        double(gRevoluteMotorOffCenterStats.finalAnchorPointSpeed),
+        double(gRevoluteMotorOffCenterStats
+                   .maximumLateAnchorPointSpeed),
+        double(gRevoluteMotorOffCenterStats.maximumLinearSpeed),
+        double(gRevoluteMotorOffCenterStats.maximumLinearReaction),
+        double(gRevoluteMotorOffCenterStats.maximumAnchorError),
+        double(gRevoluteMotorOffCenterStats.maximumAxisMisalignment),
+        gRevoluteMotorOffCenterStats.initialDynamicActors,
+        gRevoluteMotorOffCenterStats.initialStaticActors,
+        gRevoluteMotorOffCenterStats.initialConstraints,
+        gRevoluteMotorOffCenterStats.finalDynamicActors,
+        gRevoluteMotorOffCenterStats.finalStaticActors,
+        gRevoluteMotorOffCenterStats.finalConstraints);
+  } else if (isRevoluteMotorOffPrincipalCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorOffPrincipal] "
+        "case=%s topology=world-dynamic "
+        "actorOrderValid=%u driveEnabled=%u "
+        "targetVelocity=%.9g forceLimit=%.9g "
+        "inertiaX=%.9g inertiaY=%.9g inertiaZ=%.9g "
+        "bodyAngle=%.9g initialOffPrincipalResponse=%.9g "
+        "stateSamples=%u nonFiniteSamples=%u "
+        "finalHingeVelocity=%.9g finalHingeVelocityError=%.9g "
+        "maximumLateHingeVelocityError=%.9g "
+        "maximumLateSwingVelocity=%.9g "
+        "maximumSwingReaction=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        gRevoluteMotorOffPrincipalStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorOffPrincipalStats.driveEnabledReadback ? 1u : 0u,
+        double(gRevoluteMotorOffPrincipalStats.targetVelocityReadback),
+        double(gRevoluteMotorOffPrincipalStats.forceLimitReadback),
+        double(gRevoluteMotorOffPrincipalInertia.x),
+        double(gRevoluteMotorOffPrincipalInertia.y),
+        double(gRevoluteMotorOffPrincipalInertia.z),
+        double(gRevoluteMotorOffPrincipalAngle),
+        double(gRevoluteMotorOffPrincipalStats
+                   .initialOffPrincipalResponse),
+        gRevoluteMotorOffPrincipalStats.stateSamples,
+        gRevoluteMotorOffPrincipalStats.nonFiniteSamples,
+        double(gRevoluteMotorOffPrincipalStats.finalHingeVelocity),
+        double(gRevoluteMotorOffPrincipalStats
+                   .finalHingeVelocityError),
+        double(gRevoluteMotorOffPrincipalStats
+                   .maximumLateHingeVelocityError),
+        double(gRevoluteMotorOffPrincipalStats
+                   .maximumLateSwingVelocity),
+        double(gRevoluteMotorOffPrincipalStats.maximumSwingReaction),
+        double(gRevoluteMotorOffPrincipalStats.maximumAnchorError),
+        double(gRevoluteMotorOffPrincipalStats.maximumAxisMisalignment),
+        gRevoluteMotorOffPrincipalStats.initialDynamicActors,
+        gRevoluteMotorOffPrincipalStats.initialStaticActors,
+        gRevoluteMotorOffPrincipalStats.initialConstraints,
+        gRevoluteMotorOffPrincipalStats.finalDynamicActors,
+        gRevoluteMotorOffPrincipalStats.finalStaticActors,
+        gRevoluteMotorOffPrincipalStats.finalConstraints);
+  } else if (isRevoluteMotorKinematicCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorKinematic] "
+        "case=%s topology=kinematic-dynamic "
+        "actorOrderValid=%u driveEnabled=%u kinematicFlag=%u "
+        "targetVelocity=%.9g forceLimit=%.9g "
+        "endpointVelocity=%.9g expectedDynamicVelocity=%.9g "
+        "targetUpdates=%u targetUpdateFailures=%u "
+        "stateSamples=%u nonFiniteSamples=%u "
+        "finalKinematicVelocity=%.9g finalDynamicVelocity=%.9g "
+        "finalRelativeVelocity=%.9g finalRelativeError=%.9g "
+        "maximumLateRelativeError=%.9g "
+        "maximumLateKinematicVelocityError=%.9g "
+        "maximumLateDynamicVelocityError=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        gRevoluteMotorKinematicStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorKinematicStats.driveEnabledReadback ? 1u : 0u,
+        gRevoluteMotorKinematicStats.kinematicFlagReadback ? 1u : 0u,
+        double(gRevoluteMotorKinematicStats.targetVelocityReadback),
+        double(gRevoluteMotorKinematicStats.forceLimitReadback),
+        double(gRevoluteMotorKinematicEndpointVelocity),
+        double(gRevoluteMotorKinematicExpectedDynamicVelocity),
+        gRevoluteMotorKinematicStats.targetUpdates,
+        gRevoluteMotorKinematicStats.targetUpdateFailures,
+        gRevoluteMotorKinematicStats.stateSamples,
+        gRevoluteMotorKinematicStats.nonFiniteSamples,
+        double(gRevoluteMotorKinematicStats.finalKinematicVelocity),
+        double(gRevoluteMotorKinematicStats.finalDynamicVelocity),
+        double(gRevoluteMotorKinematicStats.finalRelativeVelocity),
+        double(gRevoluteMotorKinematicStats.finalRelativeError),
+        double(gRevoluteMotorKinematicStats.maximumLateRelativeError),
+        double(gRevoluteMotorKinematicStats
+                   .maximumLateKinematicVelocityError),
+        double(gRevoluteMotorKinematicStats
+                   .maximumLateDynamicVelocityError),
+        double(gRevoluteMotorKinematicStats.maximumAnchorError),
+        double(gRevoluteMotorKinematicStats.maximumAxisMisalignment),
+        gRevoluteMotorKinematicStats.initialDynamicActors,
+        gRevoluteMotorKinematicStats.initialStaticActors,
+        gRevoluteMotorKinematicStats.initialConstraints,
+        gRevoluteMotorKinematicStats.finalDynamicActors,
+        gRevoluteMotorKinematicStats.finalStaticActors,
+        gRevoluteMotorKinematicStats.finalConstraints);
+  } else if (isRevoluteMotorContactCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorContact] "
+        "case=%s topology=dynamic-dynamic-ground "
+        "actorOrderValid=%u driveEnabled=%u "
+        "targetVelocity=%.9g forceLimit=%.9g "
+        "radius=%.9g halfHeight=%.9g centerHeight=%.9g "
+        "stateSamples=%u nonFiniteSamples=%u "
+        "contactEvents=%u contactPointCount=%u "
+        "finalVelocityA=%.9g finalVelocityB=%.9g "
+        "finalRelativeVelocity=%.9g finalRelativeError=%.9g "
+        "maximumLateRelativeError=%.9g "
+        "lateDriveReactionSamples=%u meanLateDriveReaction=%.9g "
+        "maximumLateDriveReaction=%.9g "
+        "totalNormalImpulse=%.9g totalTangentialImpulse=%.9g "
+        "maximumTangentialImpulse=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "maximumCenterHeightError=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        gRevoluteMotorContactStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorContactStats.driveEnabledReadback ? 1u : 0u,
+        double(gRevoluteMotorContactStats.targetVelocityReadback),
+        double(gRevoluteMotorContactStats.forceLimitReadback),
+        double(gRevoluteMotorContactRadius),
+        double(gRevoluteMotorContactHalfHeight),
+        double(gRevoluteMotorContactCenterHeight),
+        gRevoluteMotorContactStats.stateSamples,
+        gRevoluteMotorContactStats.nonFiniteSamples,
+        gRevoluteMotorContactStats.contactEvents,
+        gRevoluteMotorContactStats.contactPointCount,
+        double(gRevoluteMotorContactStats.finalVelocityA),
+        double(gRevoluteMotorContactStats.finalVelocityB),
+        double(gRevoluteMotorContactStats.finalRelativeVelocity),
+        double(gRevoluteMotorContactStats.finalRelativeError),
+        double(gRevoluteMotorContactStats.maximumLateRelativeError),
+        gRevoluteMotorContactStats.lateDriveReactionSamples,
+        gRevoluteMotorContactStats.lateDriveReactionSamples
+            ? double(gRevoluteMotorContactStats.lateDriveReactionSum /
+                     PxReal(gRevoluteMotorContactStats
+                                .lateDriveReactionSamples))
+            : 0.0,
+        double(gRevoluteMotorContactStats.maximumLateDriveReaction),
+        double(gRevoluteMotorContactStats.totalNormalImpulse),
+        double(gRevoluteMotorContactStats.totalTangentialImpulse),
+        double(gRevoluteMotorContactStats.maximumTangentialImpulse),
+        double(gRevoluteMotorContactStats.maximumAnchorError),
+        double(gRevoluteMotorContactStats.maximumAxisMisalignment),
+        double(gRevoluteMotorContactStats.maximumCenterHeightError),
+        gRevoluteMotorContactStats.initialDynamicActors,
+        gRevoluteMotorContactStats.initialStaticActors,
+        gRevoluteMotorContactStats.initialConstraints,
+        gRevoluteMotorContactStats.finalDynamicActors,
+        gRevoluteMotorContactStats.finalStaticActors,
+        gRevoluteMotorContactStats.finalConstraints);
+  } else if (isRevoluteMotorRatioCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorRatio] "
+        "case=%s topology=%s actorOrderValid=%u "
+        "driveEnabled=%u freeSpinDisabled=%u "
+        "targetVelocity=%.9g forceLimit=%.9g driveGearRatio=%.9g "
+        "inertiaA=%.9g inertiaB=%.9g stateSamples=%u "
+        "nonFiniteSamples=%u finalVelocityA=%.9g "
+        "finalVelocityB=%.9g finalWeightedVelocity=%.9g "
+        "finalWeightedVelocityError=%.9g "
+        "maximumLateWeightedVelocityError=%.9g "
+        "initialOffPrincipalResponseA=%.9g "
+        "initialOffPrincipalResponseB=%.9g "
+        "maximumLateRelativeSwingVelocity=%.9g "
+        "maximumInitialGeneralizedMomentumDrift=%.9g "
+        "maximumGeneralizedMomentumDrift=%.9g "
+        "initialPerpendicularLeverArmA=%.9g "
+        "initialPerpendicularLeverArmB=%.9g "
+        "finalRelativeAnchorPointSpeed=%.9g "
+        "maximumLateRelativeAnchorPointSpeed=%.9g "
+        "maximumTotalLinearMomentum=%.9g "
+        "maximumInitialTotalAngularMomentum=%.9g "
+        "maximumLinearSpeed=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        isRevoluteMotorDynamicSpatialCase()
+            ? "dynamic-dynamic-spatial"
+            : (isRevoluteMotorDynamicOffPrincipalCase()
+                   ? "dynamic-dynamic-centered"
+                   : (isRevoluteMotorDynamicOffCenterCase()
+                          ? "dynamic-dynamic-off-center"
+                          : "dynamic-dynamic")),
+        gRevoluteMotorRatioStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorRatioStats.driveEnabledReadback ? 1u : 0u,
+        gRevoluteMotorRatioStats.freeSpinDisabledReadback ? 1u : 0u,
+        double(gRevoluteMotorRatioStats.targetVelocityReadback),
+        double(gRevoluteMotorRatioStats.forceLimitReadback),
+        double(gRevoluteMotorRatioStats.driveGearRatioReadback),
+        double(gRevoluteMotorRatioInertiaA),
+        double(gRevoluteMotorRatioInertiaB),
+        gRevoluteMotorRatioStats.stateSamples,
+        gRevoluteMotorRatioStats.nonFiniteSamples,
+        double(gRevoluteMotorRatioStats.finalVelocityA),
+        double(gRevoluteMotorRatioStats.finalVelocityB),
+        double(gRevoluteMotorRatioStats.finalWeightedVelocity),
+        double(gRevoluteMotorRatioStats.finalWeightedVelocityError),
+        double(gRevoluteMotorRatioStats.maximumLateWeightedVelocityError),
+        double(gRevoluteMotorRatioStats.initialOffPrincipalResponseA),
+        double(gRevoluteMotorRatioStats.initialOffPrincipalResponseB),
+        double(
+            gRevoluteMotorRatioStats.maximumLateRelativeSwingVelocity),
+        double(gRevoluteMotorRatioStats
+                   .maximumInitialGeneralizedMomentumDrift),
+        double(gRevoluteMotorRatioStats.maximumGeneralizedMomentumDrift),
+        double(gRevoluteMotorRatioStats
+                   .initialPerpendicularLeverArmA),
+        double(gRevoluteMotorRatioStats
+                   .initialPerpendicularLeverArmB),
+        double(gRevoluteMotorRatioStats
+                   .finalRelativeAnchorPointSpeed),
+        double(gRevoluteMotorRatioStats
+                   .maximumLateRelativeAnchorPointSpeed),
+        double(gRevoluteMotorRatioStats
+                   .maximumTotalLinearMomentum),
+        double(gRevoluteMotorRatioStats
+                   .maximumInitialTotalAngularMomentum),
+        double(gRevoluteMotorRatioStats.maximumLinearSpeed),
+        double(gRevoluteMotorRatioStats.maximumAnchorError),
+        double(gRevoluteMotorRatioStats.maximumAxisMisalignment),
+        gRevoluteMotorRatioStats.initialDynamicActors,
+        gRevoluteMotorRatioStats.initialStaticActors,
+        gRevoluteMotorRatioStats.initialConstraints,
+        gRevoluteMotorRatioStats.finalDynamicActors,
+        gRevoluteMotorRatioStats.finalStaticActors,
+        gRevoluteMotorRatioStats.finalConstraints);
+  } else if (isRevoluteMotorFreeSpinCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorFreeSpin] "
+        "case=%s topology=%s actorOrderValid=%u "
+        "driveEnabled=%u freeSpinEnabled=%u limitDisabled=%u "
+        "targetVelocity=%.9g forceLimit=%.9g boostFrame=%u "
+        "boostVelocity=%.9g boostVelocityReadback=%.9g "
+        "boostEvents=%u stateSamples=%u nonFiniteSamples=%u "
+        "preBoostFinalVelocity=%.9g "
+        "maximumLatePreBoostError=%.9g finalVelocity=%.9g "
+        "minimumPostBoostVelocity=%.9g "
+        "maximumPostBoostVelocityDrop=%.9g "
+        "maximumAngularMomentumDrift=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        isRevoluteMotorDynamicFreeSpinCase()
+            ? "dynamic-dynamic"
+            : "world-dynamic",
+        gRevoluteMotorFreeSpinStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorFreeSpinStats.driveEnabledReadback ? 1u : 0u,
+        gRevoluteMotorFreeSpinStats.freeSpinEnabledReadback ? 1u : 0u,
+        gRevoluteMotorFreeSpinStats.limitDisabledReadback ? 1u : 0u,
+        double(gRevoluteMotorFreeSpinStats.targetVelocityReadback),
+        double(gRevoluteMotorFreeSpinStats.forceLimitReadback),
+        gRevoluteMotorFreeSpinBoostFrame,
+        double(gRevoluteMotorFreeSpinBoostVelocity),
+        double(gRevoluteMotorFreeSpinStats.boostVelocityReadback),
+        gRevoluteMotorFreeSpinStats.boostEvents,
+        gRevoluteMotorFreeSpinStats.stateSamples,
+        gRevoluteMotorFreeSpinStats.nonFiniteSamples,
+        double(gRevoluteMotorFreeSpinStats.preBoostFinalVelocity),
+        double(gRevoluteMotorFreeSpinStats.maximumLatePreBoostError),
+        double(gRevoluteMotorFreeSpinStats.finalVelocity),
+        double(gRevoluteMotorFreeSpinStats.minimumPostBoostVelocity),
+        double(gRevoluteMotorFreeSpinStats.maximumPostBoostVelocityDrop),
+        double(gRevoluteMotorFreeSpinStats.maximumAngularMomentumDrift),
+        double(gRevoluteMotorFreeSpinStats.maximumAnchorError),
+        double(gRevoluteMotorFreeSpinStats.maximumAxisMisalignment),
+        gRevoluteMotorFreeSpinStats.initialDynamicActors,
+        gRevoluteMotorFreeSpinStats.initialStaticActors,
+        gRevoluteMotorFreeSpinStats.initialConstraints,
+        gRevoluteMotorFreeSpinStats.finalDynamicActors,
+        gRevoluteMotorFreeSpinStats.finalStaticActors,
+        gRevoluteMotorFreeSpinStats.finalConstraints);
+  } else if (isRevoluteMotorLimitCase()) {
+    const PxReal upperTravel =
+        gRevoluteMotorLimitStats.maximumAngle -
+        gRevoluteMotorLimitStats.initialAngle;
+    const PxReal range =
+        gRevoluteMotorLimitStats.maximumAngle -
+        gRevoluteMotorLimitStats.minimumAngle;
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorLimit] "
+        "case=%s topology=%s actorOrderValid=%u "
+        "driveEnabled=%u limitEnabled=%u "
+        "targetVelocity=%.9g finalTargetVelocity=%.9g "
+        "forceLimit=%.9g reverseFrame=%u reverseEvents=%u "
+        "lowerLimit=%.9g upperLimit=%.9g stateSamples=%u "
+        "nonFiniteSamples=%u initialAngle=%.9g finalAngle=%.9g "
+        "minimumAngle=%.9g maximumAngle=%.9g "
+        "upperTravel=%.9g range=%.9g "
+        "maximumUpperViolation=%.9g maximumLowerViolation=%.9g "
+        "maximumLateOutwardVelocity=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        isRevoluteMotorDynamicLimitCase()
+            ? "dynamic-dynamic"
+            : "world-dynamic",
+        gRevoluteMotorLimitStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorLimitStats.driveEnabledReadback ? 1u : 0u,
+        gRevoluteMotorLimitStats.limitEnabledReadback ? 1u : 0u,
+        double(gRevoluteMotorLimitStats.targetVelocityReadback),
+        double(gRevoluteMotorLimitStats.finalTargetVelocityReadback),
+        double(gRevoluteMotorLimitStats.forceLimitReadback),
+        gRevoluteMotorLimitReverseFrame,
+        gRevoluteMotorLimitStats.reverseEvents,
+        double(gRevoluteMotorLimitStats.lowerLimitReadback),
+        double(gRevoluteMotorLimitStats.upperLimitReadback),
+        gRevoluteMotorLimitStats.stateSamples,
+        gRevoluteMotorLimitStats.nonFiniteSamples,
+        double(gRevoluteMotorLimitStats.initialAngle),
+        double(gRevoluteMotorLimitStats.finalAngle),
+        double(gRevoluteMotorLimitStats.minimumAngle),
+        double(gRevoluteMotorLimitStats.maximumAngle),
+        double(upperTravel),
+        double(range),
+        double(gRevoluteMotorLimitStats.maximumUpperViolation),
+        double(gRevoluteMotorLimitStats.maximumLowerViolation),
+        double(gRevoluteMotorLimitStats.maximumLateOutwardVelocity),
+        double(gRevoluteMotorLimitStats.maximumAnchorError),
+        double(gRevoluteMotorLimitStats.maximumAxisMisalignment),
+        gRevoluteMotorLimitStats.initialDynamicActors,
+        gRevoluteMotorLimitStats.initialStaticActors,
+        gRevoluteMotorLimitStats.initialConstraints,
+        gRevoluteMotorLimitStats.finalDynamicActors,
+        gRevoluteMotorLimitStats.finalStaticActors,
+        gRevoluteMotorLimitStats.finalConstraints);
+  } else if (isRevoluteMotorCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotor] "
+        "case=%s topology=dynamic-dynamic actorOrderValid=%u "
+        "driveEnabled=%u targetVelocity=%.9g forceLimit=%.9g "
+        "inertiaA=%.9g inertiaB=%.9g stateSamples=%u "
+        "nonFiniteSamples=%u finalRelativeVelocity=%.9g "
+        "finalRelativeError=%.9g maximumLateRelativeError=%.9g "
+        "maximumAngularMomentumDrift=%.9g "
+        "maximumAnchorError=%.9g maximumAxisMisalignment=%.9g "
+        "initialDynamicActors=%u initialStaticActors=%u "
+        "initialConstraints=%u finalDynamicActors=%u "
+        "finalStaticActors=%u finalConstraints=%u\n",
+        getHeadlessCaseName(gHeadlessCase),
+        gRevoluteMotorStats.actorOrderValid ? 1u : 0u,
+        gRevoluteMotorStats.driveEnabledReadback ? 1u : 0u,
+        double(gRevoluteMotorStats.targetVelocityReadback),
+        double(gRevoluteMotorStats.forceLimitReadback),
+        double(gRevoluteMotorInertiaA),
+        double(gRevoluteMotorInertiaB),
+        gRevoluteMotorStats.stateSamples,
+        gRevoluteMotorStats.nonFiniteSamples,
+        double(gRevoluteMotorStats.finalRelativeVelocity),
+        double(gRevoluteMotorStats.finalRelativeError),
+        double(gRevoluteMotorStats.maximumLateRelativeError),
+        double(gRevoluteMotorStats.maximumAngularMomentumDrift),
+        double(gRevoluteMotorStats.maximumAnchorError),
+        double(gRevoluteMotorStats.maximumAxisMisalignment),
+        gRevoluteMotorStats.initialDynamicActors,
+        gRevoluteMotorStats.initialStaticActors,
+        gRevoluteMotorStats.initialConstraints,
+        gRevoluteMotorStats.finalDynamicActors,
+        gRevoluteMotorStats.finalStaticActors,
+        gRevoluteMotorStats.finalConstraints);
+  } else if (isNativeBreakReactionCase()) {
     const PxVec3 meanReaction = getNativeMeanReactionVector();
     const PxVec3 expectedReaction = getNativeExpectedReactionVector();
     const PxReal expectedMagnitude = expectedReaction.magnitude();
@@ -5762,6 +8973,161 @@ void cleanupPhysics(bool interactive) {
            gFixedStats.firstBrokenFrame, gFixedStats.brokenCount);
   }
 
+  if (!interactive && isRevoluteMotorCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorJoint);
+    if (gRevoluteMotorBodyA) {
+      if (gRevoluteMotorBodyA->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorBodyA);
+      PX_RELEASE(gRevoluteMotorBodyA);
+    }
+    if (gRevoluteMotorBodyB) {
+      if (gRevoluteMotorBodyB->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorBodyB);
+      PX_RELEASE(gRevoluteMotorBodyB);
+    }
+    gRevoluteMotorStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorLimitCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorLimitJoint);
+    if (gRevoluteMotorLimitBodyA) {
+      if (gRevoluteMotorLimitBodyA->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorLimitBodyA);
+      PX_RELEASE(gRevoluteMotorLimitBodyA);
+    }
+    if (gRevoluteMotorLimitBody) {
+      if (gRevoluteMotorLimitBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorLimitBody);
+      PX_RELEASE(gRevoluteMotorLimitBody);
+    }
+    gRevoluteMotorLimitStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorLimitStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorLimitStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorFreeSpinCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorFreeSpinJoint);
+    if (gRevoluteMotorFreeSpinBodyA) {
+      if (gRevoluteMotorFreeSpinBodyA->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorFreeSpinBodyA);
+      PX_RELEASE(gRevoluteMotorFreeSpinBodyA);
+    }
+    if (gRevoluteMotorFreeSpinBody) {
+      if (gRevoluteMotorFreeSpinBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorFreeSpinBody);
+      PX_RELEASE(gRevoluteMotorFreeSpinBody);
+    }
+    gRevoluteMotorFreeSpinStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorFreeSpinStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorFreeSpinStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorRatioCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorRatioJoint);
+    if (gRevoluteMotorRatioBodyA) {
+      if (gRevoluteMotorRatioBodyA->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorRatioBodyA);
+      PX_RELEASE(gRevoluteMotorRatioBodyA);
+    }
+    if (gRevoluteMotorRatioBodyB) {
+      if (gRevoluteMotorRatioBodyB->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorRatioBodyB);
+      PX_RELEASE(gRevoluteMotorRatioBodyB);
+    }
+    gRevoluteMotorRatioStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorRatioStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorRatioStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorContactCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorContactJoint);
+    if (gRevoluteMotorContactBodyA) {
+      if (gRevoluteMotorContactBodyA->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorContactBodyA);
+      PX_RELEASE(gRevoluteMotorContactBodyA);
+    }
+    if (gRevoluteMotorContactBodyB) {
+      if (gRevoluteMotorContactBodyB->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorContactBodyB);
+      PX_RELEASE(gRevoluteMotorContactBodyB);
+    }
+    if (gRevoluteMotorContactGround) {
+      if (gRevoluteMotorContactGround->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorContactGround);
+      PX_RELEASE(gRevoluteMotorContactGround);
+    }
+    gRevoluteMotorContactStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorContactStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorContactStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorKinematicCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorKinematicJoint);
+    if (gRevoluteMotorKinematicBody) {
+      if (gRevoluteMotorKinematicBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorKinematicBody);
+      PX_RELEASE(gRevoluteMotorKinematicBody);
+    }
+    if (gRevoluteMotorKinematicDynamicBody) {
+      if (gRevoluteMotorKinematicDynamicBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorKinematicDynamicBody);
+      PX_RELEASE(gRevoluteMotorKinematicDynamicBody);
+    }
+    gRevoluteMotorKinematicStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorKinematicStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorKinematicStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorOffPrincipalCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorOffPrincipalJoint);
+    if (gRevoluteMotorOffPrincipalBody) {
+      if (gRevoluteMotorOffPrincipalBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorOffPrincipalBody);
+      PX_RELEASE(gRevoluteMotorOffPrincipalBody);
+    }
+    gRevoluteMotorOffPrincipalStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorOffPrincipalStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorOffPrincipalStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
+  if (!interactive && isRevoluteMotorOffCenterCase() && gScene) {
+    PX_RELEASE(gRevoluteMotorOffCenterJoint);
+    if (gRevoluteMotorOffCenterBody) {
+      if (gRevoluteMotorOffCenterBody->getScene() == gScene)
+        gScene->removeActor(*gRevoluteMotorOffCenterBody);
+      PX_RELEASE(gRevoluteMotorOffCenterBody);
+    }
+    gRevoluteMotorOffCenterStats.cleanupDynamicActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    gRevoluteMotorOffCenterStats.cleanupStaticActors =
+        gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC);
+    gRevoluteMotorOffCenterStats.cleanupConstraints =
+        gScene->getNbConstraints();
+  }
+
   if (!interactive && isForceReactionCase() && gScene) {
     PX_RELEASE(gForceStaticJoint);
     if (gForceStaticBody) {
@@ -5865,6 +9231,84 @@ void cleanupPhysics(bool interactive) {
         gForceStaticStats.cleanupStaticActors == 0 &&
         gForceStaticStats.cleanupConstraints == 0;
   }
+  if (!interactive && isRevoluteMotorCase()) {
+    gRevoluteMotorStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorBodyA &&
+        !gRevoluteMotorBodyB && !gRevoluteMotorJoint &&
+        gRevoluteMotorStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorLimitCase()) {
+    gRevoluteMotorLimitStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorLimitBodyA &&
+        !gRevoluteMotorLimitBody &&
+        !gRevoluteMotorLimitJoint &&
+        gRevoluteMotorLimitStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorLimitStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorLimitStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorFreeSpinCase()) {
+    gRevoluteMotorFreeSpinStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorFreeSpinBodyA &&
+        !gRevoluteMotorFreeSpinBody &&
+        !gRevoluteMotorFreeSpinJoint &&
+        gRevoluteMotorFreeSpinStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorFreeSpinStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorFreeSpinStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorRatioCase()) {
+    gRevoluteMotorRatioStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorRatioBodyA &&
+        !gRevoluteMotorRatioBodyB && !gRevoluteMotorRatioJoint &&
+        gRevoluteMotorRatioStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorRatioStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorRatioStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorContactCase()) {
+    gRevoluteMotorContactStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorContactBodyA &&
+        !gRevoluteMotorContactBodyB &&
+        !gRevoluteMotorContactGround &&
+        !gRevoluteMotorContactJoint &&
+        gRevoluteMotorContactStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorContactStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorContactStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorKinematicCase()) {
+    gRevoluteMotorKinematicStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorKinematicBody &&
+        !gRevoluteMotorKinematicDynamicBody &&
+        !gRevoluteMotorKinematicJoint &&
+        gRevoluteMotorKinematicStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorKinematicStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorKinematicStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorOffPrincipalCase()) {
+    gRevoluteMotorOffPrincipalStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd &&
+        !gRevoluteMotorOffPrincipalBody &&
+        !gRevoluteMotorOffPrincipalJoint &&
+        gRevoluteMotorOffPrincipalStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorOffPrincipalStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorOffPrincipalStats.cleanupConstraints == 0;
+  }
+  if (!interactive && isRevoluteMotorOffCenterCase()) {
+    gRevoluteMotorOffCenterStats.cleanupComplete =
+        !gScene && !gMaterial && !gDispatcher && !gPhysics &&
+        !gFoundation && !gPvd && !gRevoluteMotorOffCenterBody &&
+        !gRevoluteMotorOffCenterJoint &&
+        gRevoluteMotorOffCenterStats.cleanupDynamicActors == 0 &&
+        gRevoluteMotorOffCenterStats.cleanupStaticActors == 0 &&
+        gRevoluteMotorOffCenterStats.cleanupConstraints == 0;
+  }
   if (!interactive && isNativeBreakReactionCase()) {
     gNativeBreakReactionStats.cleanupComplete =
         !gScene && !gMaterial && !gDispatcher && !gPhysics &&
@@ -5958,7 +9402,8 @@ static void printGateResult(const GateEvaluation &evaluation,
       getEndpointMeanTargetVelocityDelta();
   const bool partialProbe =
       isForceReactionCase() || isEndpointProbe() ||
-      isSphericalConeCase() || isNativeBreakReactionCase();
+      isSphericalConeCase() || isNativeBreakReactionCase() ||
+      isRevoluteMotorFamilyCase();
   const char *capability = partialProbe ? "PARTIAL" : "SUPPORTED";
   const char *validation = partialProbe ? "PROBE" : "GATED";
   std::printf(
@@ -6438,8 +9883,43 @@ static int reportConfigurationError(const Snippets::HeadlessOptions &options,
                                  "native-no-break") ||
       Snippets::equalsIgnoreCase(options.caseName.c_str(),
                                  "native-break");
+  const bool revoluteMotor =
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-limit") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-freespin") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-ratio") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-contact") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-kinematic") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-off-principal") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-off-center") ||
+      Snippets::equalsIgnoreCase(options.caseName.c_str(),
+                                 "revolute-motor-spatial") ||
+      Snippets::equalsIgnoreCase(
+          options.caseName.c_str(),
+          "revolute-motor-dynamic-limit") ||
+      Snippets::equalsIgnoreCase(
+          options.caseName.c_str(),
+          "revolute-motor-dynamic-freespin") ||
+      Snippets::equalsIgnoreCase(
+          options.caseName.c_str(),
+          "revolute-motor-dynamic-off-principal") ||
+      Snippets::equalsIgnoreCase(
+          options.caseName.c_str(),
+          "revolute-motor-dynamic-off-center") ||
+      Snippets::equalsIgnoreCase(
+          options.caseName.c_str(),
+          "revolute-motor-dynamic-spatial");
   const bool partialProbe =
       forceReaction || sphericalCone || nativeBreakReaction ||
+      revoluteMotor ||
       gEndpointOptionMentioned;
   std::printf("[AVBD_GATE_ERROR] snippet=SnippetJoint message=%s\n", message);
   std::printf(
@@ -6892,6 +10372,118 @@ int snippetMain(int argc, const char *const *argv) {
 
   if (isForceReactionCase() && !gForceStaticStats.cleanupComplete)
     setInfrastructureErrorOverFailure(evaluation, "force_cleanup");
+  if (isRevoluteMotorCase() &&
+      !gRevoluteMotorStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(evaluation,
+                                      "revolute_motor_cleanup");
+  if (isRevoluteMotorCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorStats.cleanupDynamicActors,
+        gRevoluteMotorStats.cleanupStaticActors,
+        gRevoluteMotorStats.cleanupConstraints,
+        gRevoluteMotorStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorLimitCase() &&
+      !gRevoluteMotorLimitStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_limit_cleanup");
+  if (isRevoluteMotorLimitCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorLimitCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorLimitStats.cleanupDynamicActors,
+        gRevoluteMotorLimitStats.cleanupStaticActors,
+        gRevoluteMotorLimitStats.cleanupConstraints,
+        gRevoluteMotorLimitStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorFreeSpinCase() &&
+      !gRevoluteMotorFreeSpinStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_freespin_cleanup");
+  if (isRevoluteMotorFreeSpinCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorFreeSpinCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorFreeSpinStats.cleanupDynamicActors,
+        gRevoluteMotorFreeSpinStats.cleanupStaticActors,
+        gRevoluteMotorFreeSpinStats.cleanupConstraints,
+        gRevoluteMotorFreeSpinStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorRatioCase() &&
+      !gRevoluteMotorRatioStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_ratio_cleanup");
+  if (isRevoluteMotorRatioCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorRatioCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorRatioStats.cleanupDynamicActors,
+        gRevoluteMotorRatioStats.cleanupStaticActors,
+        gRevoluteMotorRatioStats.cleanupConstraints,
+        gRevoluteMotorRatioStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorContactCase() &&
+      !gRevoluteMotorContactStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_contact_cleanup");
+  if (isRevoluteMotorContactCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorContactCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorContactStats.cleanupDynamicActors,
+        gRevoluteMotorContactStats.cleanupStaticActors,
+        gRevoluteMotorContactStats.cleanupConstraints,
+        gRevoluteMotorContactStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorKinematicCase() &&
+      !gRevoluteMotorKinematicStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_kinematic_cleanup");
+  if (isRevoluteMotorKinematicCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorKinematicCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorKinematicStats.cleanupDynamicActors,
+        gRevoluteMotorKinematicStats.cleanupStaticActors,
+        gRevoluteMotorKinematicStats.cleanupConstraints,
+        gRevoluteMotorKinematicStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorOffPrincipalCase() &&
+      !gRevoluteMotorOffPrincipalStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_off_principal_cleanup");
+  if (isRevoluteMotorOffPrincipalCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorOffPrincipalCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorOffPrincipalStats.cleanupDynamicActors,
+        gRevoluteMotorOffPrincipalStats.cleanupStaticActors,
+        gRevoluteMotorOffPrincipalStats.cleanupConstraints,
+        gRevoluteMotorOffPrincipalStats.cleanupComplete ? 1u : 0u);
+  }
+  if (isRevoluteMotorOffCenterCase() &&
+      !gRevoluteMotorOffCenterStats.cleanupComplete)
+    setInfrastructureErrorOverFailure(
+        evaluation, "revolute_motor_off_center_cleanup");
+  if (isRevoluteMotorOffCenterCase()) {
+    std::printf(
+        "[PROBE] [SnippetJointRevoluteMotorOffCenterCleanup] "
+        "dynamicActors=%u staticActors=%u constraints=%u "
+        "cleanupComplete=%u\n",
+        gRevoluteMotorOffCenterStats.cleanupDynamicActors,
+        gRevoluteMotorOffCenterStats.cleanupStaticActors,
+        gRevoluteMotorOffCenterStats.cleanupConstraints,
+        gRevoluteMotorOffCenterStats.cleanupComplete ? 1u : 0u);
+  }
   if (isNativeBreakReactionCase() &&
       !gNativeBreakReactionStats.cleanupComplete)
     setInfrastructureErrorOverFailure(evaluation, "native_cleanup");
@@ -6925,10 +10517,12 @@ int snippetMain(int argc, const char *const *argv) {
   const PxU32 physicsErrors = gErrorCallback.getFatalCount();
   if (physicsErrors ||
       ((isForceReactionCase() || isEndpointProbe() ||
-        isSphericalConeCase() || isNativeBreakReactionCase()) &&
+        isSphericalConeCase() || isNativeBreakReactionCase() ||
+        isRevoluteMotorFamilyCase()) &&
        gGateStats.fetchErrorState)) {
     if (isForceReactionCase() || isEndpointProbe() ||
-        isSphericalConeCase() || isNativeBreakReactionCase())
+        isSphericalConeCase() || isNativeBreakReactionCase() ||
+        isRevoluteMotorFamilyCase())
       setInfrastructureErrorOverFailure(evaluation, "physx_error");
     else if (evaluation.exitCode == Snippets::eHEADLESS_PASS)
       setGateFailure(evaluation, "physx_error");

@@ -57,7 +57,9 @@ static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPvd*					gPvd        = NULL;
 static PxRigidDynamic*			gHeadlessBody = NULL;
+static PxRigidDynamic*			gHeadlessDynamicTarget = NULL;
 static PxRigidStatic*			gHeadlessGround = NULL;
+static PxRigidActor*			gHeadlessContactTarget = NULL;
 static bool						gExtensionsInitialized = false;
 
 struct ContactReportMetrics
@@ -69,26 +71,54 @@ struct ContactReportMetrics
 	PxU32 pointCount;
 	PxU32 nonzeroImpulseCount;
 	PxU32 identityErrors;
+	PxU32 thresholdFoundCount;
+	PxU32 thresholdPersistsCount;
+	PxU32 thresholdLostCount;
+	PxU32 unexpectedTouchEventCount;
+	PxU32 thresholdReadbackErrors;
+	PxU32 frictionAnchorCount;
+	PxU32 nonzeroFrictionAnchorImpulseCount;
 	PxU32 nonFinite;
 	PxReal impulseSum;
 	PxReal maxImpulse;
+	PxReal maxFrictionAnchorImpulse;
 	PxReal minBodyY;
+	PxReal finalAbsVelocityX;
+	PxReal displacementX;
 	PxU32 cleanupComplete;
 
 	ContactReportMetrics()
 	: completedFrames(0), fetchFailures(0), callbackCount(0), pairCount(0),
 	  pointCount(0), nonzeroImpulseCount(0), identityErrors(0),
-	  nonFinite(0), impulseSum(0.0f), maxImpulse(0.0f),
-	  minBodyY(PX_MAX_F32), cleanupComplete(0)
+	  thresholdFoundCount(0), thresholdPersistsCount(0),
+	  thresholdLostCount(0), unexpectedTouchEventCount(0),
+	  thresholdReadbackErrors(0), frictionAnchorCount(0),
+	  nonzeroFrictionAnchorImpulseCount(0), nonFinite(0),
+	  impulseSum(0.0f), maxImpulse(0.0f),
+	  maxFrictionAnchorImpulse(0.0f),
+	  minBodyY(PX_MAX_F32), finalAbsVelocityX(0.0f),
+	  displacementX(0.0f), cleanupComplete(0)
 	{
 	}
 };
 
 static Snippets::HeadlessOptions gHeadlessOptions;
 static ContactReportMetrics gMetrics;
+static PxReal gHeadlessInitialX = 0.0f;
 
 PxArray<PxVec3> gContactPositions;
 PxArray<PxVec3> gContactImpulses;
+
+static bool isHeadlessCase(const char* name)
+{
+	return Snippets::equalsIgnoreCase(gHeadlessOptions.caseName.c_str(), name);
+}
+
+static bool isFrictionAnchorCase()
+{
+	return isHeadlessCase("friction-anchor") ||
+		isHeadlessCase("dynamic-friction-anchor");
+}
 
 static bool parseHeadlessOptions(
 	int argc, const char* const* argv, std::string& error)
@@ -109,9 +139,13 @@ static bool parseHeadlessOptions(
 			return false;
 		}
 	}
-	if(!Snippets::equalsIgnoreCase(gHeadlessOptions.caseName.c_str(), "drop"))
+	if(!isHeadlessCase("drop") &&
+		!isHeadlessCase("force-threshold") &&
+		!isHeadlessCase("friction-anchor") &&
+		!isHeadlessCase("dynamic-friction-anchor"))
 	{
-		error = "unsupported --case (expected drop)";
+		error = "unsupported --case (expected drop, force-threshold, "
+			"friction-anchor, or dynamic-friction-anchor)";
 		return false;
 	}
 	if(gHeadlessOptions.frames < 180)
@@ -133,11 +167,20 @@ static PxFilterFlags contactReportFilterShader(	PxFilterObjectAttributes attribu
 	PX_UNUSED(constantBlockSize);
 	PX_UNUSED(constantBlock);
 
-	// all initial and persisting reports for everything, with per-point data
-	pairFlags = PxPairFlag::eSOLVE_CONTACT | PxPairFlag::eDETECT_DISCRETE_CONTACT
-			  |	PxPairFlag::eNOTIFY_TOUCH_FOUND 
-			  | PxPairFlag::eNOTIFY_TOUCH_PERSISTS
-			  | PxPairFlag::eNOTIFY_CONTACT_POINTS;
+	pairFlags = PxPairFlag::eSOLVE_CONTACT |
+		PxPairFlag::eDETECT_DISCRETE_CONTACT |
+		PxPairFlag::eNOTIFY_CONTACT_POINTS;
+	if(isHeadlessCase("force-threshold"))
+	{
+		pairFlags |= PxPairFlag::eNOTIFY_THRESHOLD_FORCE_FOUND |
+			PxPairFlag::eNOTIFY_THRESHOLD_FORCE_PERSISTS |
+			PxPairFlag::eNOTIFY_THRESHOLD_FORCE_LOST;
+	}
+	else
+	{
+		pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+			PxPairFlag::eNOTIFY_TOUCH_PERSISTS;
+	}
 	return PxFilterFlag::eDEFAULT;
 }
 
@@ -152,20 +195,45 @@ class ContactReportCallback: public PxSimulationEventCallback
 	{
 		if(gHeadlessOptions.headless)
 		{
-			++gMetrics.callbackCount;
-			gMetrics.pairCount += nbPairs;
 			const bool identityValid =
 				(pairHeader.actors[0] == gHeadlessBody &&
-				 pairHeader.actors[1] == gHeadlessGround) ||
+				 pairHeader.actors[1] == gHeadlessContactTarget) ||
 				(pairHeader.actors[1] == gHeadlessBody &&
-				 pairHeader.actors[0] == gHeadlessGround);
+				 pairHeader.actors[0] == gHeadlessContactTarget);
+			const bool involvesHeadlessBody =
+				pairHeader.actors[0] == gHeadlessBody ||
+				pairHeader.actors[1] == gHeadlessBody;
 			if(!identityValid)
-				++gMetrics.identityErrors;
+			{
+				if(involvesHeadlessBody)
+					++gMetrics.identityErrors;
+				return;
+			}
+			++gMetrics.callbackCount;
+			gMetrics.pairCount += nbPairs;
 		}
 		PxArray<PxContactPairPoint> contactPoints;
 		
 		for(PxU32 i=0;i<nbPairs;i++)
 		{
+			if(gHeadlessOptions.headless)
+			{
+				if(pairs[i].events &
+					PxPairFlag::eNOTIFY_THRESHOLD_FORCE_FOUND)
+					++gMetrics.thresholdFoundCount;
+				if(pairs[i].events &
+					PxPairFlag::eNOTIFY_THRESHOLD_FORCE_PERSISTS)
+					++gMetrics.thresholdPersistsCount;
+				if(pairs[i].events &
+					PxPairFlag::eNOTIFY_THRESHOLD_FORCE_LOST)
+					++gMetrics.thresholdLostCount;
+				if(isHeadlessCase("force-threshold") &&
+					(pairs[i].events &
+					 (PxPairFlag::eNOTIFY_TOUCH_FOUND |
+					  PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
+					  PxPairFlag::eNOTIFY_TOUCH_LOST)))
+					++gMetrics.unexpectedTouchEventCount;
+			}
 			PxU32 contactCount = pairs[i].contactCount;
 			if(contactCount)
 			{
@@ -192,6 +260,31 @@ class ContactReportCallback: public PxSimulationEventCallback
 						if(impulse > 1e-5f)
 							++gMetrics.nonzeroImpulseCount;
 					}
+				}
+			}
+			if(gHeadlessOptions.headless && pairs[i].frictionPatches &&
+				pairs[i].patchCount)
+			{
+				PxArray<PxContactPairFrictionAnchor> frictionAnchors;
+				frictionAnchors.resize(PxU32(pairs[i].patchCount) * 2u);
+				const PxU32 anchorCount = pairs[i].extractFrictionAnchors(
+					frictionAnchors.begin(), frictionAnchors.size());
+				gMetrics.frictionAnchorCount += anchorCount;
+				for(PxU32 j = 0; j < anchorCount; ++j)
+				{
+					const PxContactPairFrictionAnchor& anchor =
+						frictionAnchors[j];
+					if(!anchor.position.isFinite() ||
+						!anchor.impulse.isFinite())
+					{
+						++gMetrics.nonFinite;
+						continue;
+					}
+					const PxReal impulse = anchor.impulse.magnitude();
+					gMetrics.maxFrictionAnchorImpulse = PxMax(
+						gMetrics.maxFrictionAnchorImpulse, impulse);
+					if(impulse > 1.0e-5f)
+						++gMetrics.nonzeroFrictionAnchorImpulseCount;
 				}
 			}
 		}
@@ -254,24 +347,72 @@ void initPhysics(bool /*interactive*/)
 				PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
 	}
 	gMaterial = gHeadlessOptions.headless ?
-		gPhysics->createMaterial(0.0f, 0.0f, 0.0f) :
+		gPhysics->createMaterial(
+			isFrictionAnchorCase() ? 1.0f : 0.0f,
+			isFrictionAnchorCase() ? 1.0f : 0.0f, 0.0f) :
 		gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
 
-	gHeadlessGround =
-		PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
-	gScene->addActor(*gHeadlessGround);
 	if(gHeadlessOptions.headless)
 	{
+		gHeadlessGround =
+			PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+		if(gHeadlessGround)
+			gScene->addActor(*gHeadlessGround);
+
+		if(isHeadlessCase("dynamic-friction-anchor"))
+		{
+			gHeadlessDynamicTarget = PxCreateDynamic(
+				*gPhysics, PxTransform(PxVec3(0.0f, 0.5f, 0.0f)),
+				PxBoxGeometry(50.0f, 0.5f, 50.0f),
+				*gMaterial, 0.1f);
+			if(gHeadlessDynamicTarget)
+			{
+				gHeadlessDynamicTarget->setLinearDamping(0.0f);
+				gHeadlessDynamicTarget->setAngularDamping(0.0f);
+				gHeadlessDynamicTarget->setSleepThreshold(0.0f);
+				gScene->addActor(*gHeadlessDynamicTarget);
+				gHeadlessContactTarget = gHeadlessDynamicTarget;
+			}
+		}
+		else
+		{
+			gHeadlessContactTarget = gHeadlessGround;
+		}
+
+		const PxReal initialY =
+			isHeadlessCase("dynamic-friction-anchor") ? 1.5f :
+			(isHeadlessCase("friction-anchor") ? 0.5f : 5.0f);
 		gHeadlessBody = PxCreateDynamic(
-			*gPhysics, PxTransform(PxVec3(0.0f, 5.0f, 0.0f)),
+			*gPhysics,
+			PxTransform(PxVec3(0.0f, initialY, 0.0f)),
 			PxBoxGeometry(0.5f, 0.5f, 0.5f), *gMaterial, 1.0f);
-		gHeadlessBody->setLinearDamping(0.0f);
-		gHeadlessBody->setAngularDamping(0.0f);
-		gHeadlessBody->setSleepThreshold(0.0f);
-		gScene->addActor(*gHeadlessBody);
+		if(gHeadlessBody)
+		{
+			gHeadlessBody->setLinearDamping(0.0f);
+			gHeadlessBody->setAngularDamping(0.0f);
+			gHeadlessBody->setSleepThreshold(0.0f);
+			if(isFrictionAnchorCase())
+				gHeadlessBody->setLinearVelocity(
+					PxVec3(5.0f, 0.0f, 0.0f));
+			if(isHeadlessCase("force-threshold"))
+			{
+				const PxReal threshold = 20.0f;
+				gHeadlessBody->setContactReportThreshold(threshold);
+				if(PxAbs(gHeadlessBody->getContactReportThreshold() -
+					threshold) > 1.0e-6f)
+					++gMetrics.thresholdReadbackErrors;
+			}
+			gHeadlessInitialX = gHeadlessBody->getGlobalPose().p.x;
+			gScene->addActor(*gHeadlessBody);
+		}
 	}
 	else
+	{
+		gHeadlessGround =
+			PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
+		gScene->addActor(*gHeadlessGround);
 		createStack(PxTransform(PxVec3(0,3.0f,10.0f)), 5, 2.0f);
+	}
 }
 
 void stepPhysics(bool /*interactive*/)
@@ -294,6 +435,9 @@ void stepPhysics(bool /*interactive*/)
 			if(!pose.isFinite() || !velocity.isFinite())
 				++gMetrics.nonFinite;
 			gMetrics.minBodyY = PxMin(gMetrics.minBodyY, pose.p.y);
+			gMetrics.finalAbsVelocityX = PxAbs(velocity.x);
+			gMetrics.displacementX =
+				PxAbs(pose.p.x - gHeadlessInitialX);
 		}
 		++gMetrics.completedFrames;
 	}
@@ -308,7 +452,9 @@ void cleanupPhysics(bool /*interactive*/)
     
 	PX_RELEASE(gScene);
 	gHeadlessBody = NULL;
+	gHeadlessDynamicTarget = NULL;
 	gHeadlessGround = NULL;
+	gHeadlessContactTarget = NULL;
 	PX_RELEASE(gMaterial);
 	PX_RELEASE(gDispatcher);
 	if(gExtensionsInitialized)
@@ -325,8 +471,10 @@ void cleanupPhysics(bool /*interactive*/)
 	}
 	PX_RELEASE(gFoundation);
 	gMetrics.cleanupComplete =
-		!gScene && !gMaterial && !gDispatcher && !gPhysics && !gPvd &&
-		!gFoundation && !gExtensionsInitialized ? 1u : 0u;
+		!gScene && !gHeadlessBody && !gHeadlessDynamicTarget &&
+		!gHeadlessGround && !gHeadlessContactTarget && !gMaterial &&
+		!gDispatcher && !gPhysics && !gPvd && !gFoundation &&
+		!gExtensionsInitialized ? 1u : 0u;
 	
 	printf("SnippetContactReport done.\n");
 }
@@ -335,10 +483,11 @@ static int runHeadless()
 {
 	std::setvbuf(stdout, NULL, _IONBF, 0);
 	std::printf(
-		"[AVBD_GATE_CONFIG] schema=1 snippet=SnippetContactReport solver=%s "
-		"case=drop execution=%s frames=%u dt=%.9g dispatcherThreads=%u "
+		"[AVBD_GATE_CONFIG] schema=2 snippet=SnippetContactReport solver=%s "
+		"case=%s execution=%s frames=%u dt=%.9g dispatcherThreads=%u "
 		"seed=%u\n",
 		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		gHeadlessOptions.caseName.c_str(),
 		Snippets::getExecutionName(gHeadlessOptions.execution),
 		gHeadlessOptions.frames, double(gHeadlessOptions.dt),
 		gHeadlessOptions.dispatcherThreads, gHeadlessOptions.seed);
@@ -346,7 +495,8 @@ static int runHeadless()
 	initPhysics(false);
 	const bool initialized =
 		gFoundation && gPhysics && gExtensionsInitialized && gDispatcher &&
-		gScene && gMaterial && gHeadlessBody && gHeadlessGround;
+		gScene && gMaterial && gHeadlessBody &&
+		gHeadlessContactTarget;
 	if(initialized)
 	{
 		for(PxU32 frame = 0; frame < gHeadlessOptions.frames; ++frame)
@@ -382,6 +532,12 @@ static int runHeadless()
 		passed = false;
 		reason = "contact_identity_mismatch";
 	}
+	else if(gMetrics.thresholdReadbackErrors != 0 ||
+		gMetrics.unexpectedTouchEventCount != 0)
+	{
+		passed = false;
+		reason = "event_payload_error";
+	}
 	else if(gMetrics.pointCount == 0)
 	{
 		passed = false;
@@ -392,6 +548,23 @@ static int runHeadless()
 	{
 		passed = false;
 		reason = "missing_contact_impulse";
+	}
+	else if(isHeadlessCase("force-threshold") &&
+		(gMetrics.thresholdFoundCount == 0 ||
+		 gMetrics.thresholdLostCount == 0))
+	{
+		passed = false;
+		reason = "missing_force_threshold_transition";
+	}
+	else if(isFrictionAnchorCase() &&
+		(gMetrics.frictionAnchorCount == 0 ||
+		 gMetrics.nonzeroFrictionAnchorImpulseCount == 0 ||
+		 gMetrics.maxFrictionAnchorImpulse <= 1.0e-3f ||
+		 gMetrics.finalAbsVelocityX >= 4.0f ||
+		 gMetrics.displacementX <= 0.01f))
+	{
+		passed = false;
+		reason = "missing_friction_anchor_impulse";
 	}
 	else if(gMetrics.minBodyY < 0.3f)
 	{
@@ -406,20 +579,34 @@ static int runHeadless()
 		reason = "cleanup_incomplete";
 	}
 	std::printf(
-		"[AVBD_GATE] schema=1 snippet=SnippetContactReport solver=%s "
-		"case=drop execution=%s frames=%u completedFrames=%u status=%s "
+		"[AVBD_GATE] schema=2 snippet=SnippetContactReport solver=%s "
+		"case=%s execution=%s frames=%u completedFrames=%u status=%s "
 		"reason=%s validation=GATED callbackCount=%u pairCount=%u "
 		"pointCount=%u nonzeroImpulseCount=%u identityErrors=%u "
-		"impulseSum=%.9g maxImpulse=%.9g minBodyY=%.9g nonFinite=%u "
+		"thresholdFoundCount=%u thresholdPersistsCount=%u "
+		"thresholdLostCount=%u unexpectedTouchEventCount=%u "
+		"thresholdReadbackErrors=%u frictionAnchorCount=%u "
+		"nonzeroFrictionAnchorImpulseCount=%u impulseSum=%.9g "
+		"maxImpulse=%.9g maxFrictionAnchorImpulse=%.9g minBodyY=%.9g "
+		"finalAbsVelocityX=%.9g displacementX=%.9g nonFinite=%u "
 		"fetchFailures=%u fatalErrors=%u cleanupComplete=%u pvd=0\n",
 		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		gHeadlessOptions.caseName.c_str(),
 		Snippets::getExecutionName(gHeadlessOptions.execution),
 		gHeadlessOptions.frames, gMetrics.completedFrames,
 		passed ? "PASS" : "FAIL", reason, gMetrics.callbackCount,
 		gMetrics.pairCount, gMetrics.pointCount,
 		gMetrics.nonzeroImpulseCount, gMetrics.identityErrors,
+		gMetrics.thresholdFoundCount, gMetrics.thresholdPersistsCount,
+		gMetrics.thresholdLostCount, gMetrics.unexpectedTouchEventCount,
+		gMetrics.thresholdReadbackErrors,
+		gMetrics.frictionAnchorCount,
+		gMetrics.nonzeroFrictionAnchorImpulseCount,
 		double(gMetrics.impulseSum), double(gMetrics.maxImpulse),
-		double(gMetrics.minBodyY), gMetrics.nonFinite,
+		double(gMetrics.maxFrictionAnchorImpulse),
+		double(gMetrics.minBodyY),
+		double(gMetrics.finalAbsVelocityX),
+		double(gMetrics.displacementX), gMetrics.nonFinite,
 		gMetrics.fetchFailures, gErrorCallback.getFatalCount(),
 		gMetrics.cleanupComplete);
 	return passed ? Snippets::eHEADLESS_PASS :

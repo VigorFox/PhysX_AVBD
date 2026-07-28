@@ -159,6 +159,20 @@ bool test137_angularSwing2PositionDriveDiscreteEquation();
 bool test138_angularSlerpPositionDriveDiscreteEquation();
 bool test139_gearJointImpulseProjectionDiscreteEquation();
 bool test140_dynamicDynamicAngularPositionDriveDiscreteEquation();
+bool test141_bodyUnilateralProjectionAuthority();
+bool test142_componentUnilateralProjectionAuthority();
+bool test143_boundedComponentPositionImpulseAuthority();
+bool test144_supportAxisRigidNullModeAuthority();
+bool test145_finiteDriveStaticFrictionPositionAuthority();
+bool test146_unequalMassFrictionWeightShareAuthority();
+bool test147_slopedSupportFrictionPositionAuthority();
+bool test148_contactPositionOutputForceOwnerAuthority();
+bool test149_passiveRigidStaticFrictionManifoldAuthority();
+bool test150_passiveRigidContactMaterialComponentAuthority();
+bool test151_restitutionRigidMaterialComponentAuthority();
+bool test152_transientRestitutionBroadMaterialComponentAuthority();
+bool probe153_scalableBroadMaterialComponentAccelerated();
+bool probe154_broadMaterialComponentScalingAuthority();
 bool probe127_canonicalPyramidFrictionOrder();
 bool probe128_canonicalBridgeFrictionOrder();
 bool probe129_contactPcgFixedPairDrop();
@@ -174,6 +188,27 @@ int gTestsPassed = 0;
 int gTestsFailed = 0;
 
 int main(int argc, char **argv) {
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=transient-broad-material") {
+    return test152_transientRestitutionBroadMaterialComponentAuthority()
+               ? 0
+               : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=scalable-broad-material") {
+    return probe153_scalableBroadMaterialComponentAccelerated()
+               ? 0
+               : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=broad-material-scaling-authority") {
+    return probe154_broadMaterialComponentScalingAuthority()
+               ? 0
+               : 1;
+  }
   if (argc == 2 &&
       std::string(argv[1]) == "--probe=canonical-pyramid-friction") {
     return probe127_canonicalPyramidFrictionOrder() ? 0 : 1;
@@ -215,6 +250,20 @@ int main(int argc, char **argv) {
       std::string(argv[1]) == "--probe=contact-pcg-slerp-drive") {
     return probe136_contactPcgSlerpDrivePair() ? 0 : 1;
   }
+  if (argc == 2 &&
+      std::string(argv[1]) == "--probe=body-unilateral-projection") {
+    return test141_bodyUnilateralProjectionAuthority() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=component-unilateral-projection") {
+    return test142_componentUnilateralProjectionAuthority() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=bounded-component-position-impulse") {
+    return test143_boundedComponentPositionImpulseAuthority() ? 0 : 1;
+  }
   const bool contactCandidateSuite =
       argc == 2 &&
       std::string(argv[1]) == "--suite=canonical-contact-pcg";
@@ -235,6 +284,12 @@ int main(int argc, char **argv) {
             "--probe=contact-pcg-twist-drive|"
             "--probe=contact-pcg-swing-drives|"
             "--probe=contact-pcg-slerp-drive|"
+            "--probe=body-unilateral-projection|"
+            "--probe=component-unilateral-projection|"
+            "--probe=bounded-component-position-impulse|"
+            "--probe=transient-broad-material|"
+            "--probe=scalable-broad-material|"
+            "--probe=broad-material-scaling-authority|"
             "--suite=canonical-contact-pcg|"
             "--suite=contact-pcg-legacy-authoring]\n");
     return 2;
@@ -244,7 +299,7 @@ int main(int argc, char **argv) {
   AvbdRef::setCanonicalRigidContactAuthoringSuiteProbeEnabled(
       contactCandidateSuite);
   printf("=========================================\n");
-  printf("Running AVBD Refactored Tests (137 Cases, contact=%s, authoring=%s)\n",
+  printf("Running AVBD Refactored Tests (149 Cases, contact=%s, authoring=%s)\n",
          contactCandidateSuite || contactLegacyAuthoringSuite
              ? "island-pcg"
              : "baseline",
@@ -407,6 +462,18 @@ int main(int argc, char **argv) {
   test138_angularSlerpPositionDriveDiscreteEquation();
   test139_gearJointImpulseProjectionDiscreteEquation();
   test140_dynamicDynamicAngularPositionDriveDiscreteEquation();
+  test141_bodyUnilateralProjectionAuthority();
+  test142_componentUnilateralProjectionAuthority();
+  test143_boundedComponentPositionImpulseAuthority();
+  test144_supportAxisRigidNullModeAuthority();
+  test145_finiteDriveStaticFrictionPositionAuthority();
+  test146_unequalMassFrictionWeightShareAuthority();
+  test147_slopedSupportFrictionPositionAuthority();
+  test148_contactPositionOutputForceOwnerAuthority();
+  test149_passiveRigidStaticFrictionManifoldAuthority();
+  test150_passiveRigidContactMaterialComponentAuthority();
+  test151_restitutionRigidMaterialComponentAuthority();
+  test152_transientRestitutionBroadMaterialComponentAuthority();
 
   printf("\n=========================================\n");
   printf("Tests Passed: %d\n", gTestsPassed);

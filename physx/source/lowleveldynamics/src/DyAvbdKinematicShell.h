@@ -34,13 +34,10 @@
 namespace physx {
 namespace Dy {
 
-struct AvbdSoftParticle;
-struct AvbdSoftBody;
-struct AvbdSoftContact;
 struct AvbdContactConstraint;
 struct AvbdSolverBody;
 
-/** SnippetDeformableMesh kinematic shell (grid vertices, no elasticity). */
+/** SnippetDeformableMesh grid history used to align authoritative NP rows. */
 class AvbdKinematicShell {
 public:
   static constexpr PxU32 kMaxVerts = 64;
@@ -52,23 +49,19 @@ public:
 
   static bool isActive() { return sActive && isEnabled(); }
 
-  /** Box-corner shell (mass>=5) defaults off; stress harness enables explicitly. */
+  /**
+   * Compatibility no-op. The NP-backed synthesized box-corner shell was
+   * retired in P3G; callers may continue to request it while validating that
+   * no direct-shell rows are emitted.
+   */
   static void setBoxCornerShellEnabled(bool enabled) {
-    sBoxCornerShellEnabled = enabled;
-  }
-
-  static bool boxCornerShellEnabled() {
-    if (sBoxCornerShellEnabled)
-      return true;
-    const char *env = std::getenv("AVBD_KINEMATIC_SHELL_BOX");
-    return env && env[0] != '\0' && env[0] != '0';
+    PX_UNUSED(enabled);
   }
 
   static void reset() {
     sActive = false;
     sGridSize = 0;
     sGridStep = 0.0f;
-    sBoxCornerShellEnabled = false;
   }
 
   static void updateFromMeshGrid(const PxVec3 *localVerts, PxU32 gridSize,
@@ -164,59 +157,7 @@ public:
     return PxVec3(worldX, sampleSurfacePrevY(worldX, worldZ), worldZ);
   }
 
-  static PxU32 nearestParticleIndex(PxReal worldX, PxReal worldZ) {
-    if (!sActive)
-      return 0;
-    const PxReal gx = PxClamp((worldX + 400.0f) / sGridStep + 0.5f, 0.0f,
-                              PxReal(sGridSize - 1u));
-    const PxReal gz = PxClamp((worldZ + 400.0f) / sGridStep + 0.5f, 0.0f,
-                              PxReal(sGridSize - 1u));
-    const PxU32 b = PxU32(gx);
-    const PxU32 a = PxU32(gz);
-    return a * sGridSize + b;
-  }
-
-  static PxReal gridStep() { return sGridStep; }
-
-  static PxU32 shellParticleCount();
-
-  static void syncIslandSoftParticles(AvbdSoftParticle *out, PxU32 capacity);
-
-  static AvbdSoftBody &kinematicShellSoftBody();
-
-  /** Build shell soft contacts for every dynamic body on the deformable mesh. */
-  static PxU32 buildIslandShellContacts(
-      const AvbdContactConstraint *constraints, PxU32 numConstraints,
-      const AvbdSolverBody *bodies, PxU32 numBodies, AvbdSoftContact *out,
-      PxU32 capacity, const PxU32 *deformAnchorCounts = nullptr);
-
-  static PxU32 stripDeformableAnchorContactsForBodies(
-      AvbdContactConstraint *constraints, PxU32 count,
-      const bool *replaceBodyMask, PxU32 numBodies);
-
-  static void countDeformableAnchorsPerBody(
-      const AvbdContactConstraint *constraints, PxU32 numConstraints,
-      PxU32 numBodies, PxU32 *outCounts);
-
-  /** Match dominant prep: synth emit only for stack boxes (many NP anchors). */
-  static bool shouldEmitDominantIslandShell(const AvbdSolverBody &body,
-                                            PxU32 deformAnchorCount);
-
-  /** One shell row per dynamic body (synthesize bridge / body-static parity). */
-  static PxU32 compactDominantIslandShellContacts(
-      AvbdSoftContact *contacts, PxU32 count, const AvbdSolverBody *bodies,
-      PxU32 numBodies);
-
-  static void restoreIslandShellContactCache(AvbdSoftContact *contacts,
-                                             PxU32 count);
-  static void saveIslandShellContactCache(const AvbdSoftContact *contacts,
-                                          PxU32 count);
-
-  /** Bilinear anchor + mesh normal (standalone / dominant synthesize parity). */
-  static void refineShellSoftContactAnchor(AvbdSoftContact &sc,
-                                           const AvbdSolverBody &body);
-
-  /** Normal + prev + TGS-style depth only; keeps NP contact points (stable). */
+  /** Publish grid normal/history metadata while preserving NP contact points. */
   static bool applyShellNormalAndPrev(
       struct AvbdContactConstraint &constraint, struct AvbdSolverBody *bodyA,
       struct AvbdSolverBody *bodyB, PxReal restDist, PxVec3 &tangent0,
@@ -224,7 +165,6 @@ public:
 
 private:
   static bool sActive;
-  static bool sBoxCornerShellEnabled;
   static PxU32 sGridSize;
   static PxReal sGridStep;
   static PxVec3 sWorld[kMaxVerts];

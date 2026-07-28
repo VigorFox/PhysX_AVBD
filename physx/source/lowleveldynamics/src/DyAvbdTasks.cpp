@@ -140,9 +140,10 @@ void AvbdTask::release() {
 
 void AvbdSolveIslandTask::release() {
   const bool hasJointConstraints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
-  const bool usesJointPath = hasJointConstraints ||
-                             (mBatch.numSoftParticles > 0 &&
-                              mBatch.numSoftBodies > 0);
+  const bool usesJointPath =
+      hasJointConstraints ||
+      (mBatch.numSoftParticles > 0 && mBatch.numSoftBodies > 0 &&
+       mBatch.softContacts && mBatch.numSoftContacts > 0);
   const PxU32 baseIterations =
       (mBatch.iterationOverride > 0)
           ? mBatch.iterationOverride
@@ -163,7 +164,8 @@ void AvbdSolveIslandTask::release() {
 
     // Function declared as friend in AvbdDynamicsContext class
     writeLambdaToCache(mContext, constraints, numConstraints, mBatch.numBodies);
-    writeContactImpulseToOutput(constraints, numConstraints, mDt);
+    writeContactImpulseToOutput(constraints, numConstraints, mBatch.numBodies,
+                                mDt);
     writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 

@@ -18,7 +18,7 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Motor Drive | ✅ Accepted | Post-solve torque motor for revolute; SLERP drive for D6 |
 | Gear Joint | ✅ Accepted | Velocity-ratio/phase/external-impulse physics plus binary round-trip dependency identity and post-load consumption (`30/30`) |
 | Standalone Alignment | ✅ Accepted | Rigid/joint D6 path is aligned with avbd_standalone; standalone soft body has progressed further than the current PhysX port |
-| Regression Baseline | ✅ Accepted | Breadth checkpoint: standalone `137/137`; all 46 AVBD in-scope CPU Snippets have reproducible headless gates |
+| Regression Baseline | ✅ Accepted | Breadth checkpoint: standalone `149/149`; all 46 AVBD in-scope CPU Snippets have reproducible headless gates |
 | O(M) Constraint Lookup | ✅ Accepted | Eliminates O(N²) complexity |
 | Multi-threaded Islands | ✅ Accepted | Per-island constraint mappings |
 | Friction Model | ✅ Accepted | Coulomb cone, per-material coefficients from PxContactPatch |
@@ -30,8 +30,9 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Fixed Tendon | ✅ Accepted | `SnippetFixedTendon` gates fixed-root serial angular plus sibling branch angular/linear tendons, rest spring/damping, runtime offset actuation and branch length limits; asymmetric reciprocal coefficients and wider trees remain pending |
 | Spatial Tendon | ✅ Accepted | `SnippetSpatialTendon` gates fixed/moving intermediate paths, shared-root multi-leaf rows, angular/linear endpoints, rest spring/damping and leaf-local limits (`12/12` new modes plus `6/6` legacy); moving-root, contact and wider topology remain pending |
 | Contact Modification | ✅ Accepted | `SnippetContactModification` gates modified normal, normal/tangent target velocity, zero and finite max-impulse response, and zero plus finite asymmetric local mass/inertia scales against unit-scale controls for TGS plus AVBD parallel/sequential execution (`27/27`) |
+| Contact Report | ✅ Accepted | `SnippetContactReport` gates normal point/impulse payload, CPU PGS-only force-threshold `FOUND/LOST` events, and public friction-anchor positions/impulses for body-static and ordinary dynamic-dynamic contacts (`10/10`) |
 | Continuous Collision Detection | ✅ Accepted | `SnippetCCD` gates built-in linear, speculative/angular and combined full CCD, linear dynamic-dynamic CCD, and the raycast extension against static/dynamic targets, with three no-CCD tunneling controls (`24/24`) |
-| CCD Contact Report | ✅ Accepted | `SnippetContactReportCCD` gates three CCD TOI events, event poses, contact points, and nonzero impulses in one step, plus a no-CCD tunneling negative control |
+| CCD Contact Report | ✅ Accepted | `SnippetContactReportCCD` gates the original multi-hit report, angular speculative `TOUCH_FOUND`, combined full-CCD found/sweep events, dynamic-dynamic CCD payload, and the RaycastCCD post-fetch boundary (`16/16`) |
 | Custom Geometry Collision | ✅ Accepted | `SnippetCustomGeometryCollision` gates callback-generated falling, sliding, and impact contacts through TGS plus AVBD parallel/sequential execution, with nonzero solver response and no fall-through |
 | Voxel Custom Geometry | ✅ Accepted | `SnippetCustomGeometry` gates voxel callback-generated drop and impact contacts through TGS plus AVBD parallel/sequential execution, with public nonzero impulses and complete teardown |
 | Custom Convex | ✅ Accepted | `SnippetCustomConvex` gates instrumented cylinder/cone callbacks through TGS plus AVBD parallel/sequential execution, with finite generated contacts, public nonzero impulses, no fall-through, and callback-safe teardown |
@@ -53,7 +54,17 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 - Copied and enforced all six `PxRigidDynamicLockFlag` axes through AVBD prediction, constraint stages, final pose, and velocity write-back. Initial-velocity and runtime-impulse witnesses pass in parallel and sequential execution.
 - Expanded `SnippetCCD` from a static-wall smoke into a `24/24` matrix covering angular/full CCD, built-in and raycast dynamic-dynamic paths, public flag readback, real negative controls, finite response, and cleanup. The review found no additional AVBD solver defect.
 - Expanded `SnippetContactModification` to a `27/27` matrix and fixed AVBD finite `maxImpulse` semantics across the primal solve, split depenetration, and final normal-velocity response; a `0.25` impulse cap now matches the TGS pass-through witness.
-- The current checked gates pass: standalone `137/137`, cross-Snippet `14/14`, Contact Modification `27/27`, CCD `24/24`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
+- Expanded `SnippetContactReport` to a `10/10` matrix. Force-threshold events follow their documented CPU PGS-only boundary, while AVBD now exposes public friction anchors and applied tangential impulses for both body-static and ordinary dynamic-dynamic contacts through `PxContactPair::extractFrictionAnchors()`.
+- Expanded `SnippetContactReportCCD` to a `16/16` matrix covering the original multi-hit sweep, angular speculative and full CCD event semantics, true dynamic-dynamic sweep payload, and the RaycastCCD post-fetch correction boundary. This extension found no additional AVBD solver defect.
+- The current checked gates pass: standalone `149/149`, cross-Snippet `14/14`, Contact Report `10/10`, CCD Contact Report `16/16`, Contact Modification `27/27`, CCD `24/24`, articulation `31/31`, the 10000-frame scissor lift, SnippetJoint, and the default/sphere-shot moving-mesh tests.
+
+### Rigid Mixed-Solve Ownership Tightening (2026-07)
+
+- Ordinary contact-only rigid material components with zero restitution and at most 16 contact points now use one complete owner for simultaneous normal and two-axis Coulomb response. Candidate state is committed atomically only after the complete component passes its physical residual checks.
+- Nonzero-restitution components and components above 16 contact points fail closed as whole components. They are not split into partially owned row subsets. A nonzero-restitution component owner was implemented and then reverted because it deterministically regressed the unchanged full `SnippetToleranceScale` acceptance gate; no gate threshold or scene-specific exception was introduced.
+- The final focused gates pass: P4AI passive material component `12/12`, P4AF passive rigid-static manifold `12/12`, Contact Modification `27/27`, full ToleranceScale `6/6`, restitution spatial `6/6`, and restitution-threshold `12/12`.
+- The fixed owner inventory passes `8/8`, but fallback is not yet rare: four cases still report 4141 sampled fallback rows and 24531 corrections. HelloWorld stack/ball account for 3780 of those rows; articulation joint-mixed ownership is a separate remaining gap.
+- The wider six/12/24-body standalone fixtures establish scalable-solver authority and failure-first behavior, but do not enable the rejected production path. P3R remains opt-in/default-off. Restitution-capable and scalable material-component ownership are the next dedicated correctness task.
 
 ### Moving Triangle-Mesh Contact Stability (2026-07)
 
@@ -135,27 +146,27 @@ Key changes:
 
 The PhysX AVBD soft-body path is still in an early prototype stage, but its existing CPU component now has an accepted correctness baseline.
 
-- Native AVBD soft-particle/VBD pieces and the current OGC-based collision experiments exist. `SnippetSoftBodyAVBD` passes its self-contained component suite `66/66`; `SnippetDeformableVolumeAVBD` passes five isolated component/lifecycle cases repeated twice (`10/10`) with finite state and zero inverted tetrahedra.
+- Native AVBD soft-particle/VBD pieces and the current OGC-based collision experiments exist. `SnippetSoftBodyAVBD` passes its self-contained component suite `74/74`; `SnippetDeformableVolumeAVBD` passes five isolated component/lifecycle cases repeated twice (`10/10`) with finite state and zero inverted tetrahedra.
 - `SnippetDeformableVolumeAVBD` directly owns and steps soft-particle arrays. It reports `sceneSoftIntegration=0`: its `PxScene` contains no public deformable actor, so this is component correctness plus AVBD scene coexistence—not a public CPU `PxScene` deformable backend gate.
 - `SnippetDeformableMesh` is not evidence for this path because all simulated bodies in that scene are rigid.
-- `avbd_standalone` passes its full `137/137` suite. A direct port of the PhysX positive-J displacement limiter regressed standalone material semantics and was reverted rather than forced into alignment.
+- `avbd_standalone` passes its full `149/149` suite. A direct port of the PhysX positive-J displacement limiter regressed standalone material semantics and was reverted rather than forced into alignment.
 - The two existing PhysX CPU soft-body component Snippets are now part of the regression baseline; public scene integration remains outside that accepted slice.
 - Current implementation has **major performance problems** and should be treated as a research path, not a production-ready or even feature-complete baseline.
 - Soft-body optimization remains deferred until the post-inventory capability review closes any remaining functional correctness blockers.
 
 ### Current Validation Snapshot
 
-- Checkpoint date: **2026-07-24**.
+- Checkpoint date: **2026-07-28**.
 - The breadth-first CPU inventory is complete: **61/61** executable Snippets are classified, **46/46** AVBD `PxScene` Snippets have reproducible headless gates, and 15 CPU tools/query/cooking Snippets are outside standard solver dynamics.
 - All render-built validation executables are launched through dedicated hidden Python runners with explicit `--headless` arguments, timeout handling, visible-window rejection, process-tree cleanup, and fail-closed authority parsing.
-- The final standalone suite passes **137/137**. The post-relink shared-DLL cross matrix passes **14/14**.
+- The final standalone suite passes **149/149**. The post-relink shared-DLL cross matrix passes **14/14**.
 - `SnippetJointDrive` passes its cumulative **1176/1176** matrix; dynamic angular-position is **288/288**, contact angular-position is **24/24**, moving-kinematic SLERP is **18/18**, and the public legacy elliptical cone is **6/6**.
 - `SnippetJoint` retains force-pair **24/24**, external-disabled constraint **6/6**, native asymmetric spherical cone **12/12**, passive native prismatic/revolute reaction and break **18/18**, and legacy fixed no-break/break **6/6**.
 - `SnippetCustomJoint` retains its public wrench/break and generic-row mode matrices (**12/12** each). Rack/Gear runtime plus binary round-trip matrices pass **18/18** and **30/30**.
 - Mimic, Fixed Tendon, and Spatial Tendon public mode packs pass **12/12**, **18/18**, and **12/12**, while their legacy matrices remain green.
 - Articulation coverage retains the strengthened **31/31** suite, the 3600-frame RC cycle gate, and the 10000-frame RC extension without stall or non-finite state.
 - Rigid contact coverage includes stack/impact, CCD, contact report/modification, custom geometry/convex, moving mesh, tolerance scaling, gyroscopic response, split simulation/fetch, serialization, multithreading, triggers, MBP, and CPU Vehicle Snippets.
-- Existing CPU soft-body components retain `SnippetSoftBodyAVBD` **66/66** and `SnippetDeformableVolumeAVBD` **10/10**. They do not represent a public CPU `PxScene` deformable backend.
+- Existing CPU soft-body components retain `SnippetSoftBodyAVBD` **74/74** and `SnippetDeformableVolumeAVBD` **10/10**. They do not represent a public CPU `PxScene` deformable backend.
 - Remaining correctness boundaries are explicit: wider native-joint topology and selected extreme/contact-combined variants, including mixed lock-flag constraint topologies. Performance work remains deferred until the remaining capability checks are resolved.
 - Local handoff, audit, probe history, and per-iteration reports are intentionally not part of this checkpoint.
 

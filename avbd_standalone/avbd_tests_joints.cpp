@@ -1,4 +1,5 @@
 #include "avbd_collision.h"
+#include "avbd_component_unilateral_projection.h"
 #include "avbd_island_pcg.h"
 #include "avbd_island_rows.h"
 #include "avbd_test_utils.h"
@@ -1136,36 +1137,1062 @@ bool test52_revoluteJoint_limit() {
 // Test 53: Revolute joint with motor drive
 bool test53_revoluteJoint_drive() {
   printf("\n--- Test 53: Revolute Joint Motor Drive ---\n");
-  Solver solver;
-  solver.gravity = {0, -9.8f, 0};
-  solver.iterations = 10;
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
 
-  // Single body on a hinge axis with a motor
-  uint32_t body = solver.addBody({2, 15, 0}, Quat(), {2, 0.5f, 0.5f}, 1.0f);
+    // Unequal-inertia dynamic pair: the authored target is one relative
+    // velocity, not one independent target per endpoint.
+    const uint32_t bodyA =
+        solver.addBody({-1, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({1, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].mass = 1.0f;
+    solver.bodies[bodyA].inertiaTensor = Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].mass = 1.0f;
+    solver.bodies[bodyB].inertiaTensor = Mat33::diag(3.0f, 4.0f, 5.0f);
+    solver.bodies[bodyB].computeDerived();
 
-  Vec3 hingeAxis(0, 0, 1);
-  solver.addRevoluteJoint(UINT32_MAX, body, {0, 15, 0}, {-2, 0, 0},
-                          hingeAxis, hingeAxis);
-  // Drive at 1 rad/s
-  solver.setRevoluteJointDrive(0, 1.0f, 500.0f);
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(bodyA, bodyB, {1, 0, 0}, {-1, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
 
-  float prevAngle = 0.0f;
-  bool isRotating = false;
-  for (int frame = 0; frame < 300; frame++) {
-    solver.contacts.clear();
-    solver.step(solver.dt);
-
-    Quat rotB = solver.bodies[body].rotation;
-    float angle = solver.d6Joints[0].computeHingeAngle(Quat(), rotB);
-    if (frame > 60 && fabsf(angle - prevAngle) > 0.001f)
-      isRotating = true;
-    prevAngle = angle;
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    a.updateInvInertiaWorld();
+    b.updateInvInertiaWorld();
+    const Vec3 worldAxis =
+        (a.rotation * solver.d6Joints[0].localFrameA)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float relativeVelocity =
+        worldAxis.dot(b.angularVelocity - a.angularVelocity);
+    const float angularMomentum =
+        worldAxis.dot(a.invInertiaWorld.inverse() * a.angularVelocity +
+                      b.invInertiaWorld.inverse() * b.angularVelocity);
+    const Vec3 anchorA = a.position + a.rotation.rotate(Vec3(1, 0, 0));
+    const Vec3 anchorB = b.position + b.rotation.rotate(Vec3(-1, 0, 0));
+    const float anchorError = (anchorA - anchorB).length();
+    printf("  pair relative=%.6f momentum=%.9f anchor=%.9f\n",
+           relativeVelocity, angularMomentum, anchorError);
+    CHECK(fabsf(relativeVelocity - 2.0f) < 0.02f,
+          "Dynamic-pair motor target mismatch: %.6f", relativeVelocity);
+    CHECK(fabsf(angularMomentum) < 1e-3f,
+          "Dynamic-pair motor injected momentum: %.9f", angularMomentum);
+    CHECK(anchorError < 1e-3f,
+          "Dynamic-pair motor anchor drift: %.9f", anchorError);
   }
 
-  printf("  final angle=%.2f deg, rotating=%s\n",
-         prevAngle * 180.0f / 3.14159f, isRotating ? "yes" : "no");
-  CHECK(isRotating, "Motor should cause rotation");
-  PASS("Revolute motor drive working");
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const float angleA = 3.14159265358979323846f / 6.0f;
+    const float angleB = -3.14159265358979323846f / 5.0f;
+    const Quat rotationA(
+        cosf(angleA * 0.5f), 0.0f, 0.0f,
+        sinf(angleA * 0.5f));
+    const Quat rotationB(
+        cosf(angleB * 0.5f), 0.0f, 0.0f,
+        sinf(angleB * 0.5f));
+    const uint32_t bodyA =
+        solver.addBody({0, 10, 0}, rotationA,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({0, 10, 0}, rotationB,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].inertiaTensor =
+        Mat33::diag(1.0f, 4.0f, 7.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].inertiaTensor =
+        Mat33::diag(2.0f, 5.0f, 8.0f);
+    solver.bodies[bodyB].computeDerived();
+    const Vec3 worldAxis(1, 0, 0);
+    const Vec3 localAxisA =
+        rotationA.conjugate().rotate(worldAxis);
+    const Vec3 localAxisB =
+        rotationB.conjugate().rotate(worldAxis);
+    solver.addRevoluteJoint(
+        bodyA, bodyB, {0, 0, 0}, {0, 0, 0},
+        localAxisA, localAxisB);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    float initialMomentum = 0.0f;
+    float maximumLateRelativeSwing = 0.0f;
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      Body &a = solver.bodies[bodyA];
+      Body &b = solver.bodies[bodyB];
+      a.updateInvInertiaWorld();
+      b.updateInvInertiaWorld();
+      const Vec3 axis =
+          (a.rotation * solver.d6Joints[0].localFrameA)
+              .rotate(Vec3(1, 0, 0))
+              .normalized();
+      const Vec3 relativeAngular =
+          b.angularVelocity - a.angularVelocity;
+      if (frame >= 60)
+        maximumLateRelativeSwing =
+            std::max(maximumLateRelativeSwing,
+                     (relativeAngular -
+                      axis * axis.dot(relativeAngular))
+                         .length());
+      const Vec3 momentum =
+          a.invInertiaWorld.inverse() * a.angularVelocity +
+          b.invInertiaWorld.inverse() * b.angularVelocity;
+      if (frame == 0)
+        initialMomentum = momentum.length();
+    }
+
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    const Vec3 axis =
+        (a.rotation * solver.d6Joints[0].localFrameA)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float relativeVelocity =
+        axis.dot(b.angularVelocity - a.angularVelocity);
+    printf("  pair off-principal relative=%.9f swing=%.9f "
+           "momentum=%.9f\n",
+           relativeVelocity, maximumLateRelativeSwing,
+           initialMomentum);
+    CHECK(fabsf(relativeVelocity - 2.0f) < 0.02f,
+          "Dynamic off-principal motor target mismatch: %.9f",
+          relativeVelocity);
+    CHECK(maximumLateRelativeSwing < 0.02f,
+          "Dynamic off-principal motor left relative swing: %.9f",
+          maximumLateRelativeSwing);
+    CHECK(initialMomentum < 0.03f,
+          "Dynamic off-principal motor injected momentum: %.9f",
+          initialMomentum);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t bodyA =
+        solver.addBody({0, 9, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({0, 11, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].mass = 1.0f;
+    solver.bodies[bodyA].inertiaTensor =
+        Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].mass = 1.0f;
+    solver.bodies[bodyB].inertiaTensor =
+        Mat33::diag(3.0f, 4.0f, 5.0f);
+    solver.bodies[bodyB].computeDerived();
+    const Vec3 localAnchorA(0, 1, 0);
+    const Vec3 localAnchorB(0, -1, 0);
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(
+        bodyA, bodyB, localAnchorA, localAnchorB,
+        hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    float maximumLateRelativeSwing = 0.0f;
+    float maximumLateRelativeAnchorPointSpeed = 0.0f;
+    float maximumTotalLinearMomentum = 0.0f;
+    float maximumInitialTotalAngularMomentum = 0.0f;
+    float maximumLinearSpeed = 0.0f;
+    for (int frame = 0; frame < 360; ++frame) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      Body &a = solver.bodies[bodyA];
+      Body &b = solver.bodies[bodyB];
+      a.updateInvInertiaWorld();
+      b.updateInvInertiaWorld();
+      const Vec3 worldAxis =
+          (a.rotation * solver.d6Joints[0].localFrameA)
+              .rotate(Vec3(1, 0, 0))
+              .normalized();
+      const Vec3 relativeAngular =
+          b.angularVelocity - a.angularVelocity;
+      const Vec3 rA = a.rotation.rotate(localAnchorA);
+      const Vec3 rB = b.rotation.rotate(localAnchorB);
+      const Vec3 relativeAnchorVelocity =
+          b.linearVelocity + b.angularVelocity.cross(rB) -
+          a.linearVelocity - a.angularVelocity.cross(rA);
+      if (frame >= 60) {
+        maximumLateRelativeSwing =
+            std::max(maximumLateRelativeSwing,
+                     (relativeAngular -
+                      worldAxis * worldAxis.dot(relativeAngular))
+                         .length());
+        maximumLateRelativeAnchorPointSpeed =
+            std::max(maximumLateRelativeAnchorPointSpeed,
+                     relativeAnchorVelocity.length());
+      }
+      const Vec3 linearMomentum =
+          a.linearVelocity * a.mass +
+          b.linearVelocity * b.mass;
+      maximumTotalLinearMomentum =
+          std::max(maximumTotalLinearMomentum,
+                   linearMomentum.length());
+      if (frame < 12) {
+        const Vec3 angularMomentum =
+            a.position.cross(a.linearVelocity * a.mass) +
+            a.invInertiaWorld.inverse() * a.angularVelocity +
+            b.position.cross(b.linearVelocity * b.mass) +
+            b.invInertiaWorld.inverse() * b.angularVelocity;
+        maximumInitialTotalAngularMomentum =
+            std::max(maximumInitialTotalAngularMomentum,
+                     angularMomentum.length());
+      }
+      maximumLinearSpeed =
+          std::max(maximumLinearSpeed,
+                   std::max(a.linearVelocity.length(),
+                            b.linearVelocity.length()));
+    }
+
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    const Vec3 worldAxisA =
+        (a.rotation * solver.d6Joints[0].localFrameA)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const Vec3 worldAxisB =
+        (b.rotation * solver.d6Joints[0].localFrameB)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float relativeVelocity =
+        worldAxisA.dot(b.angularVelocity - a.angularVelocity);
+    const Vec3 rA = a.rotation.rotate(localAnchorA);
+    const Vec3 rB = b.rotation.rotate(localAnchorB);
+    const float relativeAnchorPointSpeed =
+        (b.linearVelocity + b.angularVelocity.cross(rB) -
+         a.linearVelocity - a.angularVelocity.cross(rA))
+            .length();
+    const float anchorError =
+        (a.position + rA - b.position - rB).length();
+    const float axisError = worldAxisA.cross(worldAxisB).length();
+    printf("  pair off-center relative=%.9f swing=%.9f "
+           "anchorSpeed=%.9f linearMomentum=%.9f "
+           "initialAngularMomentum=%.9f linearSpeed=%.9f "
+           "anchorError=%.9f axisError=%.9f\n",
+           relativeVelocity, maximumLateRelativeSwing,
+           std::max(relativeAnchorPointSpeed,
+                    maximumLateRelativeAnchorPointSpeed),
+           maximumTotalLinearMomentum,
+           maximumInitialTotalAngularMomentum,
+           maximumLinearSpeed, anchorError, axisError);
+    CHECK(fabsf(relativeVelocity - 2.0f) <= 0.05f,
+          "Dynamic off-center motor target mismatch: %.9f",
+          relativeVelocity);
+    CHECK(maximumLateRelativeSwing <= 0.05f,
+          "Dynamic off-center motor left relative swing: %.9f",
+          maximumLateRelativeSwing);
+    CHECK(relativeAnchorPointSpeed <= 0.05f &&
+              maximumLateRelativeAnchorPointSpeed <= 0.05f,
+          "Dynamic off-center motor left anchor velocity: %.9f %.9f",
+          relativeAnchorPointSpeed,
+          maximumLateRelativeAnchorPointSpeed);
+    CHECK(maximumTotalLinearMomentum <= 1e-3f,
+          "Dynamic off-center motor injected linear momentum: %.9f",
+          maximumTotalLinearMomentum);
+    CHECK(maximumInitialTotalAngularMomentum <= 0.25f,
+          "Dynamic off-center motor injected angular momentum: %.9f",
+          maximumInitialTotalAngularMomentum);
+    CHECK(maximumLinearSpeed >= 0.5f,
+          "Dynamic off-center motor lacks orbital COM motion: %.9f",
+          maximumLinearSpeed);
+    CHECK(anchorError <= 1e-3f,
+          "Dynamic off-center motor anchor drift: %.9f",
+          anchorError);
+    CHECK(axisError <= 1e-3f,
+          "Dynamic off-center motor axis drift: %.9f",
+          axisError);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const float angleA = 3.14159265358979323846f / 6.0f;
+    const float angleB = -3.14159265358979323846f / 5.0f;
+    const Quat rotationA(
+        cosf(angleA * 0.5f), 0.0f, 0.0f,
+        sinf(angleA * 0.5f));
+    const Quat rotationB(
+        cosf(angleB * 0.5f), 0.0f, 0.0f,
+        sinf(angleB * 0.5f));
+    const Vec3 positionA(0, 9, 0);
+    const Vec3 positionB(0, 11, 0);
+    const Vec3 worldAnchor(0, 10, 0);
+    const Vec3 worldAxis(1, 0, 0);
+    const Vec3 localAnchorA =
+        rotationA.conjugate().rotate(worldAnchor - positionA);
+    const Vec3 localAnchorB =
+        rotationB.conjugate().rotate(worldAnchor - positionB);
+    const Vec3 localAxisA =
+        rotationA.conjugate().rotate(worldAxis);
+    const Vec3 localAxisB =
+        rotationB.conjugate().rotate(worldAxis);
+    const uint32_t bodyA =
+        solver.addBody(positionA, rotationA,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody(positionB, rotationB,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].mass = 1.0f;
+    solver.bodies[bodyA].inertiaTensor =
+        Mat33::diag(1.0f, 4.0f, 7.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].mass = 1.0f;
+    solver.bodies[bodyB].inertiaTensor =
+        Mat33::diag(2.0f, 5.0f, 8.0f);
+    solver.bodies[bodyB].computeDerived();
+    solver.addRevoluteJoint(
+        bodyA, bodyB, localAnchorA, localAnchorB,
+        localAxisA, localAxisB);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    Body &initialA = solver.bodies[bodyA];
+    Body &initialB = solver.bodies[bodyB];
+    initialA.updateInvInertiaWorld();
+    initialB.updateInvInertiaWorld();
+    const Vec3 initialResponseA =
+        initialA.invInertiaWorld * worldAxis;
+    const Vec3 initialResponseB =
+        initialB.invInertiaWorld * worldAxis;
+    const float offPrincipalResponseA =
+        (initialResponseA -
+         worldAxis * initialResponseA.dot(worldAxis))
+            .length();
+    const float offPrincipalResponseB =
+        (initialResponseB -
+         worldAxis * initialResponseB.dot(worldAxis))
+            .length();
+
+    float maximumLateRelativeSwing = 0.0f;
+    float maximumLateRelativeAnchorPointSpeed = 0.0f;
+    float maximumTotalLinearMomentum = 0.0f;
+    float maximumInitialTotalAngularMomentum = 0.0f;
+    float maximumLinearSpeed = 0.0f;
+    for (int frame = 0; frame < 360; ++frame) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      Body &a = solver.bodies[bodyA];
+      Body &b = solver.bodies[bodyB];
+      a.updateInvInertiaWorld();
+      b.updateInvInertiaWorld();
+      const Vec3 hingeAxis =
+          (a.rotation * solver.d6Joints[0].localFrameA)
+              .rotate(Vec3(1, 0, 0))
+              .normalized();
+      const Vec3 relativeAngular =
+          b.angularVelocity - a.angularVelocity;
+      const Vec3 rA = a.rotation.rotate(localAnchorA);
+      const Vec3 rB = b.rotation.rotate(localAnchorB);
+      const Vec3 relativeAnchorVelocity =
+          b.linearVelocity + b.angularVelocity.cross(rB) -
+          a.linearVelocity - a.angularVelocity.cross(rA);
+      if (frame >= 60) {
+        maximumLateRelativeSwing =
+            std::max(maximumLateRelativeSwing,
+                     (relativeAngular -
+                      hingeAxis * hingeAxis.dot(relativeAngular))
+                         .length());
+        maximumLateRelativeAnchorPointSpeed =
+            std::max(maximumLateRelativeAnchorPointSpeed,
+                     relativeAnchorVelocity.length());
+      }
+      const Vec3 linearMomentum =
+          a.linearVelocity * a.mass +
+          b.linearVelocity * b.mass;
+      maximumTotalLinearMomentum =
+          std::max(maximumTotalLinearMomentum,
+                   linearMomentum.length());
+      if (frame < 12) {
+        const Vec3 angularMomentum =
+            a.position.cross(a.linearVelocity * a.mass) +
+            a.invInertiaWorld.inverse() * a.angularVelocity +
+            b.position.cross(b.linearVelocity * b.mass) +
+            b.invInertiaWorld.inverse() * b.angularVelocity;
+        maximumInitialTotalAngularMomentum =
+            std::max(maximumInitialTotalAngularMomentum,
+                     angularMomentum.length());
+      }
+      maximumLinearSpeed =
+          std::max(maximumLinearSpeed,
+                   std::max(a.linearVelocity.length(),
+                            b.linearVelocity.length()));
+    }
+
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    const Vec3 worldAxisA =
+        (a.rotation * solver.d6Joints[0].localFrameA)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const Vec3 worldAxisB =
+        (b.rotation * solver.d6Joints[0].localFrameB)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float relativeVelocity =
+        worldAxisA.dot(b.angularVelocity - a.angularVelocity);
+    const Vec3 rA = a.rotation.rotate(localAnchorA);
+    const Vec3 rB = b.rotation.rotate(localAnchorB);
+    const float relativeAnchorPointSpeed =
+        (b.linearVelocity + b.angularVelocity.cross(rB) -
+         a.linearVelocity - a.angularVelocity.cross(rA))
+            .length();
+    const float anchorError =
+        (a.position + rA - b.position - rB).length();
+    const float axisError = worldAxisA.cross(worldAxisB).length();
+    printf("  pair spatial response=(%.9f,%.9f) relative=%.9f "
+           "swing=%.9f anchorSpeed=%.9f linearMomentum=%.9f "
+           "initialAngularMomentum=%.9f linearSpeed=%.9f "
+           "anchorError=%.9f axisError=%.9f\n",
+           offPrincipalResponseA, offPrincipalResponseB,
+           relativeVelocity, maximumLateRelativeSwing,
+           std::max(relativeAnchorPointSpeed,
+                    maximumLateRelativeAnchorPointSpeed),
+           maximumTotalLinearMomentum,
+           maximumInitialTotalAngularMomentum,
+           maximumLinearSpeed, anchorError, axisError);
+    CHECK(offPrincipalResponseA >= 0.05f &&
+              offPrincipalResponseB >= 0.05f,
+          "Dynamic spatial fixture lacks off-principal response: %.9f %.9f",
+          offPrincipalResponseA, offPrincipalResponseB);
+    CHECK(localAnchorA.cross(localAxisA).length() >= 0.5f &&
+              localAnchorB.cross(localAxisB).length() >= 0.5f,
+          "Dynamic spatial fixture lacks perpendicular lever arms");
+    CHECK(fabsf(relativeVelocity - 2.0f) <= 0.05f,
+          "Dynamic spatial motor target mismatch: %.9f",
+          relativeVelocity);
+    CHECK(maximumLateRelativeSwing <= 0.05f,
+          "Dynamic spatial motor left relative swing: %.9f",
+          maximumLateRelativeSwing);
+    CHECK(relativeAnchorPointSpeed <= 0.05f &&
+              maximumLateRelativeAnchorPointSpeed <= 0.05f,
+          "Dynamic spatial motor left anchor velocity: %.9f %.9f",
+          relativeAnchorPointSpeed,
+          maximumLateRelativeAnchorPointSpeed);
+    CHECK(maximumTotalLinearMomentum <= 1e-3f,
+          "Dynamic spatial motor injected linear momentum: %.9f",
+          maximumTotalLinearMomentum);
+    CHECK(maximumInitialTotalAngularMomentum <= 0.25f,
+          "Dynamic spatial motor injected angular momentum: %.9f",
+          maximumInitialTotalAngularMomentum);
+    CHECK(maximumLinearSpeed >= 0.5f,
+          "Dynamic spatial motor lacks orbital COM motion: %.9f",
+          maximumLinearSpeed);
+    CHECK(anchorError <= 1e-3f,
+          "Dynamic spatial motor anchor drift: %.9f",
+          anchorError);
+    CHECK(axisError <= 1e-3f,
+          "Dynamic spatial motor axis drift: %.9f",
+          axisError);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t body =
+        solver.addBody({0, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor = Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[body].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(UINT32_MAX, body, {0, 10, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointLimit(0, -0.5f, 0.5f);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    const float initialAngle = solver.d6Joints[0].computeHingeAngle(
+        Quat(), solver.bodies[body].rotation);
+    float maximumAngle = initialAngle;
+    float maximumViolation = 0.0f;
+    float maximumLateOutwardVelocity = 0.0f;
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      const float angle = solver.d6Joints[0].computeHingeAngle(
+          Quat(), solver.bodies[body].rotation);
+      maximumAngle = std::max(maximumAngle, angle);
+      maximumViolation =
+          std::max(maximumViolation, std::max(0.0f, angle - 0.5f));
+      if (frame >= 120 && angle >= 0.45f) {
+        const Vec3 worldAxis =
+            solver.d6Joints[0].localFrameA
+                .rotate(Vec3(1, 0, 0))
+                .normalized();
+        maximumLateOutwardVelocity = std::max(
+            maximumLateOutwardVelocity,
+            std::max(0.0f,
+                     worldAxis.dot(solver.bodies[body].angularVelocity)));
+      }
+    }
+    const float finalAngle = solver.d6Joints[0].computeHingeAngle(
+        Quat(), solver.bodies[body].rotation);
+    const float travel = maximumAngle - initialAngle;
+    printf("  limit travel=%.9f final=%.9f violation=%.9f outward=%.9f\n",
+           travel, finalAngle, maximumViolation,
+           maximumLateOutwardVelocity);
+    CHECK(travel >= 0.4f && finalAngle >= 0.45f,
+          "Motor did not reach active upper limit: %.9f %.9f",
+          travel, finalAngle);
+    CHECK(maximumViolation <= 0.02f,
+          "Motor crossed active upper limit: %.9f", maximumViolation);
+    CHECK(maximumLateOutwardVelocity <= 0.05f,
+          "Motor retained outward velocity at upper limit: %.9f",
+          maximumLateOutwardVelocity);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t bodyA =
+        solver.addBody({0, 10, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({0, 10, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].inertiaTensor =
+        Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].inertiaTensor =
+        Mat33::diag(3.0f, 4.0f, 5.0f);
+    solver.bodies[bodyB].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(bodyA, bodyB, {0, 0, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointLimit(0, -0.5f, 0.5f);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    const float initialAngle =
+        solver.d6Joints[0].computeHingeAngle(
+            solver.bodies[bodyA].rotation,
+            solver.bodies[bodyB].rotation);
+    float minimumAngle = initialAngle;
+    float maximumAngle = initialAngle;
+    float maximumViolation = 0.0f;
+    float maximumLateOutwardVelocity = 0.0f;
+    float maximumAngularMomentum = 0.0f;
+    for (int frame = 0; frame < 360; ++frame) {
+      if (frame == 180)
+        solver.setRevoluteJointDrive(0, -2.0f, 1000.0f);
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      Body &a = solver.bodies[bodyA];
+      Body &b = solver.bodies[bodyB];
+      a.updateInvInertiaWorld();
+      b.updateInvInertiaWorld();
+      const float angle =
+          solver.d6Joints[0].computeHingeAngle(
+              a.rotation, b.rotation);
+      minimumAngle = std::min(minimumAngle, angle);
+      maximumAngle = std::max(maximumAngle, angle);
+      maximumViolation = std::max(
+          maximumViolation,
+          std::max(std::max(0.0f, angle - 0.5f),
+                   std::max(0.0f, -0.5f - angle)));
+      const Vec3 worldAxis =
+          (a.rotation * solver.d6Joints[0].localFrameA)
+              .rotate(Vec3(1, 0, 0))
+              .normalized();
+      const float relativeVelocity =
+          worldAxis.dot(b.angularVelocity - a.angularVelocity);
+      if ((frame >= 120 && frame < 180 && angle >= 0.45f) ||
+          (frame >= 300 && angle <= -0.45f)) {
+        const float outwardVelocity =
+            frame < 180 ? relativeVelocity : -relativeVelocity;
+        maximumLateOutwardVelocity =
+            std::max(maximumLateOutwardVelocity,
+                     std::max(0.0f, outwardVelocity));
+      }
+      const Vec3 angularMomentum =
+          a.invInertiaWorld.inverse() * a.angularVelocity +
+          b.invInertiaWorld.inverse() * b.angularVelocity;
+      maximumAngularMomentum =
+          std::max(maximumAngularMomentum,
+                   angularMomentum.length());
+    }
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    const float finalAngle =
+        solver.d6Joints[0].computeHingeAngle(
+            a.rotation, b.rotation);
+    const float upperTravel = maximumAngle - initialAngle;
+    const float range = maximumAngle - minimumAngle;
+    printf("  pair limit travel=%.9f range=%.9f final=%.9f "
+           "violation=%.9f outward=%.9f momentum=%.9f\n",
+           upperTravel, range, finalAngle, maximumViolation,
+           maximumLateOutwardVelocity, maximumAngularMomentum);
+    CHECK(upperTravel >= 0.4f && range >= 0.9f &&
+              finalAngle <= -0.45f,
+          "Dynamic-pair motor did not traverse both limits: %.9f %.9f %.9f",
+          upperTravel, range, finalAngle);
+    CHECK(maximumViolation <= 0.02f,
+          "Dynamic-pair motor crossed active limit: %.9f",
+          maximumViolation);
+    CHECK(maximumLateOutwardVelocity <= 0.05f,
+          "Dynamic-pair motor retained outward limit velocity: %.9f",
+          maximumLateOutwardVelocity);
+    CHECK(maximumAngularMomentum <= 1e-3f,
+          "Dynamic-pair limited motor injected momentum: %.9f",
+          maximumAngularMomentum);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t body =
+        solver.addBody({0, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor = Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[body].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(UINT32_MAX, body, {0, 10, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f, true);
+
+    for (int frame = 0; frame < 120; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+    const float preBoostVelocity =
+        solver.bodies[body].angularVelocity.x;
+    solver.bodies[body].angularVelocity = Vec3(5.0f, 0.0f, 0.0f);
+    float minimumPostBoostVelocity = 5.0f;
+    for (int frame = 120; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      minimumPostBoostVelocity =
+          std::min(minimumPostBoostVelocity,
+                   solver.bodies[body].angularVelocity.x);
+    }
+    const float finalVelocity =
+        solver.bodies[body].angularVelocity.x;
+    printf("  free-spin pre=%.9f minimumPost=%.9f final=%.9f\n",
+           preBoostVelocity, minimumPostBoostVelocity, finalVelocity);
+    CHECK(fabsf(preBoostVelocity - 2.0f) <= 0.05f,
+          "Free-spin motor did not reach target: %.9f",
+          preBoostVelocity);
+    CHECK(minimumPostBoostVelocity >= 4.9f && finalVelocity >= 4.9f,
+          "Free-spin motor braked super-target motion: %.9f %.9f",
+          minimumPostBoostVelocity, finalVelocity);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t bodyA =
+        solver.addBody({0, 10, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({0, 10, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].inertiaTensor =
+        Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].inertiaTensor =
+        Mat33::diag(3.0f, 4.0f, 5.0f);
+    solver.bodies[bodyB].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(bodyA, bodyB, {0, 0, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f, true);
+
+    for (int frame = 0; frame < 120; ++frame) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+    const float preBoostVelocity =
+        solver.bodies[bodyB].angularVelocity.x -
+        solver.bodies[bodyA].angularVelocity.x;
+    solver.bodies[bodyA].angularVelocity =
+        Vec3(-3.75f, 0.0f, 0.0f);
+    solver.bodies[bodyB].angularVelocity =
+        Vec3(1.25f, 0.0f, 0.0f);
+    float minimumPostBoostVelocity = 5.0f;
+    float maximumAngularMomentum = 0.0f;
+    for (int frame = 120; frame < 360; ++frame) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      Body &a = solver.bodies[bodyA];
+      Body &b = solver.bodies[bodyB];
+      a.updateInvInertiaWorld();
+      b.updateInvInertiaWorld();
+      minimumPostBoostVelocity =
+          std::min(minimumPostBoostVelocity,
+                   b.angularVelocity.x - a.angularVelocity.x);
+      const Vec3 angularMomentum =
+          a.invInertiaWorld.inverse() * a.angularVelocity +
+          b.invInertiaWorld.inverse() * b.angularVelocity;
+      maximumAngularMomentum =
+          std::max(maximumAngularMomentum,
+                   angularMomentum.length());
+    }
+    const float finalVelocity =
+        solver.bodies[bodyB].angularVelocity.x -
+        solver.bodies[bodyA].angularVelocity.x;
+    printf("  pair free-spin pre=%.9f minimumPost=%.9f "
+           "final=%.9f momentum=%.9f\n",
+           preBoostVelocity, minimumPostBoostVelocity,
+           finalVelocity, maximumAngularMomentum);
+    CHECK(fabsf(preBoostVelocity - 2.0f) <= 0.05f,
+          "Dynamic-pair free-spin motor did not reach target: %.9f",
+          preBoostVelocity);
+    CHECK(minimumPostBoostVelocity >= 4.9f &&
+              finalVelocity >= 4.9f,
+          "Dynamic-pair free-spin motor braked super-target motion: "
+          "%.9f %.9f",
+          minimumPostBoostVelocity, finalVelocity);
+    CHECK(maximumAngularMomentum <= 1e-3f,
+          "Dynamic-pair free-spin motor injected momentum: %.9f",
+          maximumAngularMomentum);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t bodyA =
+        solver.addBody({-1, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    const uint32_t bodyB =
+        solver.addBody({1, 10, 0}, Quat(), {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[bodyA].inertiaTensor = Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[bodyA].computeDerived();
+    solver.bodies[bodyB].inertiaTensor = Mat33::diag(3.0f, 4.0f, 5.0f);
+    solver.bodies[bodyB].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(bodyA, bodyB, {1, 0, 0}, {-1, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f, false, 2.5f);
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+
+    Body &a = solver.bodies[bodyA];
+    Body &b = solver.bodies[bodyB];
+    a.updateInvInertiaWorld();
+    b.updateInvInertiaWorld();
+    const Vec3 worldAxis =
+        (a.rotation * solver.d6Joints[0].localFrameA)
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float velocityA = worldAxis.dot(a.angularVelocity);
+    const float velocityB = worldAxis.dot(b.angularVelocity);
+    const float weightedVelocity = 2.5f * velocityB - velocityA;
+    const float generalizedMomentum =
+        worldAxis.dot((a.invInertiaWorld.inverse() * a.angularVelocity) *
+                          2.5f +
+                      b.invInertiaWorld.inverse() * b.angularVelocity);
+    printf("  ratio motorA=%.9f motorB=%.9f weighted=%.9f momentum=%.9f\n",
+           velocityA, velocityB, weightedVelocity,
+           generalizedMomentum);
+    CHECK(fabsf(weightedVelocity - 2.0f) < 0.02f,
+          "Non-unit motor weighted target mismatch: %.9f",
+          weightedVelocity);
+    CHECK(fabsf(generalizedMomentum) < 1e-3f,
+          "Non-unit motor generalized momentum drift: %.9f",
+          generalizedMomentum);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t body =
+        solver.addBody({0, 10, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor =
+        Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[body].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    solver.addRevoluteJoint(
+        UINT32_MAX, body, {0, 10, 0}, {0, 0, 0},
+        hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+    solver.d6Joints[0].motorExternalAngularVelocityA =
+        Vec3(1.0f, 0.0f, 0.0f);
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+
+    const float dynamicVelocity =
+        solver.bodies[body].angularVelocity.x;
+    const float relativeVelocity =
+        dynamicVelocity -
+        solver.d6Joints[0].motorExternalAngularVelocityA.x;
+    printf("  prescribed motor kinematic=1.000000000 "
+           "dynamic=%.9f relative=%.9f\n",
+           dynamicVelocity, relativeVelocity);
+    CHECK(fabsf(dynamicVelocity - 3.0f) < 0.02f,
+          "Prescribed-endpoint dynamic velocity mismatch: %.9f",
+          dynamicVelocity);
+    CHECK(fabsf(relativeVelocity - 2.0f) < 0.02f,
+          "Prescribed-endpoint motor target mismatch: %.9f",
+          relativeVelocity);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const float bodyAngle = 3.14159265358979323846f / 6.0f;
+    const Quat bodyRotation(
+        cosf(bodyAngle * 0.5f), 0.0f, 0.0f,
+        sinf(bodyAngle * 0.5f));
+    const uint32_t body =
+        solver.addBody({0, 10, 0}, bodyRotation,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor =
+        Mat33::diag(1.0f, 4.0f, 7.0f);
+    solver.bodies[body].computeDerived();
+    const Vec3 worldHingeAxis(1, 0, 0);
+    const Vec3 localHingeAxis =
+        bodyRotation.conjugate().rotate(worldHingeAxis);
+    solver.addRevoluteJoint(
+        UINT32_MAX, body, {0, 10, 0}, {0, 0, 0},
+        worldHingeAxis, localHingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    solver.bodies[body].updateInvInertiaWorld();
+    const Vec3 initialResponse =
+        solver.bodies[body].invInertiaWorld * worldHingeAxis;
+    const float offPrincipalResponse =
+        (initialResponse -
+         worldHingeAxis *
+             initialResponse.dot(worldHingeAxis)).length();
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+
+    Body &dynamicBody = solver.bodies[body];
+    const Vec3 finalWorldAxis =
+        solver.d6Joints[0].localFrameA
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const float hingeVelocity =
+        finalWorldAxis.dot(dynamicBody.angularVelocity);
+    const float swingVelocity =
+        (dynamicBody.angularVelocity -
+         finalWorldAxis * hingeVelocity).length();
+    printf("  off-principal response=%.9f hinge=%.9f swing=%.9f\n",
+           offPrincipalResponse, hingeVelocity, swingVelocity);
+    CHECK(offPrincipalResponse >= 0.05f,
+          "Off-principal fixture lacks coupled response: %.9f",
+          offPrincipalResponse);
+    CHECK(fabsf(hingeVelocity - 2.0f) < 0.02f,
+          "Off-principal motor target mismatch: %.9f",
+          hingeVelocity);
+    CHECK(swingVelocity < 0.02f,
+          "Off-principal motor left locked swing velocity: %.9f",
+          swingVelocity);
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t body =
+        solver.addBody({0, 11, 0}, Quat(),
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor =
+        Mat33::diag(1.0f, 2.0f, 3.0f);
+    solver.bodies[body].computeDerived();
+    const Vec3 hingeAxis(1, 0, 0);
+    const Vec3 localAnchor(0, -1, 0);
+    solver.addRevoluteJoint(
+        UINT32_MAX, body, {0, 10, 0}, localAnchor,
+        hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+    float maximumLateAnchorPointSpeed = 0.0f;
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      if (frame >= 60) {
+        const Body &dynamicBody = solver.bodies[body];
+        const Vec3 worldLeverArm =
+            dynamicBody.rotation.rotate(localAnchor);
+        const Vec3 anchorVelocity =
+            dynamicBody.linearVelocity +
+            dynamicBody.angularVelocity.cross(worldLeverArm);
+        maximumLateAnchorPointSpeed =
+            std::max(maximumLateAnchorPointSpeed,
+                     anchorVelocity.length());
+      }
+    }
+
+    const Body &dynamicBody = solver.bodies[body];
+    const Vec3 worldAxis =
+        solver.d6Joints[0].localFrameA
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const Vec3 worldLeverArm =
+        dynamicBody.rotation.rotate(localAnchor);
+    const float hingeVelocity =
+        worldAxis.dot(dynamicBody.angularVelocity);
+    const float anchorPointSpeed =
+        (dynamicBody.linearVelocity +
+         dynamicBody.angularVelocity.cross(worldLeverArm))
+            .length();
+    printf("  off-center hinge=%.9f anchorSpeed=%.9f "
+           "lateAnchorSpeed=%.9f linearSpeed=%.9f\n",
+           hingeVelocity, anchorPointSpeed,
+           maximumLateAnchorPointSpeed,
+           dynamicBody.linearVelocity.length());
+    CHECK(fabsf(hingeVelocity - 2.0f) < 0.02f,
+          "Off-center motor target mismatch: %.9f",
+          hingeVelocity);
+    CHECK(anchorPointSpeed < 0.02f &&
+              maximumLateAnchorPointSpeed < 0.02f,
+          "Off-center motor left anchor velocity: %.9f %.9f",
+          anchorPointSpeed, maximumLateAnchorPointSpeed);
+    CHECK(dynamicBody.linearVelocity.length() > 1.0f,
+          "Off-center motor did not produce orbital COM velocity: %.9f",
+          dynamicBody.linearVelocity.length());
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const float bodyAngle = 3.14159265358979323846f / 6.0f;
+    const Quat bodyRotation(
+        cosf(bodyAngle * 0.5f), 0.0f, 0.0f,
+        sinf(bodyAngle * 0.5f));
+    const Vec3 bodyPosition(0, 11, 0);
+    const Vec3 worldAnchor(0, 10, 0);
+    const Vec3 worldHingeAxis(1, 0, 0);
+    const Vec3 localAnchor =
+        bodyRotation.conjugate().rotate(worldAnchor - bodyPosition);
+    const Vec3 localHingeAxis =
+        bodyRotation.conjugate().rotate(worldHingeAxis);
+    const uint32_t body =
+        solver.addBody(bodyPosition, bodyRotation,
+                       {0.25f, 0.25f, 0.25f}, 1.0f);
+    solver.bodies[body].inertiaTensor =
+        Mat33::diag(1.0f, 4.0f, 7.0f);
+    solver.bodies[body].computeDerived();
+    solver.addRevoluteJoint(
+        UINT32_MAX, body, worldAnchor, localAnchor,
+        worldHingeAxis, localHingeAxis);
+    solver.setRevoluteJointDrive(0, 2.0f, 1000.0f);
+
+    solver.bodies[body].updateInvInertiaWorld();
+    const Vec3 initialResponse =
+        solver.bodies[body].invInertiaWorld * worldHingeAxis;
+    const float offPrincipalResponse =
+        (initialResponse -
+         worldHingeAxis *
+             initialResponse.dot(worldHingeAxis)).length();
+    float maximumLateAnchorPointSpeed = 0.0f;
+    float maximumLateSwingVelocity = 0.0f;
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+      if (frame >= 60) {
+        const Body &dynamicBody = solver.bodies[body];
+        const Vec3 worldAxis =
+            solver.d6Joints[0].localFrameA
+                .rotate(Vec3(1, 0, 0))
+                .normalized();
+        const Vec3 worldLeverArm =
+            dynamicBody.rotation.rotate(localAnchor);
+        const float hingeVelocity =
+            worldAxis.dot(dynamicBody.angularVelocity);
+        const Vec3 anchorVelocity =
+            dynamicBody.linearVelocity +
+            dynamicBody.angularVelocity.cross(worldLeverArm);
+        maximumLateAnchorPointSpeed =
+            std::max(maximumLateAnchorPointSpeed,
+                     anchorVelocity.length());
+        maximumLateSwingVelocity =
+            std::max(maximumLateSwingVelocity,
+                     (dynamicBody.angularVelocity -
+                      worldAxis * hingeVelocity)
+                         .length());
+      }
+    }
+
+    const Body &dynamicBody = solver.bodies[body];
+    const Vec3 worldAxis =
+        solver.d6Joints[0].localFrameA
+            .rotate(Vec3(1, 0, 0))
+            .normalized();
+    const Vec3 worldLeverArm =
+        dynamicBody.rotation.rotate(localAnchor);
+    const float hingeVelocity =
+        worldAxis.dot(dynamicBody.angularVelocity);
+    const float anchorPointSpeed =
+        (dynamicBody.linearVelocity +
+         dynamicBody.angularVelocity.cross(worldLeverArm))
+            .length();
+    printf("  spatial response=%.9f hinge=%.9f swing=%.9f "
+           "anchorSpeed=%.9f lateAnchorSpeed=%.9f linearSpeed=%.9f\n",
+           offPrincipalResponse, hingeVelocity,
+           maximumLateSwingVelocity, anchorPointSpeed,
+           maximumLateAnchorPointSpeed,
+           dynamicBody.linearVelocity.length());
+    CHECK(offPrincipalResponse >= 0.05f,
+          "Spatial fixture lacks off-principal response: %.9f",
+          offPrincipalResponse);
+    CHECK(fabsf(hingeVelocity - 2.0f) < 0.02f,
+          "Spatial motor target mismatch: %.9f", hingeVelocity);
+    CHECK(maximumLateSwingVelocity < 0.02f,
+          "Spatial motor left locked swing velocity: %.9f",
+          maximumLateSwingVelocity);
+    CHECK(anchorPointSpeed < 0.02f &&
+              maximumLateAnchorPointSpeed < 0.02f,
+          "Spatial motor left anchor velocity: %.9f %.9f",
+          anchorPointSpeed, maximumLateAnchorPointSpeed);
+    CHECK(dynamicBody.linearVelocity.length() > 1.0f,
+          "Spatial motor did not produce orbital COM velocity: %.9f",
+          dynamicBody.linearVelocity.length());
+  }
+
+  {
+    Solver solver;
+    solver.gravity = {0, 0, 0};
+    solver.iterations = 10;
+    const uint32_t gearA =
+        solver.addBody({-2, 10, 0}, Quat(), {0.5f, 0.5f, 0.5f}, 1.0f);
+    const uint32_t gearB =
+        solver.addBody({2, 10, 0}, Quat(), {0.5f, 0.5f, 0.5f}, 1.0f);
+    const Vec3 hingeAxis(0, 0, 1);
+    solver.addRevoluteJoint(UINT32_MAX, gearA, {-2, 10, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.addRevoluteJoint(UINT32_MAX, gearB, {2, 10, 0}, {0, 0, 0},
+                            hingeAxis, hingeAxis);
+    solver.setRevoluteJointDrive(0, 0.5f, 1000.0f);
+    solver.addGearJoint(gearA, gearB, hingeAxis, hingeAxis, 2.5f, 1e5f);
+    for (int frame = 0; frame < 360; frame++) {
+      solver.contacts.clear();
+      solver.step(solver.dt);
+    }
+
+    const float speedA = solver.bodies[gearA].angularVelocity.z;
+    const float speedB = solver.bodies[gearB].angularVelocity.z;
+    const float gearResidual = 2.5f * speedA + speedB;
+    printf("  gear motorA=%.6f motorB=%.6f residual=%.9f\n",
+           speedA, speedB, gearResidual);
+    CHECK(fabsf(speedA - 0.5f) < 0.02f,
+          "Coupled gear motor target mismatch: %.6f", speedA);
+    CHECK(fabsf(gearResidual) < 1e-4f,
+          "Coupled gear velocity residual: %.9f", gearResidual);
+  }
+
+  PASS("Revolute motor has one velocity owner for free, one-/two-body limited and free-spin, drive-ratio, prescribed-endpoint, and gear topologies");
 }
 
 // Test 54: Axis alignment — verify hinge constrains to 1 rotation DOF
@@ -5752,6 +6779,2758 @@ bool test140_dynamicDynamicAngularPositionDriveDiscreteEquation() {
   }
 
   PASS("dynamic-dynamic angular position drive preserves coupled mass metric, internal angular momentum, finite torque, dt, and actor-order semantics");
+}
+
+// Test 144: freeze the shared rigid null mode needed after reconstructing
+// velocities from a two-body position objective with unequal endpoint
+// anchors.  A common rotation about the frictionless support normal must
+// restore only the conserved angular-momentum component without changing
+// total linear momentum, any rotating-frame D6 coordinate derivative, the
+// relative angular derivative, or either support-normal point velocity.
+bool test144_supportAxisRigidNullModeAuthority() {
+  printf("\n--- Test 144: Support-axis rigid null-mode authority ---\n");
+
+  const auto finiteVec = [](const Vec3 &value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) &&
+           std::isfinite(value.z);
+  };
+  const auto maximumAbsComponent = [](const Vec3 &value) {
+    return std::max(std::fabs(value.x),
+                    std::max(std::fabs(value.y), std::fabs(value.z)));
+  };
+  const auto linearMomentum = [](const Body &a, const Body &b) {
+    return a.linearVelocity * a.mass + b.linearVelocity * b.mass;
+  };
+  const auto axisAngularMomentum = [](const Body &a, const Body &b,
+                                      const Vec3 &axis) {
+    const float totalMass = a.mass + b.mass;
+    const Vec3 centerOfMass =
+        (a.position * a.mass + b.position * b.mass) *
+        (1.0f / totalMass);
+    return axis.dot(
+        (a.position - centerOfMass)
+                .cross(a.linearVelocity * a.mass) +
+        a.invInertiaWorld.inverse() * a.angularVelocity +
+        (b.position - centerOfMass)
+                .cross(b.linearVelocity * b.mass) +
+        b.invInertiaWorld.inverse() * b.angularVelocity);
+  };
+  const auto coordinateDerivatives =
+      [](const Body &a, const Body &b, const Vec3 &anchorA,
+         const Vec3 &anchorB) {
+        const Vec3 worldArmA = a.rotation.rotate(anchorA);
+        const Vec3 worldArmB = b.rotation.rotate(anchorB);
+        const Vec3 worldAnchorDelta =
+            (b.position + worldArmB) - (a.position + worldArmA);
+        const Vec3 pointVelocityA =
+            a.linearVelocity + a.angularVelocity.cross(worldArmA);
+        const Vec3 pointVelocityB =
+            b.linearVelocity + b.angularVelocity.cross(worldArmB);
+        const Vec3 relativePointVelocity =
+            pointVelocityB - pointVelocityA;
+        const Vec3 axes[3] = {
+            a.rotation.rotate(Vec3(1.0f, 0.0f, 0.0f)),
+            a.rotation.rotate(Vec3(0.0f, 1.0f, 0.0f)),
+            a.rotation.rotate(Vec3(0.0f, 0.0f, 1.0f))};
+        return Vec3(
+            relativePointVelocity.dot(axes[0]) +
+                worldAnchorDelta.dot(a.angularVelocity.cross(axes[0])),
+            relativePointVelocity.dot(axes[1]) +
+                worldAnchorDelta.dot(a.angularVelocity.cross(axes[1])),
+            relativePointVelocity.dot(axes[2]) +
+                worldAnchorDelta.dot(a.angularVelocity.cross(axes[2])));
+      };
+  const auto supportPointNormalVelocity =
+      [](const Body &body, const Vec3 &localPoint, const Vec3 &axis) {
+        const Vec3 arm = body.rotation.rotate(localPoint);
+        return axis.dot(
+            body.linearVelocity + body.angularVelocity.cross(arm));
+      };
+
+  Body physicalA = {};
+  Body physicalB = {};
+  physicalA.position = Vec3(-0.25f, 0.5f, 0.0f);
+  physicalB.position = Vec3(0.25f, 0.5f, -0.25f);
+  physicalA.rotation = Quat();
+  physicalB.rotation = Quat();
+  physicalA.linearVelocity = Vec3(-0.37f, 0.0f, 0.18f);
+  physicalB.linearVelocity = Vec3(0.61f, 0.0f, -0.11f);
+  physicalA.angularVelocity = Vec3(0.17f, 0.46f, -0.09f);
+  physicalB.angularVelocity = Vec3(-0.22f, -0.31f, 0.14f);
+  physicalA.mass = 1.0f;
+  physicalB.mass = 3.0f;
+  physicalA.inertiaTensor = Mat33::diag(0.8f, 1.3f, 1.9f);
+  physicalB.inertiaTensor = Mat33::diag(2.1f, 3.7f, 4.4f);
+  physicalA.maxLinearVelocity = 1000.0f;
+  physicalB.maxLinearVelocity = 1000.0f;
+  physicalA.maxAngularVelocity = 1000.0f;
+  physicalB.maxAngularVelocity = 1000.0f;
+  physicalA.computeDerived();
+  physicalB.computeDerived();
+  physicalA.updateInvInertiaWorld();
+  physicalB.updateInvInertiaWorld();
+
+  const Vec3 supportNormal(0.0f, 2.0f, 0.0f);
+  const Vec3 supportAxis = supportNormal.normalized();
+  const Vec3 anchorA(0.0f, 0.0f, 0.0f);
+  const Vec3 anchorB(0.0f, 0.0f, 0.25f);
+  const Vec3 supportPoint(0.0f, -0.5f, 0.0f);
+  const float expectedAxisAngularMomentum = 0.125f;
+
+  Body forwardA = physicalA;
+  Body forwardB = physicalB;
+  const Vec3 momentumBefore = linearMomentum(forwardA, forwardB);
+  const Vec3 derivativeBefore =
+      coordinateDerivatives(forwardA, forwardB, anchorA, anchorB);
+  const Vec3 relativeAngularBefore =
+      forwardB.angularVelocity - forwardA.angularVelocity;
+  const float supportVelocityABefore =
+      supportPointNormalVelocity(forwardA, supportPoint, supportAxis);
+  const float supportVelocityBBefore =
+      supportPointNormalVelocity(forwardB, supportPoint, supportAxis);
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            forwardA, forwardB, supportNormal,
+            expectedAxisAngularMomentum),
+        "forward support-axis null-mode correction failed");
+  const Vec3 momentumAfter = linearMomentum(forwardA, forwardB);
+  const Vec3 derivativeAfter =
+      coordinateDerivatives(forwardA, forwardB, anchorA, anchorB);
+  const Vec3 relativeAngularAfter =
+      forwardB.angularVelocity - forwardA.angularVelocity;
+  const float supportVelocityAAfter =
+      supportPointNormalVelocity(forwardA, supportPoint, supportAxis);
+  const float supportVelocityBAfter =
+      supportPointNormalVelocity(forwardB, supportPoint, supportAxis);
+  const float angularMomentumAfter =
+      axisAngularMomentum(forwardA, forwardB, supportAxis);
+
+  CHECK(finiteVec(forwardA.linearVelocity) &&
+            finiteVec(forwardA.angularVelocity) &&
+            finiteVec(forwardB.linearVelocity) &&
+            finiteVec(forwardB.angularVelocity),
+        "support-axis null-mode correction produced non-finite velocity");
+  CHECK(maximumAbsComponent(momentumAfter - momentumBefore) <= 2e-6f,
+        "support-axis null mode changed total linear momentum");
+  CHECK(std::fabs(angularMomentumAfter -
+                  expectedAxisAngularMomentum) <= 2e-6f,
+        "support-axis angular momentum did not reach target: %.9g",
+        angularMomentumAfter);
+  CHECK(maximumAbsComponent(derivativeAfter - derivativeBefore) <= 2e-6f,
+        "support-axis null mode changed rotating-frame D6 derivatives");
+  CHECK(maximumAbsComponent(relativeAngularAfter -
+                            relativeAngularBefore) <= 2e-6f,
+        "support-axis null mode changed relative angular derivative");
+  CHECK(std::fabs(supportVelocityAAfter -
+                  supportVelocityABefore) <= 2e-6f &&
+            std::fabs(supportVelocityBAfter -
+                      supportVelocityBBefore) <= 2e-6f,
+        "support-axis null mode changed support-normal point velocity");
+
+  Body reverseA = physicalB;
+  Body reverseB = physicalA;
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            reverseA, reverseB, supportNormal,
+            expectedAxisAngularMomentum),
+        "reverse support-axis null-mode correction failed");
+  CHECK(maximumAbsComponent(reverseB.linearVelocity -
+                            forwardA.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(reverseB.angularVelocity -
+                                forwardA.angularVelocity) <= 2e-6f &&
+            maximumAbsComponent(reverseA.linearVelocity -
+                                forwardB.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(reverseA.angularVelocity -
+                                forwardB.angularVelocity) <= 2e-6f,
+        "support-axis null mode depends on endpoint storage order");
+
+  // P4Z authority: freeze the exact pure-X unequal-anchor geometry used by
+  // the PhysX fixture.  The endpoint centers are offset so the public world
+  // anchors initially coincide, and the local B arm is collinear with the
+  // driven X axis.  The same shared rigid mode must remain a null mode even
+  // though this geometry has no r-cross-drive-axis moment.
+  Body collinearA = physicalA;
+  Body collinearB = physicalB;
+  collinearA.position = Vec3(0.0f, 0.5f, 0.0f);
+  collinearB.position = Vec3(-0.25f, 0.5f, 0.0f);
+  collinearA.computeDerived();
+  collinearB.computeDerived();
+  collinearA.updateInvInertiaWorld();
+  collinearB.updateInvInertiaWorld();
+  const Vec3 collinearAnchorA(0.0f, 0.0f, 0.0f);
+  const Vec3 collinearAnchorB(0.25f, 0.0f, 0.0f);
+  CHECK(((collinearA.position +
+          collinearA.rotation.rotate(collinearAnchorA)) -
+         (collinearB.position +
+          collinearB.rotation.rotate(collinearAnchorB)))
+                .length() <= 1e-7f,
+        "pure-X unequal-anchor fixture does not start coincident");
+
+  Body collinearForwardA = collinearA;
+  Body collinearForwardB = collinearB;
+  const Vec3 collinearMomentumBefore =
+      linearMomentum(collinearForwardA, collinearForwardB);
+  const Vec3 collinearDerivativeBefore =
+      coordinateDerivatives(collinearForwardA, collinearForwardB,
+                            collinearAnchorA, collinearAnchorB);
+  const Vec3 collinearRelativeAngularBefore =
+      collinearForwardB.angularVelocity -
+      collinearForwardA.angularVelocity;
+  const float collinearSupportVelocityABefore =
+      supportPointNormalVelocity(collinearForwardA, supportPoint,
+                                 supportAxis);
+  const float collinearSupportVelocityBBefore =
+      supportPointNormalVelocity(collinearForwardB, supportPoint,
+                                 supportAxis);
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            collinearForwardA, collinearForwardB, supportNormal,
+            expectedAxisAngularMomentum),
+        "pure-X support-axis null-mode correction failed");
+  const Vec3 collinearMomentumAfter =
+      linearMomentum(collinearForwardA, collinearForwardB);
+  const Vec3 collinearDerivativeAfter =
+      coordinateDerivatives(collinearForwardA, collinearForwardB,
+                            collinearAnchorA, collinearAnchorB);
+  const Vec3 collinearRelativeAngularAfter =
+      collinearForwardB.angularVelocity -
+      collinearForwardA.angularVelocity;
+  const float collinearSupportVelocityAAfter =
+      supportPointNormalVelocity(collinearForwardA, supportPoint,
+                                 supportAxis);
+  const float collinearSupportVelocityBAfter =
+      supportPointNormalVelocity(collinearForwardB, supportPoint,
+                                 supportAxis);
+  const float collinearAngularMomentumAfter =
+      axisAngularMomentum(collinearForwardA, collinearForwardB,
+                          supportAxis);
+
+  CHECK(finiteVec(collinearForwardA.linearVelocity) &&
+            finiteVec(collinearForwardA.angularVelocity) &&
+            finiteVec(collinearForwardB.linearVelocity) &&
+            finiteVec(collinearForwardB.angularVelocity),
+        "pure-X support-axis null mode produced non-finite velocity");
+  CHECK(maximumAbsComponent(collinearMomentumAfter -
+                            collinearMomentumBefore) <= 2e-6f,
+        "pure-X support-axis null mode changed total linear momentum");
+  CHECK(std::fabs(collinearAngularMomentumAfter -
+                  expectedAxisAngularMomentum) <= 2e-6f,
+        "pure-X support-axis angular momentum did not reach target: %.9g",
+        collinearAngularMomentumAfter);
+  CHECK(maximumAbsComponent(collinearDerivativeAfter -
+                            collinearDerivativeBefore) <= 2e-6f,
+        "pure-X support-axis null mode changed D6 derivatives");
+  CHECK(maximumAbsComponent(collinearRelativeAngularAfter -
+                            collinearRelativeAngularBefore) <= 2e-6f,
+        "pure-X support-axis null mode changed relative angular velocity");
+  CHECK(std::fabs(collinearSupportVelocityAAfter -
+                  collinearSupportVelocityABefore) <= 2e-6f &&
+            std::fabs(collinearSupportVelocityBAfter -
+                      collinearSupportVelocityBBefore) <= 2e-6f,
+        "pure-X support-axis null mode changed support-normal velocity");
+
+  Body collinearReverseA = collinearB;
+  Body collinearReverseB = collinearA;
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            collinearReverseA, collinearReverseB, supportNormal,
+            expectedAxisAngularMomentum),
+        "reverse pure-X support-axis null-mode correction failed");
+  CHECK(maximumAbsComponent(
+            collinearReverseB.linearVelocity -
+            collinearForwardA.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                collinearReverseB.angularVelocity -
+                collinearForwardA.angularVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                collinearReverseA.linearVelocity -
+                collinearForwardB.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                collinearReverseA.angularVelocity -
+                collinearForwardB.angularVelocity) <= 2e-6f,
+        "pure-X support-axis null mode depends on endpoint storage order");
+
+  // P4AA authority: split the same 0.25 m pure-Z relative arm across two
+  // nonzero endpoint anchors. Symmetric pose compensation keeps the public
+  // world anchors coincident and both bodies at equal support height.
+  Body twoSidedA = physicalA;
+  Body twoSidedB = physicalB;
+  twoSidedA.position = Vec3(0.0f, 0.5f, 0.125f);
+  twoSidedB.position = Vec3(0.0f, 0.5f, -0.125f);
+  twoSidedA.mass = 1.0f;
+  twoSidedB.mass = 1.0f;
+  twoSidedA.inertiaTensor = Mat33::diag(1.0f, 1.0f, 1.0f);
+  twoSidedB.inertiaTensor = Mat33::diag(1.0f, 1.0f, 1.0f);
+  twoSidedA.computeDerived();
+  twoSidedB.computeDerived();
+  twoSidedA.updateInvInertiaWorld();
+  twoSidedB.updateInvInertiaWorld();
+  const Vec3 twoSidedAnchorA(0.0f, 0.0f, -0.125f);
+  const Vec3 twoSidedAnchorB(0.0f, 0.0f, 0.125f);
+  CHECK(((twoSidedA.position +
+          twoSidedA.rotation.rotate(twoSidedAnchorA)) -
+         (twoSidedB.position +
+          twoSidedB.rotation.rotate(twoSidedAnchorB)))
+                .length() <= 1e-7f,
+        "two-sided pure-Z fixture does not start coincident");
+
+  Body twoSidedForwardA = twoSidedA;
+  Body twoSidedForwardB = twoSidedB;
+  const Vec3 twoSidedMomentumBefore =
+      linearMomentum(twoSidedForwardA, twoSidedForwardB);
+  const Vec3 twoSidedDerivativeBefore =
+      coordinateDerivatives(twoSidedForwardA, twoSidedForwardB,
+                            twoSidedAnchorA, twoSidedAnchorB);
+  const Vec3 twoSidedRelativeAngularBefore =
+      twoSidedForwardB.angularVelocity -
+      twoSidedForwardA.angularVelocity;
+  const float twoSidedSupportVelocityABefore =
+      supportPointNormalVelocity(twoSidedForwardA, supportPoint,
+                                 supportAxis);
+  const float twoSidedSupportVelocityBBefore =
+      supportPointNormalVelocity(twoSidedForwardB, supportPoint,
+                                 supportAxis);
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            twoSidedForwardA, twoSidedForwardB, supportNormal,
+            expectedAxisAngularMomentum),
+        "two-sided pure-Z support-axis null-mode correction failed");
+  const Vec3 twoSidedMomentumAfter =
+      linearMomentum(twoSidedForwardA, twoSidedForwardB);
+  const Vec3 twoSidedDerivativeAfter =
+      coordinateDerivatives(twoSidedForwardA, twoSidedForwardB,
+                            twoSidedAnchorA, twoSidedAnchorB);
+  const Vec3 twoSidedRelativeAngularAfter =
+      twoSidedForwardB.angularVelocity -
+      twoSidedForwardA.angularVelocity;
+  const float twoSidedSupportVelocityAAfter =
+      supportPointNormalVelocity(twoSidedForwardA, supportPoint,
+                                 supportAxis);
+  const float twoSidedSupportVelocityBAfter =
+      supportPointNormalVelocity(twoSidedForwardB, supportPoint,
+                                 supportAxis);
+  const float twoSidedAngularMomentumAfter =
+      axisAngularMomentum(twoSidedForwardA, twoSidedForwardB,
+                          supportAxis);
+
+  CHECK(finiteVec(twoSidedForwardA.linearVelocity) &&
+            finiteVec(twoSidedForwardA.angularVelocity) &&
+            finiteVec(twoSidedForwardB.linearVelocity) &&
+            finiteVec(twoSidedForwardB.angularVelocity),
+        "two-sided pure-Z support-axis null mode produced non-finite velocity");
+  CHECK(maximumAbsComponent(twoSidedMomentumAfter -
+                            twoSidedMomentumBefore) <= 2e-6f,
+        "two-sided pure-Z support-axis null mode changed linear momentum");
+  CHECK(std::fabs(twoSidedAngularMomentumAfter -
+                  expectedAxisAngularMomentum) <= 2e-6f,
+        "two-sided pure-Z angular momentum did not reach target: %.9g",
+        twoSidedAngularMomentumAfter);
+  CHECK(maximumAbsComponent(twoSidedDerivativeAfter -
+                            twoSidedDerivativeBefore) <= 2e-6f,
+        "two-sided pure-Z support-axis null mode changed D6 derivatives");
+  CHECK(maximumAbsComponent(twoSidedRelativeAngularAfter -
+                            twoSidedRelativeAngularBefore) <= 2e-6f,
+        "two-sided pure-Z null mode changed relative angular velocity");
+  CHECK(std::fabs(twoSidedSupportVelocityAAfter -
+                  twoSidedSupportVelocityABefore) <= 2e-6f &&
+            std::fabs(twoSidedSupportVelocityBAfter -
+                      twoSidedSupportVelocityBBefore) <= 2e-6f,
+        "two-sided pure-Z null mode changed support-normal velocity");
+
+  Body twoSidedReverseA = twoSidedB;
+  Body twoSidedReverseB = twoSidedA;
+  CHECK(restoreTwoBodySupportAxisAngularMomentum(
+            twoSidedReverseA, twoSidedReverseB, supportNormal,
+            expectedAxisAngularMomentum),
+        "reverse two-sided pure-Z null-mode correction failed");
+  CHECK(maximumAbsComponent(
+            twoSidedReverseB.linearVelocity -
+            twoSidedForwardA.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                twoSidedReverseB.angularVelocity -
+                twoSidedForwardA.angularVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                twoSidedReverseA.linearVelocity -
+                twoSidedForwardB.linearVelocity) <= 2e-6f &&
+            maximumAbsComponent(
+                twoSidedReverseA.angularVelocity -
+                twoSidedForwardB.angularVelocity) <= 2e-6f,
+        "two-sided pure-Z null mode depends on endpoint storage order");
+
+  printf("  targetL=%.9g finalL=%.9g momentumDelta=%.9g "
+         "coordinateDelta=%.9g xFinalL=%.9g xMomentumDelta=%.9g "
+         "xCoordinateDelta=%.9g pairZFinalL=%.9g "
+         "pairZMomentumDelta=%.9g pairZCoordinateDelta=%.9g\n",
+         expectedAxisAngularMomentum, angularMomentumAfter,
+         maximumAbsComponent(momentumAfter - momentumBefore),
+         maximumAbsComponent(derivativeAfter - derivativeBefore),
+         collinearAngularMomentumAfter,
+         maximumAbsComponent(collinearMomentumAfter -
+                             collinearMomentumBefore),
+         maximumAbsComponent(collinearDerivativeAfter -
+                             collinearDerivativeBefore),
+         twoSidedAngularMomentumAfter,
+         maximumAbsComponent(twoSidedMomentumAfter -
+                             twoSidedMomentumBefore),
+         maximumAbsComponent(twoSidedDerivativeAfter -
+                             twoSidedDerivativeBefore));
+  PASS("support-axis rigid null mode preserves linear momentum, rotating-frame D6 derivatives, relative angular velocity, support normal, actor order, pure-X unequal anchors, and two-sided pure-Z anchors");
+}
+
+// Test 145: a finite position drive and Coulomb support must share one
+// position-level objective. At rest, k*error balances mu*m*g. A split system
+// that omits the two external tangent rows has a nonzero Newton step at that
+// same state; a later velocity impulse cannot repair the already accepted
+// position update.
+bool test145_finiteDriveStaticFrictionPositionAuthority() {
+  printf("\n--- Test 145: Finite-drive static-friction position authority ---\n");
+
+  const float dt = 1.0f / 60.0f;
+  const float mass = 1.0f;
+  const float gravity = 9.81f;
+  const float friction = 0.5f;
+  const float stiffness = 100.0f;
+  const float forceLimit = 5.0f;
+  const float frictionCapacity = friction * mass * gravity;
+  const float equilibriumError = frictionCapacity / stiffness;
+  const Vec3 xAxis(1.0f, 0.0f, 0.0f);
+
+  CHECK(frictionCapacity < forceLimit &&
+            std::fabs(equilibriumError - 0.04905f) <= 1e-7f,
+        "finite-drive friction fixture is not in the intended boundary");
+
+  std::vector<Mat66> inertia(2);
+  std::vector<Vec6> inertialGradient(2);
+  const float massInvDt2 = mass / (dt * dt);
+  for (Mat66 &block : inertia) {
+    for (int axis = 0; axis < 3; ++axis) {
+      block.m[axis][axis] = massInvDt2;
+      block.m[3 + axis][3 + axis] = massInvDt2;
+    }
+  }
+
+  const auto addDriveRow =
+      [&](IslandPcgSystem &system) {
+        IslandPcgRow row;
+        row.owner = IslandRowOwner::D6;
+        row.ownerIndex = 0;
+        row.bodyA = 0;
+        row.bodyB = 1;
+        row.jacobianA = Vec6(-xAxis, Vec3());
+        row.jacobianB = Vec6(xAxis, Vec3());
+        row.violation = equilibriumError;
+        row.penalty = stiffness;
+        row.force = std::min(
+            forceLimit, stiffness * equilibriumError);
+        row.internalTranslationInvariant = true;
+        return system.addRow(row);
+      };
+  const auto addSupportFrictionRows =
+      [&](IslandPcgSystem &system) {
+        IslandPcgRow rowA;
+        rowA.owner = IslandRowOwner::Contact;
+        rowA.ownerIndex = 0;
+        rowA.bodyA = 0;
+        rowA.jacobianA = Vec6(xAxis, Vec3());
+        rowA.penalty = stiffness;
+        rowA.force = frictionCapacity;
+        if (!system.addRow(rowA))
+          return false;
+
+        IslandPcgRow rowB;
+        rowB.owner = IslandRowOwner::Contact;
+        rowB.ownerIndex = 1;
+        rowB.bodyA = 1;
+        rowB.jacobianA = Vec6(xAxis, Vec3());
+        rowB.penalty = stiffness;
+        rowB.force = -frictionCapacity;
+        return system.addRow(rowB);
+      };
+
+  IslandPcgSystem completeSystem;
+  completeSystem.initialize(inertia, inertialGradient);
+  CHECK(addDriveRow(completeSystem) &&
+            addSupportFrictionRows(completeSystem),
+        "complete finite-drive/friction position rows were rejected");
+  std::vector<Vec6> completeSolution;
+  const IslandPcgStats completeStats =
+      completeSystem.solvePcg(completeSolution, 1e-9, 12);
+
+  IslandPcgSystem splitSystem;
+  splitSystem.initialize(inertia, inertialGradient);
+  CHECK(addDriveRow(splitSystem),
+        "split finite-drive row was rejected");
+  std::vector<Vec6> splitSolution;
+  const IslandPcgStats splitStats =
+      splitSystem.solvePcg(splitSolution, 1e-9, 12);
+
+  const float completeStep =
+      std::max(completeSolution[0].linear().length(),
+               completeSolution[1].linear().length());
+  const float splitRelativeStep =
+      std::fabs(splitSolution[1].linear().x -
+                splitSolution[0].linear().x);
+  const Vec3 completeGradientSum =
+      completeSystem.gradient()[0].linear() +
+      completeSystem.gradient()[1].linear();
+
+  printf("  equilibriumError=%.9g frictionCapacity=%.9g "
+         "completeStep=%.9g splitRelativeStep=%.9g "
+         "completeGradientSum=%.9g\n",
+         equilibriumError, frictionCapacity, completeStep,
+         splitRelativeStep, completeGradientSum.length());
+  CHECK(completeStats.converged && completeStats.finite &&
+            !completeStats.breakdown && completeStep <= 1e-8f,
+        "complete position objective moved at static equilibrium");
+  CHECK(splitStats.converged && splitStats.finite &&
+            !splitStats.breakdown && splitRelativeStep > 1e-5f,
+        "split position objective did not expose the missing friction force");
+  CHECK(completeGradientSum.length() <= 1e-7f,
+        "external tangent rows introduced a spurious common force");
+
+  PASS("finite drive and static Coulomb support balance only in the complete position-level objective");
+}
+
+// Test 146: in the strict persistent-support position owner, each endpoint's
+// Coulomb budget comes from its own gravity-aligned support. The locked joint
+// normal is redundant with those two supports; using its indeterminate AL
+// reaction to transfer normal load changes the relative response of a
+// force-limited drive when endpoint masses differ.
+bool test146_unequalMassFrictionWeightShareAuthority() {
+  printf("\n--- Test 146: Unequal-mass friction weight-share authority ---\n");
+
+  const float dt = 1.0f / 60.0f;
+  const float dt2 = dt * dt;
+  const float massA = 1.0f;
+  const float massB = 10.0f;
+  const float gravity = 9.81f;
+  const float friction = 0.5f;
+  const float driveForce = 5.0f;
+  const float weightCapacityA = friction * massA * gravity;
+  const float weightCapacityB = friction * massB * gravity;
+  const float redundantNormalTransfer = 20.0f;
+  const float transferredCapacityA =
+      friction * (massA * gravity + redundantNormalTransfer);
+  const float transferredCapacityB =
+      friction * (massB * gravity - redundantNormalTransfer);
+  const Vec3 xAxis(1.0f, 0.0f, 0.0f);
+  const auto maximumAbsComponent = [](const Vec3 &value) {
+    return std::max(std::fabs(value.x),
+                    std::max(std::fabs(value.y),
+                             std::fabs(value.z)));
+  };
+
+  CHECK(weightCapacityA < driveForce &&
+            transferredCapacityA > weightCapacityA &&
+            transferredCapacityB > 0.0f,
+        "unequal-mass friction fixture is not in the intended boundary");
+
+  struct SolveResult {
+    std::vector<Vec6> solution;
+    IslandPcgStats stats;
+  };
+  const auto solve =
+      [&](bool reverseEndpoints, float frictionForceA,
+          float frictionForceB, SolveResult &result) {
+        std::vector<Mat66> inertia(2);
+        std::vector<Vec6> inertialGradient(2);
+        const float masses[2] = {massA, massB};
+        for (int body = 0; body < 2; ++body) {
+          const float massInvDt2 = masses[body] / dt2;
+          for (int axis = 0; axis < 3; ++axis) {
+            inertia[body].m[axis][axis] = massInvDt2;
+            inertia[body].m[3 + axis][3 + axis] = massInvDt2;
+          }
+        }
+
+        IslandPcgSystem system;
+        system.initialize(inertia, inertialGradient);
+
+        IslandPcgRow drive;
+        drive.owner = IslandRowOwner::D6;
+        drive.ownerIndex = 0;
+        drive.bodyA = reverseEndpoints ? 1 : 0;
+        drive.bodyB = reverseEndpoints ? 0 : 1;
+        drive.jacobianA =
+            Vec6(reverseEndpoints ? xAxis : -xAxis, Vec3());
+        drive.jacobianB =
+            Vec6(reverseEndpoints ? -xAxis : xAxis, Vec3());
+        drive.force = driveForce;
+        drive.internalTranslationInvariant = true;
+        if (!system.addRow(drive))
+          return false;
+
+        const float frictionForces[2] = {
+            frictionForceA, frictionForceB};
+        for (int body = 0; body < 2; ++body) {
+          IslandPcgRow support;
+          support.owner = IslandRowOwner::Contact;
+          support.ownerIndex = static_cast<uint32_t>(body);
+          support.bodyA = static_cast<uint32_t>(body);
+          support.jacobianA = Vec6(xAxis, Vec3());
+          support.force = frictionForces[body];
+          if (!system.addRow(support))
+            return false;
+        }
+
+        result.stats =
+            system.solvePcg(result.solution, 1e-9, 12);
+        return result.stats.converged && result.stats.finite &&
+               !result.stats.breakdown &&
+               result.solution.size() == 2;
+      };
+
+  SolveResult driveOnly;
+  SolveResult weightForward;
+  SolveResult weightReverse;
+  SolveResult transferred;
+  CHECK(solve(false, 0.0f, 0.0f, driveOnly) &&
+            solve(false, weightCapacityA, weightCapacityB,
+                  weightForward) &&
+            solve(true, weightCapacityA, weightCapacityB,
+                  weightReverse) &&
+            solve(false, transferredCapacityA,
+                  transferredCapacityB, transferred),
+        "unequal-mass friction PCG solve failed");
+
+  const auto relativeStep =
+      [](const SolveResult &result) {
+        return result.solution[1].linear().x -
+               result.solution[0].linear().x;
+      };
+  const float driveRelativeStep = relativeStep(driveOnly);
+  const float weightRelativeStep = relativeStep(weightForward);
+  const float transferredRelativeStep = relativeStep(transferred);
+  const float expectedDriveRelativeStep =
+      driveForce * (1.0f / massA + 1.0f / massB) * dt2;
+  const float weightCommonStep =
+      (massA * weightForward.solution[0].linear().x +
+       massB * weightForward.solution[1].linear().x) /
+      (massA + massB);
+  const float expectedWeightCommonStep = friction * gravity * dt2;
+  const float endpointOrderDelta = std::max(
+      maximumAbsComponent(
+          weightForward.solution[0].linear() -
+          weightReverse.solution[0].linear()),
+      maximumAbsComponent(
+          weightForward.solution[1].linear() -
+          weightReverse.solution[1].linear()));
+
+  printf("  driveRelativeStep=%.9g weightRelativeStep=%.9g "
+         "transferredRelativeStep=%.9g weightCommonStep=%.9g "
+         "endpointOrderDelta=%.9g\n",
+         driveRelativeStep, weightRelativeStep,
+         transferredRelativeStep, weightCommonStep,
+         endpointOrderDelta);
+  CHECK(std::fabs(driveRelativeStep -
+                  expectedDriveRelativeStep) <= 1e-8f,
+        "finite drive did not use the unequal endpoint masses");
+  CHECK(std::fabs(weightRelativeStep -
+                  driveRelativeStep) <= 1e-8f,
+        "per-body weight friction changed the relative drive response");
+  CHECK(std::fabs(weightCommonStep -
+                  expectedWeightCommonStep) <= 1e-8f,
+        "per-body weight friction lost its external common response");
+  CHECK(endpointOrderDelta <= 1e-8f,
+        "unequal-mass friction response depends on endpoint storage order");
+  CHECK(std::fabs(transferredRelativeStep -
+                  driveRelativeStep) > 1e-4f,
+        "redundant joint-normal load transfer did not expose the mismatch");
+
+  PASS("unequal-mass persistent support uses per-body weight Coulomb budgets and preserves the external common response");
+}
+
+// Test 147: an upward-facing stationary slope is still an ordinary rigid
+// support. Its Coulomb budget is set by the gravity component along the
+// support normal, while the two tangent rows jointly balance downhill
+// gravity and the internal X drive. Requiring the support normal to be
+// gravity-aligned would reject this complete position objective and leave the
+// drive on the historical mixed path.
+bool test147_slopedSupportFrictionPositionAuthority() {
+  printf("\n--- Test 147: Sloped-support friction position authority ---\n");
+
+  const float dt = 1.0f / 60.0f;
+  const float dt2 = dt * dt;
+  const float mass = 1.0f;
+  const float gravityMagnitude = 9.81f;
+  const float friction = 0.5f;
+  const float driveForce = 3.0f;
+  const float stiffness = 100.0f;
+  const float angle =
+      10.0f * 3.14159265358979323846f / 180.0f;
+  const Vec3 gravity(0.0f, -gravityMagnitude, 0.0f);
+  const Vec3 supportNormal(
+      0.0f, std::cos(angle), std::sin(angle));
+  const Vec3 driveAxis(1.0f, 0.0f, 0.0f);
+  const Vec3 downhillAxis(
+      0.0f, -std::sin(angle), std::cos(angle));
+  const float normalAcceleration =
+      -gravity.dot(supportNormal);
+  const float downhillAcceleration =
+      gravity.dot(downhillAxis);
+  const float coulombCapacity =
+      friction * mass * normalAcceleration;
+  const float fullGravityCapacity =
+      friction * mass * gravityMagnitude;
+  const float requiredFriction =
+      std::sqrt(driveForce * driveForce +
+                mass * mass * downhillAcceleration *
+                    downhillAcceleration);
+
+  CHECK(std::fabs(supportNormal.length() - 1.0f) <= 1e-7f &&
+            std::fabs(downhillAxis.length() - 1.0f) <= 1e-7f &&
+            std::fabs(supportNormal.dot(downhillAxis)) <= 1e-7f &&
+            std::fabs(supportNormal.dot(driveAxis)) <= 1e-7f,
+        "sloped-support basis is not orthonormal");
+  CHECK(-gravity.normalized().dot(supportNormal) < 0.9999f &&
+            normalAcceleration > 0.0f &&
+            downhillAcceleration > 0.0f,
+        "sloped-support fixture did not cross the former flat-only guard");
+  CHECK(coulombCapacity < fullGravityCapacity &&
+            requiredFriction < coulombCapacity,
+        "sloped-support fixture is outside the intended static cone");
+
+  std::vector<Mat66> inertia(2);
+  std::vector<Vec6> inertialGradient(2);
+  const float massInvDt2 = mass / dt2;
+  for (int body = 0; body < 2; ++body) {
+    for (int axis = 0; axis < 3; ++axis) {
+      inertia[body].m[axis][axis] = massInvDt2;
+      inertia[body].m[3 + axis][3 + axis] = massInvDt2;
+    }
+    inertialGradient[body] =
+        Vec6(downhillAxis * (mass * downhillAcceleration), Vec3());
+  }
+
+  const auto addDriveRow =
+      [&](IslandPcgSystem &system) {
+        IslandPcgRow drive;
+        drive.owner = IslandRowOwner::D6;
+        drive.ownerIndex = 0;
+        drive.bodyA = 0;
+        drive.bodyB = 1;
+        drive.jacobianA = Vec6(-driveAxis, Vec3());
+        drive.jacobianB = Vec6(driveAxis, Vec3());
+        drive.penalty = stiffness;
+        drive.force = driveForce;
+        drive.internalTranslationInvariant = true;
+        return system.addRow(drive);
+      };
+  const auto addSupportRows =
+      [&](IslandPcgSystem &system) {
+        for (int body = 0; body < 2; ++body) {
+          IslandPcgRow driveTangent;
+          driveTangent.owner = IslandRowOwner::Contact;
+          driveTangent.ownerIndex =
+              static_cast<uint32_t>(body * 2);
+          driveTangent.bodyA = static_cast<uint32_t>(body);
+          driveTangent.jacobianA = Vec6(driveAxis, Vec3());
+          driveTangent.penalty = stiffness;
+          driveTangent.force = body == 0 ? driveForce : -driveForce;
+          if (!system.addRow(driveTangent))
+            return false;
+
+          IslandPcgRow slopeTangent;
+          slopeTangent.owner = IslandRowOwner::Contact;
+          slopeTangent.ownerIndex =
+              static_cast<uint32_t>(body * 2 + 1);
+          slopeTangent.bodyA = static_cast<uint32_t>(body);
+          slopeTangent.jacobianA = Vec6(downhillAxis, Vec3());
+          slopeTangent.penalty = stiffness;
+          slopeTangent.force = -mass * downhillAcceleration;
+          if (!system.addRow(slopeTangent))
+            return false;
+        }
+        return true;
+      };
+
+  IslandPcgSystem completeSystem;
+  completeSystem.initialize(inertia, inertialGradient);
+  CHECK(addDriveRow(completeSystem) &&
+            addSupportRows(completeSystem),
+        "complete sloped-support position rows were rejected");
+  std::vector<Vec6> completeSolution;
+  const IslandPcgStats completeStats =
+      completeSystem.solvePcg(completeSolution, 1e-9, 16);
+
+  IslandPcgSystem splitSystem;
+  splitSystem.initialize(inertia, inertialGradient);
+  CHECK(addDriveRow(splitSystem),
+        "split sloped-support drive row was rejected");
+  std::vector<Vec6> splitSolution;
+  const IslandPcgStats splitStats =
+      splitSystem.solvePcg(splitSolution, 1e-9, 16);
+
+  const float completeStep =
+      std::max(completeSolution[0].linear().length(),
+               completeSolution[1].linear().length());
+  const float splitRelativeStep =
+      std::fabs((splitSolution[1].linear() -
+                 splitSolution[0].linear())
+                    .dot(driveAxis));
+  const float splitCommonDownhillStep =
+      0.5f * (splitSolution[0].linear() +
+              splitSolution[1].linear())
+                 .dot(downhillAxis);
+  float maximumCompleteGradient = 0.0f;
+  for (const Vec6 &gradient : completeSystem.gradient()) {
+    for (int component = 0; component < 6; ++component)
+      maximumCompleteGradient =
+          std::max(maximumCompleteGradient,
+                   std::fabs(gradient.v[component]));
+  }
+
+  printf("  normalAcceleration=%.9g downhillAcceleration=%.9g "
+         "coulombCapacity=%.9g requiredFriction=%.9g "
+         "completeStep=%.9g splitRelativeStep=%.9g "
+         "splitCommonDownhillStep=%.9g maxGradient=%.9g\n",
+         normalAcceleration, downhillAcceleration,
+         coulombCapacity, requiredFriction, completeStep,
+         splitRelativeStep, splitCommonDownhillStep,
+         maximumCompleteGradient);
+  CHECK(completeStats.converged && completeStats.finite &&
+            !completeStats.breakdown && completeStep <= 1e-8f &&
+            maximumCompleteGradient <= 1e-7f,
+        "complete sloped-support objective moved at static equilibrium");
+  CHECK(splitStats.converged && splitStats.finite &&
+            !splitStats.breakdown && splitRelativeStep > 1e-5f &&
+            splitCommonDownhillStep > 1e-5f,
+        "split objective did not expose missing slope friction rows");
+
+  PASS("upward sloped support uses projected normal gravity and one complete two-tangent position objective");
+}
+
+// Test 148: eOUTPUT_FORCE is an observation policy, not a solver-owner
+// selector.  A saturated force-mode X position drive remains in the same
+// complete position objective with both endpoint inertias, both support
+// normals, locked Y/Z and all three angular rows.  Enabling public force
+// reporting may expose the drive's impulse-valued writeback, but it must not
+// change any row, tangent, or pose step.
+bool test148_contactPositionOutputForceOwnerAuthority() {
+  printf("\n--- Test 148: Contact position output-force owner authority ---\n");
+
+  struct LaneResult {
+    Vec3 poseStep[2];
+    float relativeStep = 0.0f;
+    float relativeAcceleration = 0.0f;
+    float linearMomentumChange = 0.0f;
+    float publicForce = 0.0f;
+    float writebackImpulse = 0.0f;
+    bool rowsAccepted = true;
+    IslandPcgStats stats;
+  };
+
+  const float mass = 1.0f;
+  const float stiffness = 100.0f;
+  const float damping = 20.0f;
+  const float positionError = 0.5f;
+  const float targetVelocity = 0.0f;
+  const float forceLimit = 5.0f;
+  const float rawDriveForce =
+      stiffness * positionError + damping * targetVelocity;
+  const float driveForce =
+      std::max(-forceLimit, std::min(forceLimit, rawDriveForce));
+  const bool saturated = std::fabs(rawDriveForce) >= forceLimit;
+  const float drivePenalty =
+      saturated ? 0.0f : stiffness;
+  const Vec3 xAxis(1.0f, 0.0f, 0.0f);
+  const Vec3 yAxis(0.0f, 1.0f, 0.0f);
+  const Vec3 zAxis(0.0f, 0.0f, 1.0f);
+  const float frameDts[3] = {1.0f / 30.0f, 1.0f / 60.0f,
+                             1.0f / 120.0f};
+
+  CHECK(saturated && drivePenalty == 0.0f &&
+            std::fabs(driveForce - forceLimit) <= 1e-6f,
+        "output-force authority fixture did not saturate at 5 N");
+
+  const auto runLane = [&](float dt, bool reverse,
+                           bool outputForce) {
+    LaneResult result;
+    const float invDt2 = 1.0f / (dt * dt);
+    std::vector<Mat66> inertia(2);
+    std::vector<Vec6> inertialGradient(2);
+    for (int body = 0; body < 2; ++body) {
+      for (int axis = 0; axis < 6; ++axis)
+        inertia[body].m[axis][axis] = mass * invDt2;
+    }
+
+    IslandPcgSystem system;
+    system.initialize(inertia, inertialGradient);
+
+    const uint32_t actorA = reverse ? 1u : 0u;
+    const uint32_t actorB = reverse ? 0u : 1u;
+    const float actor0AxisSign = reverse ? -1.0f : 1.0f;
+    const Vec3 authoredAxis = xAxis * actor0AxisSign;
+
+    IslandPcgRow drive;
+    drive.owner = IslandRowOwner::D6;
+    drive.ownerIndex = 0;
+    drive.bodyA = actorA;
+    drive.bodyB = actorB;
+    drive.jacobianA = Vec6(-authoredAxis, Vec3());
+    drive.jacobianB = Vec6(authoredAxis, Vec3());
+    drive.penalty = drivePenalty;
+    drive.force = driveForce;
+    drive.internalTranslationInvariant = true;
+    result.rowsAccepted = system.addRow(drive);
+
+    for (uint32_t body = 0; body < 2; ++body) {
+      IslandPcgRow contactNormal;
+      contactNormal.owner = IslandRowOwner::Contact;
+      contactNormal.ownerIndex = body;
+      contactNormal.bodyA = body;
+      contactNormal.jacobianA = Vec6(yAxis, Vec3());
+      contactNormal.penalty = stiffness;
+      result.rowsAccepted =
+          system.addRow(contactNormal) && result.rowsAccepted;
+    }
+
+    const Vec3 lockedLinearAxes[2] = {yAxis, zAxis};
+    for (int axis = 0; axis < 2; ++axis) {
+      IslandPcgRow hardLinear;
+      hardLinear.owner = IslandRowOwner::D6;
+      hardLinear.ownerIndex = 0;
+      hardLinear.rowSlot = static_cast<uint16_t>(axis + 1);
+      hardLinear.bodyA = actorA;
+      hardLinear.bodyB = actorB;
+      hardLinear.jacobianA =
+          Vec6(-lockedLinearAxes[axis], Vec3());
+      hardLinear.jacobianB =
+          Vec6(lockedLinearAxes[axis], Vec3());
+      hardLinear.penalty = stiffness;
+      hardLinear.internalTranslationInvariant = true;
+      result.rowsAccepted =
+          system.addRow(hardLinear) && result.rowsAccepted;
+    }
+
+    const Vec3 lockedAngularAxes[3] = {xAxis, yAxis, zAxis};
+    for (int axis = 0; axis < 3; ++axis) {
+      IslandPcgRow hardAngular;
+      hardAngular.owner = IslandRowOwner::D6;
+      hardAngular.ownerIndex = 0;
+      hardAngular.rowSlot = static_cast<uint16_t>(axis + 3);
+      hardAngular.bodyA = actorA;
+      hardAngular.bodyB = actorB;
+      hardAngular.jacobianA =
+          Vec6(Vec3(), -lockedAngularAxes[axis]);
+      hardAngular.jacobianB =
+          Vec6(Vec3(), lockedAngularAxes[axis]);
+      hardAngular.penalty = stiffness;
+      result.rowsAccepted =
+          system.addRow(hardAngular) && result.rowsAccepted;
+    }
+
+    std::vector<Vec6> solution;
+    result.stats = system.solvePcg(solution, 1e-10, 16);
+    for (int body = 0; body < 2; ++body)
+      result.poseStep[body] = solution[body].linear() * -1.0f;
+    result.relativeStep =
+        std::fabs((result.poseStep[1] - result.poseStep[0]).dot(xAxis));
+    result.relativeAcceleration = result.relativeStep * invDt2;
+    result.linearMomentumChange =
+        ((result.poseStep[0] + result.poseStep[1]) *
+         (mass / dt))
+            .length();
+
+    const float actor0AuthoredForce =
+        actor0AxisSign * driveForce;
+    result.writebackImpulse =
+        outputForce ? actor0AuthoredForce * dt : 0.0f;
+    result.publicForce =
+        outputForce
+            ? actor0AxisSign * (result.writebackImpulse / dt)
+            : 0.0f;
+    return result;
+  };
+
+  for (float dt : frameDts) {
+    LaneResult lanes[2][2];
+    for (int order = 0; order < 2; ++order) {
+      for (int output = 0; output < 2; ++output) {
+        lanes[order][output] =
+            runLane(dt, order != 0, output != 0);
+        CHECK(lanes[order][output].rowsAccepted &&
+                  lanes[order][output].stats.converged &&
+                  lanes[order][output].stats.finite &&
+                  !lanes[order][output].stats.breakdown,
+              "complete output-force rows were rejected or did not converge");
+      }
+    }
+
+    const float expectedRelativeStep =
+        2.0f * forceLimit * dt * dt / mass;
+    const float expectedRelativeAcceleration =
+        2.0f * forceLimit / mass;
+    float maximumOutputStateDelta = 0.0f;
+    float maximumOrderStateDelta = 0.0f;
+    for (int order = 0; order < 2; ++order) {
+      for (int body = 0; body < 2; ++body) {
+        maximumOutputStateDelta = std::max(
+            maximumOutputStateDelta,
+            (lanes[order][1].poseStep[body] -
+             lanes[order][0].poseStep[body])
+                .length());
+      }
+    }
+    for (int output = 0; output < 2; ++output) {
+      for (int body = 0; body < 2; ++body) {
+        maximumOrderStateDelta = std::max(
+            maximumOrderStateDelta,
+            (lanes[1][output].poseStep[body] -
+             lanes[0][output].poseStep[body])
+                .length());
+      }
+    }
+
+    printf("  dt=%.9g relativeStep=%.9g relativeAcceleration=%.9g "
+           "momentumChange=%.9g outputOn=%.9g outputOff=%.9g "
+           "outputStateDelta=%.9g orderStateDelta=%.9g\n",
+           dt, lanes[0][1].relativeStep,
+           lanes[0][1].relativeAcceleration,
+           lanes[0][1].linearMomentumChange,
+           lanes[0][1].publicForce, lanes[0][0].publicForce,
+           maximumOutputStateDelta, maximumOrderStateDelta);
+
+    for (int order = 0; order < 2; ++order) {
+      for (int output = 0; output < 2; ++output) {
+        CHECK(std::fabs(lanes[order][output].relativeStep -
+                        expectedRelativeStep) <= 1e-8f &&
+                  std::fabs(
+                      lanes[order][output].relativeAcceleration -
+                      expectedRelativeAcceleration) <= 1e-5f,
+              "output-force changed the finite-drive physical response");
+        CHECK(lanes[order][output].linearMomentumChange <= 1e-8f,
+              "complete output-force owner changed linear momentum");
+      }
+      CHECK(std::fabs(lanes[order][1].publicForce -
+                      forceLimit) <= 1e-6f &&
+                lanes[order][0].publicForce == 0.0f,
+            "output-force did not remain a reporting-only policy");
+      CHECK(std::fabs(std::fabs(
+                          lanes[order][1].writebackImpulse) /
+                          dt -
+                      forceLimit) <= 1e-6f &&
+                lanes[order][0].writebackImpulse == 0.0f,
+            "output-force writeback did not preserve impulse units");
+    }
+    CHECK(maximumOutputStateDelta <= 1e-9f,
+          "output-force flag changed the complete position objective");
+    CHECK(maximumOrderStateDelta <= 1e-9f,
+          "output-force position owner depends on endpoint storage order");
+  }
+
+  PASS("contact position output-force is observational and preserves the complete finite-force position owner");
+}
+
+// Test 149: passive multi-row rigid-static friction is one material-velocity
+// manifold, not a reusable per-contact sweep budget.  The complete owner
+// reconstructs the inertial velocity, solves all unilateral normal rows from
+// one iterate, then solves both tangent rows at every contact simultaneously
+// with each Coulomb disk projected once.  Replaying the same per-contact cap
+// in four ordered Gauss-Seidel sweeps over-brakes the body and creates a
+// contact-order-dependent angular component.
+bool test149_passiveRigidStaticFrictionManifoldAuthority() {
+  printf("\n--- Test 149: Passive rigid-static friction manifold authority ---\n");
+
+  struct LaneResult {
+    Vec3 linearVelocity;
+    Vec3 angularVelocity;
+    float normalImpulse[4] = {};
+    float tangentImpulse[8] = {};
+    bool valid = true;
+  };
+
+  const float dt = 1.0f / 60.0f;
+  const float gravity = 9.81f;
+  const float supportImpulse = gravity * dt;
+  const float contactCoulombCap = supportImpulse * 0.25f;
+  const float initialSlideSpeed = 3.0f;
+  const Vec3 normal(0.0f, 1.0f, 0.0f);
+  const Vec3 localArms[4] = {
+      Vec3(-0.5f, -0.5f, -0.5f),
+      Vec3(-0.5f, -0.5f, 0.5f),
+      Vec3(0.5f, -0.5f, -0.5f),
+      Vec3(0.5f, -0.5f, 0.5f)};
+
+  const auto inverseInertia = [](const Vec3 &value) {
+    // Unit-mass, unit-edge cube: I = 1/6 on every principal axis.
+    return value * 6.0f;
+  };
+  const auto rotateAboutY = [](const Vec3 &value, float angle) {
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return Vec3(c * value.x - s * value.z, value.y,
+                s * value.x + c * value.z);
+  };
+  const auto pointVelocity = [](const Vec3 &linear,
+                                const Vec3 &angular,
+                                const Vec3 &arm) {
+    return linear + angular.cross(arm);
+  };
+  const auto applyImpulse =
+      [&](Vec3 &linear, Vec3 &angular, const Vec3 &arm,
+          const Vec3 &axis, float impulse) {
+        linear += axis * impulse;
+        angular += inverseInertia(arm.cross(axis) * impulse);
+      };
+
+  const auto runComplete = [&](float yaw, bool reverseRows) {
+    LaneResult result;
+    const Vec3 driveAxis =
+        rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), yaw);
+    const Vec3 lateralAxis =
+        rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), yaw);
+    Vec3 arms[4];
+    for (int row = 0; row < 4; ++row) {
+      const int source = reverseRows ? 3 - row : row;
+      arms[row] = rotateAboutY(localArms[source], yaw);
+    }
+
+    result.linearVelocity =
+        driveAxis * initialSlideSpeed - normal * supportImpulse;
+    result.angularVelocity = Vec3();
+
+    float normalResponse[4][4] = {};
+    float normalRhs[4] = {};
+    float nextNormalImpulse[4] = {};
+    float normalLipschitz = 0.0f;
+    for (int row = 0; row < 4; ++row) {
+      normalRhs[row] =
+          -pointVelocity(result.linearVelocity,
+                         result.angularVelocity, arms[row])
+               .dot(normal);
+      float absoluteRowSum = 0.0f;
+      for (int column = 0; column < 4; ++column) {
+        const Vec3 angularRow = arms[row].cross(normal);
+        const Vec3 angularColumn = arms[column].cross(normal);
+        normalResponse[row][column] =
+            1.0f +
+            angularRow.dot(inverseInertia(angularColumn));
+        absoluteRowSum += std::fabs(normalResponse[row][column]);
+      }
+      normalLipschitz =
+          std::max(normalLipschitz, absoluteRowSum);
+    }
+    if (!(normalLipschitz > 0.0f)) {
+      result.valid = false;
+      return result;
+    }
+    const float normalStep = 1.0f / normalLipschitz;
+    for (int iteration = 0; iteration < 96; ++iteration) {
+      for (int row = 0; row < 4; ++row) {
+        float gradient = -normalRhs[row];
+        for (int column = 0; column < 4; ++column)
+          gradient += normalResponse[row][column] *
+                      result.normalImpulse[column];
+        nextNormalImpulse[row] =
+            std::max(0.0f, result.normalImpulse[row] -
+                               normalStep * gradient);
+      }
+      for (int row = 0; row < 4; ++row)
+        result.normalImpulse[row] = nextNormalImpulse[row];
+    }
+    for (int row = 0; row < 4; ++row)
+      applyImpulse(result.linearVelocity, result.angularVelocity,
+                   arms[row], normal, result.normalImpulse[row]);
+
+    Vec3 tangentAxes[8];
+    Vec3 tangentAngularJacobians[8];
+    float tangentResponse[8][8] = {};
+    float tangentRhs[8] = {};
+    float nextTangentImpulse[8] = {};
+    float tangentLipschitz = 0.0f;
+    for (int contact = 0; contact < 4; ++contact) {
+      const Vec3 axes[2] = {driveAxis, lateralAxis};
+      const Vec3 velocity =
+          pointVelocity(result.linearVelocity,
+                        result.angularVelocity, arms[contact]);
+      for (int tangent = 0; tangent < 2; ++tangent) {
+        const int row = contact * 2 + tangent;
+        tangentAxes[row] = axes[tangent];
+        tangentAngularJacobians[row] =
+            arms[contact].cross(axes[tangent]);
+        tangentRhs[row] = -velocity.dot(axes[tangent]);
+      }
+    }
+    for (int row = 0; row < 8; ++row) {
+      float absoluteRowSum = 0.0f;
+      for (int column = 0; column < 8; ++column) {
+        tangentResponse[row][column] =
+            tangentAxes[row].dot(tangentAxes[column]) +
+            tangentAngularJacobians[row].dot(
+                inverseInertia(
+                    tangentAngularJacobians[column]));
+        absoluteRowSum +=
+            std::fabs(tangentResponse[row][column]);
+      }
+      tangentLipschitz =
+          std::max(tangentLipschitz, absoluteRowSum);
+    }
+    if (!(tangentLipschitz > 0.0f)) {
+      result.valid = false;
+      return result;
+    }
+    const float tangentStep = 1.0f / tangentLipschitz;
+    for (int iteration = 0; iteration < 96; ++iteration) {
+      for (int row = 0; row < 8; ++row) {
+        float gradient = -tangentRhs[row];
+        for (int column = 0; column < 8; ++column)
+          gradient += tangentResponse[row][column] *
+                      result.tangentImpulse[column];
+        nextTangentImpulse[row] =
+            result.tangentImpulse[row] - tangentStep * gradient;
+      }
+      for (int contact = 0; contact < 4; ++contact) {
+        const int row = contact * 2;
+        const float magnitude =
+            std::sqrt(nextTangentImpulse[row] *
+                          nextTangentImpulse[row] +
+                      nextTangentImpulse[row + 1] *
+                          nextTangentImpulse[row + 1]);
+        const float cap = result.normalImpulse[contact];
+        if (magnitude > cap && magnitude > 0.0f) {
+          const float scale = cap / magnitude;
+          nextTangentImpulse[row] *= scale;
+          nextTangentImpulse[row + 1] *= scale;
+        }
+      }
+      for (int row = 0; row < 8; ++row)
+        result.tangentImpulse[row] = nextTangentImpulse[row];
+    }
+    for (int contact = 0; contact < 4; ++contact) {
+      for (int tangent = 0; tangent < 2; ++tangent) {
+        const int row = contact * 2 + tangent;
+        applyImpulse(result.linearVelocity, result.angularVelocity,
+                     arms[contact], tangentAxes[row],
+                     result.tangentImpulse[row]);
+      }
+    }
+    return result;
+  };
+
+  const auto runSequentialFallback =
+      [&](float yaw, bool reverseRows) {
+        LaneResult result;
+        const Vec3 driveAxis =
+            rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), yaw);
+        const Vec3 lateralAxis =
+            rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), yaw);
+        result.linearVelocity = driveAxis * initialSlideSpeed;
+        result.angularVelocity = Vec3();
+        for (int sweep = 0; sweep < 4; ++sweep) {
+          for (int ordered = 0; ordered < 4; ++ordered) {
+            const int contact =
+                reverseRows ? 3 - ordered : ordered;
+            const Vec3 arm =
+                rotateAboutY(localArms[contact], yaw);
+            const Vec3 axes[2] = {driveAxis, lateralAxis};
+            float impulse[2] = {};
+            for (int tangent = 0; tangent < 2; ++tangent) {
+              const Vec3 angularJacobian =
+                  arm.cross(axes[tangent]);
+              const float response =
+                  1.0f + angularJacobian.dot(
+                             inverseInertia(angularJacobian));
+              impulse[tangent] =
+                  -pointVelocity(result.linearVelocity,
+                                 result.angularVelocity, arm)
+                       .dot(axes[tangent]) /
+                  response;
+            }
+            const float magnitude =
+                std::sqrt(impulse[0] * impulse[0] +
+                          impulse[1] * impulse[1]);
+            if (magnitude > contactCoulombCap) {
+              const float scale = contactCoulombCap / magnitude;
+              impulse[0] *= scale;
+              impulse[1] *= scale;
+            }
+            for (int tangent = 0; tangent < 2; ++tangent)
+              applyImpulse(result.linearVelocity,
+                           result.angularVelocity, arm,
+                           axes[tangent], impulse[tangent]);
+          }
+        }
+        return result;
+      };
+
+  const float yaw = 0.37f;
+  const LaneResult complete = runComplete(0.0f, false);
+  const LaneResult completeReverse = runComplete(0.0f, true);
+  const LaneResult completeYaw = runComplete(yaw, false);
+  const LaneResult completeYawReverse = runComplete(yaw, true);
+  const LaneResult fallback = runSequentialFallback(0.0f, false);
+  const LaneResult fallbackReverse =
+      runSequentialFallback(0.0f, true);
+  const Vec3 driveAxis(1.0f, 0.0f, 0.0f);
+  const Vec3 lateralAxis(0.0f, 0.0f, 1.0f);
+  const Vec3 yawDriveAxis =
+      rotateAboutY(driveAxis, yaw);
+  const Vec3 yawLateralAxis =
+      rotateAboutY(lateralAxis, yaw);
+  const float expectedLinearSpeed =
+      initialSlideSpeed - supportImpulse;
+  const float expectedAngularSpeed = 3.0f * supportImpulse;
+  const float completeOrderDelta =
+      (complete.linearVelocity -
+       completeReverse.linearVelocity)
+          .length() +
+      (complete.angularVelocity -
+       completeReverse.angularVelocity)
+          .length();
+  const float completeYawDelta =
+      std::max(
+          std::fabs(complete.linearVelocity.dot(driveAxis) -
+                    completeYaw.linearVelocity.dot(yawDriveAxis)),
+          std::fabs(complete.angularVelocity.dot(lateralAxis) -
+                    completeYaw.angularVelocity.dot(
+                        yawLateralAxis)));
+  const float fallbackOrderDelta =
+      (fallback.angularVelocity -
+       fallbackReverse.angularVelocity)
+          .length();
+
+  printf("  complete v=(%.9g,%.9g,%.9g) w=(%.9g,%.9g,%.9g) "
+         "expected=(%.9g,%.9g) orderDelta=%.9g yawDelta=%.9g\n",
+         complete.linearVelocity.x, complete.linearVelocity.y,
+         complete.linearVelocity.z, complete.angularVelocity.x,
+         complete.angularVelocity.y, complete.angularVelocity.z,
+         expectedLinearSpeed, expectedAngularSpeed,
+         completeOrderDelta, completeYawDelta);
+  printf("  fallback v=(%.9g,%.9g,%.9g) w=(%.9g,%.9g,%.9g) "
+         "reverseW=(%.9g,%.9g,%.9g) orderDelta=%.9g\n",
+         fallback.linearVelocity.x, fallback.linearVelocity.y,
+         fallback.linearVelocity.z, fallback.angularVelocity.x,
+         fallback.angularVelocity.y, fallback.angularVelocity.z,
+         fallbackReverse.angularVelocity.x,
+         fallbackReverse.angularVelocity.y,
+         fallbackReverse.angularVelocity.z, fallbackOrderDelta);
+
+  for (const LaneResult *lane :
+       {&complete, &completeReverse, &completeYaw,
+        &completeYawReverse}) {
+    CHECK(lane->valid,
+          "complete passive-friction manifold is singular");
+    CHECK(std::fabs(lane->linearVelocity.dot(normal)) <= 1e-6f,
+          "complete passive-friction owner left normal approach");
+    CHECK(std::fabs(lane->linearVelocity.length() -
+                    expectedLinearSpeed) <= 2e-6f,
+          "complete passive-friction owner reused the Coulomb budget");
+    CHECK(std::fabs(lane->angularVelocity.length() -
+                    expectedAngularSpeed) <= 2e-6f,
+          "complete passive-friction owner produced wrong spatial response");
+    for (int contact = 0; contact < 4; ++contact) {
+      CHECK(std::fabs(lane->normalImpulse[contact] -
+                      contactCoulombCap) <= 2e-6f,
+            "complete passive-friction normal support is asymmetric");
+      CHECK(std::fabs(lane->tangentImpulse[contact * 2] +
+                      contactCoulombCap) <= 2e-6f &&
+                std::fabs(
+                    lane->tangentImpulse[contact * 2 + 1]) <=
+                    2e-6f,
+            "complete passive-friction tangent disk is wrong");
+    }
+  }
+  CHECK(completeOrderDelta <= 2e-6f &&
+            completeYawDelta <= 2e-6f,
+        "complete passive-friction manifold depends on row order or yaw");
+  CHECK(fallback.angularVelocity.length() >
+            expectedAngularSpeed * 3.5f &&
+            expectedLinearSpeed -
+                    fallback.linearVelocity.dot(driveAxis) >
+                0.4f,
+        "sequential fallback did not expose repeated Coulomb-budget use");
+  CHECK(fallbackOrderDelta > 0.04f,
+        "sequential fallback did not expose contact-row order dependence");
+
+  PASS("passive rigid-static friction requires one normal/tangent material manifold; repeated point sweeps are rejected");
+}
+
+// Test 150: once a ground manifold and a dynamic-dynamic manifold share a
+// body, material velocity ownership belongs to the complete connected contact
+// component.  All normal rows are solved from one inertial snapshot, then all
+// tangent rows are solved from that normal result with each per-contact
+// Coulomb disk projected once.  A body-static-only sweep cannot transmit the
+// ground friction through the dynamic contact and is not an equivalent owner.
+bool test150_passiveRigidContactMaterialComponentAuthority() {
+  printf("\n--- Test 150: Passive rigid contact material component authority ---\n");
+
+  struct MaterialContact {
+    ComponentProjectionRow normal;
+    ComponentProjectionRow tangent[2];
+    float friction = 1.0f;
+    uint64_t stableKey = 0;
+  };
+  struct LaneResult {
+    Vec6 lowerVelocity;
+    Vec6 upperVelocity;
+    std::vector<float> normalImpulse;
+    std::vector<float> tangentImpulse;
+    float maximumNormalApproach = 0.0f;
+    float maximumTangentKkt = 0.0f;
+    bool valid = true;
+  };
+
+  const float dt = 1.0f / 60.0f;
+  const float gravity = 9.81f;
+  const float supportImpulse = gravity * dt;
+  const float initialSlideSpeed = 3.0f;
+  const Vec3 normal(0.0f, 1.0f, 0.0f);
+  const Vec3 localGroundArms[4] = {
+      Vec3(-0.5f, -0.5f, -0.5f),
+      Vec3(-0.5f, -0.5f, 0.5f),
+      Vec3(0.5f, -0.5f, -0.5f),
+      Vec3(0.5f, -0.5f, 0.5f)};
+  const Vec3 localLowerInterfaceArms[4] = {
+      Vec3(-0.5f, 0.5f, -0.5f),
+      Vec3(-0.5f, 0.5f, 0.5f),
+      Vec3(0.5f, 0.5f, -0.5f),
+      Vec3(0.5f, 0.5f, 0.5f)};
+  const Vec3 localUpperInterfaceArms[4] = {
+      Vec3(-0.5f, -0.5f, -0.5f),
+      Vec3(-0.5f, -0.5f, 0.5f),
+      Vec3(0.5f, -0.5f, -0.5f),
+      Vec3(0.5f, -0.5f, 0.5f)};
+  const Mat33 inverseInertia =
+      Mat33::diag(6.0f, 6.0f, 6.0f);
+
+  const auto rotateAboutY = [](const Vec3 &value, float angle) {
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return Vec3(c * value.x - s * value.z, value.y,
+                s * value.x + c * value.z);
+  };
+  const auto makeTerm =
+      [](size_t body, const Vec3 &arm, const Vec3 &axis) {
+        ComponentProjectionTerm term;
+        term.bodyIndex = body;
+        term.linearJacobian = axis;
+        term.angularJacobian = arm.cross(axis);
+        return term;
+      };
+  const auto rowVelocity =
+      [](const ComponentProjectionRow &row,
+         const std::vector<Vec6> &velocities) {
+        float value = 0.0f;
+        for (const ComponentProjectionTerm &term : row.terms) {
+          value +=
+              term.linearJacobian.dot(
+                  velocities[term.bodyIndex].linear()) +
+              term.angularJacobian.dot(
+                  velocities[term.bodyIndex].angular());
+        }
+        return value;
+      };
+  const auto rowResponse =
+      [](const ComponentProjectionRow &a,
+         const ComponentProjectionRow &b,
+         const std::vector<ComponentProjectionBody> &bodies) {
+        double value = 0.0;
+        for (const ComponentProjectionTerm &at : a.terms) {
+          for (const ComponentProjectionTerm &bt : b.terms) {
+            if (at.bodyIndex != bt.bodyIndex)
+              continue;
+            const ComponentProjectionBody &body =
+                bodies[at.bodyIndex];
+            value +=
+                static_cast<double>(body.inverseMassResponse) *
+                    static_cast<double>(
+                        at.linearJacobian.dot(bt.linearJacobian)) +
+                static_cast<double>(at.angularJacobian.dot(
+                    body.inverseInertiaResponse *
+                    bt.angularJacobian));
+          }
+        }
+        return value;
+      };
+  const auto applyRowImpulse =
+      [](const ComponentProjectionRow &row, float impulse,
+         const std::vector<ComponentProjectionBody> &bodies,
+         std::vector<Vec6> &velocities) {
+        for (const ComponentProjectionTerm &term : row.terms) {
+          const ComponentProjectionBody &body =
+              bodies[term.bodyIndex];
+          velocities[term.bodyIndex] +=
+              Vec6(term.linearJacobian *
+                       body.inverseMassResponse,
+                   body.inverseInertiaResponse *
+                       term.angularJacobian) *
+              impulse;
+        }
+      };
+
+  const auto runComplete =
+      [&](float yaw, bool reverseContacts, bool swapBodyStorage) {
+        LaneResult result;
+        const size_t lowerIndex = swapBodyStorage ? 1u : 0u;
+        const size_t upperIndex = swapBodyStorage ? 0u : 1u;
+        const Vec3 driveAxis =
+            rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), yaw);
+        const Vec3 lateralAxis =
+            rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), yaw);
+
+        std::vector<ComponentProjectionBody> bodies(2);
+        bodies[lowerIndex].inverseMassResponse = 1.0f;
+        bodies[lowerIndex].inverseInertiaResponse =
+            inverseInertia;
+        bodies[lowerIndex].stableKey = 100;
+        bodies[upperIndex].inverseMassResponse = 1.0f;
+        bodies[upperIndex].inverseInertiaResponse =
+            inverseInertia;
+        bodies[upperIndex].stableKey = 200;
+
+        std::vector<Vec6> velocities(2);
+        velocities[lowerIndex] =
+            Vec6(driveAxis * initialSlideSpeed -
+                     normal * supportImpulse,
+                 Vec3());
+        velocities[upperIndex] =
+            Vec6(driveAxis * initialSlideSpeed -
+                     normal * supportImpulse,
+                 Vec3());
+
+        std::vector<MaterialContact> contacts;
+        contacts.reserve(8);
+        for (int contact = 0; contact < 4; ++contact) {
+          const Vec3 groundArm =
+              rotateAboutY(localGroundArms[contact], yaw);
+          MaterialContact ground;
+          ground.stableKey =
+              static_cast<uint64_t>(1000 + contact);
+          ground.normal.stableKey = ground.stableKey * 3;
+          ground.normal.terms.push_back(
+              makeTerm(lowerIndex, groundArm, normal));
+          ground.tangent[0].stableKey =
+              ground.stableKey * 3 + 1;
+          ground.tangent[0].terms.push_back(
+              makeTerm(lowerIndex, groundArm, driveAxis));
+          ground.tangent[1].stableKey =
+              ground.stableKey * 3 + 2;
+          ground.tangent[1].terms.push_back(
+              makeTerm(lowerIndex, groundArm, lateralAxis));
+          contacts.push_back(ground);
+
+          const Vec3 lowerArm = rotateAboutY(
+              localLowerInterfaceArms[contact], yaw);
+          const Vec3 upperArm = rotateAboutY(
+              localUpperInterfaceArms[contact], yaw);
+          MaterialContact interfaceContact;
+          interfaceContact.stableKey =
+              static_cast<uint64_t>(2000 + contact);
+          interfaceContact.normal.stableKey =
+              interfaceContact.stableKey * 3;
+          interfaceContact.normal.terms.push_back(
+              makeTerm(upperIndex, upperArm, normal));
+          interfaceContact.normal.terms.push_back(
+              makeTerm(lowerIndex, lowerArm,
+                       normal * -1.0f));
+          interfaceContact.tangent[0].stableKey =
+              interfaceContact.stableKey * 3 + 1;
+          interfaceContact.tangent[0].terms.push_back(
+              makeTerm(upperIndex, upperArm, driveAxis));
+          interfaceContact.tangent[0].terms.push_back(
+              makeTerm(lowerIndex, lowerArm,
+                       driveAxis * -1.0f));
+          interfaceContact.tangent[1].stableKey =
+              interfaceContact.stableKey * 3 + 2;
+          interfaceContact.tangent[1].terms.push_back(
+              makeTerm(upperIndex, upperArm, lateralAxis));
+          interfaceContact.tangent[1].terms.push_back(
+              makeTerm(lowerIndex, lowerArm,
+                       lateralAxis * -1.0f));
+          contacts.push_back(interfaceContact);
+        }
+        if (reverseContacts)
+          std::reverse(contacts.begin(), contacts.end());
+        std::sort(
+            contacts.begin(), contacts.end(),
+            [](const MaterialContact &a,
+               const MaterialContact &b) {
+              return a.stableKey < b.stableKey;
+            });
+
+        std::vector<ComponentProjectionRow> materialRows;
+        materialRows.reserve(contacts.size() * 3);
+        for (MaterialContact &contact : contacts) {
+          std::sort(
+              contact.normal.terms.begin(),
+              contact.normal.terms.end(),
+              [&](const ComponentProjectionTerm &a,
+                  const ComponentProjectionTerm &b) {
+                return bodies[a.bodyIndex].stableKey <
+                       bodies[b.bodyIndex].stableKey;
+              });
+          for (int tangent = 0; tangent < 2; ++tangent) {
+            std::sort(
+                contact.tangent[tangent].terms.begin(),
+                contact.tangent[tangent].terms.end(),
+                [&](const ComponentProjectionTerm &a,
+                    const ComponentProjectionTerm &b) {
+                  return bodies[a.bodyIndex].stableKey <
+                         bodies[b.bodyIndex].stableKey;
+                });
+          }
+          contact.normal.outwardVelocity =
+              rowVelocity(contact.normal, velocities);
+          for (int tangent = 0; tangent < 2; ++tangent) {
+            contact.tangent[tangent].outwardVelocity =
+                rowVelocity(contact.tangent[tangent],
+                            velocities);
+          }
+          materialRows.push_back(contact.normal);
+          materialRows.push_back(contact.tangent[0]);
+          materialRows.push_back(contact.tangent[1]);
+        }
+
+        const size_t materialRowCount = materialRows.size();
+        std::vector<double> response(
+            materialRowCount * materialRowCount, 0.0);
+        double lipschitz = 0.0;
+        for (size_t row = 0; row < materialRowCount; ++row) {
+          double absoluteRowSum = 0.0;
+          for (size_t column = 0;
+               column < materialRowCount; ++column) {
+            const double value = rowResponse(
+                materialRows[row], materialRows[column],
+                bodies);
+            response[row * materialRowCount + column] =
+                value;
+            absoluteRowSum += std::fabs(value);
+          }
+          lipschitz = std::max(lipschitz, absoluteRowSum);
+        }
+        if (!(lipschitz > 0.0) || !std::isfinite(lipschitz)) {
+          result.valid = false;
+          return result;
+        }
+
+        std::vector<double> impulses(materialRowCount, 0.0);
+        std::vector<double> next(materialRowCount, 0.0);
+        const auto projectContactDisk =
+            [&](size_t contact,
+                std::vector<double> &candidate) {
+              const size_t row = contact * 3;
+              const double friction =
+                  contacts[contact].friction;
+              const double normalImpulse =
+                  impulses[row];
+              double tangent0 = candidate[row + 1];
+              double tangent1 = candidate[row + 2];
+              if (!(friction > 0.0)) {
+                candidate[row + 1] = 0.0;
+                candidate[row + 2] = 0.0;
+                return;
+              }
+              const double tangentMagnitude = std::sqrt(
+                  tangent0 * tangent0 +
+                  tangent1 * tangent1);
+              const double cap =
+                  friction * normalImpulse;
+              if (tangentMagnitude <= cap)
+                return;
+              if (tangentMagnitude > 0.0) {
+                const double tangentScale =
+                    cap / tangentMagnitude;
+                tangent0 *= tangentScale;
+                tangent1 *= tangentScale;
+              } else {
+                tangent0 = 0.0;
+                tangent1 = 0.0;
+              }
+              candidate[row + 1] = tangent0;
+              candidate[row + 2] = tangent1;
+            };
+        const double step = 1.0 / lipschitz;
+        bool converged = false;
+        for (int outer = 0; outer < 512; ++outer) {
+          const std::vector<double> outerStart = impulses;
+          for (int iteration = 0; iteration < 4096;
+               ++iteration) {
+            next = impulses;
+            double maximumDelta = 0.0;
+            for (size_t contact = 0;
+                 contact < contacts.size(); ++contact) {
+              const size_t row = contact * 3;
+              double gradient =
+                  materialRows[row].outwardVelocity;
+              for (size_t column = 0;
+                   column < materialRowCount; ++column) {
+                gradient +=
+                    response[row * materialRowCount + column] *
+                    impulses[column];
+              }
+              next[row] =
+                  std::max(0.0,
+                           impulses[row] - step * gradient);
+              maximumDelta = std::max(
+                  maximumDelta,
+                  std::fabs(next[row] - impulses[row]));
+            }
+            for (size_t contact = 0;
+                 contact < contacts.size(); ++contact) {
+              const size_t row = contact * 3;
+              impulses[row] = next[row];
+            }
+            if (maximumDelta <= 1.0e-12)
+              break;
+          }
+
+          for (int iteration = 0; iteration < 4096;
+               ++iteration) {
+            next = impulses;
+            for (size_t contact = 0;
+                 contact < contacts.size(); ++contact) {
+              const size_t row = contact * 3;
+              for (int tangent = 1; tangent <= 2;
+                   ++tangent) {
+                const size_t tangentRow =
+                    row + static_cast<size_t>(tangent);
+                double gradient =
+                    materialRows[tangentRow]
+                        .outwardVelocity;
+                for (size_t column = 0;
+                     column < materialRowCount; ++column) {
+                  gradient +=
+                      response[tangentRow *
+                                   materialRowCount +
+                               column] *
+                      impulses[column];
+                }
+                next[tangentRow] =
+                    impulses[tangentRow] -
+                    step * gradient;
+              }
+              projectContactDisk(contact, next);
+            }
+            double maximumDelta = 0.0;
+            for (size_t contact = 0;
+                 contact < contacts.size(); ++contact) {
+              const size_t row = contact * 3;
+              for (int tangent = 1; tangent <= 2;
+                   ++tangent) {
+                const size_t tangentRow =
+                    row + static_cast<size_t>(tangent);
+                maximumDelta = std::max(
+                    maximumDelta,
+                    std::fabs(next[tangentRow] -
+                              impulses[tangentRow]));
+                impulses[tangentRow] =
+                    next[tangentRow];
+              }
+            }
+            if (maximumDelta <= 1.0e-12)
+              break;
+          }
+
+          double outerDelta = 0.0;
+          for (size_t row = 0; row < materialRowCount;
+               ++row) {
+            outerDelta = std::max(
+                outerDelta,
+                std::fabs(impulses[row] -
+                          outerStart[row]));
+          }
+          if (outerDelta <= 1.0e-11) {
+            converged = true;
+            break;
+          }
+        }
+        if (!converged) {
+          result.valid = false;
+          return result;
+        }
+
+        result.normalImpulse.resize(contacts.size(), 0.0f);
+        result.tangentImpulse.resize(
+            contacts.size() * 2, 0.0f);
+        for (size_t contact = 0;
+             contact < contacts.size(); ++contact) {
+          const size_t materialRow = contact * 3;
+          const size_t tangentRow = contact * 2;
+          result.normalImpulse[contact] =
+              static_cast<float>(impulses[materialRow]);
+          result.tangentImpulse[tangentRow] =
+              static_cast<float>(impulses[materialRow + 1]);
+          result.tangentImpulse[tangentRow + 1] =
+              static_cast<float>(impulses[materialRow + 2]);
+        }
+        for (size_t row = 0; row < materialRowCount; ++row) {
+          const float impulse =
+              static_cast<float>(impulses[row]);
+          applyRowImpulse(
+              materialRows[row], impulse, bodies, velocities);
+        }
+
+        for (size_t contact = 0;
+             contact < contacts.size(); ++contact) {
+          result.maximumNormalApproach = std::max(
+              result.maximumNormalApproach,
+              std::max(0.0f,
+                       -rowVelocity(
+                           contacts[contact].normal,
+                           velocities)));
+        }
+        for (size_t row = 0; row < materialRowCount; ++row) {
+          double gradient =
+              materialRows[row].outwardVelocity;
+          for (size_t column = 0;
+               column < materialRowCount; ++column) {
+            gradient +=
+                response[row * materialRowCount + column] *
+                impulses[column];
+          }
+          next[row] = impulses[row] - gradient;
+        }
+        for (size_t contact = 0;
+             contact < contacts.size(); ++contact) {
+          const size_t row = contact * 3;
+          next[row] = std::max(0.0, next[row]);
+          projectContactDisk(contact, next);
+          for (int component = 0; component < 3;
+               ++component) {
+            const size_t materialRow =
+                row + static_cast<size_t>(component);
+            result.maximumTangentKkt = std::max(
+                result.maximumTangentKkt,
+                static_cast<float>(std::fabs(
+                    next[materialRow] -
+                    impulses[materialRow])));
+          }
+        }
+
+        result.lowerVelocity = velocities[lowerIndex];
+        result.upperVelocity = velocities[upperIndex];
+        return result;
+      };
+
+  const auto runBodyStaticFallback =
+      [&](bool reverseContacts) {
+        LaneResult result;
+        const Vec3 driveAxis(1.0f, 0.0f, 0.0f);
+        const Vec3 lateralAxis(0.0f, 0.0f, 1.0f);
+        Vec3 lowerLinear =
+            driveAxis * initialSlideSpeed;
+        Vec3 lowerAngular;
+        result.upperVelocity =
+            Vec6(driveAxis * initialSlideSpeed, Vec3());
+        const float groundCap =
+            supportImpulse * 0.5f;
+        for (int sweep = 0; sweep < 4; ++sweep) {
+          for (int ordered = 0; ordered < 4; ++ordered) {
+            const int contact = reverseContacts ?
+                3 - ordered : ordered;
+            const Vec3 arm = localGroundArms[contact];
+            const Vec3 axes[2] = {
+                driveAxis, lateralAxis};
+            float impulse[2] = {};
+            for (int tangent = 0; tangent < 2;
+                 ++tangent) {
+              const Vec3 angularJacobian =
+                  arm.cross(axes[tangent]);
+              const float response =
+                  1.0f + angularJacobian.dot(
+                             inverseInertia *
+                             angularJacobian);
+              impulse[tangent] =
+                  -(lowerLinear +
+                    lowerAngular.cross(arm))
+                       .dot(axes[tangent]) /
+                  response;
+            }
+            const float magnitude = std::sqrt(
+                impulse[0] * impulse[0] +
+                impulse[1] * impulse[1]);
+            if (magnitude > groundCap) {
+              const float scale = groundCap / magnitude;
+              impulse[0] *= scale;
+              impulse[1] *= scale;
+            }
+            for (int tangent = 0; tangent < 2;
+                 ++tangent) {
+              lowerLinear += axes[tangent] *
+                             impulse[tangent];
+              lowerAngular +=
+                  inverseInertia *
+                  arm.cross(axes[tangent]) *
+                  impulse[tangent];
+            }
+          }
+        }
+        result.lowerVelocity =
+            Vec6(lowerLinear, lowerAngular);
+        return result;
+      };
+
+  const float yaw = 0.37f;
+  const LaneResult canonical =
+      runComplete(0.0f, false, false);
+  const LaneResult reverse =
+      runComplete(0.0f, true, false);
+  const LaneResult swapped =
+      runComplete(0.0f, false, true);
+  const LaneResult yawed =
+      runComplete(yaw, false, false);
+  const LaneResult yawedReverse =
+      runComplete(yaw, true, true);
+  const LaneResult fallback =
+      runBodyStaticFallback(false);
+  const LaneResult fallbackReverse =
+      runBodyStaticFallback(true);
+
+  const Vec3 driveAxis(1.0f, 0.0f, 0.0f);
+  const Vec3 lateralAxis(0.0f, 0.0f, 1.0f);
+  const Vec3 yawDriveAxis =
+      rotateAboutY(driveAxis, yaw);
+  const Vec3 yawLateralAxis =
+      rotateAboutY(lateralAxis, yaw);
+
+  const auto invariantDelta =
+      [&](const LaneResult &a, const LaneResult &b,
+          const Vec3 &bDrive, const Vec3 &bLateral) {
+        float delta = 0.0f;
+        const Vec6 aBodies[2] = {
+            a.lowerVelocity, a.upperVelocity};
+        const Vec6 bBodies[2] = {
+            b.lowerVelocity, b.upperVelocity};
+        for (int body = 0; body < 2; ++body) {
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(driveAxis) -
+                  bBodies[body].linear().dot(bDrive)));
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(normal) -
+                  bBodies[body].linear().dot(normal)));
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(lateralAxis) -
+                  bBodies[body].linear().dot(bLateral)));
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].angular().dot(lateralAxis) -
+                  bBodies[body].angular().dot(bLateral)));
+        }
+        return delta;
+      };
+  const float reverseDelta = invariantDelta(
+      canonical, reverse, driveAxis, lateralAxis);
+  const float swappedDelta = invariantDelta(
+      canonical, swapped, driveAxis, lateralAxis);
+  const float yawDelta = invariantDelta(
+      canonical, yawed, yawDriveAxis, yawLateralAxis);
+  const float yawReverseDelta = invariantDelta(
+      canonical, yawedReverse,
+      yawDriveAxis, yawLateralAxis);
+  const float fallbackRelativeSpeed =
+      std::fabs(
+          fallback.upperVelocity.linear().dot(driveAxis) -
+          fallback.lowerVelocity.linear().dot(driveAxis));
+  const float fallbackOrderDelta =
+      (fallback.lowerVelocity.angular() -
+       fallbackReverse.lowerVelocity.angular())
+          .length();
+  CHECK(canonical.valid &&
+            canonical.normalImpulse.size() == 8 &&
+            canonical.tangentImpulse.size() == 16,
+        "canonical complete material component did not solve");
+  float groundNormalImpulse = 0.0f;
+  float interfaceNormalImpulse = 0.0f;
+  Vec3 groundLinearImpulse;
+  for (int contact = 0; contact < 4; ++contact) {
+    groundNormalImpulse +=
+        canonical.normalImpulse[contact];
+    interfaceNormalImpulse +=
+        canonical.normalImpulse[contact + 4];
+    groundLinearImpulse +=
+        normal * canonical.normalImpulse[contact] +
+        driveAxis *
+            canonical.tangentImpulse[contact * 2] +
+        lateralAxis *
+            canonical.tangentImpulse[contact * 2 + 1];
+  }
+  const Vec3 initialLinearMomentum =
+      driveAxis * (2.0f * initialSlideSpeed) -
+      normal * (2.0f * supportImpulse);
+  const Vec3 finalLinearMomentum =
+      canonical.lowerVelocity.linear() +
+      canonical.upperVelocity.linear();
+  const float momentumResidual =
+      (finalLinearMomentum -
+       (initialLinearMomentum + groundLinearImpulse))
+          .length();
+  const float completeRelativeSpeed =
+      std::fabs(
+          canonical.upperVelocity.linear().dot(driveAxis) -
+          canonical.lowerVelocity.linear().dot(driveAxis));
+
+  printf("  complete lowerV=(%.9g,%.9g,%.9g) "
+         "lowerW=(%.9g,%.9g,%.9g) "
+         "upperV=(%.9g,%.9g,%.9g) "
+         "upperW=(%.9g,%.9g,%.9g) "
+         "normalApproach=%.9g tangentKkt=%.9g\n",
+         canonical.lowerVelocity.linear().x,
+         canonical.lowerVelocity.linear().y,
+         canonical.lowerVelocity.linear().z,
+         canonical.lowerVelocity.angular().x,
+         canonical.lowerVelocity.angular().y,
+         canonical.lowerVelocity.angular().z,
+         canonical.upperVelocity.linear().x,
+         canonical.upperVelocity.linear().y,
+         canonical.upperVelocity.linear().z,
+         canonical.upperVelocity.angular().x,
+         canonical.upperVelocity.angular().y,
+         canonical.upperVelocity.angular().z,
+         canonical.maximumNormalApproach,
+         canonical.maximumTangentKkt);
+  printf("  groundNormal=%.9g interfaceNormal=%.9g "
+         "momentumResidual=%.9g relativeSpeed=%.9g "
+         "reverseDelta=%.9g swappedDelta=%.9g "
+         "yawDelta=%.9g yawReverseDelta=%.9g\n",
+         groundNormalImpulse, interfaceNormalImpulse,
+         momentumResidual, completeRelativeSpeed,
+         reverseDelta, swappedDelta, yawDelta,
+         yawReverseDelta);
+  printf("  fallback lowerV=(%.9g,%.9g,%.9g) "
+         "upperV=(%.9g,%.9g,%.9g) "
+         "relativeSpeed=%.9g orderDelta=%.9g\n",
+         fallback.lowerVelocity.linear().x,
+         fallback.lowerVelocity.linear().y,
+         fallback.lowerVelocity.linear().z,
+         fallback.upperVelocity.linear().x,
+         fallback.upperVelocity.linear().y,
+         fallback.upperVelocity.linear().z,
+         fallbackRelativeSpeed, fallbackOrderDelta);
+
+  for (const LaneResult *lane :
+       {&canonical, &reverse, &swapped, &yawed,
+        &yawedReverse}) {
+    CHECK(lane->valid,
+          "complete passive material component did not solve");
+    CHECK(lane->maximumNormalApproach <= 2.0e-5f,
+          "complete passive component left normal approach: %.9g",
+          lane->maximumNormalApproach);
+    CHECK(lane->maximumTangentKkt <= 2.0e-5f,
+          "complete passive component left tangent KKT error: %.9g",
+          lane->maximumTangentKkt);
+    CHECK(lane->normalImpulse.size() == 8 &&
+              lane->tangentImpulse.size() == 16,
+          "complete passive component did not own every row");
+    float groundDriveImpulse = 0.0f;
+    float interfaceDriveImpulse = 0.0f;
+    for (int contact = 0; contact < 4; ++contact) {
+      for (int layer = 0; layer < 2; ++layer) {
+        const int contactIndex = contact + layer * 4;
+        const int tangentRow = contactIndex * 2;
+        const float tangentMagnitude = std::sqrt(
+            lane->tangentImpulse[tangentRow] *
+                lane->tangentImpulse[tangentRow] +
+            lane->tangentImpulse[tangentRow + 1] *
+                lane->tangentImpulse[tangentRow + 1]);
+        CHECK(lane->normalImpulse[contactIndex] >=
+                      -2.0e-6f &&
+                  tangentMagnitude <=
+                      lane->normalImpulse[contactIndex] +
+                          2.0e-5f,
+              "complete material contact violated its Coulomb cone: "
+              "contact=%d normal=%.9g tangent=%.9g",
+              contactIndex,
+              lane->normalImpulse[contactIndex],
+              tangentMagnitude);
+      }
+      groundDriveImpulse +=
+          lane->tangentImpulse[contact * 2];
+      interfaceDriveImpulse +=
+          lane->tangentImpulse[(contact + 4) * 2];
+    }
+    CHECK(groundDriveImpulse < -1.0e-3f &&
+              interfaceDriveImpulse < -1.0e-3f,
+          "complete material component did not transmit friction "
+          "through both manifolds");
+  }
+  CHECK(momentumResidual <= 2.0e-5f,
+        "complete material component changed external momentum");
+  CHECK(groundNormalImpulse > supportImpulse &&
+            interfaceNormalImpulse > 0.1f * supportImpulse,
+        "complete material component did not carry both-body support");
+  CHECK(canonical.upperVelocity.linear().dot(driveAxis) <
+            initialSlideSpeed - 1.0e-2f,
+        "complete material component did not transfer ground friction");
+  CHECK(completeRelativeSpeed < fallbackRelativeSpeed * 0.75f,
+        "complete material component did not improve coupled slip");
+  CHECK(reverseDelta <= 2.0e-6f &&
+            swappedDelta <= 2.0e-6f &&
+            yawDelta <= 2.0e-6f &&
+            yawReverseDelta <= 2.0e-6f,
+        "complete material component depends on row/body order or yaw");
+  CHECK(fallbackRelativeSpeed > 0.5f,
+        "body-static fallback unexpectedly transmitted friction");
+  CHECK(fallbackOrderDelta > 0.02f,
+        "body-static fallback did not expose row-order dependence");
+
+  PASS("passive rigid friction requires one complete connected normal/tangent material component");
+}
+
+// Test 151: restitution is an explicit normal velocity target inside the
+// same material component objective.  A steady ground support row remains
+// target-zero while an incident dynamic-dynamic impact row receives
+// -e*v_pre when it crosses the scene bounce threshold.  Normal target
+// complementarity and both Coulomb disks share one component impulse budget;
+// omitting restitution or replaying friction separately is not equivalent.
+bool test151_restitutionRigidMaterialComponentAuthority() {
+  printf("\n--- Test 151: Restitution rigid material component authority ---\n");
+
+  struct MaterialContact {
+    ComponentProjectionRow normal;
+    ComponentProjectionRow tangent[2];
+    float normalTarget = 0.0f;
+    float friction = 1.0f;
+    uint64_t stableKey = 0;
+  };
+  struct LaneResult {
+    Vec6 lowerVelocity;
+    Vec6 upperVelocity;
+    float normalTarget[2] = {};
+    float normalImpulse[2] = {};
+    float tangentImpulse[4] = {};
+    float maximumProjectedKkt = 0.0f;
+    float maximumNormalTargetError = 0.0f;
+    float momentumResidual = 0.0f;
+    float initialEnergy = 0.0f;
+    float finalEnergy = 0.0f;
+    bool valid = true;
+  };
+
+  const float dt = 1.0f / 60.0f;
+  const float gravity = 9.81f;
+  const float supportSpeed = gravity * dt;
+  const float slideSpeed = 3.0f;
+  const Vec3 normal(0.0f, 1.0f, 0.0f);
+
+  const auto rotateAboutY = [](const Vec3 &value, float angle) {
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return Vec3(c * value.x - s * value.z, value.y,
+                s * value.x + c * value.z);
+  };
+  const auto makeTerm =
+      [](size_t body, const Vec3 &axis) {
+        ComponentProjectionTerm term;
+        term.bodyIndex = body;
+        term.linearJacobian = axis;
+        return term;
+      };
+  const auto rowVelocity =
+      [](const ComponentProjectionRow &row,
+         const std::vector<Vec6> &velocities) {
+        float value = 0.0f;
+        for (const ComponentProjectionTerm &term : row.terms) {
+          value += term.linearJacobian.dot(
+              velocities[term.bodyIndex].linear());
+        }
+        return value;
+      };
+  const auto rowResponse =
+      [](const ComponentProjectionRow &a,
+         const ComponentProjectionRow &b,
+         const std::vector<ComponentProjectionBody> &bodies) {
+        double value = 0.0;
+        for (const ComponentProjectionTerm &at : a.terms) {
+          for (const ComponentProjectionTerm &bt : b.terms) {
+            if (at.bodyIndex != bt.bodyIndex)
+              continue;
+            value +=
+                static_cast<double>(
+                    bodies[at.bodyIndex].inverseMassResponse) *
+                static_cast<double>(
+                    at.linearJacobian.dot(bt.linearJacobian));
+          }
+        }
+        return value;
+      };
+  const auto applyRowImpulse =
+      [](const ComponentProjectionRow &row, float impulse,
+         const std::vector<ComponentProjectionBody> &bodies,
+         std::vector<Vec6> &velocities) {
+        for (const ComponentProjectionTerm &term : row.terms) {
+          velocities[term.bodyIndex] +=
+              Vec6(term.linearJacobian *
+                       bodies[term.bodyIndex].inverseMassResponse,
+                   Vec3()) *
+              impulse;
+        }
+      };
+
+  const auto runLane =
+      [&](float impactSpeed, float restitution,
+          float bounceThreshold, float yaw,
+          bool reverseContacts, bool swapBodyStorage) {
+        LaneResult result;
+        const size_t lowerIndex = swapBodyStorage ? 1u : 0u;
+        const size_t upperIndex = swapBodyStorage ? 0u : 1u;
+        const Vec3 driveAxis =
+            rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), yaw);
+        const Vec3 lateralAxis =
+            rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), yaw);
+
+        std::vector<ComponentProjectionBody> bodies(2);
+        for (size_t body = 0; body < bodies.size(); ++body) {
+          bodies[body].inverseMassResponse = 1.0f;
+          bodies[body].inverseInertiaResponse =
+              Mat33::diag(0.0f, 0.0f, 0.0f);
+        }
+        bodies[lowerIndex].stableKey = 100;
+        bodies[upperIndex].stableKey = 200;
+
+        std::vector<Vec6> velocities(2);
+        velocities[lowerIndex] =
+            Vec6(driveAxis * slideSpeed -
+                     normal * supportSpeed,
+                 Vec3());
+        velocities[upperIndex] =
+            Vec6(driveAxis * slideSpeed -
+                     normal * (supportSpeed + impactSpeed),
+                 Vec3());
+        const std::vector<Vec6> initialVelocities = velocities;
+
+        std::vector<MaterialContact> contacts(2);
+        MaterialContact &ground = contacts[0];
+        ground.stableKey = 1000;
+        ground.normal.stableKey = 3000;
+        ground.normal.terms.push_back(
+            makeTerm(lowerIndex, normal));
+        ground.tangent[0].stableKey = 3001;
+        ground.tangent[0].terms.push_back(
+            makeTerm(lowerIndex, driveAxis));
+        ground.tangent[1].stableKey = 3002;
+        ground.tangent[1].terms.push_back(
+            makeTerm(lowerIndex, lateralAxis));
+
+        MaterialContact &interfaceContact = contacts[1];
+        interfaceContact.stableKey = 2000;
+        interfaceContact.normal.stableKey = 6000;
+        interfaceContact.normal.terms.push_back(
+            makeTerm(upperIndex, normal));
+        interfaceContact.normal.terms.push_back(
+            makeTerm(lowerIndex, normal * -1.0f));
+        interfaceContact.tangent[0].stableKey = 6001;
+        interfaceContact.tangent[0].terms.push_back(
+            makeTerm(upperIndex, driveAxis));
+        interfaceContact.tangent[0].terms.push_back(
+            makeTerm(lowerIndex, driveAxis * -1.0f));
+        interfaceContact.tangent[1].stableKey = 6002;
+        interfaceContact.tangent[1].terms.push_back(
+            makeTerm(upperIndex, lateralAxis));
+        interfaceContact.tangent[1].terms.push_back(
+            makeTerm(lowerIndex, lateralAxis * -1.0f));
+
+        if (reverseContacts)
+          std::reverse(contacts.begin(), contacts.end());
+        std::sort(
+            contacts.begin(), contacts.end(),
+            [](const MaterialContact &a,
+               const MaterialContact &b) {
+              return a.stableKey < b.stableKey;
+            });
+
+        std::vector<ComponentProjectionRow> rows;
+        rows.reserve(6);
+        for (MaterialContact &contact : contacts) {
+          std::sort(
+              contact.normal.terms.begin(),
+              contact.normal.terms.end(),
+              [&](const ComponentProjectionTerm &a,
+                  const ComponentProjectionTerm &b) {
+                return bodies[a.bodyIndex].stableKey <
+                       bodies[b.bodyIndex].stableKey;
+              });
+          for (int tangent = 0; tangent < 2; ++tangent) {
+            std::sort(
+                contact.tangent[tangent].terms.begin(),
+                contact.tangent[tangent].terms.end(),
+                [&](const ComponentProjectionTerm &a,
+                    const ComponentProjectionTerm &b) {
+                  return bodies[a.bodyIndex].stableKey <
+                         bodies[b.bodyIndex].stableKey;
+                });
+          }
+          const float preNormalVelocity =
+              rowVelocity(contact.normal, velocities);
+          contact.normalTarget =
+              preNormalVelocity < -bounceThreshold
+                  ? -restitution * preNormalVelocity
+                  : 0.0f;
+          contact.normal.outwardVelocity =
+              preNormalVelocity - contact.normalTarget;
+          for (int tangent = 0; tangent < 2; ++tangent) {
+            contact.tangent[tangent].outwardVelocity =
+                rowVelocity(contact.tangent[tangent],
+                            velocities);
+          }
+          rows.push_back(contact.normal);
+          rows.push_back(contact.tangent[0]);
+          rows.push_back(contact.tangent[1]);
+        }
+
+        const size_t rowCount = rows.size();
+        std::vector<double> response(
+            rowCount * rowCount, 0.0);
+        for (size_t row = 0; row < rowCount; ++row) {
+          for (size_t column = 0; column < rowCount;
+               ++column) {
+            response[row * rowCount + column] =
+                rowResponse(rows[row], rows[column],
+                            bodies);
+          }
+        }
+
+        double normalLipschitz = 0.0;
+        double tangentLipschitz = 0.0;
+        for (size_t contact = 0; contact < 2; ++contact) {
+          const size_t normalRow = contact * 3;
+          double normalRowSum = 0.0;
+          for (size_t column = 0; column < 2; ++column) {
+            normalRowSum += std::fabs(
+                response[normalRow * rowCount +
+                         column * 3]);
+          }
+          normalLipschitz =
+              std::max(normalLipschitz, normalRowSum);
+          for (int tangent = 1; tangent <= 2; ++tangent) {
+            const size_t tangentRow =
+                normalRow + static_cast<size_t>(tangent);
+            double tangentRowSum = 0.0;
+            for (size_t other = 0; other < 2; ++other) {
+              for (int otherTangent = 1;
+                   otherTangent <= 2; ++otherTangent) {
+                tangentRowSum += std::fabs(
+                    response[
+                        tangentRow * rowCount +
+                        other * 3 +
+                        static_cast<size_t>(
+                            otherTangent)]);
+              }
+            }
+            tangentLipschitz =
+                std::max(tangentLipschitz,
+                         tangentRowSum);
+          }
+        }
+        if (!(normalLipschitz > 0.0) ||
+            !(tangentLipschitz > 0.0) ||
+            !std::isfinite(normalLipschitz) ||
+            !std::isfinite(tangentLipschitz)) {
+          result.valid = false;
+          return result;
+        }
+
+        std::vector<double> impulses(rowCount, 0.0);
+        std::vector<double> next(rowCount, 0.0);
+        const auto projectTangentDisks =
+            [&](std::vector<double> &candidate) {
+              for (size_t contact = 0; contact < 2;
+                   ++contact) {
+                const size_t row = contact * 3;
+                const double cap =
+                    contacts[contact].friction *
+                    impulses[row];
+                const double magnitude = std::sqrt(
+                    candidate[row + 1] *
+                        candidate[row + 1] +
+                    candidate[row + 2] *
+                        candidate[row + 2]);
+                if (magnitude > cap && magnitude > 0.0) {
+                  const double scale = cap / magnitude;
+                  candidate[row + 1] *= scale;
+                  candidate[row + 2] *= scale;
+                }
+              }
+            };
+        const double normalStep = 1.0 / normalLipschitz;
+        const double tangentStep =
+            1.0 / tangentLipschitz;
+        bool converged = false;
+        for (int outer = 0; outer < 128; ++outer) {
+          const std::vector<double> outerStart = impulses;
+          for (int iteration = 0; iteration < 4096;
+               ++iteration) {
+            next = impulses;
+            double maximumDelta = 0.0;
+            for (size_t contact = 0; contact < 2;
+                 ++contact) {
+              const size_t row = contact * 3;
+              double gradient = rows[row].outwardVelocity;
+              for (size_t column = 0; column < rowCount;
+                   ++column) {
+                gradient +=
+                    response[row * rowCount + column] *
+                    impulses[column];
+              }
+              next[row] =
+                  std::max(0.0,
+                           impulses[row] -
+                               normalStep * gradient);
+              maximumDelta = std::max(
+                  maximumDelta,
+                  std::fabs(next[row] - impulses[row]));
+            }
+            for (size_t contact = 0; contact < 2;
+                 ++contact)
+              impulses[contact * 3] = next[contact * 3];
+            if (maximumDelta <= 1.0e-13)
+              break;
+          }
+          for (int iteration = 0; iteration < 4096;
+               ++iteration) {
+            next = impulses;
+            for (size_t contact = 0; contact < 2;
+                 ++contact) {
+              const size_t row = contact * 3;
+              for (int tangent = 1; tangent <= 2;
+                   ++tangent) {
+                const size_t tangentRow =
+                    row + static_cast<size_t>(tangent);
+                double gradient =
+                    rows[tangentRow].outwardVelocity;
+                for (size_t column = 0;
+                     column < rowCount; ++column) {
+                  gradient +=
+                      response[tangentRow * rowCount +
+                               column] *
+                      impulses[column];
+                }
+                next[tangentRow] =
+                    impulses[tangentRow] -
+                    tangentStep * gradient;
+              }
+            }
+            projectTangentDisks(next);
+            double maximumDelta = 0.0;
+            for (size_t contact = 0; contact < 2;
+                 ++contact) {
+              const size_t row = contact * 3;
+              for (int tangent = 1; tangent <= 2;
+                   ++tangent) {
+                const size_t tangentRow =
+                    row + static_cast<size_t>(tangent);
+                maximumDelta = std::max(
+                    maximumDelta,
+                    std::fabs(next[tangentRow] -
+                              impulses[tangentRow]));
+                impulses[tangentRow] =
+                    next[tangentRow];
+              }
+            }
+            if (maximumDelta <= 1.0e-13)
+              break;
+          }
+          double outerDelta = 0.0;
+          for (size_t row = 0; row < rowCount; ++row) {
+            outerDelta = std::max(
+                outerDelta,
+                std::fabs(impulses[row] -
+                          outerStart[row]));
+          }
+          if (outerDelta <= 1.0e-12) {
+            converged = true;
+            break;
+          }
+        }
+        if (!converged) {
+          result.valid = false;
+          return result;
+        }
+
+        for (size_t contact = 0; contact < 2;
+             ++contact) {
+          result.normalTarget[contact] =
+              contacts[contact].normalTarget;
+          result.normalImpulse[contact] =
+              static_cast<float>(impulses[contact * 3]);
+          result.tangentImpulse[contact * 2] =
+              static_cast<float>(
+                  impulses[contact * 3 + 1]);
+          result.tangentImpulse[contact * 2 + 1] =
+              static_cast<float>(
+                  impulses[contact * 3 + 2]);
+        }
+        for (size_t row = 0; row < rowCount; ++row) {
+          applyRowImpulse(
+              rows[row], static_cast<float>(impulses[row]),
+              bodies, velocities);
+        }
+
+        next = impulses;
+        for (size_t contact = 0; contact < 2;
+             ++contact) {
+          const size_t row = contact * 3;
+          double normalGradient =
+              rows[row].outwardVelocity;
+          for (size_t column = 0; column < rowCount;
+               ++column) {
+            normalGradient +=
+                response[row * rowCount + column] *
+                impulses[column];
+          }
+          next[row] =
+              std::max(0.0,
+                       impulses[row] -
+                           normalStep * normalGradient);
+          for (int tangent = 1; tangent <= 2;
+               ++tangent) {
+            const size_t tangentRow =
+                row + static_cast<size_t>(tangent);
+            double tangentGradient =
+                rows[tangentRow].outwardVelocity;
+            for (size_t column = 0; column < rowCount;
+                 ++column) {
+              tangentGradient +=
+                  response[tangentRow * rowCount +
+                           column] *
+                  impulses[column];
+            }
+            next[tangentRow] =
+                impulses[tangentRow] -
+                tangentStep * tangentGradient;
+          }
+        }
+        projectTangentDisks(next);
+        for (size_t row = 0; row < rowCount; ++row) {
+          result.maximumProjectedKkt = std::max(
+              result.maximumProjectedKkt,
+              static_cast<float>(
+                  std::fabs(next[row] - impulses[row])));
+        }
+        for (size_t contact = 0; contact < 2;
+             ++contact) {
+          const float finalNormalVelocity =
+              rowVelocity(contacts[contact].normal,
+                          velocities);
+          result.maximumNormalTargetError = std::max(
+              result.maximumNormalTargetError,
+              std::max(
+                  0.0f,
+                  contacts[contact].normalTarget -
+                      finalNormalVelocity));
+        }
+
+        result.lowerVelocity = velocities[lowerIndex];
+        result.upperVelocity = velocities[upperIndex];
+        const Vec3 initialMomentum =
+            initialVelocities[lowerIndex].linear() +
+            initialVelocities[upperIndex].linear();
+        const Vec3 finalMomentum =
+            result.lowerVelocity.linear() +
+            result.upperVelocity.linear();
+        const Vec3 groundImpulse =
+            normal * result.normalImpulse[0] +
+            driveAxis * result.tangentImpulse[0] +
+            lateralAxis * result.tangentImpulse[1];
+        result.momentumResidual =
+            (finalMomentum -
+             (initialMomentum + groundImpulse))
+                .length();
+        result.initialEnergy =
+            0.5f *
+            (initialVelocities[lowerIndex].linear()
+                 .length2() +
+             initialVelocities[upperIndex].linear()
+                 .length2());
+        result.finalEnergy =
+            0.5f *
+            (result.lowerVelocity.linear().length2() +
+             result.upperVelocity.linear().length2());
+        return result;
+      };
+
+  const float impactSpeed = 5.0f;
+  const float restitution = 0.5f;
+  const float bounceThreshold = 2.0f;
+  const float yaw = 0.37f;
+  const LaneResult canonical =
+      runLane(impactSpeed, restitution, bounceThreshold,
+              0.0f, false, false);
+  const LaneResult reverse =
+      runLane(impactSpeed, restitution, bounceThreshold,
+              0.0f, true, false);
+  const LaneResult swapped =
+      runLane(impactSpeed, restitution, bounceThreshold,
+              0.0f, false, true);
+  const LaneResult yawed =
+      runLane(impactSpeed, restitution, bounceThreshold,
+              yaw, false, false);
+  const LaneResult yawedReverse =
+      runLane(impactSpeed, restitution, bounceThreshold,
+              yaw, true, true);
+  const LaneResult belowThreshold =
+      runLane(1.5f, restitution, bounceThreshold,
+              0.0f, false, false);
+  const LaneResult aboveThreshold =
+      runLane(2.5f, restitution, bounceThreshold,
+              0.0f, false, false);
+  const LaneResult zeroRestitution =
+      runLane(impactSpeed, 0.0f, bounceThreshold,
+              0.0f, false, false);
+  const LaneResult elastic =
+      runLane(impactSpeed, 1.0f, bounceThreshold,
+              0.0f, false, false);
+
+  const Vec3 driveAxis(1.0f, 0.0f, 0.0f);
+  const Vec3 lateralAxis(0.0f, 0.0f, 1.0f);
+  const Vec3 yawDriveAxis =
+      rotateAboutY(driveAxis, yaw);
+  const Vec3 yawLateralAxis =
+      rotateAboutY(lateralAxis, yaw);
+  const auto invariantDelta =
+      [&](const LaneResult &a, const LaneResult &b,
+          const Vec3 &bDrive, const Vec3 &bLateral) {
+        float delta = 0.0f;
+        const Vec6 aBodies[2] = {
+            a.lowerVelocity, a.upperVelocity};
+        const Vec6 bBodies[2] = {
+            b.lowerVelocity, b.upperVelocity};
+        for (int body = 0; body < 2; ++body) {
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(driveAxis) -
+                  bBodies[body].linear().dot(bDrive)));
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(normal) -
+                  bBodies[body].linear().dot(normal)));
+          delta = std::max(
+              delta,
+              std::fabs(
+                  aBodies[body].linear().dot(lateralAxis) -
+                  bBodies[body].linear().dot(bLateral)));
+        }
+        return delta;
+      };
+  const float reverseDelta = invariantDelta(
+      canonical, reverse, driveAxis, lateralAxis);
+  const float swappedDelta = invariantDelta(
+      canonical, swapped, driveAxis, lateralAxis);
+  const float yawDelta = invariantDelta(
+      canonical, yawed, yawDriveAxis, yawLateralAxis);
+  const float yawReverseDelta = invariantDelta(
+      canonical, yawedReverse,
+      yawDriveAxis, yawLateralAxis);
+
+  printf("  complete lowerV=(%.9g,%.9g,%.9g) "
+         "upperV=(%.9g,%.9g,%.9g) target=(%.9g,%.9g) "
+         "normalImpulse=(%.9g,%.9g) "
+         "tangentImpulse=(%.9g,%.9g) "
+         "kkt=%.9g targetError=%.9g momentum=%.9g "
+         "energy=(%.9g,%.9g)\n",
+         canonical.lowerVelocity.linear().x,
+         canonical.lowerVelocity.linear().y,
+         canonical.lowerVelocity.linear().z,
+         canonical.upperVelocity.linear().x,
+         canonical.upperVelocity.linear().y,
+         canonical.upperVelocity.linear().z,
+         canonical.normalTarget[0],
+         canonical.normalTarget[1],
+         canonical.normalImpulse[0],
+         canonical.normalImpulse[1],
+         canonical.tangentImpulse[0],
+         canonical.tangentImpulse[2],
+         canonical.maximumProjectedKkt,
+         canonical.maximumNormalTargetError,
+         canonical.momentumResidual,
+         canonical.initialEnergy,
+         canonical.finalEnergy);
+  printf("  threshold below=(%.9g,%.9g) "
+         "above=(%.9g,%.9g) zero=(%.9g,%.9g) "
+         "elastic=(%.9g,%.9g) order=(%.9g,%.9g,%.9g,%.9g)\n",
+         belowThreshold.normalTarget[1],
+         belowThreshold.upperVelocity.linear().y,
+         aboveThreshold.normalTarget[1],
+         aboveThreshold.upperVelocity.linear().y,
+         zeroRestitution.normalTarget[1],
+         zeroRestitution.upperVelocity.linear().y,
+         elastic.normalTarget[1],
+         elastic.upperVelocity.linear().y,
+         reverseDelta, swappedDelta, yawDelta,
+         yawReverseDelta);
+
+  for (const LaneResult *lane :
+       {&canonical, &reverse, &swapped, &yawed,
+        &yawedReverse, &belowThreshold, &aboveThreshold,
+        &zeroRestitution, &elastic}) {
+    CHECK(lane->valid,
+          "restitution material component did not converge");
+    CHECK(lane->maximumProjectedKkt <= 2.0e-5f,
+          "restitution material component left KKT error: %.9g",
+          lane->maximumProjectedKkt);
+    CHECK(lane->maximumNormalTargetError <= 2.0e-5f,
+          "restitution material component missed normal target: %.9g",
+          lane->maximumNormalTargetError);
+    CHECK(lane->momentumResidual <= 2.0e-5f,
+          "restitution material component changed internal momentum");
+    CHECK(lane->finalEnergy <= lane->initialEnergy + 2.0e-5f,
+          "restitution material component added energy");
+    for (int contact = 0; contact < 2; ++contact) {
+      const float tangentMagnitude = std::sqrt(
+          lane->tangentImpulse[contact * 2] *
+              lane->tangentImpulse[contact * 2] +
+          lane->tangentImpulse[contact * 2 + 1] *
+              lane->tangentImpulse[contact * 2 + 1]);
+      CHECK(lane->normalImpulse[contact] >= -2.0e-6f &&
+                tangentMagnitude <=
+                    lane->normalImpulse[contact] +
+                        2.0e-5f,
+            "restitution component violated Coulomb cone");
+    }
+  }
+  CHECK(std::fabs(canonical.normalTarget[0]) <= 1.0e-6f &&
+            std::fabs(canonical.normalTarget[1] - 2.5f) <=
+                1.0e-6f,
+        "steady support and impacting row did not receive distinct targets");
+  CHECK(std::fabs(canonical.lowerVelocity.linear().y) <=
+                2.0e-5f &&
+            std::fabs(canonical.upperVelocity.linear().y -
+                      2.5f) <= 2.0e-5f,
+        "complete restitution component produced wrong rebound");
+  CHECK(canonical.lowerVelocity.linear().length() <=
+                2.0e-5f &&
+            std::fabs(
+                canonical.upperVelocity.linear().length() -
+                2.5f) <= 2.0e-5f,
+        "complete restitution/friction component did not share its budget");
+  CHECK(std::fabs(belowThreshold.normalTarget[1]) <=
+                1.0e-6f &&
+            std::fabs(
+                belowThreshold.upperVelocity.linear().y) <=
+                2.0e-5f,
+        "below-threshold impact incorrectly applied restitution");
+  CHECK(std::fabs(aboveThreshold.normalTarget[1] - 1.25f) <=
+                1.0e-6f &&
+            std::fabs(
+                aboveThreshold.upperVelocity.linear().y -
+                1.25f) <= 2.0e-5f,
+        "above-threshold impact missed restitution");
+  CHECK(std::fabs(zeroRestitution.normalTarget[1]) <=
+                1.0e-6f &&
+            std::fabs(
+                zeroRestitution.upperVelocity.linear().y) <=
+                2.0e-5f,
+        "zero restitution did not reduce to passive complementarity");
+  CHECK(std::fabs(elastic.normalTarget[1] - impactSpeed) <=
+                1.0e-6f &&
+            std::fabs(elastic.upperVelocity.linear().y -
+                      impactSpeed) <= 2.0e-5f,
+        "elastic target did not preserve relative impact speed");
+  CHECK(reverseDelta <= 2.0e-6f &&
+            swappedDelta <= 2.0e-6f &&
+            yawDelta <= 2.0e-6f &&
+            yawReverseDelta <= 2.0e-6f,
+        "restitution material component depends on row/body order or yaw");
+  CHECK(canonical.upperVelocity.linear().y -
+                zeroRestitution.upperVelocity.linear().y >
+            2.4f,
+        "omitting the restitution target did not expose the missing owner");
+
+  PASS("restitution is a thresholded normal target inside the complete rigid material component");
 }
 
 struct FixedPairDropResult {

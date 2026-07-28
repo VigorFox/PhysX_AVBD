@@ -7,7 +7,7 @@ if exist "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Bui
 if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 
 echo Building AVBD...
-cl /EHsc /O2 /std:c++17 avbd_solver.cpp avbd_tests_stability.cpp avbd_tests_collision.cpp avbd_tests_joints.cpp avbd_tests_friction.cpp avbd_tests_deformable.cpp avbd_tests_articulation.cpp avbd_tests_softbody.cpp avbd_main.cpp /Fe:avbd_test.exe
+cl /EHsc /O2 /std:c++17 avbd_solver.cpp avbd_tests_stability.cpp avbd_tests_collision.cpp avbd_tests_joints.cpp avbd_tests_material_component.cpp avbd_tests_friction.cpp avbd_tests_deformable.cpp avbd_tests_articulation.cpp avbd_tests_softbody.cpp avbd_main.cpp /Fe:avbd_test.exe
 
 if %errorlevel% neq 0 (
     echo Build FAILED!
@@ -15,7 +15,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Build SUCCESS. Running tests...
-avbd_test.exe
+avbd_test.exe %*
 set "testExit=%errorlevel%"
 
 echo Cleaning up...

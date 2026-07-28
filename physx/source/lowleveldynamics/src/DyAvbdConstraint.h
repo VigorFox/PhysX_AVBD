@@ -125,6 +125,39 @@ struct AvbdContactConstraintFlags {
     eKINEMATIC_SHELL_ANCHOR = 1u << 1,
     /** Last dual step was inside Coulomb cone (static μ for next evaluation). */
     eFRICTION_STICK = 1u << 2,
+    /** Contact-only AVBD velocity row owns this target's tangent objective. */
+    eVELOCITY_TANGENT_TARGET_OWNER = 1u << 3,
+    /**
+     * Reconstruct this target body's pre-material velocity only in the
+     * physical normal response span before applying its tangent target.
+     */
+    eVELOCITY_TANGENT_TARGET_NORMAL_SPAN = 1u << 4,
+    /**
+     * Two-to-four-point rigid-static target manifold. Its tangent objective
+     * is projected as one coupled block after velocity reconstruction; the
+     * individual contacts must not replay point-wise target impulses.
+     */
+    eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER = 1u << 5,
+    /**
+     * Deformable/static tangent is owned by the contact's position-level
+     * primal/dual row. The post friction sweep must not replay this row.
+     */
+    eDEFORMABLE_POSITION_TANGENT_OWNER = 1u << 6,
+    /**
+     * Two-to-four-point, zero-target rigid-static friction manifold.  The
+     * material owner reconstructs solve-start inertial velocity and consumes
+     * each normal-supported Coulomb disk once; position friction and ordered
+     * body-static sweeps must not replay these rows.
+     */
+    eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER = 1u << 7,
+    /**
+     * Zero-target rigid contact rows in one connected component containing
+     * both rigid-static and dynamic-dynamic contacts.  One post-reconstruction
+     * owner closes all normal complementarity rows and all Coulomb disks from
+     * the same solve-start inertial state; no body-wise or point-wise
+     * material fallback may replay these rows.
+     */
+    eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER = 1u << 8,
   };
 };
 
@@ -308,6 +341,28 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
    */
   physx::PxReal *contactImpulseWriteback;
 
+  /**
+   * Standard contact-report friction anchor slot selected during NP stream
+   * ingestion. Multiple AVBD contact rows may accumulate into one of the two
+   * public PxFrictionPatch anchors. NULL means friction reporting was not
+   * requested or the patch has no usable anchor.
+   */
+  physx::PxVec3 *frictionImpulseWriteback;
+
+  /**
+   * Actual tangential impulse applied by the decoupled body-static friction
+   * sweeps, expressed as the impulse on contact body A. Dynamic-dynamic
+   * tangential AL force is converted to impulse during report writeback.
+   */
+  physx::PxVec3 frictionSweepImpulse;
+
+  /**
+   * Actual normal impulse owned by a strict velocity complementarity block.
+   * Negative means the ordinary position multiplier remains the writeback
+   * source. This never replaces the position lambda or its warm-start cache.
+   */
+  physx::PxReal velocityNormalImpulse;
+
   //-------------------------------------------------------------------------
   // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
   //-------------------------------------------------------------------------
@@ -316,6 +371,24 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
 
   /** Previous-frame world contact on static/deformable partner (friction). */
   physx::PxVec3 staticPrevWorldPoint;
+
+  /**
+   * Opt-in ownership diagnostic state. These values are populated for every
+   * prepared row so PHYSX_AVBD_ITER_DIAG can correlate cache restore, the
+   * exact pre-AL row state, and the post-AL/finalize stages without changing
+   * any solver decision.
+   */
+  physx::PxReal diagnosticRestoredNormalLambda;
+  physx::PxReal diagnosticRestoredNormalPenalty;
+  physx::PxReal diagnosticInitialNormalPenalty;
+  physx::PxReal diagnosticPreAlRawViolation;
+  physx::PxReal diagnosticPreAlViolation;
+  physx::PxReal diagnosticPreAlNormalCoordinate;
+  physx::PxU8 diagnosticNormalWarmstartHit;
+  physx::PxU8 diagnosticNormalWarmstartAge;
+  /** Persistent contact-manager state used for normal ownership. */
+  physx::PxU8 contactManagerEstablished;
+  physx::PxU8 contactManagerAge;
 
   /**
    * Support classification for surface-motion and friction policy.
@@ -513,6 +586,61 @@ PX_FORCE_INLINE bool hasDeformableStaticAnchor(
 
 PX_FORCE_INLINE bool hasFrictionStick(const AvbdContactConstraint &c) {
   return (c.header.flags & AvbdContactConstraintFlags::eFRICTION_STICK) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetOwner(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::eVELOCITY_TANGENT_TARGET_OWNER) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetNormalSpan(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::
+              eVELOCITY_TANGENT_TARGET_NORMAL_SPAN) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetManifoldOwner(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::
+              eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityPassiveFrictionManifoldOwner(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::
+              eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityPassiveFrictionComponentOwner(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::
+              eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityFrictionManifoldOwner(
+    const AvbdContactConstraint &c) {
+  return hasVelocityTangentTargetManifoldOwner(c) ||
+         hasVelocityPassiveFrictionManifoldOwner(c) ||
+         hasVelocityPassiveFrictionComponentOwner(c);
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentMaterialOwner(
+    const AvbdContactConstraint &c) {
+  return hasVelocityTangentTargetOwner(c) ||
+         hasVelocityPassiveFrictionManifoldOwner(c) ||
+         hasVelocityPassiveFrictionComponentOwner(c);
+}
+
+PX_FORCE_INLINE bool hasDeformablePositionTangentOwner(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::
+              eDEFORMABLE_POSITION_TANGENT_OWNER) != 0;
 }
 
 PX_FORCE_INLINE void setFrictionStick(AvbdContactConstraint &c, bool stick) {
@@ -1489,7 +1617,16 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     // reconstructed from the converged physical row force.  This owns both
     // PxConstraint::getForce() writeback and force-unit break comparison;
     // limited, driven and motorized variants require separate authority.
-    eNATIVE_PASSIVE_REACTION_ACTIVE = 1u << 23
+    eNATIVE_PASSIVE_REACTION_ACTIVE = 1u << 23,
+    // Public native-revolute free-spin semantics use a one-sided motor
+    // impulse bound. The strict isolated world-dynamic owner consumes this
+    // tag; mixed limit, gear, contact, and dynamic-pair cases remain rejected.
+    eNATIVE_REVOLUTE_MOTOR_FREESPIN = 1u << 24,
+    // Transient two-dynamic, centered, force-mode linear-X position-drive
+    // ownership tag.  The position row, five locked companion rows, both
+    // endpoint responses, and every predicate-approved contact normal are
+    // solved from one frozen island objective.
+    eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE = 1u << 25
   };
 
   AvbdConstraintHeader header;
@@ -1655,12 +1792,13 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxReal conePadding;
 
   //-------------------------------------------------------------------------
-  // Revolute motor (post-solve, not AL drive)
+  // Revolute motor (strict post-finalize velocity owner, never a pose row)
   //-------------------------------------------------------------------------
 
-  physx::PxU32 motorEnabled;         //!< 1 = revolute motor active (post-solve)
+  physx::PxU32 motorEnabled;         //!< 1 = revolute velocity owner active
   physx::PxReal motorTargetVelocity; //!< Target angular velocity (rad/s) around twist axis
   physx::PxReal motorMaxForce;       //!< Max motor torque (N*m)
+  physx::PxReal motorGearRatio;      //!< Public drive gear ratio (strict owner currently requires 1)
 
   //-------------------------------------------------------------------------
   // Methods
@@ -1878,6 +2016,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     motorEnabled = 0;
     motorTargetVelocity = 0.0f;
     motorMaxForce = 0.0f;
+    motorGearRatio = 1.0f;
   }
 
 } PX_ALIGN_SUFFIX(16);

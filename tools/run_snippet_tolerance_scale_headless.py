@@ -60,7 +60,7 @@ def parse_gate(line: str) -> tuple[dict[str, str], list[str]]:
 
 
 def run_one(
-    spec: RunSpec, bin_dir: Path, timeout: float
+    spec: RunSpec, bin_dir: Path, timeout: float, dispatcher_threads: int
 ) -> tuple[bool, dict[str, str]]:
     argv = [
         str(bin_dir / EXECUTABLE),
@@ -70,7 +70,7 @@ def run_one(
         f"--execution={spec.execution}",
         f"--frames={FRAMES}",
         "--dt=0.0166666675",
-        "--dispatcher-threads=4",
+        f"--dispatcher-threads={dispatcher_threads}",
         "--seed=1",
     ]
     env = os.environ.copy()
@@ -258,6 +258,7 @@ def main() -> int:
     )
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=90.0)
+    parser.add_argument("--dispatcher-threads", type=int, default=4)
     args = parser.parse_args()
     bin_dir = args.bin_dir.resolve()
     if not (bin_dir / EXECUTABLE).is_file():
@@ -269,11 +270,19 @@ def main() -> int:
     if args.timeout <= 0:
         print("[TOLERANCE_SCALE_RUNNER_ERROR] --timeout must be positive")
         return 2
+    if args.dispatcher_threads <= 0:
+        print(
+            "[TOLERANCE_SCALE_RUNNER_ERROR] "
+            "--dispatcher-threads must be positive"
+        )
+        return 2
 
     infrastructure_ok = True
     results: dict[str, dict[str, str]] = {}
     for spec in specs(args.mode):
-        passed, fields = run_one(spec, bin_dir, args.timeout)
+        passed, fields = run_one(
+            spec, bin_dir, args.timeout, args.dispatcher_threads
+        )
         infrastructure_ok = infrastructure_ok and passed
         results[spec.name] = fields
         if not passed and args.mode != "probe":

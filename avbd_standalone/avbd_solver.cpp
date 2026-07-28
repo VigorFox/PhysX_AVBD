@@ -14,6 +14,1145 @@ namespace AvbdRef {
 namespace {
 bool gContactIslandPcgSuiteProbeEnabled = false;
 bool gCanonicalRigidContactAuthoringSuiteProbeEnabled = false;
+
+enum class RevoluteMotorVelocityOwnerKind {
+  None,
+  Isolated,
+  CenteredGear
+};
+
+struct RevoluteMotorVelocityOwner {
+  RevoluteMotorVelocityOwnerKind kind =
+      RevoluteMotorVelocityOwnerKind::None;
+  uint32_t motorJointIndex = UINT32_MAX;
+  float expectedDynamicPairAngularMomentum = 0.0f;
+  bool conserveDynamicPairAngularMomentum = false;
+  Vec3 expectedDynamicPairAngularMomentumVector;
+  bool conserveDynamicPairAngularMomentumVector = false;
+  Vec3 expectedDynamicPairLinearMomentum;
+  bool conserveDynamicPairLinearMomentum = false;
+  Vec3 expectedDynamicPairSpatialAngularMomentum;
+  bool conserveDynamicPairSpatialMomentum = false;
+  float solveStartRelativeVelocity = 0.0f;
+  bool useSolveStartRelativeVelocity = false;
+};
+
+bool isDynamicEndpoint(const std::vector<Body> &bodies, uint32_t index) {
+  return index < bodies.size() && bodies[index].mass > 0.0f;
+}
+
+bool isWorldEndpoint(uint32_t index) {
+  return index == UINT32_MAX;
+}
+
+bool isStrictRevoluteMotorRow(const D6Joint &joint) {
+  const uint32_t twistMotion = joint.getAngularMotion(0);
+  const bool limitedTwist = twistMotion == 1u;
+  return joint.motorEnabled && joint.motorMaxForce > 0.0f &&
+         std::isfinite(joint.motorMaxForce) &&
+         std::isfinite(joint.motorTargetVelocity) &&
+         std::isfinite(joint.motorGearRatio) &&
+         joint.motorGearRatio > 0.0f &&
+         std::isfinite(joint.motorExternalAngularVelocityA.x) &&
+         std::isfinite(joint.motorExternalAngularVelocityA.y) &&
+         std::isfinite(joint.motorExternalAngularVelocityA.z) &&
+         std::isfinite(joint.motorExternalAngularVelocityB.x) &&
+         std::isfinite(joint.motorExternalAngularVelocityB.y) &&
+         std::isfinite(joint.motorExternalAngularVelocityB.z) &&
+         joint.linearMotion == 0u &&
+         (twistMotion == 1u || twistMotion == 2u) &&
+         joint.getAngularMotion(1) == 0u &&
+         joint.getAngularMotion(2) == 0u &&
+         joint.driveFlags == 0u && joint.driveAccelerationFlags == 0u &&
+         joint.coneAngleLimit <= 0.0f &&
+         (!limitedTwist ||
+          (std::isfinite(joint.angularLimitLower[0]) &&
+           std::isfinite(joint.angularLimitUpper[0]) &&
+           joint.angularLimitLower[0] < joint.angularLimitUpper[0]));
+}
+
+Vec3 getRevoluteMotorWorldAxis(const std::vector<Body> &bodies,
+                               const D6Joint &joint) {
+  const bool dynamicA = isDynamicEndpoint(bodies, joint.bodyA);
+  const Quat worldFrameA =
+      dynamicA ? bodies[joint.bodyA].rotation * joint.localFrameA
+               : joint.localFrameA;
+  return worldFrameA.rotate(Vec3(1.0f, 0.0f, 0.0f)).normalized();
+}
+
+bool hasPrincipalAngularResponse(const Body &body, const Vec3 &worldAxis) {
+  const Vec3 response = body.invInertiaWorld * worldAxis;
+  const float responseScale = std::max(response.length(), 1e-8f);
+  return response.cross(worldAxis).length() <= responseScale * 1e-4f;
+}
+
+RevoluteMotorVelocityOwner classifyRevoluteMotorVelocityOwner(
+    std::vector<Body> &bodies, const std::vector<Contact> &contacts,
+    const std::vector<D6Joint> &d6Joints,
+    const std::vector<GearJoint> &gearJoints,
+    const std::vector<Articulation> &articulations,
+    const std::vector<SoftBody> &softBodies,
+    const std::vector<SoftContact> &softContacts,
+    const std::vector<SoftParticle> &softParticles) {
+  RevoluteMotorVelocityOwner owner;
+  if (!contacts.empty() || !articulations.empty() || !softBodies.empty() ||
+      !softContacts.empty() || !softParticles.empty())
+    return owner;
+
+  uint32_t dynamicBodyCount = 0;
+  for (Body &body : bodies) {
+    if (body.mass <= 0.0f)
+      continue;
+    body.updateInvInertiaWorld();
+    dynamicBodyCount++;
+  }
+
+  if (d6Joints.size() == 1 && gearJoints.empty()) {
+    const D6Joint &motor = d6Joints[0];
+    if (!isStrictRevoluteMotorRow(motor))
+      return owner;
+    const bool dynamicA = isDynamicEndpoint(bodies, motor.bodyA);
+    const bool dynamicB = isDynamicEndpoint(bodies, motor.bodyB);
+    if (dynamicA == dynamicB && !dynamicA)
+      return owner;
+    if ((!dynamicA && !isWorldEndpoint(motor.bodyA)) ||
+        (!dynamicB && !isWorldEndpoint(motor.bodyB)) ||
+        (dynamicA && dynamicB && motor.bodyA == motor.bodyB) ||
+        dynamicBodyCount != uint32_t(dynamicA) + uint32_t(dynamicB))
+      return owner;
+    const bool nonUnitDriveRatio =
+        std::fabs(motor.motorGearRatio - 1.0f) > 1e-6f;
+    if (motor.getAngularMotion(0) == 1u) {
+      const bool oneDynamic =
+          dynamicBodyCount == 1u && dynamicA != dynamicB;
+      const bool dynamicPair =
+          dynamicBodyCount == 2u && dynamicA && dynamicB;
+      if (!oneDynamic && !dynamicPair)
+        return owner;
+      if (dynamicPair) {
+        if (motor.anchorA.length2() > 1e-8f ||
+            motor.anchorB.length2() > 1e-8f)
+          return owner;
+      } else {
+        const Vec3 &dynamicAnchor =
+            dynamicA ? motor.anchorA : motor.anchorB;
+        if (dynamicAnchor.length2() > 1e-8f)
+          return owner;
+      }
+    }
+    if (motor.motorFreeSpin) {
+      const bool oneDynamic =
+          dynamicBodyCount == 1u && dynamicA != dynamicB;
+      const bool dynamicPair =
+          dynamicBodyCount == 2u && dynamicA && dynamicB;
+      if (!oneDynamic && !dynamicPair)
+        return owner;
+      if (dynamicPair) {
+        if (motor.anchorA.length2() > 1e-8f ||
+            motor.anchorB.length2() > 1e-8f)
+          return owner;
+      } else {
+        const Vec3 &dynamicAnchor =
+            dynamicA ? motor.anchorA : motor.anchorB;
+        if (dynamicAnchor.length2() > 1e-8f)
+          return owner;
+      }
+    }
+    if (motor.getAngularMotion(0) == 1u && motor.motorFreeSpin)
+      return owner;
+    if ((motor.getAngularMotion(0) == 1u || motor.motorFreeSpin) &&
+        nonUnitDriveRatio)
+      return owner;
+    if (nonUnitDriveRatio) {
+      const Vec3 localAxisA =
+          motor.localFrameA.rotate(Vec3(1.0f, 0.0f, 0.0f)).normalized();
+      const Vec3 localAxisB =
+          motor.localFrameB.rotate(Vec3(1.0f, 0.0f, 0.0f)).normalized();
+      if (motor.getAngularMotion(0) != 2u || motor.motorFreeSpin ||
+          dynamicBodyCount != 2u || !dynamicA || !dynamicB ||
+          localAxisA.length2() <= 1e-8f ||
+          localAxisB.length2() <= 1e-8f ||
+          motor.anchorA.cross(localAxisA).length2() > 1e-8f ||
+          motor.anchorB.cross(localAxisB).length2() > 1e-8f)
+        return owner;
+    }
+
+    const Vec3 worldAxis = getRevoluteMotorWorldAxis(bodies, motor);
+    if (worldAxis.length2() <= 1e-8f)
+      return owner;
+    const bool dynamicEndpoint[2] = {dynamicA, dynamicB};
+    const uint32_t bodyIndex[2] = {motor.bodyA, motor.bodyB};
+    const Vec3 anchor[2] = {motor.anchorA, motor.anchorB};
+    const Vec3 localAxis[2] = {
+        motor.localFrameA.rotate(Vec3(1.0f, 0.0f, 0.0f)),
+        motor.localFrameB.rotate(Vec3(1.0f, 0.0f, 0.0f))};
+    const Vec3 externalVelocity[2] = {
+        motor.motorExternalAngularVelocityA,
+        motor.motorExternalAngularVelocityB};
+    const bool allowCoupledOffPrincipalResponse =
+        ((dynamicBodyCount == 1u && dynamicA != dynamicB) ||
+         (dynamicBodyCount == 2u && dynamicA && dynamicB)) &&
+        motor.getAngularMotion(0) == 2u && !motor.motorFreeSpin &&
+        !nonUnitDriveRatio &&
+        motor.motorExternalAngularVelocityA.length2() <= 1e-12f &&
+        motor.motorExternalAngularVelocityB.length2() <= 1e-12f;
+    const bool allowCoupledOffCenterResponse =
+        ((dynamicBodyCount == 1u && dynamicA != dynamicB) ||
+         (dynamicBodyCount == 2u && dynamicA && dynamicB)) &&
+        motor.getAngularMotion(0) == 2u && !motor.motorFreeSpin &&
+        !nonUnitDriveRatio &&
+        motor.motorExternalAngularVelocityA.length2() <= 1e-12f &&
+        motor.motorExternalAngularVelocityB.length2() <= 1e-12f;
+    for (uint32_t side = 0; side < 2; ++side) {
+      if (!dynamicEndpoint[side]) {
+        const float stepScale =
+            std::max(externalVelocity[side].length(), 1e-8f);
+        if (externalVelocity[side].cross(worldAxis).length() >
+            stepScale * 1e-4f)
+          return owner;
+        continue;
+      }
+      if (externalVelocity[side].length2() > 1e-12f)
+        return owner;
+      if (anchor[side].cross(localAxis[side]).length2() > 1e-8f &&
+          !allowCoupledOffCenterResponse)
+        return owner;
+      if (!hasPrincipalAngularResponse(bodies[bodyIndex[side]],
+                                       worldAxis) &&
+          !allowCoupledOffPrincipalResponse)
+        return owner;
+    }
+
+    owner.kind = RevoluteMotorVelocityOwnerKind::Isolated;
+    owner.motorJointIndex = 0;
+    if (motor.motorFreeSpin) {
+      if (dynamicA)
+        owner.solveStartRelativeVelocity -=
+            worldAxis.dot(bodies[motor.bodyA].angularVelocity);
+      if (dynamicB)
+        owner.solveStartRelativeVelocity +=
+            worldAxis.dot(bodies[motor.bodyB].angularVelocity);
+      owner.useSolveStartRelativeVelocity =
+          std::isfinite(owner.solveStartRelativeVelocity);
+    }
+    if (dynamicA && dynamicB) {
+      const Body &bodyA = bodies[motor.bodyA];
+      const Body &bodyB = bodies[motor.bodyB];
+      owner.expectedDynamicPairAngularMomentum =
+          worldAxis.dot(bodyA.invInertiaWorld.inverse() *
+                            bodyA.angularVelocity *
+                            motor.motorGearRatio +
+                        bodyB.invInertiaWorld.inverse() *
+                            bodyB.angularVelocity);
+      owner.conserveDynamicPairAngularMomentum =
+          std::isfinite(owner.expectedDynamicPairAngularMomentum);
+      if (std::fabs(motor.motorGearRatio - 1.0f) <= 1e-6f &&
+          motor.anchorA.length2() <= 1e-8f &&
+          motor.anchorB.length2() <= 1e-8f) {
+        owner.expectedDynamicPairAngularMomentumVector =
+            bodyA.invInertiaWorld.inverse() *
+                bodyA.angularVelocity +
+            bodyB.invInertiaWorld.inverse() *
+                bodyB.angularVelocity;
+        const Vec3 &momentum =
+            owner.expectedDynamicPairAngularMomentumVector;
+        owner.conserveDynamicPairAngularMomentumVector =
+            std::isfinite(momentum.x) &&
+            std::isfinite(momentum.y) &&
+            std::isfinite(momentum.z);
+      }
+      owner.expectedDynamicPairLinearMomentum =
+          bodyA.linearVelocity * bodyA.mass +
+          bodyB.linearVelocity * bodyB.mass;
+      const Vec3 &linearMomentum =
+          owner.expectedDynamicPairLinearMomentum;
+      owner.conserveDynamicPairLinearMomentum =
+          std::isfinite(bodyA.mass) &&
+          std::isfinite(bodyB.mass) &&
+          std::isfinite(linearMomentum.x) &&
+          std::isfinite(linearMomentum.y) &&
+          std::isfinite(linearMomentum.z);
+      owner.expectedDynamicPairSpatialAngularMomentum =
+          bodyA.position.cross(bodyA.linearVelocity * bodyA.mass) +
+          bodyA.invInertiaWorld.inverse() *
+              bodyA.angularVelocity +
+          bodyB.position.cross(bodyB.linearVelocity * bodyB.mass) +
+          bodyB.invInertiaWorld.inverse() *
+              bodyB.angularVelocity;
+      const Vec3 &spatialAngularMomentum =
+          owner.expectedDynamicPairSpatialAngularMomentum;
+      owner.conserveDynamicPairSpatialMomentum =
+          owner.conserveDynamicPairLinearMomentum &&
+          std::isfinite(spatialAngularMomentum.x) &&
+          std::isfinite(spatialAngularMomentum.y) &&
+          std::isfinite(spatialAngularMomentum.z);
+    }
+    return owner;
+  }
+
+  if (dynamicBodyCount != 2 || d6Joints.size() != 2 ||
+      gearJoints.size() != 1)
+    return owner;
+  const GearJoint &gear = gearJoints[0];
+  if (gear.bodyA >= bodies.size() || gear.bodyB >= bodies.size() ||
+      gear.bodyA == gear.bodyB || bodies[gear.bodyA].mass <= 0.0f ||
+      bodies[gear.bodyB].mass <= 0.0f ||
+      !std::isfinite(gear.gearRatio) ||
+      std::fabs(gear.gearRatio) <= 1e-6f ||
+      gear.axisA.length2() <= 1e-8f || gear.axisB.length2() <= 1e-8f)
+    return owner;
+
+  bool ownsGearBodyA = false;
+  bool ownsGearBodyB = false;
+  for (uint32_t i = 0; i < d6Joints.size(); ++i) {
+    const D6Joint &joint = d6Joints[i];
+    const bool dynamicA = isDynamicEndpoint(bodies, joint.bodyA);
+    const bool dynamicB = isDynamicEndpoint(bodies, joint.bodyB);
+    if (dynamicA == dynamicB ||
+        (!dynamicA && !isWorldEndpoint(joint.bodyA)) ||
+        (!dynamicB && !isWorldEndpoint(joint.bodyB)) ||
+        joint.linearMotion != 0u || joint.angularMotion != 0x2u ||
+        joint.driveFlags != 0u || joint.driveAccelerationFlags != 0u ||
+        joint.coneAngleLimit > 0.0f)
+      return RevoluteMotorVelocityOwner();
+
+    const uint32_t dynamicIndex = dynamicA ? joint.bodyA : joint.bodyB;
+    const Vec3 &dynamicAnchor = dynamicA ? joint.anchorA : joint.anchorB;
+    if (dynamicAnchor.length2() > 1e-8f ||
+        (dynamicIndex != gear.bodyA && dynamicIndex != gear.bodyB))
+      return RevoluteMotorVelocityOwner();
+    if (dynamicIndex == gear.bodyA) {
+      if (ownsGearBodyA)
+        return RevoluteMotorVelocityOwner();
+      ownsGearBodyA = true;
+    } else {
+      if (ownsGearBodyB)
+        return RevoluteMotorVelocityOwner();
+      ownsGearBodyB = true;
+    }
+
+    const Vec3 hingeAxis =
+        (dynamicA ? joint.localFrameA : joint.localFrameB)
+            .rotate(Vec3(1.0f, 0.0f, 0.0f))
+            .normalized();
+    const Vec3 gearAxis =
+        (dynamicIndex == gear.bodyA ? gear.axisA : gear.axisB).normalized();
+    const Vec3 worldAxis =
+        bodies[dynamicIndex].rotation.rotate(gearAxis).normalized();
+    if (std::fabs(hingeAxis.dot(gearAxis)) < 0.9999f ||
+        !hasPrincipalAngularResponse(bodies[dynamicIndex], worldAxis))
+      return RevoluteMotorVelocityOwner();
+
+    if (joint.motorEnabled) {
+      if (owner.motorJointIndex != UINT32_MAX ||
+          !isStrictRevoluteMotorRow(joint) || joint.motorFreeSpin ||
+          std::fabs(joint.motorGearRatio - 1.0f) > 1e-6f)
+        return RevoluteMotorVelocityOwner();
+      owner.motorJointIndex = i;
+    }
+  }
+  if (!ownsGearBodyA || !ownsGearBodyB ||
+      owner.motorJointIndex == UINT32_MAX)
+    return RevoluteMotorVelocityOwner();
+  owner.kind = RevoluteMotorVelocityOwnerKind::CenteredGear;
+  return owner;
+}
+
+bool solveNativeMotorDense6(const float response[6][6],
+                            const float rhs[6],
+                            bool motorImpulseClamped,
+                            float clampedMotorImpulse,
+                            float solution[6]) {
+  float augmented[6][7] = {};
+  for (int row = 0; row < 6; ++row) {
+    for (int column = 0; column < 6; ++column)
+      augmented[row][column] = response[row][column];
+    augmented[row][6] = rhs[row];
+  }
+  if (motorImpulseClamped) {
+    for (int row = 0; row < 6; ++row) {
+      if (row == 3)
+        continue;
+      augmented[row][6] -=
+          augmented[row][3] * clampedMotorImpulse;
+      augmented[row][3] = 0.0f;
+    }
+    for (int column = 0; column < 7; ++column)
+      augmented[3][column] = 0.0f;
+    augmented[3][3] = 1.0f;
+    augmented[3][6] = clampedMotorImpulse;
+  }
+
+  for (int column = 0; column < 6; ++column) {
+    int pivot = column;
+    float pivotMagnitude =
+        std::fabs(augmented[column][column]);
+    for (int row = column + 1; row < 6; ++row) {
+      const float candidate =
+          std::fabs(augmented[row][column]);
+      if (candidate > pivotMagnitude) {
+        pivot = row;
+        pivotMagnitude = candidate;
+      }
+    }
+    if (!std::isfinite(pivotMagnitude) ||
+        pivotMagnitude <= 1e-10f)
+      return false;
+    if (pivot != column) {
+      for (int entry = column; entry < 7; ++entry)
+        std::swap(augmented[column][entry],
+                  augmented[pivot][entry]);
+    }
+    const float inversePivot =
+        1.0f / augmented[column][column];
+    for (int entry = column; entry < 7; ++entry)
+      augmented[column][entry] *= inversePivot;
+    for (int row = 0; row < 6; ++row) {
+      if (row == column)
+        continue;
+      const float factor = augmented[row][column];
+      for (int entry = column; entry < 7; ++entry)
+        augmented[row][entry] -=
+            factor * augmented[column][entry];
+    }
+  }
+  for (int row = 0; row < 6; ++row) {
+    solution[row] = augmented[row][6];
+    if (!std::isfinite(solution[row]))
+      return false;
+  }
+  return true;
+}
+
+void projectIsolatedRevoluteMotorVelocity(
+    std::vector<Body> &bodies, const D6Joint &motor, float dt,
+    const RevoluteMotorVelocityOwner &owner) {
+  const bool dynamicA = isDynamicEndpoint(bodies, motor.bodyA);
+  const bool dynamicB = isDynamicEndpoint(bodies, motor.bodyB);
+  const Vec3 worldAxis = getRevoluteMotorWorldAxis(bodies, motor);
+  if (worldAxis.length2() <= 1e-8f)
+    return;
+
+  Vec3 responseA;
+  Vec3 responseB;
+  float unitResponse = 0.0f;
+  float motorVelocity = 0.0f;
+  const float driveRatio = motor.motorGearRatio;
+  if (dynamicA) {
+    responseA = bodies[motor.bodyA].invInertiaWorld * worldAxis;
+    unitResponse += worldAxis.dot(responseA);
+    motorVelocity -=
+        worldAxis.dot(bodies[motor.bodyA].angularVelocity);
+  } else
+    motorVelocity -=
+        worldAxis.dot(motor.motorExternalAngularVelocityA);
+  if (dynamicB) {
+    responseB = bodies[motor.bodyB].invInertiaWorld * worldAxis;
+    unitResponse +=
+        driveRatio * driveRatio * worldAxis.dot(responseB);
+    motorVelocity +=
+        driveRatio *
+        worldAxis.dot(bodies[motor.bodyB].angularVelocity);
+  } else
+    motorVelocity +=
+        driveRatio *
+        worldAxis.dot(motor.motorExternalAngularVelocityB);
+  if (!std::isfinite(unitResponse) || unitResponse <= 1e-10f)
+    return;
+
+  const uint32_t dynamicBodyIndex =
+      dynamicA ? motor.bodyA : motor.bodyB;
+  const Vec3 dynamicAnchor =
+      dynamicA ? motor.anchorA : motor.anchorB;
+  const Quat dynamicFrame =
+      dynamicA ? motor.localFrameA : motor.localFrameB;
+  const Vec3 dynamicLocalAxis =
+      dynamicFrame.rotate(Vec3(1, 0, 0)).normalized();
+  const bool coupledOffCenterResponse =
+      dynamicA != dynamicB && motor.getAngularMotion(0) == 2u &&
+      !motor.motorFreeSpin &&
+      std::fabs(driveRatio - 1.0f) <= 1e-6f &&
+      dynamicLocalAxis.length2() > 1e-8f &&
+      dynamicAnchor.cross(dynamicLocalAxis).length2() > 1e-8f;
+  if (coupledOffCenterResponse) {
+    Body &body = bodies[dynamicBodyIndex];
+    if (!(body.mass > 0.0f))
+      return;
+    const Mat33 inertia = body.invInertiaWorld.inverse();
+    const Vec3 worldLeverArm =
+        body.rotation.rotate(dynamicAnchor);
+    const float motorSign = dynamicA ? -1.0f : 1.0f;
+    const auto computeMotorImpulse =
+        [&](float angularSpeed) -> float {
+      const Vec3 desiredAngular = worldAxis * angularSpeed;
+      const Vec3 desiredLinear =
+          -desiredAngular.cross(worldLeverArm);
+      const Vec3 linearImpulse =
+          (desiredLinear - body.linearVelocity) * body.mass;
+      const Vec3 angularImpulse =
+          inertia * (desiredAngular - body.angularVelocity);
+      const Vec3 anchorTorque =
+          angularImpulse - worldLeverArm.cross(linearImpulse);
+      return motorSign * worldAxis.dot(anchorTorque);
+    };
+    const float zeroSpeedImpulse = computeMotorImpulse(0.0f);
+    const float impulsePerAngularSpeed =
+        computeMotorImpulse(1.0f) - zeroSpeedImpulse;
+    if (!std::isfinite(zeroSpeedImpulse) ||
+        !std::isfinite(impulsePerAngularSpeed) ||
+        impulsePerAngularSpeed <= 1e-10f)
+      return;
+    const float targetAngularSpeed =
+        motorSign * motor.motorTargetVelocity;
+    const float requiredMotorImpulse =
+        zeroSpeedImpulse +
+        impulsePerAngularSpeed * targetAngularSpeed;
+    const float maximumMotorImpulse = motor.motorMaxForce * dt;
+    const float motorImpulse =
+        std::max(-maximumMotorImpulse,
+                 std::min(maximumMotorImpulse,
+                          requiredMotorImpulse));
+    const float ownedAngularSpeed =
+        (motorImpulse - zeroSpeedImpulse) /
+        impulsePerAngularSpeed;
+    const Vec3 candidateAngular =
+        worldAxis * ownedAngularSpeed;
+    const Vec3 candidateLinear =
+        -candidateAngular.cross(worldLeverArm);
+    if (!std::isfinite(candidateAngular.x) ||
+        !std::isfinite(candidateAngular.y) ||
+        !std::isfinite(candidateAngular.z) ||
+        !std::isfinite(candidateLinear.x) ||
+        !std::isfinite(candidateLinear.y) ||
+        !std::isfinite(candidateLinear.z) ||
+        candidateAngular.length() > body.maxAngularVelocity ||
+        candidateLinear.length() > body.maxLinearVelocity)
+      return;
+    body.angularVelocity = candidateAngular;
+    body.linearVelocity = candidateLinear;
+    return;
+  }
+
+  const Vec3 dynamicResponse = dynamicA ? responseA : responseB;
+  const bool coupledOffPrincipalResponse =
+      dynamicA != dynamicB && motor.getAngularMotion(0) == 2u &&
+      !motor.motorFreeSpin &&
+      std::fabs(driveRatio - 1.0f) <= 1e-6f &&
+      dynamicResponse.cross(worldAxis).length() >
+          std::max(dynamicResponse.length(), 1e-8f) * 1e-4f;
+  if (coupledOffPrincipalResponse) {
+    Body &body = bodies[dynamicA ? motor.bodyA : motor.bodyB];
+    const float motorSign = dynamicA ? -1.0f : 1.0f;
+    const Vec3 motorJ = worldAxis * motorSign;
+    const Vec3 referenceAxis =
+        std::fabs(worldAxis.x) < 0.8f ? Vec3(1, 0, 0)
+                                     : Vec3(0, 1, 0);
+    const Vec3 swingJ0 =
+        worldAxis.cross(referenceAxis).normalized();
+    const Vec3 swingJ1 =
+        worldAxis.cross(swingJ0).normalized();
+    if (swingJ0.length2() <= 1e-8f ||
+        swingJ1.length2() <= 1e-8f)
+      return;
+
+    const Vec3 jacobian[3] = {motorJ, swingJ0, swingJ1};
+    const Vec3 response[3] = {
+        body.invInertiaWorld * motorJ,
+        body.invInertiaWorld * swingJ0,
+        body.invInertiaWorld * swingJ1};
+    Mat33 responseMatrix;
+    for (int row = 0; row < 3; ++row)
+      for (int column = 0; column < 3; ++column)
+        responseMatrix.m[row][column] =
+            jacobian[row].dot(response[column]);
+    const float determinant =
+        responseMatrix.m[0][0] *
+            (responseMatrix.m[1][1] * responseMatrix.m[2][2] -
+             responseMatrix.m[1][2] * responseMatrix.m[2][1]) -
+        responseMatrix.m[0][1] *
+            (responseMatrix.m[1][0] * responseMatrix.m[2][2] -
+             responseMatrix.m[1][2] * responseMatrix.m[2][0]) +
+        responseMatrix.m[0][2] *
+            (responseMatrix.m[1][0] * responseMatrix.m[2][1] -
+             responseMatrix.m[1][1] * responseMatrix.m[2][0]);
+    if (!std::isfinite(determinant) ||
+        std::fabs(determinant) <= 1e-12f)
+      return;
+
+    const Vec3 rhs(
+        motor.motorTargetVelocity -
+            motorJ.dot(body.angularVelocity),
+        -swingJ0.dot(body.angularVelocity),
+        -swingJ1.dot(body.angularVelocity));
+    Vec3 impulse = responseMatrix.inverse() * rhs;
+    const float maximumMotorImpulse = motor.motorMaxForce * dt;
+    const float clampedMotorImpulse =
+        std::max(-maximumMotorImpulse,
+                 std::min(maximumMotorImpulse, impulse.x));
+    if (clampedMotorImpulse != impulse.x) {
+      const float k11 = jacobian[1].dot(response[1]);
+      const float k12 = jacobian[1].dot(response[2]);
+      const float k22 = jacobian[2].dot(response[2]);
+      const float swingDeterminant = k11 * k22 - k12 * k12;
+      if (!std::isfinite(swingDeterminant) ||
+          std::fabs(swingDeterminant) <= 1e-12f)
+        return;
+      const float swingRhs0 =
+          rhs.y - jacobian[1].dot(response[0]) *
+                      clampedMotorImpulse;
+      const float swingRhs1 =
+          rhs.z - jacobian[2].dot(response[0]) *
+                      clampedMotorImpulse;
+      impulse.y =
+          (swingRhs0 * k22 - swingRhs1 * k12) /
+          swingDeterminant;
+      impulse.z =
+          (k11 * swingRhs1 - k12 * swingRhs0) /
+          swingDeterminant;
+      impulse.x = clampedMotorImpulse;
+    }
+    const Vec3 candidate =
+        body.angularVelocity + response[0] * impulse.x +
+        response[1] * impulse.y + response[2] * impulse.z;
+    if (!std::isfinite(candidate.x) ||
+        !std::isfinite(candidate.y) ||
+        !std::isfinite(candidate.z) ||
+        candidate.length() > body.maxAngularVelocity)
+      return;
+    body.angularVelocity = candidate;
+    return;
+  }
+
+  const bool coupledDynamicPairOffPrincipalResponse =
+      dynamicA && dynamicB && motor.getAngularMotion(0) == 2u &&
+      !motor.motorFreeSpin &&
+      std::fabs(driveRatio - 1.0f) <= 1e-6f &&
+      motor.anchorA.length2() <= 1e-8f &&
+      motor.anchorB.length2() <= 1e-8f &&
+      (responseA.cross(worldAxis).length() >
+           std::max(responseA.length(), 1e-8f) * 1e-4f ||
+       responseB.cross(worldAxis).length() >
+           std::max(responseB.length(), 1e-8f) * 1e-4f);
+  if (coupledDynamicPairOffPrincipalResponse) {
+    Body &bodyA = bodies[motor.bodyA];
+    Body &bodyB = bodies[motor.bodyB];
+    const Vec3 referenceAxis =
+        std::fabs(worldAxis.x) < 0.8f ? Vec3(1, 0, 0)
+                                     : Vec3(0, 1, 0);
+    const Vec3 swingJ0 =
+        worldAxis.cross(referenceAxis).normalized();
+    const Vec3 swingJ1 =
+        worldAxis.cross(swingJ0).normalized();
+    if (swingJ0.length2() <= 1e-8f ||
+        swingJ1.length2() <= 1e-8f)
+      return;
+
+    const Vec3 jacobian[3] = {worldAxis, swingJ0, swingJ1};
+    Vec3 responseA3[3];
+    Vec3 responseB3[3];
+    Mat33 responseMatrix;
+    for (int row = 0; row < 3; ++row) {
+      responseA3[row] = bodyA.invInertiaWorld * jacobian[row];
+      responseB3[row] = bodyB.invInertiaWorld * jacobian[row];
+    }
+    for (int row = 0; row < 3; ++row)
+      for (int column = 0; column < 3; ++column)
+        responseMatrix.m[row][column] =
+            jacobian[row].dot(responseA3[column] +
+                              responseB3[column]);
+    const float determinant =
+        responseMatrix.m[0][0] *
+            (responseMatrix.m[1][1] * responseMatrix.m[2][2] -
+             responseMatrix.m[1][2] * responseMatrix.m[2][1]) -
+        responseMatrix.m[0][1] *
+            (responseMatrix.m[1][0] * responseMatrix.m[2][2] -
+             responseMatrix.m[1][2] * responseMatrix.m[2][0]) +
+        responseMatrix.m[0][2] *
+            (responseMatrix.m[1][0] * responseMatrix.m[2][1] -
+             responseMatrix.m[1][1] * responseMatrix.m[2][0]);
+    if (!std::isfinite(determinant) ||
+        std::fabs(determinant) <= 1e-12f)
+      return;
+
+    const Vec3 relativeAngular =
+        bodyB.angularVelocity - bodyA.angularVelocity;
+    const Vec3 rhs(
+        motor.motorTargetVelocity -
+            jacobian[0].dot(relativeAngular),
+        -jacobian[1].dot(relativeAngular),
+        -jacobian[2].dot(relativeAngular));
+    Vec3 impulse = responseMatrix.inverse() * rhs;
+    const float maximumMotorImpulse = motor.motorMaxForce * dt;
+    const float clampedMotorImpulse =
+        std::max(-maximumMotorImpulse,
+                 std::min(maximumMotorImpulse, impulse.x));
+    if (clampedMotorImpulse != impulse.x) {
+      const float k11 =
+          jacobian[1].dot(responseA3[1] + responseB3[1]);
+      const float k12 =
+          jacobian[1].dot(responseA3[2] + responseB3[2]);
+      const float k22 =
+          jacobian[2].dot(responseA3[2] + responseB3[2]);
+      const float swingDeterminant = k11 * k22 - k12 * k12;
+      if (!std::isfinite(swingDeterminant) ||
+          std::fabs(swingDeterminant) <= 1e-12f)
+        return;
+      const float swingRhs0 =
+          rhs.y - jacobian[1].dot(responseA3[0] +
+                                  responseB3[0]) *
+                      clampedMotorImpulse;
+      const float swingRhs1 =
+          rhs.z - jacobian[2].dot(responseA3[0] +
+                                  responseB3[0]) *
+                      clampedMotorImpulse;
+      impulse.y =
+          (swingRhs0 * k22 - swingRhs1 * k12) /
+          swingDeterminant;
+      impulse.z =
+          (k11 * swingRhs1 - k12 * swingRhs0) /
+          swingDeterminant;
+      impulse.x = clampedMotorImpulse;
+    }
+    Vec3 candidateA =
+        bodyA.angularVelocity - responseA3[0] * impulse.x -
+        responseA3[1] * impulse.y -
+        responseA3[2] * impulse.z;
+    Vec3 candidateB =
+        bodyB.angularVelocity + responseB3[0] * impulse.x +
+        responseB3[1] * impulse.y +
+        responseB3[2] * impulse.z;
+    if (owner.conserveDynamicPairAngularMomentumVector) {
+      const Mat33 inertiaA = bodyA.invInertiaWorld.inverse();
+      const Mat33 inertiaB = bodyB.invInertiaWorld.inverse();
+      Mat33 inertiaSum;
+      for (int row = 0; row < 3; ++row)
+        for (int column = 0; column < 3; ++column)
+          inertiaSum.m[row][column] =
+              inertiaA.m[row][column] +
+              inertiaB.m[row][column];
+      const Vec3 currentAngularMomentum =
+          inertiaA * candidateA + inertiaB * candidateB;
+      const Vec3 commonAngularVelocity =
+          inertiaSum.inverse() *
+          (owner.expectedDynamicPairAngularMomentumVector -
+           currentAngularMomentum);
+      candidateA += commonAngularVelocity;
+      candidateB += commonAngularVelocity;
+    }
+    if (!std::isfinite(candidateA.x) ||
+        !std::isfinite(candidateA.y) ||
+        !std::isfinite(candidateA.z) ||
+        !std::isfinite(candidateB.x) ||
+        !std::isfinite(candidateB.y) ||
+        !std::isfinite(candidateB.z) ||
+        candidateA.length() > bodyA.maxAngularVelocity ||
+        candidateB.length() > bodyB.maxAngularVelocity)
+      return;
+    bodyA.angularVelocity = candidateA;
+    bodyB.angularVelocity = candidateB;
+    return;
+  }
+
+  const Vec3 localAxisA =
+      motor.localFrameA.rotate(Vec3(1, 0, 0));
+  const Vec3 localAxisB =
+      motor.localFrameB.rotate(Vec3(1, 0, 0));
+  const bool coupledDynamicPairOffCenterResponse =
+      dynamicA && dynamicB && motor.getAngularMotion(0) == 2u &&
+      !motor.motorFreeSpin &&
+      std::fabs(driveRatio - 1.0f) <= 1e-6f &&
+      (motor.anchorA.cross(localAxisA).length2() > 1e-8f ||
+       motor.anchorB.cross(localAxisB).length2() > 1e-8f);
+  if (coupledDynamicPairOffCenterResponse) {
+    Body &bodyA = bodies[motor.bodyA];
+    Body &bodyB = bodies[motor.bodyB];
+    if (!(bodyA.mass > 0.0f) || !(bodyB.mass > 0.0f))
+      return;
+    const float invMassA = 1.0f / bodyA.mass;
+    const float invMassB = 1.0f / bodyB.mass;
+    const Vec3 rA = bodyA.rotation.rotate(motor.anchorA);
+    const Vec3 rB = bodyB.rotation.rotate(motor.anchorB);
+    const Vec3 referenceAxis =
+        std::fabs(worldAxis.x) < 0.8f ? Vec3(1, 0, 0)
+                                     : Vec3(0, 1, 0);
+    const Vec3 swingAxis0 =
+        worldAxis.cross(referenceAxis).normalized();
+    const Vec3 swingAxis1 =
+        worldAxis.cross(swingAxis0).normalized();
+    if (swingAxis0.length2() <= 1e-8f ||
+        swingAxis1.length2() <= 1e-8f)
+      return;
+
+    const Vec3 worldAxes[3] = {
+        Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1)};
+    const Vec3 angularAxes[3] = {
+        worldAxis, swingAxis0, swingAxis1};
+    Vec3 linearJacobianA[6];
+    Vec3 angularJacobianA[6];
+    Vec3 linearJacobianB[6];
+    Vec3 angularJacobianB[6];
+    for (int row = 0; row < 3; ++row) {
+      linearJacobianA[row] = worldAxes[row];
+      angularJacobianA[row] = rA.cross(worldAxes[row]);
+      linearJacobianB[row] = -worldAxes[row];
+      angularJacobianB[row] = -rB.cross(worldAxes[row]);
+      linearJacobianA[3 + row] = Vec3();
+      angularJacobianA[3 + row] = angularAxes[row];
+      linearJacobianB[3 + row] = Vec3();
+      angularJacobianB[3 + row] = -angularAxes[row];
+    }
+
+    float rhs[6] = {};
+    float responseMatrix[6][6] = {};
+    for (int row = 0; row < 6; ++row) {
+      const float current =
+          linearJacobianA[row].dot(bodyA.linearVelocity) +
+          angularJacobianA[row].dot(bodyA.angularVelocity) +
+          linearJacobianB[row].dot(bodyB.linearVelocity) +
+          angularJacobianB[row].dot(bodyB.angularVelocity);
+      const float target =
+          row == 3 ? -motor.motorTargetVelocity : 0.0f;
+      rhs[row] = target - current;
+      for (int column = 0; column < 6; ++column) {
+        const Vec3 linearResponseA =
+            linearJacobianA[column] * invMassA;
+        const Vec3 angularResponseA =
+            bodyA.invInertiaWorld *
+            angularJacobianA[column];
+        const Vec3 linearResponseB =
+            linearJacobianB[column] * invMassB;
+        const Vec3 angularResponseB =
+            bodyB.invInertiaWorld *
+            angularJacobianB[column];
+        responseMatrix[row][column] =
+            linearJacobianA[row].dot(linearResponseA) +
+            angularJacobianA[row].dot(angularResponseA) +
+            linearJacobianB[row].dot(linearResponseB) +
+            angularJacobianB[row].dot(angularResponseB);
+      }
+    }
+
+    float impulse[6] = {};
+    if (!solveNativeMotorDense6(
+            responseMatrix, rhs, false, 0.0f, impulse))
+      return;
+    const float maximumMotorImpulse =
+        motor.motorMaxForce * dt;
+    const float clampedMotorImpulse =
+        std::max(-maximumMotorImpulse,
+                 std::min(maximumMotorImpulse, impulse[3]));
+    if (clampedMotorImpulse != impulse[3] &&
+        !solveNativeMotorDense6(
+            responseMatrix, rhs, true,
+            clampedMotorImpulse, impulse))
+      return;
+
+    Vec3 linearImpulseA;
+    Vec3 angularImpulseA;
+    Vec3 linearImpulseB;
+    Vec3 angularImpulseB;
+    for (int row = 0; row < 6; ++row) {
+      linearImpulseA += linearJacobianA[row] * impulse[row];
+      angularImpulseA += angularJacobianA[row] * impulse[row];
+      linearImpulseB += linearJacobianB[row] * impulse[row];
+      angularImpulseB += angularJacobianB[row] * impulse[row];
+    }
+    Vec3 candidateLinearA =
+        bodyA.linearVelocity + linearImpulseA * invMassA;
+    Vec3 candidateAngularA =
+        bodyA.angularVelocity +
+        bodyA.invInertiaWorld * angularImpulseA;
+    Vec3 candidateLinearB =
+        bodyB.linearVelocity + linearImpulseB * invMassB;
+    Vec3 candidateAngularB =
+        bodyB.angularVelocity +
+        bodyB.invInertiaWorld * angularImpulseB;
+
+    if (owner.conserveDynamicPairSpatialMomentum &&
+        owner.conserveDynamicPairLinearMomentum) {
+      const Mat33 inertiaA = bodyA.invInertiaWorld.inverse();
+      const Mat33 inertiaB = bodyB.invInertiaWorld.inverse();
+      const Vec3 currentLinearMomentum =
+          candidateLinearA * bodyA.mass +
+          candidateLinearB * bodyB.mass;
+      const Vec3 currentAngularMomentum =
+          bodyA.position.cross(candidateLinearA * bodyA.mass) +
+          inertiaA * candidateAngularA +
+          bodyB.position.cross(candidateLinearB * bodyB.mass) +
+          inertiaB * candidateAngularB;
+      if (!std::isfinite(currentLinearMomentum.x) ||
+          !std::isfinite(currentLinearMomentum.y) ||
+          !std::isfinite(currentLinearMomentum.z) ||
+          !std::isfinite(currentAngularMomentum.x) ||
+          !std::isfinite(currentAngularMomentum.y) ||
+          !std::isfinite(currentAngularMomentum.z))
+        return;
+
+      float spatialResponse[6][6] = {};
+      const Vec3 basis[3] = {
+          Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1)};
+      for (int column = 0; column < 6; ++column) {
+        const Vec3 commonLinear =
+            column < 3 ? basis[column] : Vec3();
+        const Vec3 commonAngular =
+            column < 3 ? Vec3() : basis[column - 3];
+        const Vec3 deltaLinearA =
+            commonLinear +
+            commonAngular.cross(bodyA.position);
+        const Vec3 deltaLinearB =
+            commonLinear +
+            commonAngular.cross(bodyB.position);
+        const Vec3 deltaLinearMomentum =
+            deltaLinearA * bodyA.mass +
+            deltaLinearB * bodyB.mass;
+        const Vec3 deltaAngularMomentum =
+            bodyA.position.cross(deltaLinearA * bodyA.mass) +
+            inertiaA * commonAngular +
+            bodyB.position.cross(deltaLinearB * bodyB.mass) +
+            inertiaB * commonAngular;
+        spatialResponse[0][column] = deltaLinearMomentum.x;
+        spatialResponse[1][column] = deltaLinearMomentum.y;
+        spatialResponse[2][column] = deltaLinearMomentum.z;
+        spatialResponse[3][column] = deltaAngularMomentum.x;
+        spatialResponse[4][column] = deltaAngularMomentum.y;
+        spatialResponse[5][column] = deltaAngularMomentum.z;
+      }
+      const Vec3 linearMomentumDelta =
+          owner.expectedDynamicPairLinearMomentum -
+          currentLinearMomentum;
+      const Vec3 angularMomentumDelta =
+          owner.expectedDynamicPairSpatialAngularMomentum -
+          currentAngularMomentum;
+      const float spatialRhs[6] = {
+          linearMomentumDelta.x,
+          linearMomentumDelta.y,
+          linearMomentumDelta.z,
+          angularMomentumDelta.x,
+          angularMomentumDelta.y,
+          angularMomentumDelta.z};
+      float spatialCorrection[6] = {};
+      if (!solveNativeMotorDense6(
+              spatialResponse, spatialRhs, false, 0.0f,
+              spatialCorrection))
+        return;
+      const Vec3 commonLinearVelocity(
+          spatialCorrection[0], spatialCorrection[1],
+          spatialCorrection[2]);
+      const Vec3 commonAngularVelocity(
+          spatialCorrection[3], spatialCorrection[4],
+          spatialCorrection[5]);
+      candidateLinearA +=
+          commonLinearVelocity +
+          commonAngularVelocity.cross(bodyA.position);
+      candidateLinearB +=
+          commonLinearVelocity +
+          commonAngularVelocity.cross(bodyB.position);
+      candidateAngularA += commonAngularVelocity;
+      candidateAngularB += commonAngularVelocity;
+    } else if (owner.conserveDynamicPairLinearMomentum) {
+      const float totalMass = bodyA.mass + bodyB.mass;
+      const Vec3 currentLinearMomentum =
+          candidateLinearA * bodyA.mass +
+          candidateLinearB * bodyB.mass;
+      if (!std::isfinite(totalMass) || totalMass <= 1e-10f ||
+          !std::isfinite(currentLinearMomentum.x) ||
+          !std::isfinite(currentLinearMomentum.y) ||
+          !std::isfinite(currentLinearMomentum.z))
+        return;
+      const Vec3 correction =
+          (owner.expectedDynamicPairLinearMomentum -
+           currentLinearMomentum) *
+          (1.0f / totalMass);
+      candidateLinearA += correction;
+      candidateLinearB += correction;
+    }
+
+    if (!std::isfinite(candidateLinearA.x) ||
+        !std::isfinite(candidateLinearA.y) ||
+        !std::isfinite(candidateLinearA.z) ||
+        !std::isfinite(candidateAngularA.x) ||
+        !std::isfinite(candidateAngularA.y) ||
+        !std::isfinite(candidateAngularA.z) ||
+        !std::isfinite(candidateLinearB.x) ||
+        !std::isfinite(candidateLinearB.y) ||
+        !std::isfinite(candidateLinearB.z) ||
+        !std::isfinite(candidateAngularB.x) ||
+        !std::isfinite(candidateAngularB.y) ||
+        !std::isfinite(candidateAngularB.z) ||
+        candidateLinearA.length() > bodyA.maxLinearVelocity ||
+        candidateAngularA.length() > bodyA.maxAngularVelocity ||
+        candidateLinearB.length() > bodyB.maxLinearVelocity ||
+        candidateAngularB.length() > bodyB.maxAngularVelocity)
+      return;
+    bodyA.linearVelocity = candidateLinearA;
+    bodyA.angularVelocity = candidateAngularA;
+    bodyB.linearVelocity = candidateLinearB;
+    bodyB.angularVelocity = candidateAngularB;
+    return;
+  }
+
+  const float motorBaseVelocity =
+      motor.motorFreeSpin && owner.useSolveStartRelativeVelocity
+          ? owner.solveStartRelativeVelocity
+          : motorVelocity;
+  const float requiredMotorImpulse =
+      (motor.motorTargetVelocity - motorBaseVelocity) / unitResponse;
+  const float maximumImpulse = motor.motorMaxForce * dt;
+  float minimumMotorImpulse = -maximumImpulse;
+  float maximumMotorImpulse = maximumImpulse;
+  if (motor.motorFreeSpin && motor.motorTargetVelocity > 0.0f)
+    minimumMotorImpulse = 0.0f;
+  else if (motor.motorFreeSpin && motor.motorTargetVelocity < 0.0f)
+    maximumMotorImpulse = 0.0f;
+  const float motorImpulse =
+      std::max(minimumMotorImpulse,
+               std::min(maximumMotorImpulse, requiredMotorImpulse));
+  const float motorOwnedVelocity =
+      motorBaseVelocity + unitResponse * motorImpulse;
+  float impulse =
+      (motorOwnedVelocity - motorVelocity) / unitResponse;
+  if (motor.getAngularMotion(0) == 1u) {
+    const Quat rotationA =
+        dynamicA ? bodies[motor.bodyA].rotation : Quat();
+    const Quat rotationB =
+        dynamicB ? bodies[motor.bodyB].rotation : Quat();
+    const float angle = motor.computeHingeAngle(rotationA, rotationB);
+    const float limitSpan =
+        motor.angularLimitUpper[0] - motor.angularLimitLower[0];
+    const float activeTolerance =
+        std::max(1e-5f, std::fabs(limitSpan) * 1e-5f);
+    const float motorOnlyVelocity =
+        motorVelocity + unitResponse * impulse;
+    const float predictedAngle = angle + motorOnlyVelocity * dt;
+    const bool atLower =
+        angle <= motor.angularLimitLower[0] + activeTolerance ||
+        predictedAngle <= motor.angularLimitLower[0];
+    const bool atUpper =
+        angle >= motor.angularLimitUpper[0] - activeTolerance ||
+        predictedAngle >= motor.angularLimitUpper[0];
+    // The public hinge angle derivative is axis dot (wB - wA). Apply the
+    // bounded motor first, then add only the unilateral limit impulse needed
+    // to remove an outward derivative at a current or one-step prospective
+    // active bound.
+    if ((atLower && motorOnlyVelocity < 0.0f) ||
+        (atUpper && motorOnlyVelocity > 0.0f))
+      impulse = -motorVelocity / unitResponse;
+  }
+  if (!std::isfinite(impulse))
+    return;
+
+  Vec3 candidateA =
+      dynamicA ? bodies[motor.bodyA].angularVelocity - responseA * impulse
+               : Vec3();
+  Vec3 candidateB =
+      dynamicB ? bodies[motor.bodyB].angularVelocity +
+                     responseB * (driveRatio * impulse)
+               : Vec3();
+  if (owner.conserveDynamicPairAngularMomentum && dynamicA && dynamicB) {
+    const Mat33 inertiaA = bodies[motor.bodyA].invInertiaWorld.inverse();
+    const Mat33 inertiaB = bodies[motor.bodyB].invInertiaWorld.inverse();
+    const float inertiaSum =
+        driveRatio * driveRatio *
+            worldAxis.dot(inertiaA * worldAxis) +
+        worldAxis.dot(inertiaB * worldAxis);
+    const float currentMomentum =
+        worldAxis.dot(
+            (inertiaA * candidateA) * driveRatio +
+            inertiaB * candidateB);
+    if (!std::isfinite(inertiaSum) || !std::isfinite(currentMomentum) ||
+        inertiaSum <= 1e-10f)
+      return;
+    const float commonVelocity =
+        (owner.expectedDynamicPairAngularMomentum - currentMomentum) /
+        inertiaSum;
+    if (!std::isfinite(commonVelocity))
+      return;
+    candidateA += worldAxis * (driveRatio * commonVelocity);
+    candidateB += worldAxis * commonVelocity;
+  }
+  if ((dynamicA &&
+       candidateA.length() > bodies[motor.bodyA].maxAngularVelocity) ||
+      (dynamicB &&
+       candidateB.length() > bodies[motor.bodyB].maxAngularVelocity))
+    return;
+  if (dynamicA)
+    bodies[motor.bodyA].angularVelocity = candidateA;
+  if (dynamicB)
+    bodies[motor.bodyB].angularVelocity = candidateB;
+}
+
+void projectCenteredRevoluteMotorGearVelocity(
+    std::vector<Body> &bodies, const D6Joint &motor,
+    const GearJoint &gear, float dt) {
+  const bool dynamicA = isDynamicEndpoint(bodies, motor.bodyA);
+  const bool dynamicB = isDynamicEndpoint(bodies, motor.bodyB);
+  if (dynamicA == dynamicB)
+    return;
+  const uint32_t motorBodyIndex = dynamicA ? motor.bodyA : motor.bodyB;
+  if (gear.bodyA >= bodies.size() || gear.bodyB >= bodies.size() ||
+      (motorBodyIndex != gear.bodyA && motorBodyIndex != gear.bodyB))
+    return;
+
+  Body &bodyA = bodies[gear.bodyA];
+  Body &bodyB = bodies[gear.bodyB];
+  Body &motorBody = bodies[motorBodyIndex];
+  const Vec3 axisA = bodyA.rotation.rotate(gear.axisA).normalized();
+  const Vec3 axisB = bodyB.rotation.rotate(gear.axisB).normalized();
+  const Vec3 motorAxis = getRevoluteMotorWorldAxis(bodies, motor);
+  if (axisA.length2() <= 1e-8f || axisB.length2() <= 1e-8f ||
+      motorAxis.length2() <= 1e-8f)
+    return;
+
+  const float motorSign = dynamicA ? -1.0f : 1.0f;
+  const Vec3 motorJ = motorAxis * motorSign;
+  const Vec3 gearJA = axisA * gear.gearRatio;
+  const Vec3 gearJB = axisB;
+  const Vec3 motorResponse = motorBody.invInertiaWorld * motorJ;
+  const Vec3 gearResponseA = bodyA.invInertiaWorld * gearJA;
+  const Vec3 gearResponseB = bodyB.invInertiaWorld * gearJB;
+  const float kMM = motorJ.dot(motorResponse);
+  const float kGG =
+      gearJA.dot(gearResponseA) + gearJB.dot(gearResponseB);
+  const float kMG =
+      motorBodyIndex == gear.bodyA ? motorJ.dot(gearResponseA)
+                                   : motorJ.dot(gearResponseB);
+  const float determinant = kMM * kGG - kMG * kMG;
+  if (!std::isfinite(determinant) || kMM <= 1e-10f ||
+      kGG <= 1e-10f || determinant <= 1e-12f)
+    return;
+
+  const float motorRhs =
+      motor.motorTargetVelocity -
+      motorJ.dot(motorBody.angularVelocity);
+  const float gearRhs =
+      -(gearJA.dot(bodyA.angularVelocity) +
+        gearJB.dot(bodyB.angularVelocity));
+  const float unconstrainedMotorImpulse =
+      (motorRhs * kGG - gearRhs * kMG) / determinant;
+  const float maximumMotorImpulse = motor.motorMaxForce * dt;
+  const float motorImpulse =
+      std::max(-maximumMotorImpulse,
+               std::min(maximumMotorImpulse,
+                        unconstrainedMotorImpulse));
+  const float gearImpulse =
+      (gearRhs - kMG * motorImpulse) / kGG;
+  if (!std::isfinite(motorImpulse) || !std::isfinite(gearImpulse))
+    return;
+
+  Vec3 candidateA =
+      bodyA.angularVelocity + gearResponseA * gearImpulse;
+  Vec3 candidateB =
+      bodyB.angularVelocity + gearResponseB * gearImpulse;
+  if (motorBodyIndex == gear.bodyA)
+    candidateA += motorResponse * motorImpulse;
+  else
+    candidateB += motorResponse * motorImpulse;
+  if (candidateA.length() > bodyA.maxAngularVelocity ||
+      candidateB.length() > bodyB.maxAngularVelocity)
+    return;
+  bodyA.angularVelocity = candidateA;
+  bodyB.angularVelocity = candidateB;
+}
 }
 
 void setContactIslandPcgSuiteProbeEnabled(bool enabled) {
@@ -22,6 +1161,83 @@ void setContactIslandPcgSuiteProbeEnabled(bool enabled) {
 
 bool isContactIslandPcgSuiteProbeEnabled() {
   return gContactIslandPcgSuiteProbeEnabled;
+}
+
+bool restoreTwoBodySupportAxisAngularMomentum(
+    Body &bodyA, Body &bodyB, const Vec3 &supportNormal,
+    float expectedAxisAngularMomentum) {
+  if (!(bodyA.mass > 0.0f) || !(bodyB.mass > 0.0f) ||
+      !std::isfinite(bodyA.mass) || !std::isfinite(bodyB.mass) ||
+      !std::isfinite(expectedAxisAngularMomentum))
+    return false;
+
+  const float normalLength = supportNormal.length();
+  if (!(normalLength > 1e-8f) || !std::isfinite(normalLength))
+    return false;
+  const Vec3 axis = supportNormal * (1.0f / normalLength);
+  const float totalMass = bodyA.mass + bodyB.mass;
+  if (!(totalMass > 0.0f) || !std::isfinite(totalMass))
+    return false;
+  const Vec3 centerOfMass =
+      (bodyA.position * bodyA.mass + bodyB.position * bodyB.mass) *
+      (1.0f / totalMass);
+  const Vec3 armA = bodyA.position - centerOfMass;
+  const Vec3 armB = bodyB.position - centerOfMass;
+  const Mat33 inertiaA = bodyA.invInertiaWorld.inverse();
+  const Mat33 inertiaB = bodyB.invInertiaWorld.inverse();
+  const Vec3 currentAngularMomentum =
+      armA.cross(bodyA.linearVelocity * bodyA.mass) +
+      inertiaA * bodyA.angularVelocity +
+      armB.cross(bodyB.linearVelocity * bodyB.mass) +
+      inertiaB * bodyB.angularVelocity;
+  const float currentAxisAngularMomentum =
+      currentAngularMomentum.dot(axis);
+  const Vec3 tangentArmA = axis.cross(armA);
+  const Vec3 tangentArmB = axis.cross(armB);
+  const float axisInertia =
+      bodyA.mass * tangentArmA.length2() +
+      axis.dot(inertiaA * axis) +
+      bodyB.mass * tangentArmB.length2() +
+      axis.dot(inertiaB * axis);
+  if (!(axisInertia > 1e-10f) || !std::isfinite(axisInertia) ||
+      !std::isfinite(currentAxisAngularMomentum))
+    return false;
+
+  const float angularCorrection =
+      (expectedAxisAngularMomentum - currentAxisAngularMomentum) /
+      axisInertia;
+  const Vec3 commonAngularVelocity = axis * angularCorrection;
+  const Vec3 candidateLinearA =
+      bodyA.linearVelocity + commonAngularVelocity.cross(armA);
+  const Vec3 candidateLinearB =
+      bodyB.linearVelocity + commonAngularVelocity.cross(armB);
+  const Vec3 candidateAngularA =
+      bodyA.angularVelocity + commonAngularVelocity;
+  const Vec3 candidateAngularB =
+      bodyB.angularVelocity + commonAngularVelocity;
+  if (!std::isfinite(candidateLinearA.x) ||
+      !std::isfinite(candidateLinearA.y) ||
+      !std::isfinite(candidateLinearA.z) ||
+      !std::isfinite(candidateLinearB.x) ||
+      !std::isfinite(candidateLinearB.y) ||
+      !std::isfinite(candidateLinearB.z) ||
+      !std::isfinite(candidateAngularA.x) ||
+      !std::isfinite(candidateAngularA.y) ||
+      !std::isfinite(candidateAngularA.z) ||
+      !std::isfinite(candidateAngularB.x) ||
+      !std::isfinite(candidateAngularB.y) ||
+      !std::isfinite(candidateAngularB.z) ||
+      candidateLinearA.length() > bodyA.maxLinearVelocity ||
+      candidateLinearB.length() > bodyB.maxLinearVelocity ||
+      candidateAngularA.length() > bodyA.maxAngularVelocity ||
+      candidateAngularB.length() > bodyB.maxAngularVelocity)
+    return false;
+
+  bodyA.linearVelocity = candidateLinearA;
+  bodyA.angularVelocity = candidateAngularA;
+  bodyB.linearVelocity = candidateLinearB;
+  bodyB.angularVelocity = candidateAngularB;
+  return true;
 }
 
 void setCanonicalRigidContactAuthoringSuiteProbeEnabled(bool enabled) {
@@ -203,13 +1419,16 @@ void Solver::setRevoluteJointLimit(uint32_t jointIdx, float lowerLimit,
 }
 
 void Solver::setRevoluteJointDrive(uint32_t jointIdx, float targetVelocity,
-                                   float maxForce) {
+                                   float maxForce, bool freeSpin,
+                                   float gearRatio) {
   if (jointIdx < d6Joints.size()) {
-    // Use post-solve motor (matches PhysX) instead of AL velocity drive.
-    // This avoids ADMM oscillation when coupled with gear constraints.
+    // Native revolute motor targets are consumed only by the strict
+    // post-finalize velocity owner.
     d6Joints[jointIdx].motorEnabled = true;
+    d6Joints[jointIdx].motorFreeSpin = freeSpin;
     d6Joints[jointIdx].motorTargetVelocity = targetVelocity;
     d6Joints[jointIdx].motorMaxForce = maxForce;
+    d6Joints[jointIdx].motorGearRatio = gearRatio;
   }
 }
 
@@ -1708,6 +2927,14 @@ void Solver::step(float dt_) {
   linearDriveIslandLastStats = LinearDriveIslandStats();
   angularDriveIslandLastStats = AngularDriveIslandStats();
 
+  // A native revolute motor owns velocity only.  Classify the complete
+  // supported objective before prediction so a dynamic pair can preserve
+  // its solve-start angular momentum.
+  const RevoluteMotorVelocityOwner revoluteMotorVelocityOwner =
+      classifyRevoluteMotorVelocityOwner(
+          bodies, contacts, d6Joints, gearJoints, articulations,
+          softBodies, softContacts, softParticles);
+
   if (useContactIslandPcgProbe) {
     for (Contact &contact : contacts)
       canonicalizeSharedContactOrientation(contact, bodies);
@@ -2875,88 +4102,6 @@ void Solver::step(float dt_) {
   if (!routeContactIslandPcg)
     applyLowIslandDynDynFrictionSweeps(2);
 
-  // =========================================================================
-  // Post-solve motor drives (matches PhysX Stage 5b)
-  //
-  // After all constraint iterations converge, directly apply clamped torque
-  // to bodies. This avoids coupling the motor with position/gear constraints
-  // in the Hessian which causes ADMM oscillation.
-  // =========================================================================
-  for (auto &jnt : d6Joints) {
-    if (!jnt.motorEnabled || jnt.motorMaxForce <= 0.0f)
-      continue;
-
-    bool isAStatic = (jnt.bodyA == UINT32_MAX || jnt.bodyA >= (uint32_t)bodies.size());
-    bool isBStatic = (jnt.bodyB == UINT32_MAX || jnt.bodyB >= (uint32_t)bodies.size());
-    if (isAStatic && isBStatic)
-      continue;
-
-    // Twist axis = X-axis of localFrameA in world space
-    Quat rotA_m = isAStatic ? Quat() : bodies[jnt.bodyA].rotation;
-    Vec3 worldAxis = (rotA_m * jnt.localFrameA).rotate(Vec3(1, 0, 0));
-    float axLen = worldAxis.length();
-    if (axLen > 1e-6f) worldAxis = worldAxis * (1.0f / axLen);
-
-    // Apply motor to body B
-    if (!isBStatic) {
-      Body &bodyB = bodies[jnt.bodyB];
-
-      // Current angular velocity from position-level solver
-      Quat deltaQB = bodyB.rotation * bodyB.initialRotation.conjugate();
-      if (deltaQB.w < 0.0f) deltaQB = deltaQB * (-1.0f);
-      Vec3 currentAngVel = Vec3(deltaQB.x, deltaQB.y, deltaQB.z) * (2.0f * invDt);
-      float currentAxisVel = currentAngVel.dot(worldAxis);
-
-      float velocityError = jnt.motorTargetVelocity - currentAxisVel;
-
-      // Effective inertia along twist axis
-      Vec3 invITimesAxis = bodyB.invInertiaWorld * worldAxis;
-      float effectiveInvInertia = worldAxis.dot(invITimesAxis);
-      if (effectiveInvInertia < 1e-10f)
-        continue;
-
-      float effectiveInertia = 1.0f / effectiveInvInertia;
-      float requiredTorque = effectiveInertia * velocityError * invDt;
-      float clampedTorque = std::max(-jnt.motorMaxForce,
-                                     std::min(jnt.motorMaxForce, requiredTorque));
-      float angularAccel = clampedTorque * effectiveInvInertia;
-      float deltaAngle = angularAccel * dt2;
-
-      // Apply rotation to body B (axis-angle -> quaternion)
-      float ha = deltaAngle * 0.5f;
-      float sinHa = sinf(ha), cosHa = cosf(ha);
-      Quat dRot(cosHa, worldAxis.x * sinHa, worldAxis.y * sinHa,
-                worldAxis.z * sinHa);
-      bodyB.rotation = (dRot * bodyB.rotation).normalized();
-    }
-
-    // Apply opposite rotation to body A if dynamic
-    if (!isAStatic) {
-      Body &bodyA = bodies[jnt.bodyA];
-
-      Quat deltaQA = bodyA.rotation * bodyA.initialRotation.conjugate();
-      if (deltaQA.w < 0.0f) deltaQA = deltaQA * (-1.0f);
-      Vec3 currentAngVelA = Vec3(deltaQA.x, deltaQA.y, deltaQA.z) * (2.0f * invDt);
-      float currentAxisVelA = currentAngVelA.dot(worldAxis);
-      float velocityErrorA = -jnt.motorTargetVelocity - currentAxisVelA;
-
-      Vec3 invITimesAxisA = bodyA.invInertiaWorld * worldAxis;
-      float effectiveInvInertiaA = worldAxis.dot(invITimesAxisA);
-      if (effectiveInvInertiaA > 1e-10f) {
-        float effectiveInertiaA = 1.0f / effectiveInvInertiaA;
-        float requiredTorqueA = effectiveInertiaA * velocityErrorA * invDt;
-        float clampedTorqueA = std::max(-jnt.motorMaxForce,
-                                        std::min(jnt.motorMaxForce, requiredTorqueA));
-        float deltaAngleA = clampedTorqueA * effectiveInvInertiaA * dt2;
-        float haA = deltaAngleA * 0.5f;
-        float sinHaA = sinf(haA), cosHaA = cosf(haA);
-        Quat dRotA(cosHaA, worldAxis.x * sinHaA, worldAxis.y * sinHaA,
-                   worldAxis.z * sinHaA);
-        bodyA.rotation = (dRotA * bodyA.rotation).normalized();
-      }
-    }
-  }
-
   // Update velocities
   for (auto &body : bodies) {
     if (body.mass <= 0)
@@ -2990,6 +4135,21 @@ void Solver::step(float dt_) {
   }
 
   projectD6BodyStaticLockedLinearVelocities(bodies, d6Joints);
+
+  if (revoluteMotorVelocityOwner.motorJointIndex < d6Joints.size()) {
+    const D6Joint &motor =
+        d6Joints[revoluteMotorVelocityOwner.motorJointIndex];
+    if (revoluteMotorVelocityOwner.kind ==
+        RevoluteMotorVelocityOwnerKind::Isolated) {
+      projectIsolatedRevoluteMotorVelocity(
+          bodies, motor, dt, revoluteMotorVelocityOwner);
+    } else if (revoluteMotorVelocityOwner.kind ==
+                   RevoluteMotorVelocityOwnerKind::CenteredGear &&
+               gearJoints.size() == 1) {
+      projectCenteredRevoluteMotorGearVelocity(
+          bodies, motor, gearJoints[0], dt);
+    }
+  }
 
   // Update soft particle velocities
   for (auto &sp : softParticles) {

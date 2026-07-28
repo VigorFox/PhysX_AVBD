@@ -193,12 +193,21 @@ struct D6Joint {
 
   float rho; // penalty parameter
 
-  // Post-solve revolute motor (matches PhysX post-solve motor approach).
-  // Used instead of AL velocity drive to avoid ADMM oscillation when
-  // coupled with gear constraints.
+  // Native revolute motor metadata. The motor is a strict post-finalize
+  // velocity owner; it never writes pose. An active twist limit adds a
+  // unilateral velocity derivative to the isolated scalar owner. Free-spin
+  // uses a one-sided impulse bound and preserves a super-target solve-entry
+  // derivative. A complete centered motor+gear topology is solved as a
+  // coupled row set.
   bool motorEnabled;
-  float motorTargetVelocity;
-  float motorMaxForce;
+  bool motorFreeSpin;
+    float motorTargetVelocity;
+    float motorMaxForce;
+    float motorGearRatio;
+    // Prescribed world-space endpoint derivatives for standalone parity with
+    // PhysX kinematic endpoints. Dynamic endpoints must leave these zero.
+    Vec3 motorExternalAngularVelocityA;
+    Vec3 motorExternalAngularVelocityB;
 
   // Revolute-specific: hinge angle measurement helpers
   // (set by addRevoluteJoint, unused by other joint types)
@@ -215,8 +224,12 @@ struct D6Joint {
     relativeRotation = Quat(); // identity
     rho = 1e6f;
     motorEnabled = false;
+    motorFreeSpin = false;
     motorTargetVelocity = 0.0f;
     motorMaxForce = 0.0f;
+    motorGearRatio = 1.0f;
+    motorExternalAngularVelocityA = Vec3();
+    motorExternalAngularVelocityB = Vec3();
   }
 
   uint32_t getLinearMotion(int axis) const {

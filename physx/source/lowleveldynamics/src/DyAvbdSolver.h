@@ -92,10 +92,6 @@ public:
              AvbdColorBatch *colorBatches,
              physx::PxU32 numColors,
              physx::PxU32 iterationOverride,
-             AvbdSoftParticle *kinematicShellParticles,
-             physx::PxU32 numKinematicShellParticles,
-             AvbdSoftContact *kinematicShellContacts,
-             physx::PxU32 numKinematicShellContacts,
              AvbdSolverStats &stats);
 
   /**
@@ -140,9 +136,10 @@ public:
   /**
    * @brief Single island solve entry.
    *
-   * Classifies the batch and runs the shared stage list. Contact-only,
-   * kinematic-shell, and joint/soft islands share post-AL stages; primal
-   * joint rows remain on the joint module path when D6/gear/soft-VBD present.
+   * Classifies the batch and runs the shared stage list. Joint rows and a
+   * complete genuine soft/VBD tuple use the joint/VBD module; contact-only
+   * rows remain on the rigid contact path. Soft data is never synthesized
+   * from NP contacts here.
    */
   void solveIsland(physx::PxReal dt, AvbdSolverBody *bodies,
                    physx::PxU32 numBodies, AvbdContactConstraint *contacts,
@@ -163,7 +160,6 @@ public:
                    physx::PxU32 numSoftBodies,
                    AvbdSoftContact *softContacts,
                    physx::PxU32 numSoftContacts,
-                   bool kinematicShellBatch,
                    AvbdSolverStats &stats);
 
   /**
@@ -216,32 +212,23 @@ private:
                              physx::PxU32 numContacts, physx::PxReal dt,
                              const AvbdBodyConstraintMap *contactMap = nullptr,
                              AvbdColorBatch *colorBatches = nullptr,
-                             physx::PxU32 numColors = 0,
-                             AvbdSoftParticle *kinematicShellParticles = nullptr,
-                             physx::PxU32 numKinematicShellParticles = 0,
-                             AvbdSoftContact *kinematicShellContacts = nullptr,
-                             physx::PxU32 numKinematicShellContacts = 0);
-
-  void updateKinematicShellDual(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                                AvbdSoftContact *shellContacts,
-                                physx::PxU32 numShellContacts);
+                             physx::PxU32 numColors = 0);
 
   /**
-   * @brief Shared contact + kinematic-shell primal rows for one body (Phase 1).
+   * @brief Shared contact primal rows for one body (Phase 1).
    *
    * Body-static contract (both contact and joint local solvers):
-   *   - skip NP deformable normals when shell owns the body
    *   - dominant body-static normal only when contact count > 4
    *   - finalizeBodyVsStaticViolation for deformable anchors
    *   - no multi-contact body-static tangents in aggregated 6x6
-   *   - shell soft rows via avbdAddKinematicShellContactContribution_rigid
+   *   - static-particle soft rows only from a complete genuine soft/VBD tuple
    */
   void accumulateBodyContactRows(
       AvbdSolverBody &body, physx::PxU32 bodyIndex, AvbdSolverBody *bodies,
       physx::PxU32 numBodies, AvbdContactConstraint *contacts,
       physx::PxU32 numContacts, const AvbdBodyConstraintMap *contactMap,
-      AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
-      AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
       physx::PxReal dt, physx::PxReal massInvDt2, AvbdBlock6x6 &A,
       physx::PxVec3 &gLinear, physx::PxVec3 &gAngular,
       physx::PxU32 &numTouching);
@@ -254,11 +241,7 @@ private:
                         physx::PxU32 numBodies, AvbdContactConstraint *contacts,
                         physx::PxU32 numContacts, physx::PxReal dt,
                         physx::PxReal invDt2,
-                        const AvbdBodyConstraintMap *contactMap = nullptr,
-                        AvbdSoftParticle *kinematicShellParticles = nullptr,
-                        physx::PxU32 numKinematicShellParticles = 0,
-                        AvbdSoftContact *kinematicShellContacts = nullptr,
-                        physx::PxU32 numKinematicShellContacts = 0);
+                        const AvbdBodyConstraintMap *contactMap = nullptr);
 
   /**
    * @brief Solve local 6x6 system for a single body with BOTH contacts AND
@@ -320,11 +303,10 @@ private:
    * @brief Sequential (Gauss-Seidel) velocity-level friction for body-vs-static
    *        contacts (rigid plane and deformable-mesh anchors).
    *
-   * The aggregated 6x6 block solve cannot apply per-contact Coulomb friction to
-   * heavily-loaded body-static contacts without ill-conditioning/diverging, so
-   * such tangents are kept out of the block (see useBodyVsStaticFrictionIn6x6).
-   * This decoupled TGS-style pass restores grip via one dominant contact per body.
-   * Deformable anchors on shell-normal bodies are skipped (shell friction pass).
+   * This is the fallback for body-static tangents that are intentionally not
+   * owned by the position-level local system. Rigid-static rows and unsupported
+   * deformable rows use the decoupled projected pass; position-owned deformable
+   * tangents are excluded.
    */
   void applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
                                      physx::PxU32 numBodies,
@@ -335,31 +317,34 @@ private:
                                      physx::PxU32 sweeps,
                                      const physx::PxArray<physx::PxVec3> *velSeedPos,
                                      const physx::PxArray<physx::PxQuat> *velSeedRot,
-                                     const physx::PxArray<bool> *skipForBodies = nullptr);
+                                     const physx::PxArray<bool> *skipForBodies,
+                                     AvbdSolverStats *stats);
 
-  /** Post-pass friction for kinematic-shell AvbdSoftContact rows (island 1c). */
+  /** Post-pass friction for static-particle AvbdSoftContact rows. */
   void applyKinematicShellFrictionSweeps(
       AvbdSolverBody *bodies, physx::PxU32 numBodies,
       AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
       AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
       physx::PxReal dt, physx::PxU32 sweeps,
       const physx::PxArray<physx::PxVec3> *velSeedPos,
-      const physx::PxArray<physx::PxQuat> *velSeedRot);
+      const physx::PxArray<physx::PxQuat> *velSeedRot,
+      AvbdSolverStats *stats);
 
-  /** TGS-style capped normal projection on kinematic-shell soft rows. */
+  /** TGS-style capped normal projection on static-particle soft rows. */
   void applyKinematicShellNormalDepenetrationSweeps(
       AvbdSolverBody *bodies, physx::PxU32 numBodies,
       AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
       AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
-      const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps);
+      const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps,
+      AvbdSolverStats *stats);
 
-  /** e=0 normal clamp for bodies on kinematic shell (mesh-relative when dt>0). */
+  /** e=0 normal clamp for rigid/static-particle soft contacts. */
   void clampKinematicShellInelasticNormalVelocities(
       AvbdSolverBody *bodies, physx::PxU32 numBodies,
       AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
       AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
       const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
-      physx::PxReal dt);
+      physx::PxReal dt, AvbdSolverStats *stats);
 
   /**
    * @brief Gauss-Seidel geometric normal depenetration for body-vs-static.
@@ -372,7 +357,14 @@ private:
       AvbdSolverBody *bodies, physx::PxU32 numBodies,
       AvbdContactConstraint *contacts, physx::PxU32 numContacts,
       const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps,
-      const physx::PxArray<bool> *skipDepenForBodies = nullptr);
+      const physx::PxArray<bool> *skipDepenForBodies,
+      physx::PxArray<physx::PxU8> *deformableNormalStageMask,
+      AvbdSolverStats *stats);
+
+  /** Capture the exact normal-row state consumed by the first AL iteration. */
+  void captureBodyStaticNormalDiagnosticStart(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts);
 
   /**
    * @brief Stage 5: Update velocities from position change
@@ -384,8 +376,9 @@ private:
   /**
    * Shared post-AL stage list (Decision A + depen + e=0 + pose-split velocity).
    * Called from both contact and joint island paths after primal/dual iterations.
-   * Motors (optional) run after friction pose updates, before velocity finalize
-   * when d6Joints is non-null. Soft particle velocity write is optional.
+   * A strict complete velocity owner may suppress the legacy body-static
+   * friction pose sweep and consume those contact derivatives after velocity
+   * reconstruction. Soft particle velocity write is optional.
    */
   void postAlStages(
       physx::PxReal dt, physx::PxReal invDt, AvbdSolverBody *bodies,
@@ -394,13 +387,18 @@ private:
       bool hasBodyStaticContact, bool deformableFastImpactIsland,
       const physx::PxArray<bool> &touchingBodyStatic,
       const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
+      const physx::PxArray<physx::PxVec3> *angularVelAtSolveStart,
+      bool allowRigidDeepPoseRecoverySplit,
+      bool allowRigidFiniteMaterialPoseSplit,
       AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
       AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
       const physx::PxArray<bool> &touchesKinematicShell,
       const physx::PxArray<physx::PxVec3> *shellLinearVelAtSolveStart,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-      bool applyVelocityDamping, AvbdSoftParticle *softParticlesForVel,
-      physx::PxU32 numSoftParticlesForVel);
+      bool hasJointConstraints, bool skipBodyStaticFriction,
+      bool applyVelocityDamping,
+      AvbdSoftParticle *softParticlesForVel,
+      physx::PxU32 numSoftParticlesForVel, AvbdSolverStats &stats);
 
   //-------------------------------------------------------------------------
   // Energy Minimization Framework

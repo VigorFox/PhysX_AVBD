@@ -666,6 +666,614 @@ def contact_acceleration_limit18_specs() -> list[RunSpec]:
     return specs
 
 
+def contact_position18_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for rate_name, dt, frames in rates:
+            for solver, execution in lanes:
+                name = (
+                    f"contact-position-{endpoint}-{rate_name}-"
+                    f"{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=position",
+                    "--drive=x",
+                    "--drive-mode=force",
+                    "--mass=1",
+                    "--limit=high",
+                    "--topology=contact-dynamic-dynamic",
+                    f"--endpoint={endpoint}",
+                    f"--dt={dt}",
+                    f"--frames={frames}",
+                ]
+                specs.append(
+                    RunSpec(
+                        name,
+                        tuple(args),
+                        "PASS",
+                        "none",
+                    )
+                )
+    return specs
+
+
+def contact_position_limit18_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for endpoint in ("forward", "reverse"):
+        for rate_name, dt, frames in rates:
+            for solver, execution in lanes:
+                name = (
+                    f"contact-position-limit-low-{endpoint}-{rate_name}-"
+                    f"{solver}-{execution}"
+                )
+                args = common_args(solver, execution) + [
+                    "--case=position",
+                    "--drive=x",
+                    "--drive-mode=force",
+                    "--mass=1",
+                    "--limit=low",
+                    "--topology=contact-dynamic-dynamic",
+                    f"--endpoint={endpoint}",
+                    f"--dt={dt}",
+                    f"--frames={frames}",
+                ]
+                specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_unequal36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for limit in ("high", "low"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-unequal-{limit}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=10",
+                        f"--limit={limit}",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_friction36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for friction in ("zero", "standard"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-friction-{friction}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--friction={friction}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_support_slope36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for friction in ("zero", "standard"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-support-slope-"
+                        f"{friction}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--friction={friction}",
+                        "--support=slope-x10",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_output_force36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for output in ("off", "on"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-output-force-"
+                        f"{output}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=output-force",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=low",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--output-force={output}",
+                        "--break=none",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_friction_limit36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for limit in ("high", "low"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-friction-limit-{limit}-"
+                        f"{endpoint}-{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        f"--limit={limit}",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        "--friction=standard",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_friction_unequal36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for limit in ("high", "low"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-friction-unequal-{limit}-"
+                        f"{endpoint}-{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=10",
+                        f"--limit={limit}",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        "--friction=standard",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_target_velocity36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for target_velocity in ("zero", "positive"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-target-velocity-"
+                        f"{target_velocity}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--position-target-velocity={target_velocity}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_anchor36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "symmetric-y25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-anchor-{anchor}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_anchor_z36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "symmetric-z25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-anchor-z-{anchor}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_anchor_x36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "symmetric-x25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-anchor-x-{anchor}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
+def contact_position_anchor_asymmetric_z36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "asymmetric-z25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-anchor-asymmetric-z-"
+                        f"{anchor}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(
+                        RunSpec(
+                            name,
+                            tuple(args),
+                            "PASS",
+                            "none",
+                        )
+                    )
+    return specs
+
+
+def contact_position_anchor_asymmetric_x36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "asymmetric-x25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-anchor-asymmetric-x-"
+                        f"{anchor}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(
+                        RunSpec(
+                            name,
+                            tuple(args),
+                            "PASS",
+                            "none",
+                        )
+                    )
+    return specs
+
+
+def contact_position_anchor_two_sided_z36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for anchor in ("centered", "asymmetric-zpair25"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        "contact-position-anchor-two-sided-z-"
+                        f"{anchor}-{endpoint}-{rate_name}-"
+                        f"{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--anchor={anchor}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(
+                        RunSpec(
+                            name,
+                            tuple(args),
+                            "PASS",
+                            "none",
+                        )
+                    )
+    return specs
+
+
+def contact_position_frame36_specs() -> list[RunSpec]:
+    rates = (
+        ("30hz", "0.0333333351", "300"),
+        ("60hz", "0.0166666675", "600"),
+        ("120hz", "0.00833333377", "1200"),
+    )
+    lanes = (
+        ("tgs", "parallel"),
+        ("avbd", "parallel"),
+        ("avbd", "sequential"),
+    )
+    specs: list[RunSpec] = []
+    for frame in ("identity", "roty-neg45"):
+        for endpoint in ("forward", "reverse"):
+            for rate_name, dt, frames in rates:
+                for solver, execution in lanes:
+                    name = (
+                        f"contact-position-frame-{frame}-{endpoint}-"
+                        f"{rate_name}-{solver}-{execution}"
+                    )
+                    args = common_args(solver, execution) + [
+                        "--case=position",
+                        "--drive=x",
+                        "--drive-mode=force",
+                        "--mass=1",
+                        "--limit=high",
+                        "--topology=contact-dynamic-dynamic",
+                        f"--endpoint={endpoint}",
+                        f"--frame-a={frame}",
+                        f"--frame-b={frame}",
+                        f"--dt={dt}",
+                        f"--frames={frames}",
+                    ]
+                    specs.append(RunSpec(name, tuple(args)))
+    return specs
+
+
 def dynamic_acceleration_limit18_specs() -> list[RunSpec]:
     rates = (
         ("30hz", "0.0333333351", "300"),
@@ -817,6 +1425,210 @@ SUITES = {
     "contact72": contact72_specs,
     "contact-acceleration36": contact_acceleration36_specs,
     "contact-acceleration-limit18": contact_acceleration_limit18_specs,
+    "contact-position18": contact_position18_specs,
+    "contact-position-limit18": contact_position_limit18_specs,
+    "contact-position-unequal36": contact_position_unequal36_specs,
+    "contact-position-friction36": contact_position_friction36_specs,
+    "contact-position-support-slope36":
+        contact_position_support_slope36_specs,
+    "contact-position-support-slope-smoke": lambda: [
+        spec
+        for spec in contact_position_support_slope36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-support-slope-zero-forward-"
+                "60hz-avbd-parallel"
+            ),
+            (
+                "contact-position-support-slope-standard-forward-"
+                "60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-support-slope-standard-forward-"
+                "60hz-avbd-parallel"
+            ),
+            (
+                "contact-position-support-slope-standard-forward-"
+                "60hz-avbd-sequential"
+            ),
+        }
+    ],
+    "contact-position-output-force36":
+        contact_position_output_force36_specs,
+    "contact-position-output-force-smoke": lambda: [
+        spec
+        for spec in contact_position_output_force36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-output-force-"
+                "off-forward-60hz-avbd-parallel"
+            ),
+            (
+                "contact-position-output-force-"
+                "on-forward-60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-output-force-"
+                "on-forward-60hz-avbd-parallel"
+            ),
+            (
+                "contact-position-output-force-"
+                "on-forward-60hz-avbd-sequential"
+            ),
+        }
+    ],
+    "contact-position-friction-limit36":
+        contact_position_friction_limit36_specs,
+    "contact-position-friction-limit-smoke": lambda: [
+        spec
+        for spec in contact_position_friction_limit36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-friction-limit-low-forward-"
+                "60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-friction-limit-low-forward-"
+                "60hz-avbd-parallel"
+            ),
+        }
+    ],
+    "contact-position-friction-unequal36":
+        contact_position_friction_unequal36_specs,
+    "contact-position-friction-unequal-smoke": lambda: [
+        spec
+        for spec in contact_position_friction_unequal36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-friction-unequal-high-forward-"
+                "60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-friction-unequal-high-forward-"
+                "60hz-avbd-parallel"
+            ),
+            (
+                "contact-position-friction-unequal-low-forward-"
+                "60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-friction-unequal-low-forward-"
+                "60hz-avbd-parallel"
+            ),
+        }
+    ],
+    "contact-position-friction-smoke": lambda: [
+        spec
+        for spec in contact_position_friction36_specs()
+        if spec.name
+        == "contact-position-friction-standard-forward-60hz-avbd-parallel"
+    ],
+    "contact-position-target-velocity36":
+        contact_position_target_velocity36_specs,
+    "contact-position-target-velocity-smoke": lambda: [
+        spec
+        for spec in contact_position_target_velocity36_specs()
+        if spec.name
+        == (
+            "contact-position-target-velocity-positive-forward-"
+            "60hz-avbd-parallel"
+        )
+    ],
+    "contact-position-anchor36": contact_position_anchor36_specs,
+    "contact-position-anchor-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor36_specs()
+        if spec.name
+        == (
+            "contact-position-anchor-symmetric-y25-forward-"
+            "60hz-avbd-parallel"
+        )
+    ],
+    "contact-position-anchor-z36": contact_position_anchor_z36_specs,
+    "contact-position-anchor-z-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor_z36_specs()
+        if spec.name
+        == (
+            "contact-position-anchor-z-symmetric-z25-forward-"
+            "60hz-avbd-parallel"
+        )
+    ],
+    "contact-position-anchor-x36": contact_position_anchor_x36_specs,
+    "contact-position-anchor-x-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor_x36_specs()
+        if spec.name
+        == (
+            "contact-position-anchor-x-symmetric-x25-forward-"
+            "60hz-avbd-parallel"
+        )
+    ],
+    "contact-position-anchor-asymmetric-z36":
+        contact_position_anchor_asymmetric_z36_specs,
+    "contact-position-anchor-asymmetric-z-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor_asymmetric_z36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-anchor-asymmetric-z-"
+                "asymmetric-z25-forward-60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-anchor-asymmetric-z-"
+                "asymmetric-z25-forward-60hz-avbd-parallel"
+            ),
+        }
+    ],
+    "contact-position-anchor-asymmetric-x36":
+        contact_position_anchor_asymmetric_x36_specs,
+    "contact-position-anchor-asymmetric-x-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor_asymmetric_x36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-anchor-asymmetric-x-"
+                "asymmetric-x25-forward-60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-anchor-asymmetric-x-"
+                "asymmetric-x25-forward-60hz-avbd-parallel"
+            ),
+        }
+    ],
+    "contact-position-anchor-two-sided-z36":
+        contact_position_anchor_two_sided_z36_specs,
+    "contact-position-anchor-two-sided-z-smoke": lambda: [
+        spec
+        for spec in contact_position_anchor_two_sided_z36_specs()
+        if spec.name
+        in {
+            (
+                "contact-position-anchor-two-sided-z-"
+                "asymmetric-zpair25-forward-60hz-tgs-parallel"
+            ),
+            (
+                "contact-position-anchor-two-sided-z-"
+                "asymmetric-zpair25-forward-60hz-avbd-parallel"
+            ),
+        }
+    ],
+    "contact-position-frame36": contact_position_frame36_specs,
+    "contact-position-frame-smoke": lambda: [
+        spec
+        for spec in contact_position_frame36_specs()
+        if spec.name
+        == (
+            "contact-position-frame-roty-neg45-forward-"
+            "60hz-avbd-parallel"
+        )
+    ],
     "dynamic36": dynamic36_specs,
     "dynamic-acceleration-limit18": dynamic_acceleration_limit18_specs,
     "legacy228": legacy228_specs,

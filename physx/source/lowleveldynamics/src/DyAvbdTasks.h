@@ -28,7 +28,6 @@
 #define DY_AVBD_TASKS_H
 
 #include "DyAvbdConstraint.h"
-#include "DyAvbdKinematicShell.h"
 #include "DyAvbdSolver.h"
 #include "DyAvbdSolverBody.h"
 #include "DyAvbdTypes.h"
@@ -65,7 +64,8 @@ struct AvbdIslandBatch {
   AvbdGearJointConstraint *gearJoints;
   PxU32 numGear;
 
-  // Soft body VBD data
+  // Complete soft/VBD tuple. Rigid NP contact prep leaves these null; no
+  // synthetic-shell discriminator or partial soft representation is allowed.
   AvbdSoftParticle *softParticles;
   PxU32 numSoftParticles;
 
@@ -74,9 +74,6 @@ struct AvbdIslandBatch {
 
   AvbdSoftContact *softContacts;
   PxU32 numSoftContacts;
-
-  /** Island kinematic shell via solve() + solveLocalSystem (not full soft VBD). */
-  bool kinematicShellBatch;
 
   PxU32 islandStart;
   PxU32 islandEnd;
@@ -136,14 +133,9 @@ public:
         mBatch.numConstraints, mGravity, mBatch.d6Joints, mBatch.numD6,
         mBatch.gearJoints, mBatch.numGear, &mBatch.contactMap, &mBatch.d6Map,
         &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors,
-        mBatch.iterationOverride, mBatch.softParticles, mBatch.numSoftParticles,
-        mBatch.softBodies, mBatch.numSoftBodies, mBatch.softContacts,
-        mBatch.numSoftContacts, mBatch.kinematicShellBatch, mStats);
-    if (AvbdKinematicShell::isActive() && mBatch.kinematicShellBatch &&
-        mBatch.softContacts && mBatch.numSoftContacts > 0) {
-      AvbdKinematicShell::saveIslandShellContactCache(mBatch.softContacts,
-                                                    mBatch.numSoftContacts);
-    }
+        mBatch.iterationOverride, mBatch.softParticles,
+        mBatch.numSoftParticles, mBatch.softBodies, mBatch.numSoftBodies,
+        mBatch.softContacts, mBatch.numSoftContacts, mStats);
   }
 
   virtual void release() override;

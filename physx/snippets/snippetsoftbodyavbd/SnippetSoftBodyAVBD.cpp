@@ -1240,10 +1240,13 @@ static void testOGCSelfCollision()
 
 	for (PxU32 f = 0; f < 180; f++)
 	{
-		contacts.clear();
-		avbdDetectSoftGroundContacts(particles.begin(), particles.size(),
-		                             contacts, 0.0f, 0.02f, 0.5f);
-		avbdDetectSelfCollisionOGC(particles.begin(), bodies[0], selfAdj[0], contacts, ogc);
+		// The AVBD contact dual is stateful.  Use the unified detector so
+		// ground and self-contact multipliers survive re-detection.
+		avbdDetectAllOGCContacts(
+			particles.begin(), particles.size(),
+			bodies.begin(), bodies.size(),
+			NULL, 0, selfAdj.begin(), selfAdj.size(),
+			contacts, ogc, 0.0f);
 
 		avbdStepSoftBodies(
 			particles.begin(), particles.size(),
@@ -1487,6 +1490,82 @@ static void testLongTermStability()
 
 	TEST_CHECK(stable, "10-second simulation stable");
 	TEST_CHECK(c.y > -0.5f && c.y < 3.0f, "COM in reasonable range");
+}
+
+// ============================================================================
+// Test 20: Position-level AVBD contact primal/dual semantics
+// ============================================================================
+
+static void testContactAugmentedLagrangian()
+{
+	printf("\n--- Test 20: Contact Augmented Lagrangian ---\n");
+
+	PxArray<AvbdSoftParticle> particles(1);
+	particles[0].position = PxVec3(0.02f, -0.01f, 0.0f);
+	particles[0].initialPosition = particles[0].position;
+
+	AvbdSoftContact contact;
+	contact.particleIdx = 0;
+	contact.rigidBodyIdx = PX_MAX_U32;
+	contact.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	contact.tangent1 = PxVec3(1.0f, 0.0f, 0.0f);
+	contact.tangent2 = PxVec3(0.0f, 0.0f, 1.0f);
+	contact.particlePointPrev = PxVec3(0.0f, -0.01f, 0.0f);
+	contact.surfacePoint = PxVec3(0.0f);
+	contact.surfacePointPrev = PxVec3(0.0f);
+	contact.k = 1000.0f;
+	contact.ke = 1e6f;
+	contact.alLambda = -5.0f;
+	contact.penTangent[0] = contact.penTangent[1] = 1000.0f;
+	contact.friction = 0.5f;
+
+	PxVec3 force;
+	PxMat33 hessian;
+	avbdEvaluateContactForceHessian(
+		contact, particles.begin(), force, hessian);
+	TEST_CLOSE(force.y, 15.0f, 1e-4f,
+		"Normal primal includes persistent AL multiplier");
+	TEST_CLOSE(force.x, -7.5f, 1e-4f,
+		"Tangent primal is clamped by the Coulomb cone");
+	TEST_CLOSE(force.z, 0.0f, 1e-5f,
+		"Contact primal has no spurious tangent component");
+
+	avbdUpdateSoftContactDual(
+		contact, particles.begin(), 1000.0f);
+	TEST_CLOSE(contact.alLambda, -15.0f, 1e-4f,
+		"Normal dual stores the clamped augmented force");
+	const PxReal tangentDualMagnitude = PxSqrt(
+		contact.alLambdaTangent[0] * contact.alLambdaTangent[0] +
+		contact.alLambdaTangent[1] * contact.alLambdaTangent[1]);
+	TEST_CHECK(
+		tangentDualMagnitude <=
+			contact.friction * PxAbs(contact.alLambda) + 1e-4f,
+		"Tangent dual remains inside the Coulomb cone");
+
+	PxArray<AvbdSoftContact> previous;
+	previous.pushBack(contact);
+	PxArray<AvbdSoftContact> detected;
+	AvbdSoftContact rotatedBasis;
+	rotatedBasis.particleIdx = 0;
+	rotatedBasis.rigidBodyIdx = PX_MAX_U32;
+	rotatedBasis.normal = contact.normal;
+	rotatedBasis.tangent1 = PxVec3(0.0f, 0.0f, 1.0f);
+	rotatedBasis.tangent2 = PxVec3(1.0f, 0.0f, 0.0f);
+	rotatedBasis.k = 1000.0f;
+	rotatedBasis.ke = 1e6f;
+	detected.pushBack(rotatedBasis);
+	detected.pushBack(rotatedBasis);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(), particles.begin(), detected);
+	TEST_CHECK(detected[0].alLambda < -14.0f,
+		"Contact re-detection preserves the normal dual");
+	TEST_CHECK(PxAbs(detected[0].alLambdaTangent[0]) < 1e-4f &&
+		PxAbs(detected[0].alLambdaTangent[1]) > 7.0f,
+		"Contact re-detection rotates the tangent dual into the new basis");
+	TEST_CHECK(PxAbs(detected[1].alLambda) < 1e-6f &&
+		PxAbs(detected[1].alLambdaTangent[0]) < 1e-6f &&
+		PxAbs(detected[1].alLambdaTangent[1]) < 1e-6f,
+		"Contact re-detection transfers each prior dual at most once");
 }
 
 // ===========================================================================
@@ -1874,8 +1953,9 @@ void stepPhysics(bool /*interactive*/)
 		break;
 	case VS_OGC_SELF:
 		if (gVisSelfAdj.size())
-			avbdDetectSelfCollisionOGC(gParticles.begin(), gSoftBodies[0],
-			                           gVisSelfAdj[0], gContacts, gVisOGC);
+			avbdDetectSelfCollisionOGC(
+				gParticles.begin(), gSoftBodies[0], 0,
+				gVisSelfAdj[0], gContacts, gVisOGC);
 		break;
 	case VS_OGC_FULL:
 		avbdDetectAllOGCContacts(
@@ -1993,6 +2073,7 @@ int snippetMain(int, const char*const*)
 	if (shouldRunTest(selectedId, 17)) testAsymmetricToppling();
 	if (shouldRunTest(selectedId, 18)) testMaterialStiffness();
 	if (shouldRunTest(selectedId, 19)) testLongTermStability();
+	if (shouldRunTest(selectedId, 20)) testContactAugmentedLagrangian();
 
 	printf("\n=== Results: %d PASSED, %d FAILED (out of %d) ===\n",
 	       gTestsPassed, gTestsFailed, gTestsPassed + gTestsFailed);

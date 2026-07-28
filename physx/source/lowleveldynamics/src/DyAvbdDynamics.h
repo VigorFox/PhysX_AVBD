@@ -157,6 +157,15 @@ public:
   PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
   bool mEnableLambdaWarmStart; //!< Enable lambda warm-starting (default: true)
 
+  struct CachedContactManagerState {
+    PxU64 key;      //!< Exact manager/body identity for slot validation
+    PxU8 frameAge; //!< 1 means the manager was active last frame
+    PxU8 padding[7];
+  };
+
+  PxArray<CachedContactManagerState>
+      mContactManagerStateCache; //!< One persistent state per CM index
+
   struct CachedJointLambda {
     PxU64 key; //!< Stable joint identity used to validate hashed cache slots
     PxVec3 lambdaLinear;
@@ -190,8 +199,10 @@ private:
     PxVec3 linearVelocity;
   };
 
-  // Fixed-size, direct-mapped storage keeps stale body identities bounded.
-  // The exact bodyCore pointer is still validated before any history is used.
+  // Open-addressed storage starts at a bounded minimum and grows before
+  // gather to keep load at or below 0.5.  The exact bodyCore pointer is
+  // validated before any history is used, and serial gather resolves
+  // collisions without evicting another active body's previous-frame state.
   static const PxU32 BODY_VELOCITY_HISTORY_CACHE_SIZE = 16384;
   PxArray<CachedBodyVelocityHistory> mBodyVelocityHistoryCache;
   PxU64 mBodyVelocityHistoryFrame;
@@ -203,6 +214,7 @@ private:
 
   void restoreAndUpdateBodyVelocityHistory(const PxsBodyCore &bodyCore,
                                            AvbdSolverBody &solverBody);
+  void ensureBodyVelocityHistoryCapacity(PxU32 bodyCount);
 
   /**
    * @brief Solve constraints for a single island using AVBD algorithm
@@ -297,12 +309,303 @@ private:
   bool mSolverInitialized;      //!< Whether solver has been initialized
   bool mIterationDiagnosticsEnabled; //!< Print AVBD iteration summaries when enabled via env
   bool mIterationDiagnosticsSequential; //!< Force sequential island solve for trustworthy diagnostics
+  bool mNormalRowDiagnosticsEnabled; //!< Emit detailed body-static row evidence
   PxU32 mIterationDiagnosticsEvery; //!< Diagnostic print cadence in frames
   std::atomic<PxU64> mDiagIslandCount;
   std::atomic<PxU64> mDiagJointIslandCount;
   std::atomic<PxU64> mDiagRequestedIterations;
   std::atomic<PxU64> mDiagExecutedIterations;
   std::atomic<PxU64> mDiagEarlyStopIslands;
+  std::atomic<PxU64> mDiagBodyStaticNormalAlRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalAlEvaluations;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationEligibleRows;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationFiniteImpulseSkips;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips;
+  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityCorrections;
+  std::atomic<PxU64> mDiagBodyStaticRestitutionCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartHits;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartMisses;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge0;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge1;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge2;
+  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge3;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerOnsetRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerSupportRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge0;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge1;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge2;
+  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge3;
+  std::atomic<PxU64> mDiagBodyStaticNormalRowMissOnManagerSupportRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeBodies;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeBodies;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationEligibleRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationEligibleRows;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportShallowDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportDeepDepenetrationCorrections;
+  std::atomic<PxU64> mDiagBodyStaticMaterialFiniteBudgetRows;
+  std::atomic<PxU64> mDiagBodyStaticMaterialUnlimitedBudgetRows;
+  std::atomic<PxU64> mDiagContactFrictionTargetAlEvaluations;
+  std::atomic<PxU64> mDiagBodyStaticFrictionTargetRows;
+  std::atomic<PxU64> mDiagBodyStaticFrictionTargetCorrections;
+  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackRows;
+  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackCorrections;
+  std::atomic<PxU64> mDiagContactTargetNormalProjectionRows;
+  std::atomic<PxU64> mDiagContactTargetNormalCorrections;
+  std::atomic<PxU64> mDiagContactTargetTangentRows;
+  std::atomic<PxU64> mDiagContactTargetTangentCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableAlRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableAlEvaluations;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentCandidates;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentEvaluations;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentMixedRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentShellRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentTargetRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentRestitutionRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentFiniteRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentScaleRejectRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableStrippedRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableShellSuppressedPrimalRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionRawRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionDominantRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionFewContactRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionMultiCornerRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeBodies;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeSpatialCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComFallbackCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeSecondaryRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeManifoldBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldOneRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldFourRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeManifoldAliasRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponents;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponentOneBody;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponentTwoBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentOneToEightRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentRestitution;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentFiniteImpulse;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentTargetVelocity;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentMixedScale;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentRigidStatic;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentJointIsland;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentLockedDof;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeComponentNonDynamicBody;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeBudgetDiagRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowComponents;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowNoCorrection;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowSolved;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowCommitCapable;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowBudgetExhausted;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowInfeasible;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowResidualUnclassified;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowNumericalFailure;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowIterationLimit;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowUnsupported;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowLowerRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowFreeRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowUpperRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizePreOwnerBodies;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeLegacyOwnerBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeProbeEligibleComponents;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeProbeCommittedComponents;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeProbeCommittedRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeProbeCommittedBodies;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies;
+  std::atomic<PxU64> mDiagSurfaceDeformableAlDepenetrationRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableAlFinalizeRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationFinalizeRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableAlDepenetrationFinalizeRows;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactReversalCorrections;
+  std::atomic<PxU64> mDiagSurfaceShellContacts;
+  std::atomic<PxU64> mDiagSurfaceShellDepenetrationCorrections;
+  std::atomic<PxU64> mDiagSurfaceShellFrictionRows;
+  std::atomic<PxU64> mDiagSurfaceShellFrictionCorrections;
+  std::atomic<PxU64> mDiagSurfaceShellFinalizeBodies;
+  std::atomic<PxU64> mDiagSurfaceShellFinalizeCorrections;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityDeltaNanos;
+  std::atomic<PxU64> mDiagBodyStaticFrictionTargetImpulseNanos;
+  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackImpulseNanos;
+  std::atomic<PxU64> mDiagContactTargetNormalImpulseNanos;
+  std::atomic<PxU64> mDiagContactTargetTangentImpulseNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableFrictionImpulseNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeDeltaNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPreSeparationNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPostSeparationNanos;
+  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPostApproachNanos;
+  std::atomic<PxU64>
+      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos;
+  std::atomic<PxU64> mDiagSurfaceShellDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagSurfaceShellFrictionImpulseNanos;
+  std::atomic<PxU64> mDiagSurfaceShellFinalizeDeltaNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalRestoredLambdaMaxNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalRestoredPenaltyMaxNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalInitialPenaltyMaxNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalPreAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalPostAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalAlphaC0OffsetNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalPreAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalPostAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalPostAlSeparationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalAlOutwardDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalAlInwardDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticMaterialPoseSeparatingVelocityNanos;
+  std::atomic<PxU64> mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos;
+  std::atomic<PxU64> mDiagBodyStaticMaterialFiniteRemainingImpulseNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPreAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPostAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportPreAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportPostAlPenetrationNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportAlphaC0OffsetNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportAlOutwardDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeDeltaNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeDeltaNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos;
+  std::atomic<PxU64> mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos;
   std::atomic<PxU64> mDiagJointRequestedIterations;
   std::atomic<PxU64> mDiagJointExecutedIterations;
   std::atomic<PxU64> mDiagJointBudgetHitIslands;
@@ -318,6 +621,8 @@ private:
   std::atomic<PxU64> mDiagJointConeRows;
   std::atomic<PxU32> mDiagMaxRequestedIterations;
   std::atomic<PxU32> mDiagMaxExecutedIterations;
+  std::atomic<PxU64> mDiagBodyStaticDepenetrationMaxCorrectionNanos;
+  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityMaxDeltaNanos;
   std::atomic<PxU32> mDiagJointMaxExecutedIterations;
   std::atomic<PxU32> mDiagJointMaxLinearLambdaMilli;
   std::atomic<PxU32> mDiagJointMaxAngularLambdaMilli;
@@ -343,7 +648,8 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
                         PxU32 numConstraints, PxU32 numBodies);
 
 void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
-                                 PxU32 numConstraints, PxReal dt);
+                                 PxU32 numConstraints, PxU32 numBodies,
+                                 PxReal dt);
 
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,

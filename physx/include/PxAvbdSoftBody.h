@@ -28,10 +28,10 @@
 // =============================================================================
 // Public AVBD Soft Body / Cloth -- unified AVBD energy-based deformable system
 //
-// All energy terms (elastic, contact, pin) use the AVBD framework: adaptive
-// proximal penalty with dual variable update ensures convergence independent
-// of update order (Jacobi-safe).  Pure VBD (no proximal term) is available
-// as a lightweight fallback for simple elastic-only scenarios.
+// Elastic energies use position-level VBD blocks. Contacts use a persistent
+// augmented-Lagrangian normal/tangent state; pins currently use adaptive
+// penalty state. The authoritative global schedule is serial vertex-block
+// nonlinear Gauss-Seidel.
 //
 // Elastic forces: StVK (triangles), Neo-Hookean (tetrahedra), dihedral bending
 // Constraints: contact (ground/soft-soft/soft-rigid), kinematic pins
@@ -39,7 +39,7 @@
 // This header contains only public-API types (PxVec3, PxMat33, PxArray, etc.)
 // and can be included by snippets and user code.
 //
-// Reference: AVBD (SIGGRAPH 2024)
+// References: VBD (SIGGRAPH 2024), AVBD (SIGGRAPH 2025)
 // =============================================================================
 
 #include "foundation/PxAllocator.h"
@@ -49,6 +49,7 @@
 #include "foundation/PxQuat.h"
 #include "foundation/PxSimpleTypes.h"
 #include "foundation/PxSort.h"
+#include "foundation/PxTime.h"
 #include "foundation/PxVec3.h"
 
 
@@ -174,7 +175,7 @@ struct AvbdEdgeInfo
 };
 
 // =============================================================================
-// AVBD constraint types -- adaptive penalty only
+// AVBD constraint types
 // =============================================================================
 
 struct AvbdSoftAttachment
@@ -215,10 +216,12 @@ struct AvbdSoftContact
 
 	// Kinematic shell rigid coupling (invMass=0 shell particle, moving surfacePoint).
 	PxVec3 surfacePointPrev;
+	PxVec3 particlePointPrev;
 	PxVec3 rigidLocalPoint;
 	PxReal alLambda;
 	PxReal alLambdaTangent[2];
 	PxReal penTangent[2];
+	bool frictionStick;
 
 	PxReal k;
 	PxReal ke;
@@ -228,10 +231,19 @@ struct AvbdSoftContact
 		  projNormal(0.0f, 1.0f, 0.0f),
 		  depth(0.0f), margin(0.0f), friction(0.5f), tangent1(1.0f, 0.0f, 0.0f),
 		  tangent2(0.0f, 0.0f, 1.0f), surfacePoint(0.0f),
-		  surfacePointPrev(0.0f), rigidLocalPoint(0.0f), alLambda(0.0f),
+		  surfacePointPrev(0.0f), particlePointPrev(0.0f),
+		  rigidLocalPoint(0.0f), alLambda(0.0f),
 		  alLambdaTangent{0.0f, 0.0f}, penTangent{1000.0f, 1000.0f},
-		  k(1e4f), ke(1e6f) {}
+		  frictionStick(false), k(1e4f), ke(1e6f) {}
 };
+
+PX_FORCE_INLINE void avbdInitializeSoftContactAnchors(
+	AvbdSoftContact& contact, const AvbdSoftParticle* particles)
+{
+	contact.particlePointPrev =
+		particles[contact.particleIdx].position;
+	contact.surfacePointPrev = contact.surfacePoint;
+}
 
 // =============================================================================
 // Per-particle element adjacency
@@ -1011,7 +1023,7 @@ PX_FORCE_INLINE void avbdEvaluateBendingForceHessian(
 }
 
 // =============================================================================
-// AVBD contact/pin evaluators (penalty only)
+// AVBD contact/pin evaluators
 // =============================================================================
 
 PX_FORCE_INLINE void avbdEvaluateContactForceHessian(
@@ -1023,24 +1035,56 @@ PX_FORCE_INLINE void avbdEvaluateContactForceHessian(
 	outHessian = PxMat33(PxZero);
 
 	const AvbdSoftParticle& sp = particles[sc.particleIdx];
-	PxVec3 n = sc.normal;
-
-	PxReal penetration;
+	const PxVec3 n = sc.normal;
+	PxReal normalConstraint;
 	if (sc.rigidBodyIdx == PX_MAX_U32)
-		penetration = -(sp.position.dot(n));         // ground: analytical
+		normalConstraint = sp.position.dot(n); // ground: analytical
 	else
-		penetration = sc.margin - (sp.position - sc.surfacePoint).dot(n);  // proximity shell
+		normalConstraint =
+			(sp.position - sc.surfacePoint).dot(n) - sc.margin;
 
-	if (penetration <= 0.0f) return;
-
-	PxReal fn = sc.k * penetration;
-	outForce = n * fn;
+	// AVBD unilateral normal row.  Lambda follows the reference convention:
+	// compression is negative and the particle force is -J^T F.
+	const PxReal normalRowForce =
+		PxMin(0.0f, sc.k * normalConstraint + sc.alLambda);
+	outForce = n * (-normalRowForce);
 	outHessian = avbdOuter(n, n) * sc.k;
 
-	// NOTE: friction is applied as explicit velocity/position correction
-	// after the VBD inner loop (see avbdApplyExplicitFriction), NOT here.
-	// Including it in the Hessian creates enormous tangential stiffness
-	// near zero slip that locks particles and prevents macroscopic rotation.
+	if(sc.friction <= 0.0f || normalRowForce >= 0.0f)
+		return;
+
+	const PxVec3 relativeDisplacement =
+		(sp.position - sc.particlePointPrev) -
+		(sc.surfacePoint - sc.surfacePointPrev);
+	const PxReal tangentConstraint[2] =
+	{
+		relativeDisplacement.dot(sc.tangent1),
+		relativeDisplacement.dot(sc.tangent2)
+	};
+	PxReal tangentForce[2] =
+	{
+		sc.penTangent[0] * tangentConstraint[0] +
+			sc.alLambdaTangent[0],
+		sc.penTangent[1] * tangentConstraint[1] +
+			sc.alLambdaTangent[1]
+	};
+	const PxReal frictionBound =
+		sc.friction * PxAbs(normalRowForce);
+	const PxReal tangentMagnitude = PxSqrt(
+		tangentForce[0] * tangentForce[0] +
+		tangentForce[1] * tangentForce[1]);
+	if(tangentMagnitude > frictionBound && tangentMagnitude > 1e-12f)
+	{
+		const PxReal scale = frictionBound / tangentMagnitude;
+		tangentForce[0] *= scale;
+		tangentForce[1] *= scale;
+	}
+
+	outForce -= sc.tangent1 * tangentForce[0] +
+		sc.tangent2 * tangentForce[1];
+	outHessian = outHessian +
+		avbdOuter(sc.tangent1, sc.tangent1) * sc.penTangent[0] +
+		avbdOuter(sc.tangent2, sc.tangent2) * sc.penTangent[1];
 }
 
 PX_FORCE_INLINE void avbdEvaluatePinForceHessian(
@@ -1072,13 +1116,64 @@ PX_FORCE_INLINE void avbdUpdateSoftContactDual(
 	PxReal beta)
 {
 	PxVec3 n = sc.normal;
-	PxReal penetration;
+	PxReal normalConstraint;
 	if (sc.rigidBodyIdx == PX_MAX_U32)
-		penetration = -(particles[sc.particleIdx].position.dot(n));
+		normalConstraint = particles[sc.particleIdx].position.dot(n);
 	else
-		penetration = sc.margin - (particles[sc.particleIdx].position - sc.surfacePoint).dot(n);
-	penetration = PxMax(0.0f, penetration);
-	sc.k = PxMin(sc.k + beta * penetration, sc.ke);
+		normalConstraint =
+			(particles[sc.particleIdx].position -
+			 sc.surfacePoint).dot(n) - sc.margin;
+
+	sc.alLambda =
+		PxMin(0.0f, sc.k * normalConstraint + sc.alLambda);
+	if(sc.alLambda < 0.0f)
+		sc.k = PxMin(
+			sc.k + beta * PxAbs(normalConstraint), sc.ke);
+
+	const AvbdSoftParticle& sp = particles[sc.particleIdx];
+	const PxVec3 relativeDisplacement =
+		(sp.position - sc.particlePointPrev) -
+		(sc.surfacePoint - sc.surfacePointPrev);
+	const PxReal tangentConstraint[2] =
+	{
+		relativeDisplacement.dot(sc.tangent1),
+		relativeDisplacement.dot(sc.tangent2)
+	};
+	const PxReal frictionBound =
+		sc.friction * PxAbs(sc.alLambda);
+	PxReal tangentForce[2] =
+	{
+		sc.penTangent[0] * tangentConstraint[0] +
+			sc.alLambdaTangent[0],
+		sc.penTangent[1] * tangentConstraint[1] +
+			sc.alLambdaTangent[1]
+	};
+	const PxReal rawTangentMagnitude = PxSqrt(
+		tangentForce[0] * tangentForce[0] +
+		tangentForce[1] * tangentForce[1]);
+	const bool insideFrictionCone =
+		rawTangentMagnitude <= frictionBound;
+	if(!insideFrictionCone && rawTangentMagnitude > 1e-12f)
+	{
+		const PxReal scale = frictionBound / rawTangentMagnitude;
+		tangentForce[0] *= scale;
+		tangentForce[1] *= scale;
+	}
+	sc.alLambdaTangent[0] = tangentForce[0];
+	sc.alLambdaTangent[1] = tangentForce[1];
+	if(insideFrictionCone)
+	{
+		sc.penTangent[0] = PxMin(
+			sc.penTangent[0] +
+				beta * PxAbs(tangentConstraint[0]), sc.ke);
+		sc.penTangent[1] = PxMin(
+			sc.penTangent[1] +
+				beta * PxAbs(tangentConstraint[1]), sc.ke);
+	}
+	sc.frictionStick =
+		insideFrictionCone &&
+		tangentConstraint[0] * tangentConstraint[0] +
+			tangentConstraint[1] * tangentConstraint[1] < 1e-10f;
 }
 
 // =============================================================================
@@ -1109,6 +1204,7 @@ inline void avbdDetectSoftGroundContacts(
 			sc.friction = friction;
 			sc.tangent1 = t1;
 			sc.tangent2 = t2;
+			avbdInitializeSoftContactAnchors(sc, particles);
 			contacts.pushBack(sc);
 		}
 	}
@@ -1318,6 +1414,7 @@ inline void avbdDetectSoftSoftContacts(
 					else
 						sc.tangent1 = penN.cross(PxVec3(0.0f, 1.0f, 0.0f)).getNormalized();
 					sc.tangent2 = penN.cross(sc.tangent1);
+					avbdInitializeSoftContactAnchors(sc, particles);
 					contacts.pushBack(sc);
 				}
 			};
@@ -1360,6 +1457,51 @@ struct AvbdOGCParams
 		, tau(-1.0f) {}
 
 	PxReal getTau() const { return (tau < 0.0f) ? contactRadius * 0.5f : tau; }
+};
+
+// Optional diagnostic counters for the component collision path.  These are
+// deliberately caller-owned so production callers pay no storage cost when
+// profiling is disabled.
+struct AvbdSoftCollisionStats
+{
+	PxU64 detectionCalls;
+	PxU64 bodyPairs;
+	PxU64 overlappingBodyPairs;
+	PxU64 particleSurfaceCandidates;
+	PxU64 insideTriangleTests;
+	PxU64 closestTriangleTests;
+	PxU64 selfTriangleTests;
+	PxU64 rigidParticleBoxTests;
+	PxU64 generatedGroundContacts;
+	PxU64 generatedRigidContacts;
+	PxU64 generatedSoftContacts;
+	PxU64 generatedSelfContacts;
+
+	AvbdSoftCollisionStats()
+		: detectionCalls(0), bodyPairs(0), overlappingBodyPairs(0),
+		  particleSurfaceCandidates(0), insideTriangleTests(0),
+		  closestTriangleTests(0), selfTriangleTests(0),
+		  rigidParticleBoxTests(0), generatedGroundContacts(0),
+		  generatedRigidContacts(0), generatedSoftContacts(0),
+		  generatedSelfContacts(0)
+	{
+	}
+
+	void accumulate(const AvbdSoftCollisionStats& other)
+	{
+		detectionCalls += other.detectionCalls;
+		bodyPairs += other.bodyPairs;
+		overlappingBodyPairs += other.overlappingBodyPairs;
+		particleSurfaceCandidates += other.particleSurfaceCandidates;
+		insideTriangleTests += other.insideTriangleTests;
+		closestTriangleTests += other.closestTriangleTests;
+		selfTriangleTests += other.selfTriangleTests;
+		rigidParticleBoxTests += other.rigidParticleBoxTests;
+		generatedGroundContacts += other.generatedGroundContacts;
+		generatedRigidContacts += other.generatedRigidContacts;
+		generatedSoftContacts += other.generatedSoftContacts;
+		generatedSelfContacts += other.generatedSelfContacts;
+	}
 };
 
 // Closest-point feature type for OGC block classification
@@ -1500,12 +1642,15 @@ PX_FORCE_INLINE AvbdActivationResult avbdOGCActivationFull(PxReal d, PxReal r, P
 inline bool avbdIsPointInsideTetMesh(
 	const PxVec3& point,
 	const PxArray<PxU32>& surfaceTriangles,
-	const AvbdSoftParticle* particles)
+	const AvbdSoftParticle* particles,
+	AvbdSoftCollisionStats* stats = NULL)
 {
 	int crossings = 0;
 	PxVec3 rayDir(0.0f, 1.0f, 0.0f);
 	for (PxU32 ti = 0; ti + 2 < surfaceTriangles.size(); ti += 3)
 	{
+		if(stats)
+			stats->insideTriangleTests++;
 		const PxVec3& a = particles[surfaceTriangles[ti]].position;
 		const PxVec3& b = particles[surfaceTriangles[ti+1]].position;
 		const PxVec3& c = particles[surfaceTriangles[ti+2]].position;
@@ -1621,6 +1766,7 @@ inline void avbdDetectSoftRigidSDF(
 			else
 				sc.tangent1 = worldNormal.cross(PxVec3(0.0f, 1.0f, 0.0f)).getNormalized();
 			sc.tangent2 = worldNormal.cross(sc.tangent1);
+			avbdInitializeSoftContactAnchors(sc, particles);
 			contacts.pushBack(sc);
 		}
 	}
@@ -1636,7 +1782,8 @@ inline void avbdDetectSoftSoftOGC(
 	const AvbdSoftParticle* particles, PxU32 numParticles,
 	const AvbdSoftBody* softBodies, PxU32 numSoftBodies,
 	PxArray<AvbdSoftContact>& contacts,
-	const AvbdOGCParams& params = AvbdOGCParams())
+	const AvbdOGCParams& params = AvbdOGCParams(),
+	AvbdSoftCollisionStats* stats = NULL)
 {
 	PX_UNUSED(numParticles);
 	PxReal r = params.contactRadius;
@@ -1645,6 +1792,8 @@ inline void avbdDetectSoftSoftOGC(
 	{
 		for (PxU32 sB = sA + 1; sB < numSoftBodies; sB++)
 		{
+			if(stats)
+				stats->bodyPairs++;
 			const AvbdSoftBody& bodyA = softBodies[sA];
 			const AvbdSoftBody& bodyB = softBodies[sB];
 
@@ -1663,6 +1812,8 @@ inline void avbdDetectSoftSoftOGC(
 				minA.y > maxB.y + r || maxA.y < minB.y - r ||
 				minA.z > maxB.z + r || maxA.z < minB.z - r)
 				continue;
+			if(stats)
+				stats->overlappingBodyPairs++;
 
 			// Lambda: test particles of testBody against surface of surfBody
 			auto testParticlesVsSurface = [&](
@@ -1681,9 +1832,12 @@ inline void avbdDetectSoftSoftOGC(
 						pp.y < aabbLo.y - r || pp.y > aabbHi.y + r ||
 						pp.z < aabbLo.z - r || pp.z > aabbHi.z + r)
 						continue;
+					if(stats)
+						stats->particleSurfaceCandidates++;
 
 					// DCD: check if particle is inside the other body
-					bool isInside = avbdIsPointInsideTetMesh(pp, surfBody.surfaceTriangles, particles);
+					bool isInside = avbdIsPointInsideTetMesh(
+						pp, surfBody.surfaceTriangles, particles, stats);
 					if (isInside)
 					{
 						// Find closest surface triangle for direction
@@ -1692,6 +1846,8 @@ inline void avbdDetectSoftSoftOGC(
 						PxVec3 bestClosest(0.0f);
 						for (PxU32 ti = 0; ti + 2 < surfBody.surfaceTriangles.size(); ti += 3)
 						{
+							if(stats)
+								stats->closestTriangleTests++;
 							const PxVec3& va = particles[surfBody.surfaceTriangles[ti]].position;
 							const PxVec3& vb = particles[surfBody.surfaceTriangles[ti+1]].position;
 							const PxVec3& vc = particles[surfBody.surfaceTriangles[ti+2]].position;
@@ -1722,6 +1878,7 @@ inline void avbdDetectSoftSoftOGC(
 						else
 							sc.tangent1 = bestNormal.cross(PxVec3(0.0f,1.0f,0.0f)).getNormalized();
 						sc.tangent2 = bestNormal.cross(sc.tangent1);
+						avbdInitializeSoftContactAnchors(sc, particles);
 						contacts.pushBack(sc);
 						continue;
 					}
@@ -1729,6 +1886,8 @@ inline void avbdDetectSoftSoftOGC(
 					// Not inside: OGC outward offset blocks on surface
 					for (PxU32 ti = 0; ti + 2 < surfBody.surfaceTriangles.size(); ti += 3)
 					{
+						if(stats)
+							stats->closestTriangleTests++;
 						const PxVec3& va = particles[surfBody.surfaceTriangles[ti]].position;
 						const PxVec3& vb = particles[surfBody.surfaceTriangles[ti+1]].position;
 						const PxVec3& vc = particles[surfBody.surfaceTriangles[ti+2]].position;
@@ -1766,6 +1925,7 @@ inline void avbdDetectSoftSoftOGC(
 						else
 							sc.tangent1 = contactNormal.cross(PxVec3(0.0f,1.0f,0.0f)).getNormalized();
 						sc.tangent2 = contactNormal.cross(sc.tangent1);
+						avbdInitializeSoftContactAnchors(sc, particles);
 						contacts.pushBack(sc);
 					}
 				}
@@ -1902,9 +2062,11 @@ PX_FORCE_INLINE void avbdTruncateDisplacement(
 inline void avbdDetectSelfCollisionOGC(
 	const AvbdSoftParticle* particles,
 	const AvbdSoftBody& sb,
+	PxU32 softBodyIdx,
 	const PxArray<PxArray<PxU32> >& adj,
 	PxArray<AvbdSoftContact>& contacts,
-	const AvbdOGCParams& params = AvbdOGCParams())
+	const AvbdOGCParams& params = AvbdOGCParams(),
+	AvbdSoftCollisionStats* stats = NULL)
 {
 	PxReal r   = params.contactRadius;
 	PxReal tau = params.getTau();
@@ -1917,6 +2079,8 @@ inline void avbdDetectSelfCollisionOGC(
 
 		for (PxU32 ti = 0; ti + 2 < sb.surfaceTriangles.size(); ti += 3)
 		{
+			if(stats)
+				stats->selfTriangleTests++;
 			PxU32 lv0 = sb.surfaceTriangles[ti]   - sb.particleStart;
 			PxU32 lv1 = sb.surfaceTriangles[ti+1] - sb.particleStart;
 			PxU32 lv2 = sb.surfaceTriangles[ti+2] - sb.particleStart;
@@ -1954,7 +2118,10 @@ inline void avbdDetectSelfCollisionOGC(
 			PxReal depth = r - cp.distance;
 			AvbdSoftContact sc;
 			sc.particleIdx  = gi;
-			sc.rigidBodyIdx = PX_MAX_U32;
+			// A self contact is still a particle-vs-surface contact.  Do not
+			// use the ground sentinel or the solver will evaluate this against
+			// the y=0 plane and discard the detected surface point.
+			sc.rigidBodyIdx = softBodyIdx;
 			sc.normal       = contactNormal;
 			sc.projNormal   = contactNormal;
 			sc.depth        = depth;
@@ -1968,6 +2135,7 @@ inline void avbdDetectSelfCollisionOGC(
 			else
 				sc.tangent1 = contactNormal.cross(PxVec3(0.0f,1.0f,0.0f)).getNormalized();
 			sc.tangent2 = contactNormal.cross(sc.tangent1);
+			avbdInitializeSoftContactAnchors(sc, particles);
 			contacts.pushBack(sc);
 		}
 	}
@@ -1976,6 +2144,80 @@ inline void avbdDetectSelfCollisionOGC(
 // =============================================================================
 // Convenience: detect all OGC contacts (ground + soft-rigid + soft-soft + self)
 // =============================================================================
+
+PX_FORCE_INLINE void avbdTransferSoftContactState(
+	const AvbdSoftContact* previousContacts, PxU32 numPreviousContacts,
+	const AvbdSoftParticle* particles,
+	PxArray<AvbdSoftContact>& contacts)
+{
+	const PxReal normalMatch = 0.8f;
+	const PxReal pointMatchSq = 0.05f * 0.05f;
+	PxArray<PxU8> previousUsed(numPreviousContacts);
+	for(PxU32 oldIdx = 0; oldIdx < numPreviousContacts; ++oldIdx)
+		previousUsed[oldIdx] = 0;
+	for(PxU32 contactIdx = 0; contactIdx < contacts.size(); ++contactIdx)
+	{
+		AvbdSoftContact& contact = contacts[contactIdx];
+		contact.particlePointPrev =
+			particles[contact.particleIdx].position;
+		contact.surfacePointPrev = contact.surfacePoint;
+
+		const AvbdSoftContact* best = NULL;
+		PxU32 bestIdx = PX_MAX_U32;
+		PxReal bestDistanceSq = PX_MAX_F32;
+		for(PxU32 oldIdx = 0; oldIdx < numPreviousContacts; ++oldIdx)
+		{
+			if(previousUsed[oldIdx])
+				continue;
+			const AvbdSoftContact& old = previousContacts[oldIdx];
+			if(old.particleIdx != contact.particleIdx ||
+				old.rigidBodyIdx != contact.rigidBodyIdx ||
+				old.normal.dot(contact.normal) < normalMatch)
+				continue;
+
+			const PxReal distanceSq =
+				(old.surfacePoint - contact.surfacePoint).magnitudeSquared();
+			if(contact.rigidBodyIdx != PX_MAX_U32 &&
+				distanceSq > pointMatchSq)
+				continue;
+			if(distanceSq < bestDistanceSq)
+			{
+				best = &old;
+				bestIdx = oldIdx;
+				bestDistanceSq = distanceSq;
+			}
+		}
+		if(!best)
+			continue;
+		previousUsed[bestIdx] = 1;
+
+		const PxReal dualDecay = 0.99f;
+		const PxReal penaltyDecay = 0.999f;
+		contact.alLambda = best->alLambda * dualDecay;
+		contact.k = PxClamp(
+			best->k * penaltyDecay, contact.k, contact.ke);
+		contact.penTangent[0] = PxClamp(
+			best->penTangent[0] * penaltyDecay,
+			1000.0f, contact.ke);
+		contact.penTangent[1] = PxClamp(
+			best->penTangent[1] * penaltyDecay,
+			1000.0f, contact.ke);
+
+		const PxVec3 oldTangentForce =
+			best->tangent1 * best->alLambdaTangent[0] +
+			best->tangent2 * best->alLambdaTangent[1];
+		contact.alLambdaTangent[0] =
+			oldTangentForce.dot(contact.tangent1) * dualDecay;
+		contact.alLambdaTangent[1] =
+			oldTangentForce.dot(contact.tangent2) * dualDecay;
+		contact.frictionStick = best->frictionStick;
+		if(best->frictionStick)
+		{
+			contact.particlePointPrev = best->particlePointPrev;
+			contact.surfacePointPrev = best->surfacePointPrev;
+		}
+	}
+}
 
 // Per-body self-collision adjacency array type
 typedef PxArray<PxArray<PxU32> > AvbdSelfCollisionAdjacency;
@@ -1987,33 +2229,62 @@ inline void avbdDetectAllOGCContacts(
 	const AvbdSelfCollisionAdjacency* perBodyAdj, PxU32 numAdj,
 	PxArray<AvbdSoftContact>& contacts,
 	const AvbdOGCParams& params = AvbdOGCParams(),
-	PxReal groundY = 0.0f)
+	PxReal groundY = 0.0f,
+	AvbdSoftCollisionStats* stats = NULL)
 {
+	PxArray<AvbdSoftContact> previousContacts;
+	previousContacts.assign(contacts.begin(), contacts.end());
 	contacts.clear();
+	if(stats)
+		stats->detectionCalls++;
 
 	// Ground
+	const PxU32 groundStart = contacts.size();
 	avbdDetectSoftGroundContacts(particles, numParticles,
 	                             contacts, groundY, params.contactRadius, params.friction);
+	if(stats)
+		stats->generatedGroundContacts += contacts.size() - groundStart;
 
 	// Path 2: Rigid-soft SDF
 	if (numRigidBoxes > 0)
+	{
+		const PxU32 rigidStart = contacts.size();
+		if(stats)
+			stats->rigidParticleBoxTests += PxU64(numParticles) * numRigidBoxes;
 		avbdDetectSoftRigidSDF(particles, numParticles,
 		                       rigidBoxes, numRigidBoxes,
 		                       contacts, params.contactRadius);
+		if(stats)
+			stats->generatedRigidContacts += contacts.size() - rigidStart;
+	}
 
 	// Path 3: Soft-soft OGC simplified
 	if (numSoftBodies > 1)
+	{
+		const PxU32 softStart = contacts.size();
 		avbdDetectSoftSoftOGC(particles, numParticles,
 		                      softBodies, numSoftBodies,
-		                      contacts, params);
+		                      contacts, params, stats);
+		if(stats)
+			stats->generatedSoftContacts += contacts.size() - softStart;
+	}
 
 	// Path 4: Self-collision OGC full
 	for (PxU32 si = 0; si < numSoftBodies; si++)
 	{
 		if (si < numAdj && perBodyAdj)
-			avbdDetectSelfCollisionOGC(particles, softBodies[si],
-			                           perBodyAdj[si], contacts, params);
+		{
+			const PxU32 selfStart = contacts.size();
+			avbdDetectSelfCollisionOGC(particles, softBodies[si], si,
+			                           perBodyAdj[si], contacts, params, stats);
+			if(stats)
+				stats->generatedSelfContacts += contacts.size() - selfStart;
+		}
 	}
+
+	avbdTransferSoftContactState(
+		previousContacts.begin(), previousContacts.size(),
+		particles, contacts);
 }
 
 // Build all per-body self-collision adjacencies
@@ -2370,6 +2641,82 @@ typedef void (*AvbdContactRedetectFn)(
 	AvbdSoftBody* softBodies, PxU32 numSoftBodies,
 	PxArray<AvbdSoftContact>& contacts, void* userData);
 
+struct AvbdSoftBodyStepStats
+{
+	PxF64 predictionMs;
+	PxF64 contactIndexMs;
+	PxF64 bodyPrecomputeMs;
+	PxF64 bodySolveMs;
+	PxF64 particleSolveMs;
+	PxF64 projectionMs;
+	PxF64 dualMs;
+	PxF64 redetectMs;
+	PxF64 velocityMs;
+	PxF64 frictionMs;
+	PxU64 requestedOuterIterations;
+	PxU64 requestedInnerIterations;
+	PxU64 executedOuterIterations;
+	PxU64 executedInnerIterations;
+	PxU64 particleSweeps;
+	PxU64 workspaceGrowthEvents;
+	PxU64 workspaceGrowthBytes;
+	PxReal finalMaxDisplacement;
+
+	AvbdSoftBodyStepStats()
+		: predictionMs(0.0), contactIndexMs(0.0), bodyPrecomputeMs(0.0),
+		  bodySolveMs(0.0), particleSolveMs(0.0), projectionMs(0.0),
+		  dualMs(0.0), redetectMs(0.0), velocityMs(0.0), frictionMs(0.0),
+		  requestedOuterIterations(0), requestedInnerIterations(0),
+		  executedOuterIterations(0), executedInnerIterations(0),
+		  particleSweeps(0), workspaceGrowthEvents(0),
+		  workspaceGrowthBytes(0), finalMaxDisplacement(0.0f)
+	{
+	}
+};
+
+struct AvbdSoftBodyWorkspace
+{
+	PxArray<PxU32> contactIndices;
+	PxArray<PxU32> contactStarts;
+	PxArray<PxU32> contactCounts;
+	PxArray<PxVec3> chebyPrevPos;
+	PxArray<PxVec3> chebyPrevPrevPos;
+	PxU64 growthEvents;
+	PxU64 growthBytes;
+
+	AvbdSoftBodyWorkspace() : growthEvents(0), growthBytes(0)
+	{
+	}
+
+	template<typename T, typename Alloc>
+	void resize(PxArray<T, Alloc>& array, PxU32 size)
+	{
+		if(size > array.capacity())
+		{
+			growthEvents++;
+			growthBytes +=
+				PxU64(size - array.capacity()) * sizeof(T);
+		}
+		array.resize(size);
+	}
+
+	void beginStep()
+	{
+		growthEvents = 0;
+		growthBytes = 0;
+	}
+
+	void reset()
+	{
+		contactIndices.reset();
+		contactStarts.reset();
+		contactCounts.reset();
+		chebyPrevPos.reset();
+		chebyPrevPrevPos.reset();
+		beginStep();
+	}
+};
+
 inline void avbdStepSoftBodies(
 	AvbdSoftParticle* particles, PxU32 numParticles,
 	AvbdSoftBody* softBodies, PxU32 numSoftBodies,
@@ -2380,9 +2727,23 @@ inline void avbdStepSoftBodies(
 	AvbdContactRedetectFn redetectFn = NULL,
 	PxArray<AvbdSoftContact>* contactsArray = NULL,
 	void* redetectUserData = NULL,
-	PxReal chebyshevRho = 0.92f)
+	PxReal chebyshevRho = 0.92f,
+	AvbdSoftBodyStepStats* stepStats = NULL,
+	AvbdSoftBodyWorkspace* persistentWorkspace = NULL)
 {
 	if (numParticles == 0 || numSoftBodies == 0) return;
+	if(stepStats)
+	{
+		*stepStats = AvbdSoftBodyStepStats();
+		stepStats->requestedOuterIterations = outerIterations;
+		stepStats->requestedInnerIterations =
+			PxU64(outerIterations) * innerIterations;
+	}
+	PxTime stageTimer;
+	AvbdSoftBodyWorkspace localWorkspace;
+	AvbdSoftBodyWorkspace& workspace =
+		persistentWorkspace ? *persistentWorkspace : localWorkspace;
+	workspace.beginStep();
 
 	PxReal invDt = dt > 0.0f ? 1.0f / dt : 0.0f;
 	PxReal invDtSq = invDt * invDt;
@@ -2395,17 +2756,18 @@ inline void avbdStepSoftBodies(
 		// (warmstart: retain a fraction from prior timestep for stability)
 		particles[i].elasticK = particles[i].elasticK * 0.5f;
 	}
-
-	// Stage 2: warmstart contact penalties
-	for (PxU32 ci = 0; ci < numContacts; ci++)
-		contacts[ci].k = PxMin(contacts[ci].k * 2.0f, contacts[ci].ke);
+	if(stepStats)
+		stepStats->predictionMs += stageTimer.getElapsedSeconds() * 1000.0;
 
 	// Build per-particle contact index to avoid O(particles*contacts) scan.
 	// contactStart[pi] = first index into contactIdx for particle pi.
 	// contactIdx stores contact indices grouped by particle.
-	PxArray<PxU32> contactIdxBuf(numContacts);
-	PxArray<PxU32> contactStart(numParticles + 1);
-	PxArray<PxU32> contactCount(numParticles);
+	workspace.resize(workspace.contactIndices, numContacts);
+	workspace.resize(workspace.contactStarts, numParticles + 1);
+	workspace.resize(workspace.contactCounts, numParticles);
+	PxArray<PxU32>& contactIdxBuf = workspace.contactIndices;
+	PxArray<PxU32>& contactStart = workspace.contactStarts;
+	PxArray<PxU32>& contactCount = workspace.contactCounts;
 	auto buildContactIndex = [&]()
 	{
 		for (PxU32 i = 0; i < numParticles; i++) contactCount[i] = 0;
@@ -2424,58 +2786,9 @@ inline void avbdStepSoftBodies(
 	};
 	buildContactIndex();
 
-	PxArray<PxU32> particleBodyIdx(numParticles);
-	for(PxU32 i = 0; i < numParticles; ++i)
-		particleBodyIdx[i] = PX_MAX_U32;
-	for(PxU32 bodyIdx = 0; bodyIdx < numSoftBodies; ++bodyIdx)
-	{
-		const AvbdSoftBody& body = softBodies[bodyIdx];
-		for(PxU32 localIdx = 0; localIdx < body.particleCount; ++localIdx)
-			particleBodyIdx[body.particleStart + localIdx] = bodyIdx;
-	}
-
-	// Pre-compute body-level inertial targets for Newton-style body solve
-	PxArray<PxVec3> bodyComPred(numSoftBodies);
-	PxArray<PxVec3> bodyThetaPred(numSoftBodies);
-	PxArray<PxVec3> bodyAccumTheta(numSoftBodies);
-	for (PxU32 si = 0; si < numSoftBodies; si++)
-	{
-		const AvbdSoftBody& sb = softBodies[si];
-		PxVec3 com(0.0f), comPred(0.0f);
-		PxReal totalMass = 0.0f;
-		PxVec3 angMom(0.0f);
-		for (PxU32 li = 0; li < sb.particleCount; li++)
-		{
-			PxU32 pi = sb.particleStart + li;
-			if (particles[pi].isStatic()) continue;
-			PxReal m = particles[pi].mass;
-			com = com + particles[pi].position * m;
-			comPred = comPred + particles[pi].predictedPosition * m;
-			totalMass += m;
-		}
-		if (totalMass > 0.0f)
-		{
-			PxReal invM = 1.0f / totalMass;
-			com = com * invM;
-			comPred = comPred * invM;
-		}
-		bodyComPred[si] = comPred;
-		PxMat33 bodyI = PxMat33::createDiagonal(PxVec3(0.0f));
-		for (PxU32 li = 0; li < sb.particleCount; li++)
-		{
-			PxU32 pi = sb.particleStart + li;
-			if (particles[pi].isStatic()) continue;
-			PxReal m = particles[pi].mass;
-			PxVec3 r = particles[pi].position - com;
-			PxReal r2 = r.dot(r);
-			bodyI = bodyI + (PxMat33::createDiagonal(PxVec3(r2)) - avbdOuter(r, r)) * m;
-			angMom = angMom + r.cross(particles[pi].velocity) * m;
-		}
-		PxVec3 omega = bodyI.getInverse() * angMom;
-		if (omega.x != omega.x) omega = PxVec3(0.0f);
-		bodyThetaPred[si] = omega * dt;
-		bodyAccumTheta[si] = PxVec3(0.0f);
-	}
+	if(stepStats)
+		stepStats->contactIndexMs +=
+			stageTimer.getElapsedSeconds() * 1000.0;
 
 	// Chebyshev semi-iterative acceleration state.
 	// If chebyshevRho > 0, we use adaptive spectral-radius estimation:
@@ -2486,10 +2799,12 @@ inline void avbdStepSoftBodies(
 	const bool useChebyshev = (chebyshevRho > 0.0f && chebyshevRho < 1.0f);
 	PxReal chebyOmega = 1.0f;
 	PxReal adaptiveRho = chebyshevRho;
-	PxArray<PxVec3> chebyPrevPos(numParticles);
-	PxArray<PxVec3> chebyPrevPrevPos(numParticles);
+	PxArray<PxVec3>& chebyPrevPos = workspace.chebyPrevPos;
+	PxArray<PxVec3>& chebyPrevPrevPos = workspace.chebyPrevPrevPos;
 	if (useChebyshev)
 	{
+		workspace.resize(chebyPrevPos, numParticles);
+		workspace.resize(chebyPrevPrevPos, numParticles);
 		for (PxU32 i = 0; i < numParticles; i++)
 		{
 			chebyPrevPos[i] = particles[i].position;
@@ -2500,106 +2815,8 @@ inline void avbdStepSoftBodies(
 	// Main iteration loop
 	for (PxU32 outerIt = 0; outerIt < outerIterations; outerIt++)
 	{
-		// Body-level 6x6 solve: Newton-style rigid-body update for soft bodies.
-		// Solves for body-level translation and rotation from contact forces,
-		// then applies as a rigid-body motion to all particles.
-		// Neo-Hookean elastic energy is rotation-invariant, so the subsequent
-		// per-particle VBD solve won't fight this body-level correction.
-		// Ref: DyAvbdSolver::solveLocalSystem, Newton VBD rigid_vbd_kernels.py
-		for (PxU32 si = 0; si < numSoftBodies; si++)
-		{
-			const AvbdSoftBody& sb = softBodies[si];
-			PxVec3 com(0.0f);
-			PxReal bodyMass = 0.0f;
-			for (PxU32 li = 0; li < sb.particleCount; li++)
-			{
-				PxU32 pi = sb.particleStart + li;
-				if (particles[pi].isStatic()) continue;
-				com = com + particles[pi].position * particles[pi].mass;
-				bodyMass += particles[pi].mass;
-			}
-			if (bodyMass <= 0.0f) continue;
-			com = com * (1.0f / bodyMass);
-
-			PxU32 bodyContactCount = 0;
-			for (PxU32 li = 0; li < sb.particleCount; li++)
-			{
-				PxU32 pi = sb.particleStart + li;
-				bodyContactCount += contactStart[pi + 1] - contactStart[pi];
-			}
-			if (bodyContactCount == 0) continue;
-
-			PxMat33 bodyInertia = PxMat33::createDiagonal(PxVec3(0.0f));
-			for (PxU32 li = 0; li < sb.particleCount; li++)
-			{
-				PxU32 pi = sb.particleStart + li;
-				if (particles[pi].isStatic()) continue;
-				PxVec3 r = particles[pi].position - com;
-				PxReal r2 = r.dot(r);
-				bodyInertia = bodyInertia +
-					(PxMat33::createDiagonal(PxVec3(r2)) - avbdOuter(r, r)) * particles[pi].mass;
-			}
-
-			PxReal bodyMassDtSq = bodyMass * invDtSq;
-			PxMat33 A_ll = PxMat33::createDiagonal(PxVec3(bodyMassDtSq));
-			PxMat33 A_la = PxMat33::createDiagonal(PxVec3(0.0f));
-			PxMat33 A_al = PxMat33::createDiagonal(PxVec3(0.0f));
-			PxMat33 A_aa = bodyInertia * invDtSq;
-			A_aa = A_aa + PxMat33::createDiagonal(PxVec3(1e-4f * bodyMassDtSq));
-
-			PxVec3 g_l = (com - bodyComPred[si]) * bodyMassDtSq;
-			PxVec3 g_a = (bodyInertia * invDtSq) * (bodyAccumTheta[si] - bodyThetaPred[si]);
-
-			for (PxU32 li = 0; li < sb.particleCount; li++)
-			{
-				PxU32 pi = sb.particleStart + li;
-				PxVec3 r = particles[pi].position - com;
-				for (PxU32 k = contactStart[pi]; k < contactStart[pi + 1]; k++)
-				{
-					const AvbdSoftContact& sc = contacts[contactIdxBuf[k]];
-					PxVec3 n = sc.normal;
-					PxReal violation;
-					if (sc.rigidBodyIdx == PX_MAX_U32)
-						violation = particles[pi].position.dot(n);
-					else
-						violation = (particles[pi].position - sc.surfacePoint).dot(n) - sc.margin;
-
-					PxReal pen = sc.k;
-					PxVec3 rCrossN = r.cross(n);
-					A_ll = A_ll + avbdOuter(n, n) * pen;
-					A_la = A_la + avbdOuter(n, rCrossN) * pen;
-					A_al = A_al + avbdOuter(rCrossN, n) * pen;
-					A_aa = A_aa + avbdOuter(rCrossN, rCrossN) * pen;
-
-					PxReal f = PxMin(0.0f, pen * violation);
-					if (f < 0.0f)
-					{
-						g_l = g_l + n * f;
-						g_a = g_a + rCrossN * f;
-					}
-				}
-			}
-
-			PxMat33 A_ll_inv = A_ll.getInverse();
-			PxMat33 S = A_aa - A_al * A_ll_inv * A_la;
-			PxVec3 deltaTheta = S.getInverse() * (g_a - A_al * (A_ll_inv * g_l));
-			PxVec3 deltaPos = A_ll_inv * (g_l - A_la * deltaTheta);
-
-			if (deltaPos.x != deltaPos.x || deltaTheta.x != deltaTheta.x) continue;
-
-			PxReal thetaMag = deltaTheta.magnitude();
-			if (thetaMag > 0.5f) deltaTheta = deltaTheta * (0.5f / thetaMag);
-
-			for (PxU32 li = 0; li < sb.particleCount; li++)
-			{
-				PxU32 pi = sb.particleStart + li;
-				if (particles[pi].isStatic()) continue;
-				PxVec3 r = particles[pi].position - com;
-				particles[pi].position = particles[pi].position - deltaPos - deltaTheta.cross(r);
-			}
-			bodyAccumTheta[si] = bodyAccumTheta[si] - deltaTheta;
-		}
-
+		if(stepStats)
+			stepStats->executedOuterIterations++;
 		// Snapshot positions as proximal anchor for AVBD elastic term
 		for (PxU32 i = 0; i < numParticles; i++)
 			particles[i].outerPosition = particles[i].position;
@@ -2621,9 +2838,16 @@ inline void avbdStepSoftBodies(
 
 		for (PxU32 innerIt = 0; innerIt < innerIterations; innerIt++)
 		{
+			if(stepStats)
+			{
+				stepStats->executedInnerIterations++;
+				stepStats->particleSweeps++;
+			}
 			PxReal maxDxSq = 0.0f;
 
-			// Soft particle primal
+			// Soft particle primal.  Preserve the reference vertex-block
+			// nonlinear Gauss-Seidel ordering until a colored schedule has its
+			// own equivalence gate.
 			for (PxU32 si = 0; si < numSoftBodies; si++)
 			{
 				const AvbdSoftBody& sb = softBodies[si];
@@ -2655,7 +2879,8 @@ inline void avbdStepSoftBodies(
 					// Tet (Neo-Hookean) contributions
 					for (PxU32 ti = 0; ti < adj.tetRefs.size(); ti++)
 					{
-						const AvbdParticleElementRef& ref = adj.tetRefs[ti];
+						const AvbdParticleElementRef& ref =
+							adj.tetRefs[ti];
 						PxVec3 ef; PxMat33 eH;
 						avbdEvaluateNeoHookeanForceHessian(
 							sb.tetElements[ref.index], int(ref.vOrder),
@@ -2722,8 +2947,8 @@ inline void avbdStepSoftBodies(
 						H = H + H_damp;
 					}
 
-					// AVBD elastic proximal term: pulls toward outer-iteration anchor
-					// to ensure convergence independent of update order (Jacobi-safe)
+					// AVBD elastic proximal term: pulls toward the
+					// outer-iteration anchor.
 					if (sp.elasticK > 0.0f)
 					{
 						H = H + PxMat33::createDiagonal(PxVec3(sp.elasticK));
@@ -2747,6 +2972,8 @@ inline void avbdStepSoftBodies(
 					}
 				}
 			}
+			if(stepStats)
+				stepStats->finalMaxDisplacement = PxSqrt(maxDxSq);
 
 			// Early termination: converged if max displacement < 1e-6
 			if (maxDxSq < 1e-12f) break;
@@ -2816,38 +3043,9 @@ inline void avbdStepSoftBodies(
 				}
 			}
 		}
-
-		// Collision projection (Jolt-style hard constraint).
-		// Uses projNormal (face-normal corrected, always outward)
-		// so inside particles are pushed out correctly.
-		for (PxU32 ci = 0; ci < numContacts; ci++)
-		{
-			AvbdSoftParticle& sp = particles[contacts[ci].particleIdx];
-			if (sp.isStatic()) continue;
-			const AvbdSoftContact& sc = contacts[ci];
-			PxVec3 n = sc.projNormal;
-			PxReal projPen;
-			if (sc.rigidBodyIdx == PX_MAX_U32)
-				projPen = -(sp.position.dot(n));          // ground plane
-			else
-				projPen = -(sp.position - sc.surfacePoint).dot(n);  // body surface
-			if (projPen > 0.0f)
-			{
-				// Clamp soft-soft projection per iteration to avoid
-				// destabilizing elastic forces.
-				if (sc.rigidBodyIdx != PX_MAX_U32 && sc.rigidBodyIdx < numSoftBodies)
-					projPen = PxMin(projPen, 0.05f);
-				PxVec3 projection = n * projPen;
-				const PxU32 bodyIdx = particleBodyIdx[sc.particleIdx];
-				if(bodyIdx < numSoftBodies)
-				{
-					projection = avbdLimitTetDisplacement(
-						softBodies[bodyIdx], sc.particleIdx,
-						particles, projection);
-				}
-				sp.position += projection;
-			}
-		}
+		if(stepStats)
+			stepStats->particleSolveMs +=
+				stageTimer.getElapsedSeconds() * 1000.0;
 
 		// Dual update (contacts, pins, elastic proximal)
 		for (PxU32 ci = 0; ci < numContacts; ci++)
@@ -2869,6 +3067,9 @@ inline void avbdStepSoftBodies(
 			PxReal disp = (sp.position - sp.outerPosition).magnitude();
 			sp.elasticK = PxMin(sp.elasticK + avbdBeta * disp, sp.elasticKMax);
 		}
+		if(stepStats)
+			stepStats->dualMs +=
+				stageTimer.getElapsedSeconds() * 1000.0;
 
 		// Re-detect contacts between outer iterations so surface anchors
 		// track the deforming geometry instead of going stale.
@@ -2878,61 +3079,24 @@ inline void avbdStepSoftBodies(
 					   *contactsArray, redetectUserData);
 			contacts = contactsArray->begin();
 			numContacts = contactsArray->size();
-			// Warmstart the fresh contacts
-			for (PxU32 ci = 0; ci < numContacts; ci++)
-				contacts[ci].k = PxMin(contacts[ci].k * 2.0f, contacts[ci].ke);
 			// Rebuild per-particle contact index
-			contactIdxBuf.resize(numContacts);
+			workspace.resize(contactIdxBuf, numContacts);
 			buildContactIndex();
 		}
+		if(stepStats)
+			stepStats->redetectMs +=
+				stageTimer.getElapsedSeconds() * 1000.0;
 	}
 
 	// Stage 3: velocity update
 	for (PxU32 i = 0; i < numParticles; i++)
 		particles[i].updateVelocityFromPosition(invDt);
-
-	// Stage 4: explicit contact friction on updated velocities.
-	// The contact Hessian intentionally omits tangential terms, so without
-	// an explicit pass bodies can keep sliding forever after contact.
-	for (PxU32 i = 0; i < numParticles; i++)
+	if(stepStats)
+		stepStats->velocityMs += stageTimer.getElapsedSeconds() * 1000.0;
+	if(stepStats)
 	{
-		AvbdSoftParticle& sp = particles[i];
-		if (sp.isStatic()) continue;
-
-		PxVec3 accumulatedNormal(0.0f);
-		PxReal maxFriction = 0.0f;
-		PxReal maxSupportSpeed = 0.0f;
-
-		for (PxU32 k = contactStart[i]; k < contactStart[i + 1]; k++)
-		{
-			const AvbdSoftContact& sc = contacts[contactIdxBuf[k]];
-			PxReal penetration;
-			if (sc.rigidBodyIdx == PX_MAX_U32)
-				penetration = -(sp.position.dot(sc.projNormal));
-			else
-				penetration = -(sp.position - sc.surfacePoint).dot(sc.projNormal);
-			if (penetration <= 0.0f) continue;
-
-			PxVec3 n = sc.projNormal.getNormalized();
-			accumulatedNormal += n * penetration;
-			maxFriction = PxMax(maxFriction, sc.friction);
-			maxSupportSpeed = PxMax(maxSupportSpeed, penetration * invDt);
-		}
-
-		PxReal nLen = accumulatedNormal.magnitude();
-		if (nLen <= 1e-8f || maxFriction <= 0.0f) continue;
-
-		PxVec3 n = accumulatedNormal * (1.0f / nLen);
-		PxReal vn = sp.velocity.dot(n);
-		PxVec3 vt = sp.velocity - n * vn;
-		PxReal vtMag = vt.magnitude();
-		if (vtMag <= 1e-8f) continue;
-
-		// Coulomb-like explicit tangential damping. The support speed term gives
-		// static-friction-like stopping even once the normal velocity is near zero.
-		PxReal frictionBudget = maxFriction * (PxMax(0.0f, -vn) + maxSupportSpeed + 0.25f);
-		PxReal newVtMag = PxMax(0.0f, vtMag - frictionBudget);
-		sp.velocity = n * PxMax(0.0f, vn) + vt * (newVtMag / vtMag);
+		stepStats->workspaceGrowthEvents = workspace.growthEvents;
+		stepStats->workspaceGrowthBytes = workspace.growthBytes;
 	}
 
 }

@@ -93,7 +93,7 @@ def run_one(
             test_ids=test_ids,
         )
         expected_ids = (
-            tuple(range(1, 20)) if test_id is None else (test_id,)
+            tuple(range(1, 21)) if test_id is None else (test_id,)
         )
         if parsed.test_ids != expected_ids:
             errors.append(
@@ -127,7 +127,7 @@ def main() -> int:
     parser.add_argument(
         "--mode", choices=("probe", "acceptance"), default="probe"
     )
-    parser.add_argument("--test-id", type=int, choices=range(1, 20))
+    parser.add_argument("--test-id", type=int, choices=range(1, 21))
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args()

@@ -57,6 +57,19 @@ struct AngularDriveIslandStats {
   float maxAbsDual = 0.0f;
 };
 
+/**
+ * Restore the shared rigid rotation about a frictionless support normal.
+ *
+ * This changes only the two-body rigid null mode: both angular velocities
+ * receive the same axis rotation and both COM velocities receive the
+ * corresponding rotation about the instantaneous system COM.  Total linear
+ * momentum, every globally rotation-invariant joint coordinate derivative,
+ * and support-normal point velocity are therefore unchanged.
+ */
+bool restoreTwoBodySupportAxisAngularMomentum(
+    Body &bodyA, Body &bodyB, const Vec3 &supportNormal,
+    float expectedAxisAngularMomentum);
+
 struct Solver {
   Vec3 gravity = {0, -9.8f, 0};
   int iterations = 10;
@@ -147,7 +160,8 @@ struct Solver {
   void setRevoluteJointLimit(uint32_t jointIdx, float lowerLimit,
                              float upperLimit);
   void setRevoluteJointDrive(uint32_t jointIdx, float targetVelocity,
-                             float maxForce);
+                             float maxForce, bool freeSpin = false,
+                             float gearRatio = 1.0f);
 
   // Prismatic limit/drive (operates on d6Joints by index)
   void setPrismaticJointLimit(uint32_t jointIdx, float lowerLimit,

@@ -84,6 +84,8 @@ struct ScaleRunMetrics
 	PxU32 nonFinite;
 	PxU32 bodyCount;
 	PxU32 sleepingBodies;
+	PxU32 modifyCallbackCount;
+	PxU32 modifiedPointCount;
 	PxReal sphereInitialY;
 	PxReal sphereFinalY;
 	PxReal sphereMinY;
@@ -98,12 +100,49 @@ struct ScaleRunMetrics
 	: length(0.0f), speed(0.0f), massScale(0.0f),
 	  scaleReadbackError(0.0f), contactOffsetNormalized(0.0f),
 	  completedFrames(0), fetchFailures(0), nonFinite(0), bodyCount(0),
-	  sleepingBodies(0), sphereInitialY(0.0f), sphereFinalY(0.0f),
+	  sleepingBodies(0), modifyCallbackCount(0), modifiedPointCount(0),
+	  sphereInitialY(0.0f), sphereFinalY(0.0f),
 	  sphereMinY(FLT_MAX), sphereMaxSpeed(0.0f), meanPosition(0.0f),
 	  meanSpeed(0.0f), minBodyY(FLT_MAX), maxBodyY(-FLT_MAX)
 	{
 	}
 };
+
+class OwnershipContactModifyCallback : public PxContactModifyCallback
+{
+public:
+	virtual void onContactModify(PxContactModifyPair* const pairs,
+		PxU32 count) PX_OVERRIDE
+	{
+		if(!gCurrentMetrics)
+			return;
+		gCurrentMetrics->modifyCallbackCount += count;
+		for(PxU32 pairIndex = 0; pairIndex < count; ++pairIndex)
+		{
+			PxContactSet contacts = pairs[pairIndex].contacts;
+			for(PxU32 contactIndex = 0;
+				contactIndex < contacts.size(); ++contactIndex)
+			{
+				contacts.setMaxImpulse(contactIndex, PX_MAX_REAL);
+				gCurrentMetrics->modifiedPointCount++;
+			}
+		}
+	}
+};
+
+static OwnershipContactModifyCallback gOwnershipContactModifyCallback;
+
+static PxFilterFlags ownershipFilterShader(
+	PxFilterObjectAttributes, PxFilterData,
+	PxFilterObjectAttributes, PxFilterData,
+	PxPairFlags& pairFlags, const void*, PxU32)
+{
+	pairFlags = PxPairFlag::eCONTACT_DEFAULT |
+		PxPairFlag::eMODIFY_CONTACTS |
+		PxPairFlag::eNOTIFY_TOUCH_FOUND |
+		PxPairFlag::eNOTIFY_TOUCH_PERSISTS;
+	return PxFilterFlag::eDEFAULT;
+}
 
 struct ScaleComparison
 {
@@ -165,7 +204,7 @@ void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent, const PxRe
 }
 
 bool initPhysics(bool interactive, const PxTolerancesScale& scale,
-	PxReal scaleMass, ScaleRunMetrics& metrics)
+	PxReal scaleMass, bool ownershipFixture, ScaleRunMetrics& metrics)
 {
 	gCurrentMetrics = &metrics;
 	gDynamicActors.clear();
@@ -198,14 +237,18 @@ bool initPhysics(bool interactive, const PxTolerancesScale& scale,
 	PxReal scaleLength = scale.length;
 
 	PxSceneDesc sceneDesc(scale);
-	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f) * scaleLength;
+	sceneDesc.gravity = ownershipFixture ?
+		PxVec3(0.0f) : PxVec3(0.0f, -9.81f, 0.0f) * scaleLength;
 	gDispatcher = PxDefaultCpuDispatcherCreate(
 		gHeadlessOptions.headless ?
 		gHeadlessOptions.dispatcherThreads : 2u);
 	if(!gDispatcher)
 		return false;
 	sceneDesc.cpuDispatcher	= gDispatcher;
-	sceneDesc.filterShader	= PxDefaultSimulationFilterShader;
+	sceneDesc.filterShader	= ownershipFixture ?
+		ownershipFilterShader : PxDefaultSimulationFilterShader;
+	if(ownershipFixture)
+		sceneDesc.contactModifyCallback = &gOwnershipContactModifyCallback;
 	if(gHeadlessOptions.headless)
 		sceneDesc.solverType = gHeadlessOptions.solverType;
 	gScene = gPhysics->createScene(sceneDesc);
@@ -220,28 +263,48 @@ bool initPhysics(bool interactive, const PxTolerancesScale& scale,
 		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
 	}
 
-	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+	gMaterial = gPhysics->createMaterial(
+		ownershipFixture ? 0.0f : 0.5f,
+		ownershipFixture ? 0.0f : 0.5f,
+		ownershipFixture ? 0.0f : 0.6f);
 	if(!gMaterial)
 		return false;
 
 	PxRigidStatic* groundPlane = PxCreatePlane(*gPhysics, PxPlane(0,1,0,0), *gMaterial);
 	gScene->addActor(*groundPlane);
 
-	for(PxU32 i=0;i<5;i++)
-		createStack(PxTransform(PxVec3(0,0,gStackZ-=10.0f) * scaleLength), 10, 2.0f * scaleLength, 1.0f * scaleMass);
-
-	if(!interactive)
+	if(ownershipFixture)
 	{
 		gSphere = createDynamic(
-			PxTransform(PxVec3(0,40,100) * scaleLength),
-			PxSphereGeometry(10 * scaleLength), 100.0f * scaleMass,
-			PxVec3(0,-50,-100) * scaleLength);
+			PxTransform(PxVec3(0.0f, 0.49f, 0.0f) * scaleLength),
+			PxSphereGeometry(0.5f * scaleLength), 1.0f * scaleMass);
+		PxShape* sphereShape = NULL;
+		if(gSphere->getShapes(&sphereShape, 1) == 1 && sphereShape)
+			metrics.contactOffsetNormalized =
+				sphereShape->getContactOffset() / scaleLength;
 		metrics.sphereInitialY =
 			gSphere->getGlobalPose().p.y / scaleLength;
 		metrics.sphereMinY = metrics.sphereInitialY;
 	}
+	else
+	{
+		for(PxU32 i=0;i<5;i++)
+			createStack(PxTransform(PxVec3(0,0,gStackZ-=10.0f) * scaleLength), 10, 2.0f * scaleLength, 1.0f * scaleMass);
+
+		if(!interactive)
+		{
+			gSphere = createDynamic(
+				PxTransform(PxVec3(0,40,100) * scaleLength),
+				PxSphereGeometry(10 * scaleLength), 100.0f * scaleMass,
+				PxVec3(0,-50,-100) * scaleLength);
+			metrics.sphereInitialY =
+				gSphere->getGlobalPose().p.y / scaleLength;
+			metrics.sphereMinY = metrics.sphereInitialY;
+		}
+	}
 	metrics.bodyCount = PxU32(gDynamicActors.size());
-	return metrics.bodyCount == (interactive ? 275u : 276u);
+	return metrics.bodyCount == (ownershipFixture ? 1u :
+		(interactive ? 275u : 276u));
 }
 
 bool stepPhysics(bool /*interactive*/, ScaleRunMetrics& metrics)
@@ -334,11 +397,12 @@ bool captureFinalState(ScaleRunMetrics& metrics)
 }
 
 bool runSim(const PxTolerancesScale& scale, PxReal scaleMass,
-	ScaleRunMetrics& metrics)
+	bool ownershipFixture, ScaleRunMetrics& metrics)
 {
 	const PxU32 frameCount =
 		gHeadlessOptions.headless ? gHeadlessOptions.frames : 150u;
-	bool runOk = initPhysics(false, scale, scaleMass, metrics);
+	bool runOk = initPhysics(
+		false, scale, scaleMass, ownershipFixture, metrics);
 	if(runOk)
 		for(PxU32 i=0; i<frameCount; i++)
 			if(!stepPhysics(false, metrics))
@@ -426,16 +490,23 @@ bool parseHeadlessOptions(
 			error = std::string("unknown option: ") + argv[i];
 			return false;
 		}
-	if(gHeadlessOptions.headless &&
-		!Snippets::equalsIgnoreCase(
-			gHeadlessOptions.caseName.c_str(), "scale-pair"))
+	const bool scalePair = Snippets::equalsIgnoreCase(
+		gHeadlessOptions.caseName.c_str(), "scale-pair");
+	const bool ownershipScalePair = Snippets::equalsIgnoreCase(
+		gHeadlessOptions.caseName.c_str(),
+		"normal-ownership-scale-pair");
+	if(gHeadlessOptions.headless && !scalePair && !ownershipScalePair)
 	{
 		error = "unsupported --case";
 		return false;
 	}
-	if(gHeadlessOptions.headless && gHeadlessOptions.frames != 150)
+	const PxU32 requiredFrames = ownershipScalePair ? 120u : 150u;
+	if(gHeadlessOptions.headless &&
+		gHeadlessOptions.frames != requiredFrames)
 	{
-		error = "scale-pair requires --frames=150";
+		error = ownershipScalePair ?
+			"normal-ownership-scale-pair requires --frames=120" :
+			"scale-pair requires --frames=150";
 		return false;
 	}
 	if(gHeadlessOptions.headless &&
@@ -503,6 +574,120 @@ const char* failureReason(const ScaleRunMetrics& base,
 		comparison.sphereMaxSpeedDelta >= 2.0f)
 		return "sphere_scale_invariance";
 	return "aggregate_scale_invariance";
+}
+
+bool ownershipHeadlessPassed(const ScaleRunMetrics& base,
+	const ScaleRunMetrics& scaled, const ScaleComparison& comparison)
+{
+	return
+		base.completedFrames == 120 &&
+		scaled.completedFrames == 120 &&
+		base.bodyCount == 1 &&
+		scaled.bodyCount == 1 &&
+		base.finalStates.size() == 1 &&
+		scaled.finalStates.size() == 1 &&
+		base.fetchFailures == 0 && scaled.fetchFailures == 0 &&
+		base.nonFinite == 0 && scaled.nonFinite == 0 &&
+		base.scaleReadbackError < 1e-6f &&
+		scaled.scaleReadbackError < 1e-6f &&
+		PxAbs(base.contactOffsetNormalized -
+			scaled.contactOffsetNormalized) < 1e-6f &&
+		base.modifyCallbackCount > 0 &&
+		base.modifyCallbackCount == scaled.modifyCallbackCount &&
+		base.modifiedPointCount >= base.modifyCallbackCount &&
+		base.modifiedPointCount == scaled.modifiedPointCount &&
+		base.sphereMinY >= 0.48f && scaled.sphereMinY >= 0.48f &&
+		base.sphereFinalY >= 0.49f && base.sphereFinalY <= 0.51f &&
+		scaled.sphereFinalY >= 0.49f && scaled.sphereFinalY <= 0.51f &&
+		comparison.sphereFinalPositionDelta < 1e-4f &&
+		comparison.sphereMinYDelta < 1e-4f &&
+		comparison.sphereMaxSpeedDelta < 1e-4f &&
+		comparison.meanPositionDelta < 1e-4f &&
+		comparison.meanSpeedDelta < 1e-4f &&
+		gCleanupCount == 2 &&
+		gErrorCallback.getFatalCount() == 0;
+}
+
+const char* ownershipFailureReason(const ScaleRunMetrics& base,
+	const ScaleRunMetrics& scaled, const ScaleComparison& comparison)
+{
+	if(gErrorCallback.getFatalCount())
+		return "fatal_error";
+	if(gCleanupCount != 2)
+		return "cleanup_incomplete";
+	if(base.fetchFailures || scaled.fetchFailures)
+		return "fetch_failed";
+	if(base.nonFinite || scaled.nonFinite)
+		return "non_finite";
+	if(base.bodyCount != 1 || scaled.bodyCount != 1)
+		return "body_count";
+	if(base.modifyCallbackCount == 0 ||
+		base.modifyCallbackCount != scaled.modifyCallbackCount ||
+		base.modifiedPointCount < base.modifyCallbackCount ||
+		base.modifiedPointCount != scaled.modifiedPointCount)
+		return "contact_modify_coverage";
+	if(base.sphereMinY < 0.48f || scaled.sphereMinY < 0.48f ||
+		base.sphereFinalY < 0.49f || base.sphereFinalY > 0.51f ||
+		scaled.sphereFinalY < 0.49f || scaled.sphereFinalY > 0.51f)
+		return "support";
+	if(comparison.sphereFinalPositionDelta >= 1e-4f ||
+		comparison.sphereMinYDelta >= 1e-4f ||
+		comparison.sphereMaxSpeedDelta >= 1e-4f ||
+		comparison.meanPositionDelta >= 1e-4f ||
+		comparison.meanSpeedDelta >= 1e-4f)
+		return "scale_invariance";
+	return "configuration";
+}
+
+void printOwnershipHeadlessResult(const ScaleRunMetrics& base,
+	const ScaleRunMetrics& scaled, const ScaleComparison& comparison)
+{
+	const bool pass =
+		ownershipHeadlessPassed(base, scaled, comparison);
+	std::printf(
+		"[AVBD_GATE] schema=2 snippet=SnippetToleranceScale solver=%s "
+		"case=%s execution=%s frames=120 runs=2 "
+		"baseCompleted=%u scaledCompleted=%u baseBodies=%u "
+		"scaledBodies=%u baseLength=%.9g scaledLength=%.9g "
+		"baseSpeed=%.9g scaledSpeed=%.9g baseMassScale=%.9g "
+		"scaledMassScale=%.9g baseScaleError=%.9g "
+		"scaledScaleError=%.9g baseContactOffsetN=%.9g "
+		"scaledContactOffsetN=%.9g baseModifyCallbacks=%u "
+		"scaledModifyCallbacks=%u baseModifiedPoints=%u "
+		"scaledModifiedPoints=%u baseSphereFinalY=%.9g "
+		"scaledSphereFinalY=%.9g baseSphereMinY=%.9g "
+		"scaledSphereMinY=%.9g baseSphereMaxSpeed=%.9g "
+		"scaledSphereMaxSpeed=%.9g sphereFinalDelta=%.9g "
+		"sphereMinDelta=%.9g sphereSpeedDelta=%.9g "
+		"meanPositionDelta=%.9g meanSpeedDelta=%.9g "
+		"baseNonFinite=%u scaledNonFinite=%u baseFetchFailures=%u "
+		"scaledFetchFailures=%u fatalErrors=%u cleanupComplete=%u "
+		"pvd=0 status=%s reason=%s validation=GATED\n",
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+		gHeadlessOptions.caseName.c_str(),
+		Snippets::getExecutionName(gHeadlessOptions.execution),
+		base.completedFrames, scaled.completedFrames, base.bodyCount,
+		scaled.bodyCount, double(base.length), double(scaled.length),
+		double(base.speed), double(scaled.speed), double(base.massScale),
+		double(scaled.massScale), double(base.scaleReadbackError),
+		double(scaled.scaleReadbackError),
+		double(base.contactOffsetNormalized),
+		double(scaled.contactOffsetNormalized),
+		base.modifyCallbackCount, scaled.modifyCallbackCount,
+		base.modifiedPointCount, scaled.modifiedPointCount,
+		double(base.sphereFinalY), double(scaled.sphereFinalY),
+		double(base.sphereMinY), double(scaled.sphereMinY),
+		double(base.sphereMaxSpeed), double(scaled.sphereMaxSpeed),
+		double(comparison.sphereFinalPositionDelta),
+		double(comparison.sphereMinYDelta),
+		double(comparison.sphereMaxSpeedDelta),
+		double(comparison.meanPositionDelta),
+		double(comparison.meanSpeedDelta),
+		base.nonFinite, scaled.nonFinite, base.fetchFailures,
+		scaled.fetchFailures, gErrorCallback.getFatalCount(),
+		gCleanupCount, pass ? "PASS" : "FAIL",
+		pass ? "none" :
+			ownershipFailureReason(base, scaled, comparison));
 }
 
 void printHeadlessResult(const ScaleRunMetrics& base,
@@ -586,13 +771,25 @@ int snippetMain(int argc, const char*const* argv)
 		PxTolerancesScale scaledScale;
 		scaledScale.length = 100.0f;
 		scaledScale.speed *= scaledScale.length;
-		bool runOk = runSim(baseScale, 1000.0f, baseMetrics);
-		runOk = runSim(scaledScale, 1.0f, scaledMetrics) && runOk;
+		const bool ownershipFixture = Snippets::equalsIgnoreCase(
+			gHeadlessOptions.caseName.c_str(),
+			"normal-ownership-scale-pair");
+		bool runOk = runSim(
+			baseScale, 1000.0f, ownershipFixture, baseMetrics);
+		runOk = runSim(
+			scaledScale, 1.0f, ownershipFixture, scaledMetrics) && runOk;
 		const ScaleComparison comparison =
 			compareScaleRuns(baseMetrics, scaledMetrics);
-		printHeadlessResult(baseMetrics, scaledMetrics, comparison);
-		return runOk &&
-			headlessPassed(baseMetrics, scaledMetrics, comparison) ?
+		if(ownershipFixture)
+			printOwnershipHeadlessResult(
+				baseMetrics, scaledMetrics, comparison);
+		else
+			printHeadlessResult(baseMetrics, scaledMetrics, comparison);
+		const bool passed = ownershipFixture ?
+			ownershipHeadlessPassed(
+				baseMetrics, scaledMetrics, comparison) :
+			headlessPassed(baseMetrics, scaledMetrics, comparison);
+		return runOk && passed ?
 			Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
 	}
 
@@ -601,14 +798,14 @@ int snippetMain(int argc, const char*const* argv)
 	// Default
 	printf("PxToleranceScale (Default).\n");
 	ScaleRunMetrics baseMetrics;
-	runSim(scale, 1000.0f, baseMetrics);
+	runSim(scale, 1000.0f, false, baseMetrics);
 
 	// Scaled assets
 	printf("PxToleranceScale (Scaled).\n");
 	scale.length = 100;				// length in cm
  	scale.speed *= scale.length;	// speed in cm/s
 	ScaleRunMetrics scaledMetrics;
-	runSim(scale, 1.0f, scaledMetrics);
+	runSim(scale, 1.0f, false, scaledMetrics);
 
 	printf("SnippetToleranceScale done.\n");
 

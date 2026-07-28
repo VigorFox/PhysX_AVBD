@@ -53,7 +53,6 @@
 #include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
 #include "../snippetcommon/SnippetPVD.h"
-#include "../snippetutils/SnippetUtils.h"
 
 #include "SnippetDeformableVolumeAVBD.h"
 
@@ -196,6 +195,7 @@ PxArray<SoftBodyRenderData>    gSoftBodyRenderData;
 
 static PxArray<AvbdSoftContact> gContacts;
 static PxArray<AvbdRigidBox>     gRigidBoxes;
+static AvbdSoftBodyWorkspace     gSoftWorkspace;
 
 struct DeformableVolumeMetrics
 {
@@ -259,6 +259,60 @@ struct DeformableVolumeMetrics
 
 static DeformableVolumeMetrics gMetrics;
 static PxArray<PxVec3> gInitialCentroids;
+
+struct DeformableVolumePerformanceMetrics
+{
+	PxU32 warmupFrames;
+	PxU32 profiledFrames;
+	PxU32 softWorkers;
+	PxArray<PxReal> stepSamplesMs;
+	PxF64 initialContactMs;
+	PxF64 solverMs;
+	PxF64 sceneMs;
+	PxF64 metricsMs;
+	PxReal avgStepMs;
+	PxReal p50StepMs;
+	PxReal p95StepMs;
+	PxReal maxStepMs;
+	AvbdSoftBodyStepStats solverStages;
+	AvbdSoftCollisionStats collision;
+
+	DeformableVolumePerformanceMetrics()
+		: warmupFrames(0), profiledFrames(0), softWorkers(1),
+		  initialContactMs(0.0),
+		  solverMs(0.0), sceneMs(0.0), metricsMs(0.0),
+		  avgStepMs(0.0f), p50StepMs(0.0f), p95StepMs(0.0f),
+		  maxStepMs(0.0f)
+	{
+	}
+};
+
+static DeformableVolumePerformanceMetrics gPerformance;
+static AvbdSoftCollisionStats gFrameCollisionStats;
+static PxU32 gProfileWarmupFrames = 0;
+
+static void accumulateStepStats(
+	AvbdSoftBodyStepStats& total, const AvbdSoftBodyStepStats& frame)
+{
+	total.predictionMs += frame.predictionMs;
+	total.contactIndexMs += frame.contactIndexMs;
+	total.bodyPrecomputeMs += frame.bodyPrecomputeMs;
+	total.bodySolveMs += frame.bodySolveMs;
+	total.particleSolveMs += frame.particleSolveMs;
+	total.projectionMs += frame.projectionMs;
+	total.dualMs += frame.dualMs;
+	total.redetectMs += frame.redetectMs;
+	total.velocityMs += frame.velocityMs;
+	total.frictionMs += frame.frictionMs;
+	total.requestedOuterIterations += frame.requestedOuterIterations;
+	total.requestedInnerIterations += frame.requestedInnerIterations;
+	total.executedOuterIterations += frame.executedOuterIterations;
+	total.executedInnerIterations += frame.executedInnerIterations;
+	total.particleSweeps += frame.particleSweeps;
+	total.workspaceGrowthEvents += frame.workspaceGrowthEvents;
+	total.workspaceGrowthBytes += frame.workspaceGrowthBytes;
+	total.finalMaxDisplacement = frame.finalMaxDisplacement;
+}
 
 // ---------------------------------------------------------------------------
 // Push AVBD soft-body surface triangles to PVD as debug geometry.
@@ -385,6 +439,8 @@ static bool initPhysicsInternal(
 	bool interactive, const std::string& caseName)
 {
 	gMetrics = DeformableVolumeMetrics();
+	gPerformance = DeformableVolumePerformanceMetrics();
+	gPerformance.warmupFrames = gProfileWarmupFrames;
 	gErrorCallback.reset();
 	gParticles.clear();
 	gSoftBodies.clear();
@@ -430,6 +486,9 @@ static bool initPhysicsInternal(
 	gScene = gPhysics->createScene(sceneDesc);
 	if(!gScene)
 		return false;
+	// Vertex-block nonlinear GS is intentionally serial until a colored
+	// schedule has a numerical-equivalence gate.
+	gPerformance.softWorkers = 1;
 	gMetrics.solverReadbackMatched =
 		gScene->getSolverType() == sceneDesc.solverType;
 
@@ -619,12 +678,14 @@ static void redetectContacts(
 	AvbdSoftBody* softBodies, PxU32 numSoftBodies,
 	PxArray<AvbdSoftContact>& contacts, void* /*userData*/)
 {
+	AvbdSoftCollisionStats stats;
 	avbdDetectAllOGCContacts(
 		particles, numParticles,
 		softBodies, numSoftBodies,
 		gRigidBoxes.begin(), gRigidBoxes.size(),
 		NULL, 0,
-		contacts, gOGCParams, 0.0f);
+		contacts, gOGCParams, 0.0f, &stats);
+	gFrameCollisionStats.accumulate(stats);
 }
 
 static void recordContactMetrics()
@@ -742,36 +803,65 @@ static void recordStateMetrics()
 
 static bool stepPhysicsInternal(PxReal dt)
 {
+	const bool profileFrame =
+		gMetrics.completedFrames >= gProfileWarmupFrames;
+	PxTime frameTimer;
+	PxTime stageTimer;
+	gFrameCollisionStats = AvbdSoftCollisionStats();
 
 	// Initial contact detection: ground + soft-soft OGC + rigid-soft SDF.
+	AvbdSoftCollisionStats initialCollisionStats;
 	avbdDetectAllOGCContacts(
 		gParticles.begin(), gParticles.size(),
 		gSoftBodies.begin(), gSoftBodies.size(),
 		gRigidBoxes.begin(), gRigidBoxes.size(),
 		NULL, 0,
-		gContacts, gOGCParams, 0.0f);
+		gContacts, gOGCParams, 0.0f, &initialCollisionStats);
+	gFrameCollisionStats.accumulate(initialCollisionStats);
+	const PxF64 initialContactMs =
+		stageTimer.getElapsedSeconds() * 1000.0;
 	recordContactMetrics();
 
 	// 8 outer iterations with contact re-detection between each.
 	// Contacts are re-detected via callback so surface-point anchors
 	// track the deforming geometry instead of going stale.
+	AvbdSoftBodyStepStats stepStats;
+	PxTime solverTimer;
 	avbdStepSoftBodies(
 		gParticles.begin(), gParticles.size(),
 		gSoftBodies.begin(), gSoftBodies.size(),
 		gContacts.begin(), gContacts.size(),
 		dt, PxVec3(0.0f, -9.81f, 0.0f), 8, 20, 1000.0f,
-		redetectContacts, &gContacts, NULL);
+		redetectContacts, &gContacts, NULL, 0.92f, &stepStats,
+		&gSoftWorkspace);
+	const PxF64 solverMs = solverTimer.getElapsedSeconds() * 1000.0;
 
+	PxTime sceneTimer;
 	gScene->simulate(dt);
 	if(!gScene->fetchResults(true))
 	{
 		gMetrics.fetchFailures++;
 		return false;
 	}
+	const PxF64 sceneMs = sceneTimer.getElapsedSeconds() * 1000.0;
 
+	PxTime metricsTimer;
 	gMetrics.completedFrames++;
 	recordStateMetrics();
 	sendSoftBodiesToPvd();
+	const PxF64 metricsMs = metricsTimer.getElapsedSeconds() * 1000.0;
+	if(profileFrame)
+	{
+		gPerformance.profiledFrames++;
+		gPerformance.initialContactMs += initialContactMs;
+		gPerformance.solverMs += solverMs;
+		gPerformance.sceneMs += sceneMs;
+		gPerformance.metricsMs += metricsMs;
+		accumulateStepStats(gPerformance.solverStages, stepStats);
+		gPerformance.collision.accumulate(gFrameCollisionStats);
+		gPerformance.stepSamplesMs.pushBack(
+			PxReal(frameTimer.getElapsedSeconds() * 1000.0));
+	}
 	return true;
 }
 
@@ -830,6 +920,7 @@ void cleanupPhysics(bool /*interactive*/)
 	gSoftBodies.reset();
 	gParticles.reset();
 	gInitialCentroids.reset();
+	gSoftWorkspace.reset();
 
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
@@ -952,6 +1043,129 @@ static bool validateHeadlessResult(const std::string& caseName)
 	return passed;
 }
 
+static void finalizePerformanceMetrics()
+{
+	if(gPerformance.stepSamplesMs.empty())
+		return;
+	PxF64 sumStepMs = 0.0;
+	for(PxU32 i = 0; i < gPerformance.stepSamplesMs.size(); ++i)
+		sumStepMs += gPerformance.stepSamplesMs[i];
+	PxSort(
+		gPerformance.stepSamplesMs.begin(),
+		gPerformance.stepSamplesMs.size());
+	gPerformance.avgStepMs = PxReal(
+		sumStepMs / PxF64(gPerformance.stepSamplesMs.size()));
+	const PxU32 last = gPerformance.stepSamplesMs.size() - 1;
+	gPerformance.p50StepMs =
+		gPerformance.stepSamplesMs[PxU32(PxCeil(0.5f * PxReal(last)))];
+	gPerformance.p95StepMs =
+		gPerformance.stepSamplesMs[PxU32(PxCeil(0.95f * PxReal(last)))];
+	gPerformance.maxStepMs = gPerformance.stepSamplesMs[last];
+	// PxArray uses the PhysX foundation allocator. Release its storage while
+	// the foundation is still alive; the scalar summary remains printable
+	// after cleanup.
+	gPerformance.stepSamplesMs.reset();
+}
+
+static void printPerformanceResult()
+{
+#if PX_DEBUG
+	const char* buildProfile = "debug";
+#elif PX_CHECKED
+	const char* buildProfile = "checked";
+#else
+	const char* buildProfile = "release";
+#endif
+	const bool softParallel = gPerformance.softWorkers > 1;
+	const char* softExecution = softParallel ? "parallel" : "serial";
+	const PxU32 softWorkers = gPerformance.softWorkers;
+	const PxF64 divisor = gPerformance.profiledFrames ?
+		PxF64(gPerformance.profiledFrames) : 1.0;
+	const AvbdSoftBodyStepStats& stages = gPerformance.solverStages;
+	const PxF64 solverStageMs =
+		stages.predictionMs + stages.contactIndexMs +
+		stages.bodyPrecomputeMs + stages.bodySolveMs +
+		stages.particleSolveMs + stages.projectionMs + stages.dualMs +
+		stages.redetectMs + stages.velocityMs + stages.frictionMs;
+	const PxF64 closureMs =
+		gPerformance.initialContactMs + gPerformance.solverMs +
+		gPerformance.sceneMs + gPerformance.metricsMs;
+
+	printf(
+		"[AVBD_PERF] schema=1 snippet=SnippetDeformableVolumeAVBD "
+		"case=%s buildProfile=%s softExecution=%s softWorkers=%u "
+		"warmupFrames=%u profileFrames=%u "
+		"avgStepMs=%.9g p50StepMs=%.9g p95StepMs=%.9g maxStepMs=%.9g "
+		"initialContactMs=%.9g solverMs=%.9g sceneMs=%.9g metricsMs=%.9g "
+		"predictionMs=%.9g contactIndexMs=%.9g bodyPrecomputeMs=%.9g "
+		"bodySolveMs=%.9g particleSolveMs=%.9g projectionMs=%.9g "
+		"dualMs=%.9g redetectMs=%.9g velocityMs=%.9g frictionMs=%.9g "
+		"solverUnattributedMs=%.9g closureMs=%.9g "
+		"requestedOuterIterations=%llu requestedInnerIterations=%llu "
+		"executedOuterIterations=%llu executedInnerIterations=%llu "
+		"particleSweeps=%llu workspaceGrowthEvents=%llu "
+		"workspaceGrowthBytes=%llu finalMaxDisplacement=%.9g "
+		"detectionCalls=%llu bodyPairs=%llu overlappingBodyPairs=%llu "
+		"particleSurfaceCandidates=%llu insideTriangleTests=%llu "
+		"closestTriangleTests=%llu selfTriangleTests=%llu "
+		"rigidParticleBoxTests=%llu generatedGroundContacts=%llu "
+		"generatedRigidContacts=%llu generatedSoftContacts=%llu "
+		"generatedSelfContacts=%llu\n",
+		gHeadlessOptions.caseName.c_str(), buildProfile,
+		softExecution, softWorkers,
+		gPerformance.warmupFrames,
+		gPerformance.profiledFrames, double(gPerformance.avgStepMs),
+		double(gPerformance.p50StepMs),
+		double(gPerformance.p95StepMs), double(gPerformance.maxStepMs),
+		double(gPerformance.initialContactMs / divisor),
+		double(gPerformance.solverMs / divisor),
+		double(gPerformance.sceneMs / divisor),
+		double(gPerformance.metricsMs / divisor),
+		double(stages.predictionMs / divisor),
+		double(stages.contactIndexMs / divisor),
+		double(stages.bodyPrecomputeMs / divisor),
+		double(stages.bodySolveMs / divisor),
+		double(stages.particleSolveMs / divisor),
+		double(stages.projectionMs / divisor),
+		double(stages.dualMs / divisor),
+		double(stages.redetectMs / divisor),
+		double(stages.velocityMs / divisor),
+		double(stages.frictionMs / divisor),
+		double((gPerformance.solverMs - solverStageMs) / divisor),
+		double(closureMs / divisor),
+		static_cast<unsigned long long>(stages.requestedOuterIterations),
+		static_cast<unsigned long long>(stages.requestedInnerIterations),
+		static_cast<unsigned long long>(stages.executedOuterIterations),
+		static_cast<unsigned long long>(stages.executedInnerIterations),
+		static_cast<unsigned long long>(stages.particleSweeps),
+		static_cast<unsigned long long>(stages.workspaceGrowthEvents),
+		static_cast<unsigned long long>(stages.workspaceGrowthBytes),
+		double(stages.finalMaxDisplacement),
+		static_cast<unsigned long long>(
+			gPerformance.collision.detectionCalls),
+		static_cast<unsigned long long>(gPerformance.collision.bodyPairs),
+		static_cast<unsigned long long>(
+			gPerformance.collision.overlappingBodyPairs),
+		static_cast<unsigned long long>(
+			gPerformance.collision.particleSurfaceCandidates),
+		static_cast<unsigned long long>(
+			gPerformance.collision.insideTriangleTests),
+		static_cast<unsigned long long>(
+			gPerformance.collision.closestTriangleTests),
+		static_cast<unsigned long long>(
+			gPerformance.collision.selfTriangleTests),
+		static_cast<unsigned long long>(
+			gPerformance.collision.rigidParticleBoxTests),
+		static_cast<unsigned long long>(
+			gPerformance.collision.generatedGroundContacts),
+		static_cast<unsigned long long>(
+			gPerformance.collision.generatedRigidContacts),
+		static_cast<unsigned long long>(
+			gPerformance.collision.generatedSoftContacts),
+		static_cast<unsigned long long>(
+			gPerformance.collision.generatedSelfContacts));
+}
+
 static void printHeadlessResult(bool passed)
 {
 	printf(
@@ -1038,6 +1252,20 @@ int snippetMain(int argc, const char*const* argv)
 				gHeadlessOptions.caseName.c_str());
 			return Snippets::eHEADLESS_CONFIG_ERROR;
 		}
+		const char* warmupEnvironment =
+			std::getenv("PHYSX_AVBD_PROFILE_WARMUP");
+		gProfileWarmupFrames = 0;
+		if(warmupEnvironment && warmupEnvironment[0] &&
+			(!Snippets::parseU32(
+				warmupEnvironment, 0, 100000000u,
+				gProfileWarmupFrames) ||
+			 gProfileWarmupFrames >= gHeadlessOptions.frames))
+		{
+			printf(
+				"[AVBD_GATE_CONFIG_ERROR] "
+				"invalid PHYSX_AVBD_PROFILE_WARMUP\n");
+			return Snippets::eHEADLESS_CONFIG_ERROR;
+		}
 		if(!Snippets::applyExecutionEnvironment(gHeadlessOptions))
 		{
 			printf(
@@ -1058,11 +1286,13 @@ int snippetMain(int argc, const char*const* argv)
 					break;
 			}
 			finalizeMetrics();
+			finalizePerformanceMetrics();
 		}
 		cleanupPhysics(false);
 		const bool passed =
 			initialized &&
 			validateHeadlessResult(gHeadlessOptions.caseName);
+		printPerformanceResult();
 		printHeadlessResult(passed);
 		return passed ?
 			Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;

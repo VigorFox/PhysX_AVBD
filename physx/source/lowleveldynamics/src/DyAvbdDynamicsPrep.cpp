@@ -46,6 +46,8 @@
 #include "foundation/PxMath.h"
 #include "extensions/PxJoint.h"
 
+#include <cstdint>
+
 using namespace physx;
 using namespace physx::Dy;
 
@@ -125,6 +127,20 @@ static PxU64 makeAvbdContactCacheKey(PxU32 globalBody0Idx,
   mixAvbdContactKey(
       hash, static_cast<PxU32>(
                 quantizeAvbdContactAnchor(localPointB.z, lengthScale)));
+  return hash != 0 ? hash : 1;
+}
+
+static PxU64 makeAvbdContactManagerKey(const PxsContactManager *manager,
+                                       PxU32 globalBody0Idx,
+                                       PxU32 globalBody1Idx) {
+  const std::uintptr_t address =
+      reinterpret_cast<std::uintptr_t>(manager);
+  PxU64 hash = 14695981039346656037ull;
+  mixAvbdContactKey(hash, static_cast<PxU32>(address));
+  mixAvbdContactKey(
+      hash, static_cast<PxU32>(static_cast<PxU64>(address) >> 32));
+  mixAvbdContactKey(hash, globalBody0Idx);
+  mixAvbdContactKey(hash, globalBody1Idx);
   return hash != 0 ? hash : 1;
 }
 
@@ -375,6 +391,17 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     AvbdSolverBody *bodyB = (localBody1Idx < islandBodyCount)
                                 ? &avbdBodies[localBody1Idx]
                                 : nullptr;
+    const PxU32 cmIdx = cm->getIndex();
+    PxU8 contactManagerAge = 255;
+    const PxU64 contactManagerKey = makeAvbdContactManagerKey(
+        cm, globalBody0Idx, globalBody1Idx);
+    CachedContactManagerState *contactManagerState = nullptr;
+    if (cmIdx < mContactManagerStateCache.size()) {
+      contactManagerState = &mContactManagerStateCache[cmIdx];
+      if (contactManagerState->key == contactManagerKey)
+        contactManagerAge = contactManagerState->frameAge;
+    }
+    const PxU32 managerConstraintStart = constraintIndex;
 
     const PxU8 *contactData = output.contactPoints;
     const PxU8 *patchData = output.contactPatches;
@@ -402,6 +429,58 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
       const PxVec3 normal = patch->normal;
       const PxU32 startContact = patch->startContactIndex;
       const PxU16 numContactsInPatch = patch->nbContacts;
+
+      // Standard PhysX contact reports expose at most two friction anchors per
+      // contact patch. The regular PGS/TGS prep fills this PxFrictionPatch
+      // while building its solver rows; AVBD ingests the NP stream directly,
+      // so construct the same public payload here. Use the first point and the
+      // farthest point in the patch as deterministic manifold anchors, then
+      // accumulate every AVBD row into its nearest anchor during writeback.
+      PxFrictionPatch *reportFrictionPatch =
+          output.frictionPatches
+              ? reinterpret_cast<PxFrictionPatch *>(output.frictionPatches) +
+                    patchIdx
+              : nullptr;
+      PxU32 reportAnchorCount = 0;
+      if (reportFrictionPatch) {
+        reportFrictionPatch->anchorCount = 0;
+        reportFrictionPatch->anchorPositions[0] = PxVec3(0.0f);
+        reportFrictionPatch->anchorPositions[1] = PxVec3(0.0f);
+        reportFrictionPatch->anchorImpulses[0] = PxVec3(0.0f);
+        reportFrictionPatch->anchorImpulses[1] = PxVec3(0.0f);
+
+        if (numContactsInPatch > 0 &&
+            (patch->dynamicFriction > 0.0f ||
+             patch->staticFriction > 0.0f)) {
+          const PxContact *firstContact =
+              reinterpret_cast<const PxContact *>(
+                  contactData + startContact * contactPointSize);
+          reportFrictionPatch->anchorPositions[0] = firstContact->contact;
+          reportAnchorCount = 1;
+
+          PxReal farthestDistanceSq = 0.0f;
+          PxVec3 farthestPosition = firstContact->contact;
+          for (PxU16 anchorCandidate = 1;
+               anchorCandidate < numContactsInPatch; ++anchorCandidate) {
+            const PxContact *candidate =
+                reinterpret_cast<const PxContact *>(
+                    contactData +
+                    (startContact + anchorCandidate) * contactPointSize);
+            const PxReal distanceSq =
+                (candidate->contact - firstContact->contact)
+                    .magnitudeSquared();
+            if (distanceSq > farthestDistanceSq) {
+              farthestDistanceSq = distanceSq;
+              farthestPosition = candidate->contact;
+            }
+          }
+          if (farthestDistanceSq > 1.0e-12f) {
+            reportFrictionPatch->anchorPositions[1] = farthestPosition;
+            reportAnchorCount = 2;
+          }
+          reportFrictionPatch->anchorCount = reportAnchorCount;
+        }
+      }
 
       for (PxU16 c = 0;
            c < numContactsInPatch && constraintIndex < maxConstraints; ++c) {
@@ -457,7 +536,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
         //   lambda *= alpha * gamma
         //   penalty = clamp(penalty * gamma, PENALTY_MIN, PENALTY_MAX)
-        const PxU32 cmIdx = cm->getIndex();
         const PxU64 cacheKey = makeAvbdContactCacheKey(
             globalBody0Idx, globalBody1Idx, constraint.contactPointA,
             constraint.contactPointB, getLengthScale());
@@ -469,10 +547,43 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
                                    : PX_MAX_U32;
         constraint.cacheIndex = cacheIdx;
         constraint.cacheKey = cacheKey;
+        constraint.diagnosticRestoredNormalLambda = 0.0f;
+        constraint.diagnosticRestoredNormalPenalty =
+            AvbdConstants::AVBD_MIN_PENALTY_RHO;
+        constraint.diagnosticInitialNormalPenalty =
+            AvbdConstants::AVBD_MIN_PENALTY_RHO;
+        constraint.diagnosticPreAlRawViolation = 0.0f;
+        constraint.diagnosticPreAlViolation = 0.0f;
+        constraint.diagnosticPreAlNormalCoordinate = 0.0f;
+        constraint.diagnosticNormalWarmstartHit = 0;
+        constraint.diagnosticNormalWarmstartAge = 255;
+        constraint.contactManagerEstablished =
+            contactManagerAge == 1 ? 1 : 0;
+        constraint.contactManagerAge = contactManagerAge;
         constraint.contactImpulseWriteback =
             output.contactForces
                 ? output.contactForces + startContact + c
                 : nullptr;
+        constraint.frictionImpulseWriteback = nullptr;
+        constraint.frictionSweepImpulse = PxVec3(0.0f);
+        constraint.velocityNormalImpulse = -1.0f;
+        if (reportFrictionPatch && reportAnchorCount > 0) {
+          PxU32 anchorIndex = 0;
+          if (reportAnchorCount > 1) {
+            const PxReal distance0 =
+                (worldContact -
+                 reportFrictionPatch->anchorPositions[0])
+                    .magnitudeSquared();
+            const PxReal distance1 =
+                (worldContact -
+                 reportFrictionPatch->anchorPositions[1])
+                    .magnitudeSquared();
+            if (distance1 < distance0)
+              anchorIndex = 1;
+          }
+          constraint.frictionImpulseWriteback =
+              &reportFrictionPatch->anchorImpulses[anchorIndex];
+        }
 
         // AVBD warmstart decay constants
         // alpha=0.95, gamma=0.99 => alpha*gamma=0.9405
@@ -516,6 +627,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
             constraint.tangentPenalty1 = PxClamp(
                 cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
             setFrictionStick(constraint, cached.stick != 0);
+            constraint.diagnosticNormalWarmstartHit = 1;
+            constraint.diagnosticNormalWarmstartAge = cached.frameAge;
             localHits++;
           } else {
             constraint.header.lambda = 0.0f;
@@ -538,6 +651,9 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           localMisses++;
         }
 
+        constraint.diagnosticRestoredNormalLambda = constraint.header.lambda;
+        constraint.diagnosticRestoredNormalPenalty =
+            constraint.header.penalty;
         constraint.contactNormal = normal;
         constraint.targetVelocity =
             extendedContact ? extendedContact->targetVelocity : PxVec3(0.0f);
@@ -586,9 +702,10 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           // Entry 153: never restore staticPrev from CM-index lambda cache.
           // Contact order within a mesh CM reorders every frame -> aliasing
           // injects multi-metre fictitious mesh steps after long runs.
-          // Shell path: bilinearSurfacePointPrev at body xz (feature-stable).
-          // Non-shell: prev = now (zero mesh velocity from cache; dual still
-          // works with C0=0 / geometric normal).
+          // Published-grid path: preserve the current NP anchor and carry its
+          // same-xz mesh displacement back to t-dt. Non-grid deformable
+          // anchors keep prev = now; CM-index history is intentionally not
+          // restored because contact order within a mesh CM is not stable.
           if (AvbdKinematicShell::isActive()) {
             const bool shellApplied =
                 AvbdKinematicShell::applyShellNormalAndPrev(
@@ -612,6 +729,15 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         ++constraintIndex;
       }
     }
+
+    // A manager owns established-support semantics only after it emitted at
+    // least one response row in the current step.  Notification-only streams,
+    // forceNoResponse pairs, and points disabled with maxImpulse=0 must leave a
+    // lifecycle gap so a later response is classified as contact onset.
+    if (contactManagerState && constraintIndex > managerConstraintStart) {
+      contactManagerState->key = contactManagerKey;
+      contactManagerState->frameAge = 0;
+    }
   }
 
   // Update global debug counters and print statistics
@@ -619,8 +745,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
   sDebugMisses += localMisses;
   sFrameCount++;
   // DEBUG: Lambda cache statistics intentionally disabled in production.
-
-  // Kinematic shell box rows are built per-island in DyAvbdDynamics (AvbdSoftContact).
 
   return constraintIndex;
 }
@@ -942,13 +1066,17 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
                 c.angularLimitUpper = PxVec3(PxPi, 0.0f, 0.0f);
               }
 
-              // Motor/drive support: use post-solve motor (like reference)
-              // instead of AL velocity drive (which couples with gear constraints
-              // and causes instability).
+              // Native revolute motors are finalized by the strict velocity
+              // owner. Supported centered gear topology is solved as one
+              // coupled velocity objective; unsupported mixtures fail closed.
               if (revoluteData->jointFlags & 0x0002) { // eDRIVE_ENABLED
                 c.motorEnabled = 1;
                 c.motorTargetVelocity = revoluteData->driveVelocity;
                 c.motorMaxForce = revoluteData->driveForceLimit;
+                c.motorGearRatio = revoluteData->driveGearRatio;
+                if (revoluteData->jointFlags & 0x0004) // eDRIVE_FREESPIN
+                  c.sourceFlags |= AvbdD6JointConstraint::
+                      eNATIVE_REVOLUTE_MOTOR_FREESPIN;
               }
 
               c.header.rho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;

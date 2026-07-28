@@ -25,30 +25,94 @@ class RunSpec:
     solver: str
     execution: str
     case_name: str
+    frames: int
 
 
-def specs() -> tuple[RunSpec, ...]:
+def authority_specs() -> tuple[RunSpec, ...]:
     return (
         RunSpec(
             "no-ccd-control-tgs",
             "tgs",
             "parallel",
             "no-ccd-control",
+            1,
         ),
-        RunSpec("ccd-report-tgs", "tgs", "parallel", "ccd-report"),
+        RunSpec("ccd-report-tgs", "tgs", "parallel", "ccd-report", 1),
         RunSpec(
-            "ccd-report-avbd-parallel",
-            "avbd",
+            "angular-report-tgs",
+            "tgs",
             "parallel",
-            "ccd-report",
+            "angular-report",
+            24,
+        ),
+        RunSpec("full-report-tgs", "tgs", "parallel", "full-report", 24),
+        RunSpec(
+            "raycast-report-tgs",
+            "tgs",
+            "parallel",
+            "raycast-report",
+            2,
         ),
         RunSpec(
-            "ccd-report-avbd-sequential",
-            "avbd",
-            "sequential",
-            "ccd-report",
+            "dynamic-report-tgs",
+            "tgs",
+            "parallel",
+            "dynamic-report",
+            2,
         ),
     )
+
+
+def specs(mode: str) -> tuple[RunSpec, ...]:
+    authority = authority_specs()
+    if mode == "authority":
+        return authority
+
+    avbd: list[RunSpec] = []
+    for case_name in (
+        "ccd-report",
+        "angular-report",
+        "full-report",
+        "raycast-report",
+        "dynamic-report",
+    ):
+        avbd.extend(
+            (
+                RunSpec(
+                    f"{case_name}-avbd-parallel",
+                    "avbd",
+                    "parallel",
+                    case_name,
+                    (
+                        24
+                        if case_name in ("angular-report", "full-report")
+                        else 2
+                        if case_name in (
+                            "raycast-report",
+                            "dynamic-report",
+                        )
+                        else 1
+                    ),
+                ),
+                RunSpec(
+                    f"{case_name}-avbd-sequential",
+                    "avbd",
+                    "sequential",
+                    case_name,
+                    (
+                        24
+                        if case_name in ("angular-report", "full-report")
+                        else 2
+                        if case_name in (
+                            "raycast-report",
+                            "dynamic-report",
+                        )
+                        else 1
+                    ),
+                ),
+            )
+        )
+    return authority + tuple(avbd)
 
 
 def parse_authority(line: str) -> tuple[dict[str, str], list[str]]:
@@ -74,7 +138,7 @@ def run_one(
         f"--solver={spec.solver}",
         f"--case={spec.case_name}",
         f"--execution={spec.execution}",
-        "--frames=1",
+        f"--frames={spec.frames}",
         "--dt=0.0166666675",
         "--dispatcher-threads=2",
         "--seed=1",
@@ -82,7 +146,7 @@ def run_one(
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
     env["PHYSX_SNIPPET_SOLVER"] = spec.solver
-    env["PHYSX_SNIPPET_FRAME_COUNT"] = "1"
+    env["PHYSX_SNIPPET_FRAME_COUNT"] = str(spec.frames)
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout_seconds
     )
@@ -113,13 +177,13 @@ def run_one(
         errors.extend(parse_errors)
 
     required = {
-        "schema": "1",
+        "schema": "2",
         "snippet": "SnippetContactReportCCD",
         "solver": spec.solver,
         "case": spec.case_name,
         "execution": spec.execution,
-        "frames": "1",
-        "completedFrames": "1",
+        "frames": str(spec.frames),
+        "completedFrames": str(spec.frames),
         "identityErrors": "0",
         "nonFinite": "0",
         "fetchFailures": "0",
@@ -132,7 +196,30 @@ def run_one(
         if actual != expected:
             errors.append(f"{key}={actual!r}, expected {expected!r}")
 
-    if mode == "acceptance":
+    expected_flags = {
+        "no-ccd-control": (0, 0, 0, 0, 0, 0),
+        "ccd-report": (1, 1, 0, 0, 0, 0),
+        "angular-report": (0, 0, 1, 0, 1, 1),
+        "full-report": (1, 1, 1, 1, 1, 1),
+        "raycast-report": (0, 0, 0, 0, 0, 0),
+        "dynamic-report": (1, 1, 0, 0, 0, 1),
+    }[spec.case_name]
+    for key, expected in zip(
+        (
+            "sceneLinearCCD",
+            "sourceLinearCCD",
+            "sourceSpeculativeCCD",
+            "targetLinearCCD",
+            "targetSpeculativeCCD",
+            "targetDynamic",
+        ),
+        expected_flags,
+    ):
+        actual = fields.get(key)
+        if actual != str(expected):
+            errors.append(f"{key}={actual!r}, expected {expected!r}")
+
+    if mode in ("authority", "acceptance"):
         if result.returncode != 0:
             errors.append(f"exit code {result.returncode}, expected 0")
         if fields.get("status") != "PASS":
@@ -181,7 +268,9 @@ def run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--mode", choices=("probe", "acceptance"), default="probe"
+        "--mode",
+        choices=("authority", "probe", "acceptance"),
+        default="probe",
     )
     parser.add_argument("--bin-dir", type=Path, default=DEFAULT_BIN_DIR)
     parser.add_argument("--timeout", type=float, default=30.0)
@@ -204,7 +293,7 @@ def main() -> int:
     all_infrastructure_passed = True
     physics_passes = 0
     physics_failures = 0
-    for spec in specs():
+    for spec in specs(args.mode):
         passed, fields = run_one(
             spec, args.mode, bin_dir, args.timeout
         )

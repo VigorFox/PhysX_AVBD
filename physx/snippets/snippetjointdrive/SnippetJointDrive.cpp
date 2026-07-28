@@ -117,12 +117,28 @@ enum JointDriveTopology {
 enum JointFrameOrientation {
   eFRAME_IDENTITY,
   eFRAME_ROTZ_NEG45,
-  eFRAME_ROTX_NEG45
+  eFRAME_ROTX_NEG45,
+  eFRAME_ROTY_NEG45
 };
 
 enum JointKinematicMotion {
   eKINEMATIC_STATIONARY,
   eKINEMATIC_SPIN_WORLD_Y
+};
+
+enum JointDriveFriction {
+  eFRICTION_ZERO,
+  eFRICTION_STANDARD
+};
+
+enum JointContactSupport {
+  eSUPPORT_FLAT,
+  eSUPPORT_SLOPE_X10
+};
+
+enum JointPositionTargetVelocity {
+  ePOSITION_TARGET_VELOCITY_ZERO,
+  ePOSITION_TARGET_VELOCITY_POSITIVE
 };
 
 struct JointDriveHeadlessConfig {
@@ -134,6 +150,11 @@ struct JointDriveHeadlessConfig {
   bool bodyBRotated;
   bool initialRelativeOffset;
   bool offsetAnchor;
+  bool positionAnchorAlongX;
+  bool positionAnchorAlongZ;
+  bool positionAnchorAsymmetricX;
+  bool positionAnchorAsymmetricZ;
+  bool positionAnchorTwoSidedZ;
   PxReal comparisonMass;
   bool lowForceLimit;
   bool outputForceEnabled;
@@ -141,16 +162,31 @@ struct JointDriveHeadlessConfig {
   JointDriveEndpoint endpoint;
   JointDriveTopology topology;
   JointKinematicMotion kinematicMotion;
+  bool frictionProbeEnabled;
+  JointDriveFriction friction;
+  bool supportProbeEnabled;
+  JointContactSupport support;
+  bool positionTargetVelocityProbeEnabled;
+  JointPositionTargetVelocity positionTargetVelocity;
+  bool positionAnchorProbeEnabled;
+  bool positionFrameProbeEnabled;
 
   JointDriveHeadlessConfig()
       : drive(eDRIVE_LINEAR_X), driveMode(eDRIVE_MODE_FORCE),
         actorAKinematic(false), frameAOrientation(eFRAME_IDENTITY),
         frameBOrientation(eFRAME_IDENTITY),
         bodyBRotated(false), initialRelativeOffset(false), offsetAnchor(false),
+        positionAnchorAlongX(false), positionAnchorAlongZ(false),
+        positionAnchorAsymmetricX(false), positionAnchorAsymmetricZ(false),
+        positionAnchorTwoSidedZ(false),
         comparisonMass(10.0f), lowForceLimit(true), outputForceEnabled(false),
         breakMode(eBREAK_UNBREAKABLE),
         endpoint(eENDPOINT_FORWARD), topology(eTOPOLOGY_STATIC_DYNAMIC),
-        kinematicMotion(eKINEMATIC_STATIONARY) {}
+        kinematicMotion(eKINEMATIC_STATIONARY), frictionProbeEnabled(false),
+        friction(eFRICTION_ZERO), supportProbeEnabled(false),
+        support(eSUPPORT_FLAT), positionTargetVelocityProbeEnabled(false),
+        positionTargetVelocity(ePOSITION_TARGET_VELOCITY_ZERO),
+        positionAnchorProbeEnabled(false), positionFrameProbeEnabled(false) {}
 };
 
 struct JointDriveOptionSeen {
@@ -169,12 +205,16 @@ struct JointDriveOptionSeen {
   bool endpoint;
   bool topology;
   bool kinematicMotion;
+  bool friction;
+  bool support;
+  bool positionTargetVelocity;
 
   JointDriveOptionSeen()
       : drive(false), driveMode(false), actorA(false), frameA(false),
         frameB(false), bodyB(false), initialRelative(false), anchor(false), mass(false),
         limit(false), outputForce(false), breakMode(false), endpoint(false),
-        topology(false), kinematicMotion(false) {}
+        topology(false), kinematicMotion(false), friction(false),
+        support(false), positionTargetVelocity(false) {}
 };
 
 struct DrivePairRuntime {
@@ -462,6 +502,7 @@ struct JointDriveGateEvaluation {
   PxReal motionWitness;
   PxReal positionLateErrorRms;
   PxReal positionLateErrorRatio;
+  PxReal positionLateDriveObjectiveResidualRms;
   PxReal positionLateSpeedRms;
   PxReal positionMotionRatio;
   PxReal testToReferenceResponseRatio;
@@ -469,17 +510,24 @@ struct JointDriveGateEvaluation {
   PxReal expectedTestDeltaVelocity;
   PxReal normalizedImpulse;
   PxReal meanTestAcceleration;
+  PxReal frictionLateCenterOfMassSpeedRms;
+  PxReal finiteFrictionExpectedEquilibriumError;
+  PxReal finiteFrictionEquilibriumRatio;
 
   JointDriveGateEvaluation()
       : exitCode(Snippets::eHEADLESS_PASS), status("PASS"), reason("none"),
         lateTargetMean(0.0f), lateTargetRms(0.0f),
         lateOrthogonalRms(0.0f), motionWitness(0.0f),
         positionLateErrorRms(0.0f), positionLateErrorRatio(PX_MAX_F32),
+        positionLateDriveObjectiveResidualRms(0.0f),
         positionLateSpeedRms(0.0f), positionMotionRatio(0.0f),
         testToReferenceResponseRatio(PX_MAX_F32),
         referenceToTestRateRatio(PX_MAX_F32),
         expectedTestDeltaVelocity(0.0f), normalizedImpulse(0.0f),
-        meanTestAcceleration(0.0f) {}
+        meanTestAcceleration(0.0f),
+        frictionLateCenterOfMassSpeedRms(0.0f),
+        finiteFrictionExpectedEquilibriumError(0.0f),
+        finiteFrictionEquilibriumRatio(0.0f) {}
 };
 
 struct JointDrivePositionMetrics {
@@ -498,6 +546,10 @@ struct JointDrivePositionMetrics {
   PxReal stiffnessReadback;
   PxReal dampingReadback;
   PxReal forceLimitReadback;
+  PxVec3 driveLinearVelocityReadback;
+  PxVec3 driveAngularVelocityReadback;
+  PxReal targetVelocityReadbackError;
+  PxReal canonicalTargetVelocity;
   PxReal worldFrameAxisDot;
   PxReal wrongRawFrameAxisDot;
   PxReal targetReadbackError;
@@ -508,6 +560,9 @@ struct JointDrivePositionMetrics {
   PxReal finalTargetError;
   PxReal finalErrorRatio;
   PxReal lateErrorSquaredSum;
+  PxReal signedTargetAxisError;
+  PxReal driveObjectiveResidual;
+  PxReal lateDriveObjectiveResidualSquaredSum;
   PxReal lateSpeedSquaredSum;
   PxReal maximumSignedProgress;
   PxReal minimumSignedProgress;
@@ -521,12 +576,32 @@ struct JointDrivePositionMetrics {
   PxReal firstSignedAngularAccelerationA;
   PxReal firstSignedAngularAccelerationB;
   PxReal maximumCenterOfMassDrift;
+  PxReal maximumCenterOfMassSpeed;
+  PxReal maximumAbsCenterOfMassDriftX;
+  PxReal maximumAbsCenterOfMassDriftZ;
   PxReal maximumLinearMomentum;
+  PxReal maximumAbsLinearMomentumX;
+  PxReal maximumAbsLinearMomentumZ;
   PxReal maximumAngularMomentum;
+  PxReal maximumConservedAngularMomentum;
+  PxReal staticFrictionReadback;
+  PxReal dynamicFrictionReadback;
+  PxReal initialCommonVelocityReadbackA;
+  PxReal initialCommonVelocityReadbackB;
+  PxVec3 supportNormalReadback;
+  PxVec3 centerOfMassLocalReadbackA;
+  PxVec3 centerOfMassLocalReadbackB;
+  PxReal halfSecondCenterOfMassSpeed;
+  PxReal finalSignedCenterOfMassVelocity;
+  PxReal lateCenterOfMassSpeedSquaredSum;
   PxVec3 firstPublicForce;
   PxVec3 firstPublicTorque;
   PxVec3 actor0WorldArm;
   PxVec3 dynamicWorldArm;
+  PxVec3 jointFramePositionReadbackA;
+  PxVec3 jointFramePositionReadbackB;
+  PxReal jointFrameOrientationReadbackErrorA;
+  PxReal jointFrameOrientationReadbackErrorB;
   PxVec3 expectedNormalizedPublicTorque;
   PxVec3 firstNormalizedPublicTorque;
   PxReal firstSignedPublicForce;
@@ -556,13 +631,20 @@ struct JointDrivePositionMetrics {
         massReadback(0.0f),
         inertiaReadback(0.0f), stiffnessReadback(0.0f),
         dampingReadback(0.0f), forceLimitReadback(0.0f),
+        driveLinearVelocityReadback(0.0f),
+        driveAngularVelocityReadback(0.0f),
+        targetVelocityReadbackError(0.0f),
+        canonicalTargetVelocity(0.0f),
         worldFrameAxisDot(0.0f), wrongRawFrameAxisDot(1.0f),
         targetReadbackError(0.0f),
         initialTargetError(0.0f),
         initialRelativeMagnitude(0.0f), initialRelativeSetupError(0.0f),
         targetRelativeMagnitude(0.0f), finalTargetError(0.0f),
         finalErrorRatio(PX_MAX_F32),
-        lateErrorSquaredSum(0.0f), lateSpeedSquaredSum(0.0f),
+        lateErrorSquaredSum(0.0f), signedTargetAxisError(0.0f),
+        driveObjectiveResidual(0.0f),
+        lateDriveObjectiveResidualSquaredSum(0.0f),
+        lateSpeedSquaredSum(0.0f),
         maximumSignedProgress(0.0f), minimumSignedProgress(0.0f),
         maximumOrthogonalError(0.0f), maximumOvershoot(0.0f),
         firstRelativeAcceleration(0.0f), maximumRelativeAcceleration(0.0f),
@@ -571,10 +653,30 @@ struct JointDrivePositionMetrics {
         expectedSignedAngularAccelerationB(0.0f),
         firstSignedAngularAccelerationA(0.0f),
         firstSignedAngularAccelerationB(0.0f),
-        maximumCenterOfMassDrift(0.0f), maximumLinearMomentum(0.0f),
+        maximumCenterOfMassDrift(0.0f),
+        maximumCenterOfMassSpeed(0.0f),
+        maximumAbsCenterOfMassDriftX(0.0f),
+        maximumAbsCenterOfMassDriftZ(0.0f),
+        maximumLinearMomentum(0.0f),
+        maximumAbsLinearMomentumX(0.0f),
+        maximumAbsLinearMomentumZ(0.0f),
         maximumAngularMomentum(0.0f),
+        maximumConservedAngularMomentum(0.0f),
+        staticFrictionReadback(0.0f), dynamicFrictionReadback(0.0f),
+        initialCommonVelocityReadbackA(0.0f),
+        initialCommonVelocityReadbackB(0.0f),
+        supportNormalReadback(0.0f),
+        centerOfMassLocalReadbackA(0.0f),
+        centerOfMassLocalReadbackB(0.0f),
+        halfSecondCenterOfMassSpeed(PX_MAX_F32),
+        finalSignedCenterOfMassVelocity(0.0f),
+        lateCenterOfMassSpeedSquaredSum(0.0f),
         firstPublicForce(0.0f), firstPublicTorque(0.0f),
         actor0WorldArm(0.0f), dynamicWorldArm(0.0f),
+        jointFramePositionReadbackA(0.0f),
+        jointFramePositionReadbackB(0.0f),
+        jointFrameOrientationReadbackErrorA(0.0f),
+        jointFrameOrientationReadbackErrorB(0.0f),
         expectedNormalizedPublicTorque(0.0f),
         firstNormalizedPublicTorque(0.0f),
         firstSignedPublicForce(0.0f), maximumPublicForce(0.0f),
@@ -718,6 +820,7 @@ static const PxReal gPositionTargetMagnitude = 0.5f;
 static const PxReal gPositionInitialRelativeMagnitude = 0.2f;
 static const PxReal gPositionDriveStiffness = 100.0f;
 static const PxReal gPositionDriveDamping = 20.0f;
+static const PxReal gPositionPositiveTargetVelocity = 0.25f;
 static const PxReal gPositionLowForceLimit = 5.0f;
 static const PxReal gPositionOffsetAnchorMagnitude = 0.25f;
 static const PxReal gPositionDuration = 3.0f;
@@ -765,6 +868,8 @@ static const PxReal gMaximumSlerpPositionOrthogonalError = 0.06f;
 static const PxReal gMaximumPositionOvershootRatio = 0.50f;
 static const PxReal gMaximumPositionReverseMotionRatio = 0.10f;
 static const PxReal gMaximumLatePositionSpeed = 0.25f;
+static const PxReal gMaximumPositionDriveObjectiveResidual = 0.01f;
+static const PxReal gMaximumLatePositionDriveObjectiveResidualRms = 0.015f;
 static const PxReal gOutputForceZeroTolerance = 1e-4f;
 static const PxReal gOutputForceDirectionTolerance = 0.01f;
 static const PxReal gOutputTorqueTolerance = 1e-3f;
@@ -792,10 +897,31 @@ static const PxReal gComparisonMaximumMonotonicDropScale = 0.05f;
 static const PxReal gDynamicComparisonMaximumComDrift = 1e-3f;
 static const PxReal gDynamicComparisonMaximumMomentum = 1e-3f;
 static const PxReal gDynamicAngularPositionMaximumComDrift = 1e-4f;
-static const PxReal gDynamicAngularPositionMaximumLinearMomentum = 1e-4f;
-static const PxReal gDynamicAngularPositionMaximumAngularMomentum = 1e-3f;
+// The original equal-mass fixture used a 1e-4 kg*m/s total-momentum gate.
+// Dividing by its 2 kg total mass yields the equivalent common-mode velocity
+// tolerance while keeping the authority independent of endpoint mass.
+static const PxReal gDynamicPositionMaximumCenterOfMassSpeed = 5e-5f;
+// This gate now measures full spin+orbital momentum rather than spin alone.
+// The 30 Hz TGS reference has a reproducible 1.0642e-3 kg*m^2/s transient
+// while converging approximately linearly with dt; retain a narrow 1.1e-3
+// reference envelope.  The pre-correction AVBD P4Y defect was 7.10e-2.
+static const PxReal gDynamicAngularPositionMaximumAngularMomentum = 1.1e-3f;
 static const PxReal gContactComparisonMinimumBottom = -0.05f;
 static const PxReal gContactComparisonMaximumVerticalSpeed = 1.0f;
+static const PxReal gFrictionProbeCommonVelocity = 1.0f;
+static const PxReal gFrictionProbeCoefficient = 0.5f;
+static const PxReal gFrictionProbeInertia = 1.0f;
+static const PxReal gFrictionProbeCenterOfMassOffset = -0.5f;
+static const PxReal gFrictionProbeWitnessTime = 0.5f;
+static const PxReal gFrictionProbeMaximumWitnessSpeed = 0.10f;
+static const PxReal gFrictionProbeMinimumControlWitnessSpeed = 0.4f;
+static const PxReal gContactSupportSlopeAngle = PxPi / 18.0f;
+// With a force-limited spring just above the static-friction capacity,
+// mu*m*g/k is the boundary of the set-valued static-capture band rather than
+// a unique final coordinate. The late-speed gate proves rest separately, so
+// the coordinate gate has no positive lower bound; its upper tolerance only
+// rejects a spring force outside the admissible Coulomb budget.
+static const PxReal gFiniteFrictionMaximumEquilibriumRatio = 1.40f;
 static const PxReal gOrderingMaximumRotationError = 1e-3f;
 static const PxReal gOrderingMaximumAngularSpeed = 1e-3f;
 
@@ -815,6 +941,64 @@ static bool isDynamicComparisonTopology(JointDriveTopology topology) {
 
 static bool isContactComparisonTopology(JointDriveTopology topology) {
   return topology == eTOPOLOGY_CONTACT_DYNAMIC_DYNAMIC;
+}
+
+static bool isFrictionProbe() {
+  return gHeadlessConfig.frictionProbeEnabled;
+}
+
+static bool isSupportProbe() {
+  return gHeadlessCase == eCASE_POSITION &&
+         gHeadlessConfig.supportProbeEnabled;
+}
+
+static bool isSlopedContactSupport() {
+  return isContactComparisonTopology(gHeadlessConfig.topology) &&
+         gHeadlessConfig.support == eSUPPORT_SLOPE_X10;
+}
+
+static PxVec3 getContactSupportNormal() {
+  if (!isSlopedContactSupport())
+    return PxVec3(0.0f, 1.0f, 0.0f);
+  return PxQuat(gContactSupportSlopeAngle, PxVec3(1.0f, 0.0f, 0.0f))
+      .rotate(PxVec3(0.0f, 1.0f, 0.0f));
+}
+
+static PxVec3 getFrictionProbeCenterOfMassOffset() {
+  return getContactSupportNormal() * gFrictionProbeCenterOfMassOffset;
+}
+
+static bool isPositionTargetVelocityProbe() {
+  return gHeadlessConfig.positionTargetVelocityProbeEnabled;
+}
+
+static bool isPositionAnchorProbe() {
+  return gHeadlessCase == eCASE_POSITION &&
+         gHeadlessConfig.positionAnchorProbeEnabled;
+}
+
+static bool isAsymmetricPositionAnchorProbe() {
+  return isPositionAnchorProbe() &&
+         (gHeadlessConfig.positionAnchorAsymmetricX ||
+          gHeadlessConfig.positionAnchorAsymmetricZ ||
+          gHeadlessConfig.positionAnchorTwoSidedZ);
+}
+
+static bool isTwoSidedPositionAnchorProbe() {
+  return isPositionAnchorProbe() &&
+         gHeadlessConfig.positionAnchorTwoSidedZ;
+}
+
+static bool isPositionFrameProbe() {
+  return gHeadlessCase == eCASE_POSITION &&
+         gHeadlessConfig.positionFrameProbeEnabled;
+}
+
+static PxReal getCanonicalPositionTargetVelocity() {
+  return gHeadlessConfig.positionTargetVelocity ==
+                 ePOSITION_TARGET_VELOCITY_POSITIVE
+             ? gPositionPositiveTargetVelocity
+             : 0.0f;
 }
 
 static bool passesComparisonConservationGate() {
@@ -1017,6 +1201,32 @@ static const char *getTopologyName(JointDriveTopology topology) {
   return "static-dynamic";
 }
 
+static const char *getFrictionName(JointDriveFriction friction) {
+  return friction == eFRICTION_STANDARD ? "standard" : "zero";
+}
+
+static const char *getSupportName(JointContactSupport support) {
+  return support == eSUPPORT_SLOPE_X10 ? "slope-x10" : "flat";
+}
+
+static bool tryParseSupport(const char *value,
+                            JointContactSupport &support) {
+  if (Snippets::equalsIgnoreCase(value, "flat"))
+    support = eSUPPORT_FLAT;
+  else if (Snippets::equalsIgnoreCase(value, "slope-x10"))
+    support = eSUPPORT_SLOPE_X10;
+  else
+    return false;
+  return true;
+}
+
+static const char *getPositionTargetVelocityName(
+    JointPositionTargetVelocity targetVelocity) {
+  return targetVelocity == ePOSITION_TARGET_VELOCITY_POSITIVE
+             ? "positive"
+             : "zero";
+}
+
 static bool tryParseTopology(const char *value,
                              JointDriveTopology &topology) {
   if (Snippets::equalsIgnoreCase(value, "static-dynamic"))
@@ -1188,6 +1398,8 @@ static const char *getOrientationName(JointFrameOrientation orientation) {
     return "rotz-neg45";
   case eFRAME_ROTX_NEG45:
     return "rotx-neg45";
+  case eFRAME_ROTY_NEG45:
+    return "roty-neg45";
   default:
     return "identity";
   }
@@ -1197,17 +1409,85 @@ static const char *getInitialRelativeName(bool offset) {
   return offset ? "driven-pos20" : "identity";
 }
 
-static const char *getAnchorName(bool offset) {
-  return offset ? "symmetric-y25" : "centered";
+static const char *getAnchorName(bool offset, bool alongX, bool alongZ,
+                                 bool asymmetricX, bool asymmetricZ,
+                                 bool twoSidedZ) {
+  return offset ? (twoSidedZ
+                       ? "asymmetric-zpair25"
+                       : (asymmetricX
+                       ? "asymmetric-x25"
+                       : (asymmetricZ
+                              ? "asymmetric-z25"
+                              : (alongX ? "symmetric-x25"
+                                        : (alongZ ? "symmetric-z25"
+                                                  : "symmetric-y25")))))
+                : "centered";
 }
 
-static bool tryParseAnchor(const char *value, bool &offset) {
+static bool tryParseAnchor(const char *value, bool &offset, bool &alongX,
+                           bool &alongZ, bool &asymmetricX,
+                           bool &asymmetricZ, bool &twoSidedZ) {
   if (Snippets::equalsIgnoreCase(value, "centered")) {
     offset = false;
+    alongX = false;
+    alongZ = false;
+    asymmetricX = false;
+    asymmetricZ = false;
+    twoSidedZ = false;
     return true;
   }
   if (Snippets::equalsIgnoreCase(value, "symmetric-y25")) {
     offset = true;
+    alongX = false;
+    alongZ = false;
+    asymmetricX = false;
+    asymmetricZ = false;
+    twoSidedZ = false;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "symmetric-x25")) {
+    offset = true;
+    alongX = true;
+    alongZ = false;
+    asymmetricX = false;
+    asymmetricZ = false;
+    twoSidedZ = false;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "symmetric-z25")) {
+    offset = true;
+    alongX = false;
+    alongZ = true;
+    asymmetricX = false;
+    asymmetricZ = false;
+    twoSidedZ = false;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "asymmetric-x25")) {
+    offset = true;
+    alongX = true;
+    alongZ = false;
+    asymmetricX = true;
+    asymmetricZ = false;
+    twoSidedZ = false;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "asymmetric-z25")) {
+    offset = true;
+    alongX = false;
+    alongZ = true;
+    asymmetricX = false;
+    asymmetricZ = true;
+    twoSidedZ = false;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "asymmetric-zpair25")) {
+    offset = true;
+    alongX = false;
+    alongZ = true;
+    asymmetricX = false;
+    asymmetricZ = true;
+    twoSidedZ = true;
     return true;
   }
   return false;
@@ -1249,6 +1529,10 @@ static bool tryParseOrientation(const char *value,
   }
   if (Snippets::equalsIgnoreCase(value, "rotx-neg45")) {
     orientation = eFRAME_ROTX_NEG45;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "roty-neg45")) {
+    orientation = eFRAME_ROTY_NEG45;
     return true;
   }
   return false;
@@ -1965,7 +2249,17 @@ static bool configurePositionDrive(DrivePairRuntime &pair,
     pair.joint->setDrive(PxD6Drive::eSLERP, parameters);
     break;
   }
-  pair.joint->setDriveVelocity(PxVec3(0.0f), PxVec3(0.0f), true);
+  const bool reverse = gHeadlessConfig.endpoint == eENDPOINT_REVERSE;
+  gPositionMetrics.canonicalTargetVelocity =
+      isPositionTargetVelocityProbe()
+          ? getCanonicalPositionTargetVelocity()
+          : 0.0f;
+  const PxVec3 jointLinearTargetVelocity(
+      reverse ? -gPositionMetrics.canonicalTargetVelocity
+              : gPositionMetrics.canonicalTargetVelocity,
+      0.0f, 0.0f);
+  pair.joint->setDriveVelocity(jointLinearTargetVelocity,
+                               PxVec3(0.0f), true);
   pair.joint->setConstraintFlag(
       PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
 
@@ -1978,6 +2272,13 @@ static bool configurePositionDrive(DrivePairRuntime &pair,
   gPositionMetrics.driveLimitsAreForcesReadback =
       pair.joint->getConstraintFlags().isSet(
           PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES);
+  pair.joint->getDriveVelocity(
+      gPositionMetrics.driveLinearVelocityReadback,
+      gPositionMetrics.driveAngularVelocityReadback);
+  gPositionMetrics.targetVelocityReadbackError =
+      safeMagnitude(gPositionMetrics.driveLinearVelocityReadback -
+                    jointLinearTargetVelocity) +
+      safeMagnitude(gPositionMetrics.driveAngularVelocityReadback);
 
   gPositionMetrics.initialRelativePose = getJointRelativePose(pair);
   gPositionMetrics.initialRelativeMagnitude =
@@ -2016,7 +2317,6 @@ static bool configurePositionDrive(DrivePairRuntime &pair,
           ? safeMagnitude(gPositionMetrics.targetRelativePose.p)
           : quaternionAngle(PxQuat(PxIdentity),
                             gPositionMetrics.targetRelativePose.q);
-  const bool reverse = gHeadlessConfig.endpoint == eENDPOINT_REVERSE;
   const PxTransform jointTarget =
       reverse ? gPositionMetrics.targetRelativePose.getInverse()
               : gPositionMetrics.targetRelativePose;
@@ -2327,12 +2627,15 @@ static bool createDrivePair(bool interactive) {
       positionProbe && gHeadlessConfig.endpoint == eENDPOINT_REVERSE;
   const PxQuat rotZ = PxGetRotZQuat(-PxPi / 4.0f);
   const PxQuat rotX(-PxPi / 4.0f, PxVec3(1.0f, 0.0f, 0.0f));
+  const PxQuat rotY(-PxPi / 4.0f, PxVec3(0.0f, 1.0f, 0.0f));
   const PxBoxGeometry boxGeometry(0.5f, 0.5f, 0.5f);
   PxTransform poseA(
       interactive
           ? PxVec3(0.0f, 2.0f, -20.0f)
-          : (contactPositionPair ? PxVec3(0.0f, 0.5f, 0.0f)
+          : (contactPositionPair ? getContactSupportNormal() * 0.5f
                                  : PxVec3(0.0f)));
+  if (positionProbe && gHeadlessConfig.positionAnchorTwoSidedZ)
+    poseA.p.z += 0.5f * gPositionOffsetAnchorMagnitude;
   DrivePairRuntime &pair = gPairs[0];
   gPairCount = 1;
 
@@ -2346,7 +2649,11 @@ static bool createDrivePair(bool interactive) {
     if (!actor)
       return false;
     actor->setMass(1.0f);
-    actor->setMassSpaceInertiaTensor(PxVec3(1.0f));
+    if (isFrictionProbe())
+      actor->setCMassLocalPose(
+          PxTransform(getFrictionProbeCenterOfMassOffset()));
+    actor->setMassSpaceInertiaTensor(
+        PxVec3(isFrictionProbe() ? gFrictionProbeInertia : 1.0f));
     actor->setLinearDamping(0.0f);
     actor->setAngularDamping(0.0f);
     actor->setSolverIterationCounts(4, 1);
@@ -2358,6 +2665,14 @@ static bool createDrivePair(bool interactive) {
     gPositionMetrics.actorAMassReadback = actor->getMass();
     gPositionMetrics.actorAInertiaReadback =
         actor->getMassSpaceInertiaTensor();
+    gPositionMetrics.centerOfMassLocalReadbackA =
+        actor->getCMassLocalPose().p;
+    if (isFrictionProbe()) {
+      actor->setLinearVelocity(
+          PxVec3(gFrictionProbeCommonVelocity, 0.0f, 0.0f));
+      gPositionMetrics.initialCommonVelocityReadbackA =
+          actor->getLinearVelocity().x;
+    }
   } else if (actorAKinematic) {
     PxRigidDynamic *actor = positionProbe
                                 ? gPhysics->createRigidDynamic(poseA)
@@ -2380,17 +2695,43 @@ static bool createDrivePair(bool interactive) {
     pair.jointFrameA.q = rotZ;
   else if (frameAOrientation == eFRAME_ROTX_NEG45)
     pair.jointFrameA.q = rotX;
+  else if (frameAOrientation == eFRAME_ROTY_NEG45)
+    pair.jointFrameA.q = rotY;
   if (frameBOrientation == eFRAME_ROTZ_NEG45)
     pair.jointFrameB.q = rotZ;
   else if (frameBOrientation == eFRAME_ROTX_NEG45)
     pair.jointFrameB.q = rotX;
+  else if (frameBOrientation == eFRAME_ROTY_NEG45)
+    pair.jointFrameB.q = rotY;
   if (positionProbe && gHeadlessConfig.offsetAnchor) {
-    // Give both endpoints the same joint-Y lever arm.  The finite drive force
-    // therefore needs a locked-angular reaction torque.  Since drive rows
-    // report about bodyAWorldOffset, toggling eOUTPUT_FORCE must not invent a
-    // second COM moment on top of that physical reaction.
-    pair.jointFrameA.p = pair.jointFrameA.q.rotate(
-        PxVec3(0.0f, gPositionOffsetAnchorMagnitude, 0.0f));
+    // Position-anchor fixtures are authored in joint coordinates and
+    // converted into each actor-local frame. One-sided asymmetric fixtures
+    // keep A centered and offset only B. The two-sided fixture uses equal and
+    // opposite local Z arms. Pose construction compensates either form so
+    // both world anchors start coincident at equal support height.
+    const PxReal localAnchorMagnitude =
+        isTwoSidedPositionAnchorProbe()
+            ? 0.5f * gPositionOffsetAnchorMagnitude
+            : gPositionOffsetAnchorMagnitude;
+    const PxVec3 localAnchorB =
+        gHeadlessConfig.positionAnchorAlongX
+            ? PxVec3(localAnchorMagnitude, 0.0f, 0.0f)
+            : (gHeadlessConfig.positionAnchorAlongZ
+                   ? PxVec3(0.0f, 0.0f,
+                            localAnchorMagnitude)
+                   : PxVec3(0.0f, localAnchorMagnitude,
+                            0.0f));
+    const PxVec3 localAnchorA =
+        isTwoSidedPositionAnchorProbe()
+            ? -localAnchorB
+            : (isAsymmetricPositionAnchorProbe() ? PxVec3(0.0f)
+                                                  : localAnchorB);
+    pair.jointFrameA.p =
+        pair.jointFrameA.q.rotate(localAnchorA);
+    pair.jointFrameB.p =
+        pair.jointFrameB.q.rotate(localAnchorB);
+  } else if (isFrictionProbe()) {
+    pair.jointFrameA.p = getFrictionProbeCenterOfMassOffset();
     pair.jointFrameB.p = pair.jointFrameA.p;
   }
 
@@ -2421,14 +2762,27 @@ static bool createDrivePair(bool interactive) {
                 *gPhysics, poseB, boxGeometry, *gMaterial, 1.0f);
   if (positionProbe && pair.actorB) {
     pair.actorB->setMass(gHeadlessConfig.comparisonMass);
+    if (isFrictionProbe())
+      pair.actorB->setCMassLocalPose(
+          PxTransform(getFrictionProbeCenterOfMassOffset()));
     pair.actorB->setMassSpaceInertiaTensor(
-        PxVec3(gHeadlessConfig.comparisonMass));
+        PxVec3(isFrictionProbe()
+                   ? gFrictionProbeInertia
+                   : gHeadlessConfig.comparisonMass));
     pair.actorB->setLinearDamping(0.0f);
     pair.actorB->setAngularDamping(0.0f);
     pair.actorB->setSolverIterationCounts(4, 1);
     gPositionMetrics.massReadback = pair.actorB->getMass();
     gPositionMetrics.inertiaReadback =
         pair.actorB->getMassSpaceInertiaTensor();
+    gPositionMetrics.centerOfMassLocalReadbackB =
+        pair.actorB->getCMassLocalPose().p;
+    if (isFrictionProbe()) {
+      pair.actorB->setLinearVelocity(
+          PxVec3(gFrictionProbeCommonVelocity, 0.0f, 0.0f));
+      gPositionMetrics.initialCommonVelocityReadbackB =
+          pair.actorB->getLinearVelocity().x;
+    }
   }
   if (contactPositionPair && pair.actorB &&
       !configureContactBody(*pair.actorB, 0, 1))
@@ -2451,6 +2805,22 @@ static bool createDrivePair(bool interactive) {
         reversePosition
             ? jointActor0 == pair.actorB && jointActor1 == pair.actorA
             : jointActor0 == pair.actorA && jointActor1 == pair.actorB;
+    const PxTransform localPose0 =
+        pair.joint->getLocalPose(PxJointActorIndex::eACTOR0);
+    const PxTransform localPose1 =
+        pair.joint->getLocalPose(PxJointActorIndex::eACTOR1);
+    gPositionMetrics.jointFramePositionReadbackA =
+        reversePosition ? localPose1.p : localPose0.p;
+    gPositionMetrics.jointFramePositionReadbackB =
+        reversePosition ? localPose0.p : localPose1.p;
+    const PxQuat readbackOrientationA =
+        reversePosition ? localPose1.q : localPose0.q;
+    const PxQuat readbackOrientationB =
+        reversePosition ? localPose0.q : localPose1.q;
+    gPositionMetrics.jointFrameOrientationReadbackErrorA =
+        quaternionAngle(readbackOrientationA, pair.jointFrameA.q);
+    gPositionMetrics.jointFrameOrientationReadbackErrorB =
+        quaternionAngle(readbackOrientationB, pair.jointFrameB.q);
   }
   pair.joint->setAngularDriveConfig(PxD6AngularDriveConfig::eSWING_TWIST);
   pair.joint->setConstraintFlag(PxConstraintFlag::eVISUALIZATION, true);
@@ -2567,9 +2937,13 @@ static bool createDrivePair(bool interactive) {
                  gPositionMetrics.actorAMassReadback +
              gMetrics.initialPoseB.p * gPositionMetrics.massReadback) /
             totalMass;
-        if (gHeadlessConfig.lowForceLimit &&
-            gHeadlessCase == eCASE_ANGULAR_POSITION) {
-          if (drive == eDRIVE_SLERP) {
+        if (gHeadlessConfig.lowForceLimit) {
+          if (isLinearDrive(drive)) {
+            gPositionMetrics.expectedFirstRelativeAcceleration =
+                gPositionLowForceLimit *
+                (1.0f / gPositionMetrics.actorAMassReadback +
+                 1.0f / gPositionMetrics.massReadback);
+          } else if (drive == eDRIVE_SLERP) {
             PxRigidActor *slerpActor0 = NULL;
             PxRigidActor *slerpActor1 = NULL;
             pair.joint->getActors(slerpActor0, slerpActor1);
@@ -2775,7 +3149,9 @@ static void createScene() {
 
   if (!gHeadlessMode || contactComparison) {
     PxRigidStatic *groundPlane =
-        PxCreatePlane(*gPhysics, PxPlane(0, 1, 0, 0), *gMaterial);
+        PxCreatePlane(*gPhysics,
+                      PxPlane(getContactSupportNormal(), 0.0f),
+                      *gMaterial);
     if (!groundPlane) {
       gInitializationFailed = true;
       return;
@@ -2785,6 +3161,10 @@ static void createScene() {
       gContactGroundTag.body = PX_MAX_U32;
       gContactGroundTag.ground = true;
       groundPlane->userData = &gContactGroundTag;
+      gPositionMetrics.supportNormalReadback =
+          groundPlane->getGlobalPose().q.rotate(
+              PxVec3(1.0f, 0.0f, 0.0f));
+      gPositionMetrics.supportNormalReadback.normalize();
     }
     gScene->addActor(*groundPlane);
   }
@@ -2845,12 +3225,29 @@ void initPhysics(bool interactive) {
   const bool contactComparison =
       !interactive &&
       isContactComparisonTopology(gHeadlessConfig.topology);
-  gMaterial = contactComparison
-                  ? gPhysics->createMaterial(0.0f, 0.0f, 0.0f)
-                  : gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+  const bool frictionalContactComparison =
+      contactComparison &&
+      gHeadlessConfig.friction == eFRICTION_STANDARD;
+  gMaterial =
+      contactComparison
+          ? gPhysics->createMaterial(
+                frictionalContactComparison
+                    ? gFrictionProbeCoefficient
+                    : 0.0f,
+                frictionalContactComparison
+                    ? gFrictionProbeCoefficient
+                    : 0.0f,
+                0.0f)
+          : gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
   if (!gMaterial) {
     gInitializationFailed = true;
     return;
+  }
+  if (contactComparison) {
+    gPositionMetrics.staticFrictionReadback =
+        gMaterial->getStaticFriction();
+    gPositionMetrics.dynamicFrictionReadback =
+        gMaterial->getDynamicFriction();
   }
   createScene();
 }
@@ -3065,6 +3462,7 @@ static void sampleVelocityState(const PrimaryPairSample &sample) {
 
 static void samplePositionState(const PrimaryPairSample &sample) {
   const DrivePairRuntime &pair = gPairs[0];
+  PxReal centerOfMassSpeedForFriction = 0.0f;
   if (gHeadlessCase == eCASE_OUTPUT_FORCE) {
     gPositionMetrics.publicForceSampleAttempts++;
     PxVec3 publicForce(0.0f);
@@ -3108,9 +3506,17 @@ static void samplePositionState(const PrimaryPairSample &sample) {
   const PxTransform frameB = sample.poseB * pair.jointFrameB;
   const PxTransform relativePose = frameA.transformInv(frameB);
   const PxVec3 localAxis = getPositionTargetAxis(gHeadlessConfig.drive);
+  const PxVec3 worldArmA =
+      sample.poseA.q.rotate(pair.jointFrameA.p);
+  const PxVec3 worldArmB =
+      sample.poseB.q.rotate(pair.jointFrameB.p);
+  const PxVec3 anchorVelocityA =
+      sample.linearA + sample.angularA.cross(worldArmA);
+  const PxVec3 anchorVelocityB =
+      sample.linearB + sample.angularB.cross(worldArmB);
   const PxVec3 relativeVelocity =
       isLinearDrive(gHeadlessConfig.drive)
-          ? sample.linearB - sample.linearA
+          ? anchorVelocityB - anchorVelocityA
           : sample.angularB - sample.angularA;
   const PxReal relativeSpeed = safeMagnitude(relativeVelocity);
   const PxReal relativeAcceleration =
@@ -3118,10 +3524,14 @@ static void samplePositionState(const PrimaryPairSample &sample) {
                     gPositionMetrics.previousRelativeVelocity) /
       gHeadlessOptions.dt;
   if (isContactComparisonTopology(gHeadlessConfig.topology)) {
+    const PxVec3 supportNormal = getContactSupportNormal();
     const PxReal minimumBottom =
-        PxMin(sample.poseA.p.y, sample.poseB.p.y) - 0.5f;
+        PxMin(sample.poseA.p.dot(supportNormal),
+              sample.poseB.p.dot(supportNormal)) -
+        0.5f;
     const PxReal maximumAbsVerticalSpeed =
-        PxMax(PxAbs(sample.linearA.y), PxAbs(sample.linearB.y));
+        PxMax(PxAbs(sample.linearA.dot(supportNormal)),
+              PxAbs(sample.linearB.dot(supportNormal)));
     gComparisonMetrics.minimumBottom[0] =
         PxMin(gComparisonMetrics.minimumBottom[0], minimumBottom);
     gComparisonMetrics.maximumAbsVerticalSpeed[0] =
@@ -3142,24 +3552,62 @@ static void samplePositionState(const PrimaryPairSample &sample) {
     const PxVec3 linearMomentum =
         sample.linearA * massA + sample.linearB * massB;
     // The fixture authors isotropic principal inertias, so I*w is already a
-    // world-space angular-momentum vector and needs no frame transform.
-    const PxVec3 angularMomentum =
+    // world-space spin angular-momentum vector.  Include the orbital term
+    // about the instantaneous system COM: centered/equal-anchor fixtures
+    // made it identically zero, but asymmetric local anchors require the
+    // common spin and orbital parts to cancel.
+    const PxVec3 spinAngularMomentum =
         sample.angularA * gPositionMetrics.actorAInertiaReadback.x +
         sample.angularB * gPositionMetrics.inertiaReadback.x;
+    const PxVec3 orbitalAngularMomentum =
+        (sample.poseA.p - centerOfMass)
+                .cross(sample.linearA * massA) +
+        (sample.poseB.p - centerOfMass)
+                .cross(sample.linearB * massB);
+    const PxVec3 angularMomentum =
+        spinAngularMomentum + orbitalAngularMomentum;
+    PxReal conservedAngularMomentum = safeMagnitude(angularMomentum);
+    if (isContactComparisonTopology(gHeadlessConfig.topology)) {
+      PxVec3 supportNormal = getContactSupportNormal();
+      const PxReal supportMagnitude = safeMagnitude(supportNormal);
+      if (supportMagnitude <= 1e-6f ||
+          supportMagnitude >= PX_MAX_F32) {
+        gMetrics.nonFinite = true;
+        return;
+      }
+      supportNormal *= 1.0f / supportMagnitude;
+      // Gravity and frictionless support may apply external torque in the
+      // support plane, but their wrench has no component around the support
+      // normal.  That scalar component remains the internal-drive invariant.
+      conservedAngularMomentum =
+          PxAbs(angularMomentum.dot(supportNormal));
+    }
     PxVec3 centerOfMassDelta =
         centerOfMass - gPositionMetrics.initialCenterOfMass;
     PxVec3 measuredLinearMomentum = linearMomentum;
     if (isContactComparisonTopology(gHeadlessConfig.topology)) {
-      centerOfMassDelta.y = 0.0f;
-      measuredLinearMomentum.y = 0.0f;
+      if (isSlopedContactSupport()) {
+        centerOfMassDelta =
+            pair.signedWorldAxis *
+            centerOfMassDelta.dot(pair.signedWorldAxis);
+        measuredLinearMomentum =
+            pair.signedWorldAxis *
+            measuredLinearMomentum.dot(pair.signedWorldAxis);
+      } else {
+        centerOfMassDelta.y = 0.0f;
+        measuredLinearMomentum.y = 0.0f;
+      }
     }
     const PxReal centerOfMassDrift =
         safeMagnitude(centerOfMassDelta);
     const PxReal linearMomentumMagnitude =
         safeMagnitude(measuredLinearMomentum);
+    const PxReal centerOfMassSpeed =
+        linearMomentumMagnitude / totalMass;
     const PxReal angularMomentumMagnitude = safeMagnitude(angularMomentum);
     if (centerOfMassDrift >= PX_MAX_F32 ||
         linearMomentumMagnitude >= PX_MAX_F32 ||
+        centerOfMassSpeed >= PX_MAX_F32 ||
         angularMomentumMagnitude >= PX_MAX_F32) {
       gMetrics.nonFinite = true;
       return;
@@ -3167,12 +3615,42 @@ static void samplePositionState(const PrimaryPairSample &sample) {
     gPositionMetrics.maximumCenterOfMassDrift =
         PxMax(gPositionMetrics.maximumCenterOfMassDrift,
               centerOfMassDrift);
+    gPositionMetrics.maximumAbsCenterOfMassDriftX =
+        PxMax(gPositionMetrics.maximumAbsCenterOfMassDriftX,
+              PxAbs(centerOfMassDelta.x));
+    gPositionMetrics.maximumAbsCenterOfMassDriftZ =
+        PxMax(gPositionMetrics.maximumAbsCenterOfMassDriftZ,
+              PxAbs(centerOfMassDelta.z));
     gPositionMetrics.maximumLinearMomentum =
         PxMax(gPositionMetrics.maximumLinearMomentum,
               linearMomentumMagnitude);
+    gPositionMetrics.maximumCenterOfMassSpeed =
+        PxMax(gPositionMetrics.maximumCenterOfMassSpeed,
+              centerOfMassSpeed);
+    centerOfMassSpeedForFriction = centerOfMassSpeed;
+    gPositionMetrics.finalSignedCenterOfMassVelocity =
+        measuredLinearMomentum.x / totalMass;
+    if (isFrictionProbe()) {
+      const PxU32 witnessFrame = PxU32(
+          PxFloor(gFrictionProbeWitnessTime /
+                      gHeadlessOptions.dt +
+                  0.5f));
+      if (gMetrics.completedFrames == witnessFrame)
+        gPositionMetrics.halfSecondCenterOfMassSpeed =
+            centerOfMassSpeed;
+    }
+    gPositionMetrics.maximumAbsLinearMomentumX =
+        PxMax(gPositionMetrics.maximumAbsLinearMomentumX,
+              PxAbs(measuredLinearMomentum.x));
+    gPositionMetrics.maximumAbsLinearMomentumZ =
+        PxMax(gPositionMetrics.maximumAbsLinearMomentumZ,
+              PxAbs(measuredLinearMomentum.z));
     gPositionMetrics.maximumAngularMomentum =
         PxMax(gPositionMetrics.maximumAngularMomentum,
               angularMomentumMagnitude);
+    gPositionMetrics.maximumConservedAngularMomentum =
+        PxMax(gPositionMetrics.maximumConservedAngularMomentum,
+              conservedAngularMomentum);
     if (gMetrics.sampleCount == 0) {
       gPositionMetrics.firstSignedAngularAccelerationA =
           sample.angularA.dot(gMetrics.signedWorldAxis) /
@@ -3185,11 +3663,19 @@ static void samplePositionState(const PrimaryPairSample &sample) {
   PxReal targetError = 0.0f;
   PxReal signedProgress = 0.0f;
   PxReal orthogonalError = 0.0f;
+  PxReal signedTargetAxisError = 0.0f;
+  PxReal driveObjectiveResidual = 0.0f;
 
   if (isLinearDrive(gHeadlessConfig.drive)) {
     const PxVec3 targetErrorVector =
         gPositionMetrics.targetRelativePose.p - relativePose.p;
     const PxReal targetAxisError = targetErrorVector.dot(localAxis);
+    signedTargetAxisError = targetAxisError;
+    const PxReal expectedSignedTargetAxisError =
+        -(gPositionDriveDamping / gPositionDriveStiffness) *
+        gPositionMetrics.canonicalTargetVelocity;
+    driveObjectiveResidual =
+        signedTargetAxisError - expectedSignedTargetAxisError;
     targetError = PxAbs(targetAxisError);
     orthogonalError =
         safeMagnitude(targetErrorVector - localAxis * targetAxisError);
@@ -3208,13 +3694,18 @@ static void samplePositionState(const PrimaryPairSample &sample) {
   }
 
   if (!PxIsFinite(targetError) || !PxIsFinite(signedProgress) ||
-      !PxIsFinite(orthogonalError) || relativeSpeed >= PX_MAX_F32 ||
+      !PxIsFinite(orthogonalError) ||
+      !PxIsFinite(signedTargetAxisError) ||
+      !PxIsFinite(driveObjectiveResidual) ||
+      relativeSpeed >= PX_MAX_F32 ||
       relativeAcceleration >= PX_MAX_F32) {
     gMetrics.nonFinite = true;
     return;
   }
 
   gPositionMetrics.finalTargetError = targetError;
+  gPositionMetrics.signedTargetAxisError = signedTargetAxisError;
+  gPositionMetrics.driveObjectiveResidual = driveObjectiveResidual;
   gPositionMetrics.finalErrorRatio =
       gPositionMetrics.initialTargetError > 1e-6f
           ? targetError / gPositionMetrics.initialTargetError
@@ -3247,7 +3738,13 @@ static void samplePositionState(const PrimaryPairSample &sample) {
           : 0u;
   if (gMetrics.completedFrames > lateStart) {
     gPositionMetrics.lateErrorSquaredSum += targetError * targetError;
+    gPositionMetrics.lateDriveObjectiveResidualSquaredSum +=
+        driveObjectiveResidual * driveObjectiveResidual;
     gPositionMetrics.lateSpeedSquaredSum += relativeSpeed * relativeSpeed;
+    if (isFrictionProbe())
+      gPositionMetrics.lateCenterOfMassSpeedSquaredSum +=
+          centerOfMassSpeedForFriction *
+          centerOfMassSpeedForFriction;
     gPositionMetrics.lateSampleCount++;
   }
   gMetrics.previousPoseA = sample.poseA;
@@ -3292,12 +3789,25 @@ static bool sampleComparisonLane(PxU32 pairIndex) {
         centerOfMass - gComparisonMetrics.initialCenterOfMass[pairIndex];
     PxVec3 measuredMomentum = momentum;
     if (isContactComparisonTopology(gHeadlessConfig.topology)) {
-      centerOfMassDelta.y = 0.0f;
-      measuredMomentum.y = 0.0f;
+      if (isSlopedContactSupport()) {
+        centerOfMassDelta =
+            pair.signedWorldAxis *
+            centerOfMassDelta.dot(pair.signedWorldAxis);
+        measuredMomentum =
+            pair.signedWorldAxis *
+            measuredMomentum.dot(pair.signedWorldAxis);
+      } else {
+        centerOfMassDelta.y = 0.0f;
+        measuredMomentum.y = 0.0f;
+      }
+      const PxVec3 supportNormal = getContactSupportNormal();
       const PxReal minimumBottom =
-          PxMin(sample.poseA.p.y, sample.poseB.p.y) - 0.5f;
+          PxMin(sample.poseA.p.dot(supportNormal),
+                sample.poseB.p.dot(supportNormal)) -
+          0.5f;
       const PxReal maximumAbsVerticalSpeed =
-          PxMax(PxAbs(sample.linearA.y), PxAbs(sample.linearB.y));
+          PxMax(PxAbs(sample.linearA.dot(supportNormal)),
+                PxAbs(sample.linearB.dot(supportNormal)));
       gComparisonMetrics.minimumBottom[pairIndex] =
           PxMin(gComparisonMetrics.minimumBottom[pairIndex], minimumBottom);
       gComparisonMetrics.maximumAbsVerticalSpeed[pairIndex] =
@@ -4023,8 +4533,17 @@ static JointDriveGateEvaluation evaluateGate() {
         1.0f / PxReal(gPositionMetrics.lateSampleCount);
     evaluation.positionLateErrorRms =
         PxSqrt(gPositionMetrics.lateErrorSquaredSum * invSamples);
+    evaluation.positionLateDriveObjectiveResidualRms =
+        PxSqrt(
+            gPositionMetrics.lateDriveObjectiveResidualSquaredSum *
+            invSamples);
     evaluation.positionLateSpeedRms =
         PxSqrt(gPositionMetrics.lateSpeedSquaredSum * invSamples);
+    if (isFrictionProbe())
+      evaluation.frictionLateCenterOfMassSpeedRms =
+          PxSqrt(
+              gPositionMetrics.lateCenterOfMassSpeedSquaredSum *
+              invSamples);
     if (gPositionMetrics.initialTargetError > 1e-6f) {
       evaluation.positionLateErrorRatio =
           evaluation.positionLateErrorRms /
@@ -4147,7 +4666,6 @@ static JointDriveGateEvaluation evaluateGate() {
       setGateFailure(evaluation, "missing_motion");
   } else if (isPositionLikeCase(gHeadlessCase)) {
     const bool dynamicPositionPair =
-        gHeadlessCase == eCASE_ANGULAR_POSITION &&
         isDynamicComparisonTopology(gHeadlessConfig.topology);
     const bool expectsOutputBreak =
         gHeadlessCase == eCASE_OUTPUT_FORCE &&
@@ -4191,19 +4709,29 @@ static JointDriveGateEvaluation evaluateGate() {
                        "kinematic_relative_target_not_tracked");
     }
     const PxReal expectedForceLimit = getPositionForceLimit();
+    const PxReal expectedActorAInertia =
+        isFrictionProbe() ? gFrictionProbeInertia : 1.0f;
+    const PxReal expectedActorBInertia =
+        isFrictionProbe() ? gFrictionProbeInertia
+                          : gHeadlessConfig.comparisonMass;
+    const PxReal inertiaReadbackTolerance =
+        isFrictionProbe() ? 1e-3f : 1e-5f;
     if ((dynamicPositionPair &&
          (PxAbs(gPositionMetrics.actorAMassReadback - 1.0f) > 1e-5f ||
-          PxAbs(gPositionMetrics.actorAInertiaReadback.x - 1.0f) > 1e-5f ||
-          PxAbs(gPositionMetrics.actorAInertiaReadback.y - 1.0f) > 1e-5f ||
-          PxAbs(gPositionMetrics.actorAInertiaReadback.z - 1.0f) > 1e-5f)) ||
+          PxAbs(gPositionMetrics.actorAInertiaReadback.x -
+                expectedActorAInertia) > inertiaReadbackTolerance ||
+          PxAbs(gPositionMetrics.actorAInertiaReadback.y -
+                expectedActorAInertia) > inertiaReadbackTolerance ||
+          PxAbs(gPositionMetrics.actorAInertiaReadback.z -
+                expectedActorAInertia) > inertiaReadbackTolerance)) ||
         PxAbs(gPositionMetrics.massReadback -
               gHeadlessConfig.comparisonMass) > 1e-5f ||
         PxAbs(gPositionMetrics.inertiaReadback.x -
-              gHeadlessConfig.comparisonMass) > 1e-5f ||
+              expectedActorBInertia) > inertiaReadbackTolerance ||
         PxAbs(gPositionMetrics.inertiaReadback.y -
-              gHeadlessConfig.comparisonMass) > 1e-5f ||
+              expectedActorBInertia) > inertiaReadbackTolerance ||
         PxAbs(gPositionMetrics.inertiaReadback.z -
-              gHeadlessConfig.comparisonMass) > 1e-5f ||
+              expectedActorBInertia) > inertiaReadbackTolerance ||
         PxAbs(gPositionMetrics.stiffnessReadback -
               gPositionDriveStiffness) > 1e-5f ||
         PxAbs(gPositionMetrics.dampingReadback -
@@ -4218,6 +4746,51 @@ static JointDriveGateEvaluation evaluateGate() {
       setGateError(evaluation, "output_force_flag_readback");
     if (gPositionMetrics.targetReadbackError > 1e-5f)
       setGateError(evaluation, "position_target_readback");
+    if (isPositionAnchorProbe()) {
+      const PxVec3 expectedAnchorB =
+          gHeadlessConfig.offsetAnchor
+              ? (gHeadlessConfig.positionAnchorAlongX
+                     ? PxVec3(isTwoSidedPositionAnchorProbe()
+                                  ? 0.5f * gPositionOffsetAnchorMagnitude
+                                  : gPositionOffsetAnchorMagnitude,
+                              0.0f,
+                              0.0f)
+                     : (gHeadlessConfig.positionAnchorAlongZ
+                            ? PxVec3(
+                                  0.0f, 0.0f,
+                                  isTwoSidedPositionAnchorProbe()
+                                      ? 0.5f *
+                                            gPositionOffsetAnchorMagnitude
+                                      : gPositionOffsetAnchorMagnitude)
+                            : PxVec3(0.0f,
+                                     gPositionOffsetAnchorMagnitude,
+                                     0.0f)))
+              : PxVec3(0.0f);
+      const PxVec3 expectedAnchorA =
+          isTwoSidedPositionAnchorProbe()
+              ? -expectedAnchorB
+              : (isAsymmetricPositionAnchorProbe() ? PxVec3(0.0f)
+                                                    : expectedAnchorB);
+      if (safeMagnitude(
+              gPositionMetrics.jointFramePositionReadbackA -
+              expectedAnchorA) > 1e-6f ||
+          safeMagnitude(
+              gPositionMetrics.jointFramePositionReadbackB -
+              expectedAnchorB) > 1e-6f)
+        setGateError(evaluation, "position_anchor_readback");
+    }
+    if (isPositionFrameProbe() &&
+        (gPositionMetrics.jointFrameOrientationReadbackErrorA > 1e-6f ||
+         gPositionMetrics.jointFrameOrientationReadbackErrorB > 1e-6f))
+      setGateError(evaluation, "position_frame_readback");
+    if (isSupportProbe() &&
+        safeMagnitude(gPositionMetrics.supportNormalReadback -
+                      getContactSupportNormal()) > 1e-6f)
+      setGateError(evaluation, "support_normal_readback");
+    if (isPositionTargetVelocityProbe() &&
+        gPositionMetrics.targetVelocityReadbackError > 1e-6f)
+      setGateError(evaluation,
+                   "position_target_velocity_readback");
     if (gPositionMetrics.initialTargetError <= 1e-6f)
       setGateError(evaluation, "missing_position_stimulus");
     const PxReal expectedInitialRelativeMagnitude =
@@ -4240,6 +4813,13 @@ static JointDriveGateEvaluation evaluateGate() {
          evaluation.positionLateErrorRatio >
              gMaximumLatePositionErrorRatio))
       setGateFailure(evaluation, "position_target_not_tracked");
+    if (isPositionTargetVelocityProbe() &&
+        (PxAbs(gPositionMetrics.driveObjectiveResidual) >
+             gMaximumPositionDriveObjectiveResidual ||
+         evaluation.positionLateDriveObjectiveResidualRms >
+             gMaximumLatePositionDriveObjectiveResidualRms))
+      setGateFailure(evaluation,
+                     "position_target_velocity_objective");
     if (gHeadlessConfig.lowForceLimit) {
       const PxReal expectedAcceleration =
           dynamicPositionPair
@@ -4266,15 +4846,15 @@ static JointDriveGateEvaluation evaluateGate() {
                          "angular_position_endpoint_response");
       }
     }
-    if (dynamicPositionPair &&
+    if (dynamicPositionPair && !isFrictionProbe() &&
         (gPositionMetrics.maximumCenterOfMassDrift >
              gDynamicAngularPositionMaximumComDrift ||
-         gPositionMetrics.maximumLinearMomentum >
-             gDynamicAngularPositionMaximumLinearMomentum))
+         gPositionMetrics.maximumCenterOfMassSpeed >
+             gDynamicPositionMaximumCenterOfMassSpeed))
       setGateFailure(evaluation,
                      "angular_position_linear_conservation");
-    if (dynamicPositionPair &&
-        gPositionMetrics.maximumAngularMomentum >
+    if (dynamicPositionPair && !isFrictionProbe() &&
+        gPositionMetrics.maximumConservedAngularMomentum >
             gDynamicAngularPositionMaximumAngularMomentum)
       setGateFailure(evaluation,
                      "angular_position_angular_momentum");
@@ -4282,6 +4862,94 @@ static JointDriveGateEvaluation evaluateGate() {
       setGateFailure(evaluation, "contact_not_sustained");
     if (!passesContactSupportGate())
       setGateFailure(evaluation, "contact_support");
+    if (isFrictionProbe()) {
+      const PxReal expectedFriction =
+          gHeadlessConfig.friction == eFRICTION_STANDARD
+              ? gFrictionProbeCoefficient
+              : 0.0f;
+      if (PxAbs(gPositionMetrics.staticFrictionReadback -
+                expectedFriction) > 1e-6f ||
+          PxAbs(gPositionMetrics.dynamicFrictionReadback -
+                expectedFriction) > 1e-6f ||
+          PxAbs(gPositionMetrics.initialCommonVelocityReadbackA -
+                gFrictionProbeCommonVelocity) > 1e-6f ||
+          PxAbs(gPositionMetrics.initialCommonVelocityReadbackB -
+                gFrictionProbeCommonVelocity) > 1e-6f ||
+          safeMagnitude(
+              gPositionMetrics.centerOfMassLocalReadbackA -
+              getFrictionProbeCenterOfMassOffset()) > 1e-6f ||
+          safeMagnitude(
+              gPositionMetrics.centerOfMassLocalReadbackB -
+              getFrictionProbeCenterOfMassOffset()) > 1e-6f)
+        setGateError(evaluation, "friction_fixture_readback");
+      if (gHeadlessConfig.friction == eFRICTION_STANDARD) {
+        if (gHeadlessConfig.lowForceLimit) {
+          const PxReal gravityMagnitude =
+              safeMagnitude(gScene->getGravity());
+          const PxReal supportedMass =
+              PxMin(gPositionMetrics.actorAMassReadback,
+                    gPositionMetrics.massReadback);
+          const PxReal supportedNormalAcceleration =
+              PxAbs(gScene->getGravity().dot(
+                  getContactSupportNormal()));
+          const PxReal frictionCapacity =
+              gPositionMetrics.staticFrictionReadback *
+              supportedNormalAcceleration * supportedMass;
+          const bool validEquilibriumFixture =
+              PxIsFinite(gravityMagnitude) &&
+              PxIsFinite(supportedMass) &&
+              PxIsFinite(supportedNormalAcceleration) &&
+              PxIsFinite(frictionCapacity) &&
+              PxIsFinite(gPositionMetrics.stiffnessReadback) &&
+              gravityMagnitude > 0.0f && supportedMass > 0.0f &&
+              supportedNormalAcceleration > 0.0f &&
+              frictionCapacity > 0.0f &&
+              gPositionMetrics.stiffnessReadback > 0.0f &&
+              gPositionMetrics.forceLimitReadback > frictionCapacity;
+          if (!validEquilibriumFixture) {
+            setGateError(evaluation,
+                         "finite_friction_equilibrium_fixture");
+          } else {
+            evaluation.finiteFrictionExpectedEquilibriumError =
+                frictionCapacity /
+                gPositionMetrics.stiffnessReadback;
+            evaluation.finiteFrictionEquilibriumRatio =
+                gPositionMetrics.finalTargetError /
+                evaluation.finiteFrictionExpectedEquilibriumError;
+            // Static Coulomb friction defines an admissible force interval,
+            // not one selected equilibrium coordinate. At rest the spring
+            // force must remain inside the light endpoint's Coulomb budget;
+            // zero through that upper bound are all physically valid.
+            if (!PxIsFinite(
+                    evaluation.finiteFrictionEquilibriumRatio) ||
+                evaluation.finiteFrictionEquilibriumRatio >
+                    gFiniteFrictionMaximumEquilibriumRatio)
+              setGateFailure(
+                  evaluation,
+                  "friction_finite_limit_static_equilibrium");
+          }
+        }
+        // The flat unlimited-force P4S authority requires prompt
+        // dissipation at the fixed half-second witness. With a finite drive
+        // clamp, or with continuous downhill gravity work on a sloped
+        // support, drive and friction may still exchange tangent work at
+        // that instant even though the common X mode is fully dissipated in
+        // the late window. Preserve the flat P4S witness and use the same
+        // unchanged speed limit on the already reported late RMS for the two
+        // independently classified persistent-work categories.
+        const PxReal frictionSpeedWitness =
+            gHeadlessConfig.lowForceLimit ||
+                    isSlopedContactSupport()
+                ? evaluation.frictionLateCenterOfMassSpeedRms
+                : gPositionMetrics.halfSecondCenterOfMassSpeed;
+        if (frictionSpeedWitness > gFrictionProbeMaximumWitnessSpeed)
+          setGateFailure(evaluation, "friction_not_dissipative");
+      } else if (
+          gPositionMetrics.halfSecondCenterOfMassSpeed <
+          gFrictionProbeMinimumControlWitnessSpeed) {
+        setGateFailure(evaluation, "friction_control_damped");
+      }
+    }
     if (!expectsOutputBreak &&
         evaluation.positionMotionRatio < gMinimumPositionMotionRatio)
       setGateFailure(evaluation, "missing_position_motion");
@@ -4773,7 +5441,6 @@ static void printGateDetails(const JointDriveGateEvaluation &evaluation) {
 
   if (isPositionLikeCase(gHeadlessCase)) {
     const bool dynamicPositionPair =
-        gHeadlessCase == eCASE_ANGULAR_POSITION &&
         isDynamicComparisonTopology(gHeadlessConfig.topology);
     printf(
         "[SnippetJointDriveDiag] case=%s drive=%s actorA=%s frameA=%s "
@@ -4784,12 +5451,19 @@ static void printGateDetails(const JointDriveGateEvaluation &evaluation) {
         "massReadback=%.9g inertiaReadback=(%.9g,%.9g,%.9g) "
         "stiffnessReadback=%.9g dampingReadback=%.9g "
         "forceLimitReadback=%.9g driveLimitsAreForces=%u "
+        "positionTargetVelocityProbe=%u positionTargetVelocity=%s "
+        "canonicalTargetVelocity=%.9g "
+        "driveLinearVelocityReadback=(%.9g,%.9g,%.9g) "
+        "driveAngularVelocityReadback=(%.9g,%.9g,%.9g) "
+        "targetVelocityReadbackError=%.9g "
         "targetDeltaMagnitude=%.9g targetRelativeMagnitude=%.9g "
         "initialRelativeMagnitude=%.9g "
         "initialRelativeSetupError=%.9g "
         "targetReadbackError=%.9g initialTargetError=%.9g "
         "finalTargetError=%.9g finalErrorRatio=%.9g lateErrorRms=%.9g "
         "lateErrorRatio=%.9g motionWitness=%.9g motionRatio=%.9g "
+        "signedTargetAxisError=%.9g driveObjectiveResidual=%.9g "
+        "lateDriveObjectiveResidualRms=%.9g "
         "minimumSignedProgress=%.9g maximumOrthogonalError=%.9g "
         "maximumOvershoot=%.9g "
         "firstRelativeAcceleration=%.9g maximumRelativeAcceleration=%.9g "
@@ -4818,7 +5492,12 @@ static void printGateDetails(const JointDriveGateEvaluation &evaluation) {
         getOrientationName(gHeadlessConfig.frameBOrientation),
         getOrientationName(gHeadlessConfig.bodyBRotated),
         getInitialRelativeName(gHeadlessConfig.initialRelativeOffset),
-        getAnchorName(gHeadlessConfig.offsetAnchor),
+        getAnchorName(gHeadlessConfig.offsetAnchor,
+                      gHeadlessConfig.positionAnchorAlongX,
+                      gHeadlessConfig.positionAnchorAlongZ,
+                      gHeadlessConfig.positionAnchorAsymmetricX,
+                      gHeadlessConfig.positionAnchorAsymmetricZ,
+                      gHeadlessConfig.positionAnchorTwoSidedZ),
         getDriveModeName(gHeadlessConfig.driveMode),
         getEndpointName(gHeadlessConfig.endpoint),
         getKinematicMotionName(gHeadlessConfig.kinematicMotion),
@@ -4834,6 +5513,17 @@ static void printGateDetails(const JointDriveGateEvaluation &evaluation) {
         double(gPositionMetrics.dampingReadback),
         double(gPositionMetrics.forceLimitReadback),
         gPositionMetrics.driveLimitsAreForcesReadback ? 1u : 0u,
+        isPositionTargetVelocityProbe() ? 1u : 0u,
+        getPositionTargetVelocityName(
+            gHeadlessConfig.positionTargetVelocity),
+        double(gPositionMetrics.canonicalTargetVelocity),
+        double(gPositionMetrics.driveLinearVelocityReadback.x),
+        double(gPositionMetrics.driveLinearVelocityReadback.y),
+        double(gPositionMetrics.driveLinearVelocityReadback.z),
+        double(gPositionMetrics.driveAngularVelocityReadback.x),
+        double(gPositionMetrics.driveAngularVelocityReadback.y),
+        double(gPositionMetrics.driveAngularVelocityReadback.z),
+        double(gPositionMetrics.targetVelocityReadbackError),
         double(gMetrics.targetMagnitude),
         double(gPositionMetrics.targetRelativeMagnitude),
         double(gPositionMetrics.initialRelativeMagnitude),
@@ -4846,6 +5536,9 @@ static void printGateDetails(const JointDriveGateEvaluation &evaluation) {
         double(evaluation.positionLateErrorRatio),
         double(evaluation.motionWitness),
         double(evaluation.positionMotionRatio),
+        double(gPositionMetrics.signedTargetAxisError),
+        double(gPositionMetrics.driveObjectiveResidual),
+        double(evaluation.positionLateDriveObjectiveResidualRms),
         double(gPositionMetrics.minimumSignedProgress),
         double(gPositionMetrics.maximumOrthogonalError),
         double(gPositionMetrics.maximumOvershoot),
@@ -5396,7 +6089,6 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
 
   if (isPositionLikeCase(gHeadlessCase)) {
     const bool dynamicPositionPair =
-        gHeadlessCase == eCASE_ANGULAR_POSITION &&
         isDynamicComparisonTopology(gHeadlessConfig.topology);
     const bool outputOnlyFailure =
         gHeadlessCase == eCASE_OUTPUT_FORCE &&
@@ -5416,6 +6108,30 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
     const char *kinematicMotionGate =
         isMovingKinematicPositionFixture() ? evaluation.status
                                            : "NOT_COVERED";
+    const char *positionTargetVelocityGate =
+        isPositionTargetVelocityProbe() ? evaluation.status
+                                        : "NOT_COVERED";
+    const char *positionAnchorGate =
+        isPositionAnchorProbe() ? evaluation.status
+                                : "NOT_COVERED";
+    const char *positionFrameGate =
+        isPositionFrameProbe() ? evaluation.status
+                               : "NOT_COVERED";
+    const bool finiteFrictionEquilibriumProbe =
+        isFrictionProbe() &&
+        gHeadlessConfig.friction == eFRICTION_STANDARD &&
+        gHeadlessConfig.lowForceLimit;
+    const char *finiteFrictionEquilibriumGate =
+        !finiteFrictionEquilibriumProbe
+            ? "NOT_COVERED"
+            : (evaluation.finiteFrictionExpectedEquilibriumError <=
+                       0.0f
+                   ? "ERROR"
+                   : (evaluation.finiteFrictionEquilibriumRatio >= 0.0f &&
+                          evaluation.finiteFrictionEquilibriumRatio <=
+                              gFiniteFrictionMaximumEquilibriumRatio
+                          ? "PASS"
+                          : "FAIL"));
     const char *validation =
         (gHeadlessConfig.topology == eTOPOLOGY_CONTACT_DYNAMIC_DYNAMIC ||
          isMovingKinematicPositionFixture())
@@ -5424,13 +6140,20 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
     const bool conservationPass =
         gPositionMetrics.maximumCenterOfMassDrift <=
             gDynamicAngularPositionMaximumComDrift &&
-        gPositionMetrics.maximumLinearMomentum <=
-            gDynamicAngularPositionMaximumLinearMomentum &&
-        gPositionMetrics.maximumAngularMomentum <=
+        gPositionMetrics.maximumCenterOfMassSpeed <=
+            gDynamicPositionMaximumCenterOfMassSpeed &&
+        gPositionMetrics.maximumConservedAngularMomentum <=
             gDynamicAngularPositionMaximumAngularMomentum;
     const char *conservationGate =
-        dynamicPositionPair
+        dynamicPositionPair && !isFrictionProbe()
             ? (conservationPass ? "PASS" : "FAIL")
+            : "NOT_COVERED";
+    const bool supportNormalPass =
+        safeMagnitude(gPositionMetrics.supportNormalReadback -
+                      getContactSupportNormal()) <= 1e-6f;
+    const char *supportNormalGate =
+        isSupportProbe()
+            ? (supportNormalPass ? "PASS" : "ERROR")
             : "NOT_COVERED";
     printf(
         "[AVBD_GATE] schema=1 snippet=SnippetJointDrive case=%s "
@@ -5464,12 +6187,39 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         "expectedSignedAngularAccelerationB=%.9g "
         "firstSignedAngularAccelerationA=%.9g "
         "firstSignedAngularAccelerationB=%.9g "
-        "maximumCenterOfMassDrift=%.9g maximumLinearMomentum=%.9g "
-        "maximumAngularMomentum=%.9g conservationGate=%s "
+        "maximumCenterOfMassDrift=%.9g "
+        "maximumAbsCenterOfMassDriftX=%.9g "
+        "maximumAbsCenterOfMassDriftZ=%.9g "
+        "maximumLinearMomentum=%.9g "
+        "maximumCenterOfMassSpeed=%.9g "
+        "maximumAbsLinearMomentumX=%.9g "
+        "maximumAbsLinearMomentumZ=%.9g "
+        "maximumAngularMomentum=%.9g "
+        "maximumConservedAngularMomentum=%.9g conservationGate=%s "
         "bodyContactFramesA=%u bodyContactFramesB=%u "
         "bothBodyContactFrames=%u contactPointCount=%u "
         "minimumBottom=%.9g maximumAbsVerticalSpeed=%.9g "
         "contactCoverageGate=%s contactSupportGate=%s "
+        "supportProbe=%u support=%s "
+        "supportNormalX=%.9g supportNormalY=%.9g supportNormalZ=%.9g "
+        "supportNormalReadbackX=%.9g supportNormalReadbackY=%.9g "
+        "supportNormalReadbackZ=%.9g supportNormalGate=%s "
+        "frictionProbe=%u friction=%s staticFrictionReadback=%.9g "
+        "dynamicFrictionReadback=%.9g "
+        "initialCommonVelocityReadbackA=%.9g "
+        "initialCommonVelocityReadbackB=%.9g "
+        "centerOfMassLocalReadbackAX=%.9g "
+        "centerOfMassLocalReadbackAY=%.9g "
+        "centerOfMassLocalReadbackAZ=%.9g "
+        "centerOfMassLocalReadbackBX=%.9g "
+        "centerOfMassLocalReadbackBY=%.9g "
+        "centerOfMassLocalReadbackBZ=%.9g "
+        "halfSecondCenterOfMassSpeed=%.9g "
+        "finalSignedCenterOfMassVelocity=%.9g "
+        "frictionLateCenterOfMassSpeedRms=%.9g "
+        "finiteFrictionExpectedEquilibriumError=%.9g "
+        "finiteFrictionEquilibriumRatio=%.9g "
+        "finiteFrictionEquilibriumGate=%s frictionGate=%s "
         "lateSpeedRms=%.9g awakeSamples=%u "
         "sampleCount=%u lateSampleCount=%u maxQuaternionNormError=%.9g "
         "maxAbsPosition=%.9g maxLinearSpeed=%.9g maxAngularSpeed=%.9g "
@@ -5499,7 +6249,31 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         "kinematicMotionGate=%s "
         "accelerationDriveGate=NOT_COVERED "
         "massScalingGate=NOT_COVERED forceLimitGate=NOT_COVERED "
-        "outputForceGate=%s\n",
+        "outputForceGate=%s "
+        "positionTargetVelocityProbe=%u positionTargetVelocity=%s "
+        "canonicalTargetVelocity=%.9g "
+        "driveLinearVelocityReadbackX=%.9g "
+        "driveLinearVelocityReadbackY=%.9g "
+        "driveLinearVelocityReadbackZ=%.9g "
+        "driveAngularVelocityReadbackX=%.9g "
+        "driveAngularVelocityReadbackY=%.9g "
+        "driveAngularVelocityReadbackZ=%.9g "
+        "targetVelocityReadbackError=%.9g "
+        "signedTargetAxisError=%.9g driveObjectiveResidual=%.9g "
+        "lateDriveObjectiveResidualRms=%.9g "
+        "positionTargetVelocityGate=%s "
+        "positionAnchorProbe=%u "
+        "jointFramePositionReadbackAX=%.9g "
+        "jointFramePositionReadbackAY=%.9g "
+        "jointFramePositionReadbackAZ=%.9g "
+        "jointFramePositionReadbackBX=%.9g "
+        "jointFramePositionReadbackBY=%.9g "
+        "jointFramePositionReadbackBZ=%.9g "
+        "positionAnchorGate=%s "
+        "positionFrameProbe=%u "
+        "jointFrameOrientationReadbackErrorA=%.9g "
+        "jointFrameOrientationReadbackErrorB=%.9g "
+        "positionFrameGate=%s\n",
         getCaseName(gHeadlessCase),
         Snippets::getSolverTypeName(gHeadlessOptions.solverType),
         Snippets::getExecutionName(gHeadlessOptions.execution),
@@ -5518,7 +6292,12 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         getOrientationName(gHeadlessConfig.frameBOrientation),
         getOrientationName(gHeadlessConfig.bodyBRotated),
         getInitialRelativeName(gHeadlessConfig.initialRelativeOffset),
-        getAnchorName(gHeadlessConfig.offsetAnchor),
+        getAnchorName(gHeadlessConfig.offsetAnchor,
+                      gHeadlessConfig.positionAnchorAlongX,
+                      gHeadlessConfig.positionAnchorAlongZ,
+                      gHeadlessConfig.positionAnchorAsymmetricX,
+                      gHeadlessConfig.positionAnchorAsymmetricZ,
+                      gHeadlessConfig.positionAnchorTwoSidedZ),
         getDriveModeName(gHeadlessConfig.driveMode),
         getEndpointName(gHeadlessConfig.endpoint),
         getKinematicMotionName(gHeadlessConfig.kinematicMotion),
@@ -5563,8 +6342,14 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         double(gPositionMetrics.firstSignedAngularAccelerationA),
         double(gPositionMetrics.firstSignedAngularAccelerationB),
         double(gPositionMetrics.maximumCenterOfMassDrift),
+        double(gPositionMetrics.maximumAbsCenterOfMassDriftX),
+        double(gPositionMetrics.maximumAbsCenterOfMassDriftZ),
         double(gPositionMetrics.maximumLinearMomentum),
+        double(gPositionMetrics.maximumCenterOfMassSpeed),
+        double(gPositionMetrics.maximumAbsLinearMomentumX),
+        double(gPositionMetrics.maximumAbsLinearMomentumZ),
         double(gPositionMetrics.maximumAngularMomentum),
+        double(gPositionMetrics.maximumConservedAngularMomentum),
         conservationGate,
         gComparisonMetrics.bodyContactFrames[0][0],
         gComparisonMetrics.bodyContactFrames[0][1],
@@ -5578,6 +6363,34 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         isContactComparisonTopology(gHeadlessConfig.topology)
             ? (passesContactSupportGate() ? "PASS" : "FAIL")
             : "NOT_COVERED",
+        isSupportProbe() ? 1u : 0u,
+        getSupportName(gHeadlessConfig.support),
+        double(getContactSupportNormal().x),
+        double(getContactSupportNormal().y),
+        double(getContactSupportNormal().z),
+        double(gPositionMetrics.supportNormalReadback.x),
+        double(gPositionMetrics.supportNormalReadback.y),
+        double(gPositionMetrics.supportNormalReadback.z),
+        supportNormalGate,
+        isFrictionProbe() ? 1u : 0u,
+        getFrictionName(gHeadlessConfig.friction),
+        double(gPositionMetrics.staticFrictionReadback),
+        double(gPositionMetrics.dynamicFrictionReadback),
+        double(gPositionMetrics.initialCommonVelocityReadbackA),
+        double(gPositionMetrics.initialCommonVelocityReadbackB),
+        double(gPositionMetrics.centerOfMassLocalReadbackA.x),
+        double(gPositionMetrics.centerOfMassLocalReadbackA.y),
+        double(gPositionMetrics.centerOfMassLocalReadbackA.z),
+        double(gPositionMetrics.centerOfMassLocalReadbackB.x),
+        double(gPositionMetrics.centerOfMassLocalReadbackB.y),
+        double(gPositionMetrics.centerOfMassLocalReadbackB.z),
+        double(gPositionMetrics.halfSecondCenterOfMassSpeed),
+        double(gPositionMetrics.finalSignedCenterOfMassVelocity),
+        double(evaluation.frictionLateCenterOfMassSpeedRms),
+        double(evaluation.finiteFrictionExpectedEquilibriumError),
+        double(evaluation.finiteFrictionEquilibriumRatio),
+        finiteFrictionEquilibriumGate,
+        isFrictionProbe() ? evaluation.status : "NOT_COVERED",
         double(evaluation.positionLateSpeedRms), gPositionMetrics.awakeSamples,
         gMetrics.sampleCount, gPositionMetrics.lateSampleCount,
         double(gMetrics.maxQuaternionNormError),
@@ -5622,7 +6435,34 @@ static void printGateResult(const JointDriveGateEvaluation &evaluation,
         positionGate,
         gHeadlessConfig.lowForceLimit ? finiteLimitGate : "NOT_COVERED",
         kinematicMotionGate,
-        outputForceGate);
+        outputForceGate,
+        isPositionTargetVelocityProbe() ? 1u : 0u,
+        getPositionTargetVelocityName(
+            gHeadlessConfig.positionTargetVelocity),
+        double(gPositionMetrics.canonicalTargetVelocity),
+        double(gPositionMetrics.driveLinearVelocityReadback.x),
+        double(gPositionMetrics.driveLinearVelocityReadback.y),
+        double(gPositionMetrics.driveLinearVelocityReadback.z),
+        double(gPositionMetrics.driveAngularVelocityReadback.x),
+        double(gPositionMetrics.driveAngularVelocityReadback.y),
+        double(gPositionMetrics.driveAngularVelocityReadback.z),
+        double(gPositionMetrics.targetVelocityReadbackError),
+        double(gPositionMetrics.signedTargetAxisError),
+        double(gPositionMetrics.driveObjectiveResidual),
+        double(evaluation.positionLateDriveObjectiveResidualRms),
+        positionTargetVelocityGate,
+        isPositionAnchorProbe() ? 1u : 0u,
+        double(gPositionMetrics.jointFramePositionReadbackA.x),
+        double(gPositionMetrics.jointFramePositionReadbackA.y),
+        double(gPositionMetrics.jointFramePositionReadbackA.z),
+        double(gPositionMetrics.jointFramePositionReadbackB.x),
+        double(gPositionMetrics.jointFramePositionReadbackB.y),
+        double(gPositionMetrics.jointFramePositionReadbackB.z),
+        positionAnchorGate,
+        isPositionFrameProbe() ? 1u : 0u,
+        double(gPositionMetrics.jointFrameOrientationReadbackErrorA),
+        double(gPositionMetrics.jointFrameOrientationReadbackErrorB),
+        positionFrameGate);
     return;
   }
 
@@ -5685,7 +6525,10 @@ static int reportConfigurationError(const Snippets::HeadlessOptions &options,
       "status=ERROR reason=%s nonFinite=0 physicsErrors=0 "
       "physicsWarnings=0 drive=%s actorA=%s frameA=%s frameB=%s "
       "bodyBRotation=%s initialRelative=%s anchor=%s driveMode=%s topology=%s "
-      "endpoint=%s kinematicMotion=%s\n",
+      "endpoint=%s kinematicMotion=%s frictionProbe=%u friction=%s "
+      "supportProbe=%u support=%s "
+      "positionTargetVelocityProbe=%u positionTargetVelocity=%s "
+      "positionAnchorProbe=%u positionFrameProbe=%u\n",
       Snippets::getSolverTypeName(options.solverType),
       Snippets::getExecutionName(options.execution), options.frames,
       double(options.dt), options.seed, options.dispatcherThreads,
@@ -5696,10 +6539,22 @@ static int reportConfigurationError(const Snippets::HeadlessOptions &options,
       getOrientationName(config.frameBOrientation),
       getOrientationName(config.bodyBRotated),
       getInitialRelativeName(config.initialRelativeOffset),
-      getAnchorName(config.offsetAnchor),
+      getAnchorName(config.offsetAnchor, config.positionAnchorAlongX,
+                    config.positionAnchorAlongZ,
+                    config.positionAnchorAsymmetricX,
+                    config.positionAnchorAsymmetricZ,
+                    config.positionAnchorTwoSidedZ),
       getDriveModeName(config.driveMode), getTopologyName(config.topology),
       getEndpointName(config.endpoint),
-      getKinematicMotionName(config.kinematicMotion));
+      getKinematicMotionName(config.kinematicMotion),
+      config.frictionProbeEnabled ? 1u : 0u,
+      getFrictionName(config.friction),
+      config.supportProbeEnabled ? 1u : 0u,
+      getSupportName(config.support),
+      config.positionTargetVelocityProbeEnabled ? 1u : 0u,
+      getPositionTargetVelocityName(config.positionTargetVelocity),
+      config.positionAnchorProbeEnabled ? 1u : 0u,
+      config.positionFrameProbeEnabled ? 1u : 0u);
   return Snippets::eHEADLESS_CONFIG_ERROR;
 }
 
@@ -5845,7 +6700,13 @@ int snippetMain(int argc, const char *const *argv) {
                                         "duplicate_--anchor");
       seen.anchor = true;
       headlessOnlyOptionSeen = true;
-      if (!tryParseAnchor(arg + strlen("--anchor="), config.offsetAnchor))
+      config.positionAnchorProbeEnabled = true;
+      if (!tryParseAnchor(arg + strlen("--anchor="), config.offsetAnchor,
+                          config.positionAnchorAlongX,
+                          config.positionAnchorAlongZ,
+                          config.positionAnchorAsymmetricX,
+                          config.positionAnchorAsymmetricZ,
+                          config.positionAnchorTwoSidedZ))
         return reportConfigurationError(options, config,
                                         "invalid_--anchor_value");
       continue;
@@ -5881,6 +6742,59 @@ int snippetMain(int argc, const char *const *argv) {
       else
         return reportConfigurationError(options, config,
                                         "invalid_--limit_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--friction=")) {
+      if (seen.friction)
+        return reportConfigurationError(options, config,
+                                        "duplicate_--friction");
+      seen.friction = true;
+      headlessOnlyOptionSeen = true;
+      config.frictionProbeEnabled = true;
+      const char *value = arg + strlen("--friction=");
+      if (Snippets::equalsIgnoreCase(value, "zero"))
+        config.friction = eFRICTION_ZERO;
+      else if (Snippets::equalsIgnoreCase(value, "standard"))
+        config.friction = eFRICTION_STANDARD;
+      else
+        return reportConfigurationError(options, config,
+                                        "invalid_--friction_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--support=")) {
+      if (seen.support)
+        return reportConfigurationError(options, config,
+                                        "duplicate_--support");
+      seen.support = true;
+      headlessOnlyOptionSeen = true;
+      config.supportProbeEnabled = true;
+      if (!tryParseSupport(arg + strlen("--support="),
+                           config.support))
+        return reportConfigurationError(options, config,
+                                        "invalid_--support_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(
+            arg, "--position-target-velocity=")) {
+      if (seen.positionTargetVelocity)
+        return reportConfigurationError(
+            options, config,
+            "duplicate_--position-target-velocity");
+      seen.positionTargetVelocity = true;
+      headlessOnlyOptionSeen = true;
+      config.positionTargetVelocityProbeEnabled = true;
+      const char *value =
+          arg + strlen("--position-target-velocity=");
+      if (Snippets::equalsIgnoreCase(value, "zero"))
+        config.positionTargetVelocity =
+            ePOSITION_TARGET_VELOCITY_ZERO;
+      else if (Snippets::equalsIgnoreCase(value, "positive"))
+        config.positionTargetVelocity =
+            ePOSITION_TARGET_VELOCITY_POSITIVE;
+      else
+        return reportConfigurationError(
+            options, config,
+            "invalid_--position-target-velocity_value");
       continue;
     }
     if (Snippets::hasOptionPrefix(arg, "--output-force=")) {
@@ -5965,6 +6879,88 @@ int snippetMain(int argc, const char *const *argv) {
                                     "frames_must_be_at_least_120");
   const bool contactComparison =
       isContactComparisonTopology(config.topology);
+  const bool contactOutputForceFixture =
+      testCase == eCASE_OUTPUT_FORCE && contactComparison;
+  if (seen.anchor &&
+      (config.positionAnchorAlongX || config.positionAnchorAlongZ) &&
+      testCase != eCASE_POSITION)
+    return reportConfigurationError(
+        options, config,
+        "non_y_symmetric_anchor_requires_position_case");
+  if (seen.friction &&
+      (testCase != eCASE_POSITION || !seen.drive ||
+       config.drive != eDRIVE_LINEAR_X || !seen.driveMode ||
+       config.driveMode != eDRIVE_MODE_FORCE || !seen.topology ||
+       !contactComparison || !seen.endpoint || !seen.mass ||
+       !seen.limit || seen.actorA ||
+       seen.frameA || seen.frameB || seen.bodyB ||
+       seen.initialRelative || seen.anchor || seen.outputForce ||
+       seen.breakMode || seen.kinematicMotion ||
+       seen.positionTargetVelocity))
+    return reportConfigurationError(
+        options, config,
+        "friction_requires_strict_contact_position_fixture");
+  if (seen.support &&
+      (testCase != eCASE_POSITION || !seen.drive ||
+       config.drive != eDRIVE_LINEAR_X || !seen.driveMode ||
+       config.driveMode != eDRIVE_MODE_FORCE || !seen.topology ||
+       !contactComparison || !seen.endpoint || !seen.mass ||
+       PxAbs(config.comparisonMass - 1.0f) > 1e-6f ||
+       !seen.limit || config.lowForceLimit || !seen.friction ||
+       seen.actorA || seen.frameA || seen.frameB || seen.bodyB ||
+       seen.initialRelative || seen.anchor || seen.outputForce ||
+       seen.breakMode || seen.kinematicMotion ||
+       seen.positionTargetVelocity))
+    return reportConfigurationError(
+        options, config,
+        "support_requires_strict_contact_position_fixture");
+  if (seen.positionTargetVelocity &&
+      (testCase != eCASE_POSITION || !seen.drive ||
+       config.drive != eDRIVE_LINEAR_X || !seen.driveMode ||
+       config.driveMode != eDRIVE_MODE_FORCE || !seen.topology ||
+       !contactComparison || !seen.endpoint || !seen.mass ||
+       PxAbs(config.comparisonMass - 1.0f) > 1e-6f ||
+       !seen.limit || config.lowForceLimit || seen.actorA ||
+       seen.frameA || seen.frameB || seen.bodyB ||
+       seen.initialRelative || seen.anchor || seen.outputForce ||
+       seen.breakMode || seen.kinematicMotion || seen.friction ||
+       seen.support))
+    return reportConfigurationError(
+        options, config,
+        "position_target_velocity_requires_strict_contact_position_fixture");
+  if (seen.anchor && testCase == eCASE_POSITION &&
+      (!seen.drive || config.drive != eDRIVE_LINEAR_X ||
+       !seen.driveMode || config.driveMode != eDRIVE_MODE_FORCE ||
+       !seen.topology || !contactComparison || !seen.endpoint ||
+       !seen.mass || PxAbs(config.comparisonMass - 1.0f) > 1e-6f ||
+       !seen.limit || config.lowForceLimit || seen.actorA ||
+       seen.frameA || seen.frameB || seen.bodyB ||
+       seen.initialRelative || seen.outputForce || seen.breakMode ||
+       seen.kinematicMotion || seen.friction ||
+       seen.support || seen.positionTargetVelocity))
+    return reportConfigurationError(
+        options, config,
+        "anchor_requires_strict_contact_position_fixture");
+  if ((seen.frameA || seen.frameB) && testCase == eCASE_POSITION &&
+      contactComparison) {
+    const bool supportedFrame =
+        config.frameAOrientation == config.frameBOrientation &&
+        (config.frameAOrientation == eFRAME_IDENTITY ||
+         config.frameAOrientation == eFRAME_ROTY_NEG45);
+    if (!seen.frameA || !seen.frameB || !supportedFrame ||
+        !seen.drive || config.drive != eDRIVE_LINEAR_X ||
+        !seen.driveMode || config.driveMode != eDRIVE_MODE_FORCE ||
+        !seen.topology || !seen.endpoint || !seen.mass ||
+        PxAbs(config.comparisonMass - 1.0f) > 1e-6f ||
+        !seen.limit || config.lowForceLimit || seen.actorA ||
+        seen.bodyB || seen.initialRelative || seen.anchor ||
+        seen.outputForce || seen.breakMode || seen.kinematicMotion ||
+        seen.friction || seen.support || seen.positionTargetVelocity)
+      return reportConfigurationError(
+          options, config,
+          "frame_requires_strict_contact_position_fixture");
+    config.positionFrameProbeEnabled = true;
+  }
   const bool accelerationLimitComparison =
       testCase == eCASE_ACCELERATION_MODE && seen.limit;
   if (contactComparison || accelerationLimitComparison) {
@@ -6080,12 +7076,17 @@ int snippetMain(int argc, const char *const *argv) {
                                     "endpoint_requires_velocity_ordering");
   }
 
+  const bool dynamicPositionTopology =
+      (testCase == eCASE_POSITION ||
+       testCase == eCASE_ANGULAR_POSITION ||
+       testCase == eCASE_OUTPUT_FORCE) &&
+      isDynamicComparisonTopology(config.topology);
   if (seen.topology && !isComparisonCase(testCase) &&
-      !(testCase == eCASE_ANGULAR_POSITION &&
-        isDynamicComparisonTopology(config.topology)))
+      !dynamicPositionTopology)
     return reportConfigurationError(options, config,
                                     "topology_requires_comparison_case");
-  if (seen.anchor && testCase != eCASE_OUTPUT_FORCE)
+  if (seen.anchor && testCase != eCASE_OUTPUT_FORCE &&
+      testCase != eCASE_POSITION)
     return reportConfigurationError(options, config,
                                     "anchor_requires_output_force_case");
   if (seen.breakMode && testCase != eCASE_OUTPUT_FORCE &&
@@ -6120,8 +7121,10 @@ int snippetMain(int argc, const char *const *argv) {
                                     "option_incompatible_with_case");
   if (isPositionLikeCase(testCase)) {
     if (testCase == eCASE_OUTPUT_FORCE) {
-      config.comparisonMass = 1.0f;
-      config.lowForceLimit = true;
+      if (!seen.mass)
+        config.comparisonMass = 1.0f;
+      if (!seen.limit)
+        config.lowForceLimit = true;
     } else if (testCase == eCASE_ANGULAR_POSITION) {
       if (!seen.mass)
         config.comparisonMass = 1.0f;
@@ -6207,7 +7210,22 @@ int snippetMain(int argc, const char *const *argv) {
       if (config.drive != eDRIVE_LINEAR_X)
         return reportConfigurationError(
             options, config, "output_force_requires_drive_x");
-      if (seen.mass || seen.limit || seen.actorA || seen.bodyB)
+      if (contactOutputForceFixture) {
+        if (!seen.driveMode ||
+            config.driveMode != eDRIVE_MODE_FORCE ||
+            !seen.topology || !seen.mass ||
+            PxAbs(config.comparisonMass - 1.0f) > 1e-6f ||
+            !seen.limit || !config.lowForceLimit ||
+            config.breakMode != eBREAK_UNBREAKABLE ||
+            seen.actorA || seen.frameA || seen.frameB || seen.bodyB ||
+            seen.initialRelative || seen.anchor ||
+            seen.kinematicMotion || seen.friction || seen.support ||
+            seen.positionTargetVelocity)
+          return reportConfigurationError(
+              options, config,
+              "output_force_contact_requires_strict_position_fixture");
+      } else if (seen.mass || seen.limit || seen.actorA || seen.bodyB ||
+                 seen.topology)
         return reportConfigurationError(options, config,
                                         "option_incompatible_with_case");
     } else if (seen.outputForce) {
@@ -6344,7 +7362,14 @@ int snippetMain(int argc, const char *const *argv) {
       "targetMagnitude=%.9g "
       "comparisonMass=%.9g limit=%s outputForce=%s breakMode=%s "
       "topology=%s endpoint=%s kinematicMotion=%s "
-      "contactDriveGate=%s gravity=%s ground=%s friction=%s "
+      "contactDriveGate=%s gravity=%s ground=%s "
+      "supportProbe=%u support=%s supportNormalX=%.9g "
+      "supportNormalY=%.9g supportNormalZ=%.9g friction=%s "
+      "frictionProbe=%u commonVelocity=%.9g frictionInertia=%.9g "
+      "positionTargetVelocityProbe=%u positionTargetVelocity=%s "
+      "canonicalPositionTargetVelocity=%.9g "
+      "positionAnchorProbe=%u "
+      "positionFrameProbe=%u "
       "positionDriveGate=%s "
       "accelerationDriveGate=%s massScalingGate=%s forceLimitGate=%s "
       "outputForceGate=%s\n",
@@ -6355,7 +7380,12 @@ int snippetMain(int argc, const char *const *argv) {
       getOrientationName(gHeadlessConfig.frameBOrientation),
       getOrientationName(gHeadlessConfig.bodyBRotated),
       getInitialRelativeName(gHeadlessConfig.initialRelativeOffset),
-      getAnchorName(gHeadlessConfig.offsetAnchor),
+      getAnchorName(gHeadlessConfig.offsetAnchor,
+                    gHeadlessConfig.positionAnchorAlongX,
+                    gHeadlessConfig.positionAnchorAlongZ,
+                    gHeadlessConfig.positionAnchorAsymmetricX,
+                    gHeadlessConfig.positionAnchorAsymmetricZ,
+                    gHeadlessConfig.positionAnchorTwoSidedZ),
       getDriveModeName(gHeadlessConfig.driveMode),
       double(configuredTargetMagnitude),
       double(gHeadlessConfig.comparisonMass),
@@ -6371,8 +7401,34 @@ int snippetMain(int argc, const char *const *argv) {
                                                             : "zero",
       isContactComparisonTopology(gHeadlessConfig.topology) ? "plane"
                                                             : "none",
-      isContactComparisonTopology(gHeadlessConfig.topology) ? "zero"
-                                                            : "not-applicable",
+      isSupportProbe() ? 1u : 0u,
+      isContactComparisonTopology(gHeadlessConfig.topology)
+          ? getSupportName(gHeadlessConfig.support)
+          : "not-applicable",
+      double(isContactComparisonTopology(gHeadlessConfig.topology)
+                 ? getContactSupportNormal().x
+                 : 0.0f),
+      double(isContactComparisonTopology(gHeadlessConfig.topology)
+                 ? getContactSupportNormal().y
+                 : 0.0f),
+      double(isContactComparisonTopology(gHeadlessConfig.topology)
+                 ? getContactSupportNormal().z
+                 : 0.0f),
+      isContactComparisonTopology(gHeadlessConfig.topology)
+          ? getFrictionName(gHeadlessConfig.friction)
+          : "not-applicable",
+      isFrictionProbe() ? 1u : 0u,
+      double(isFrictionProbe() ? gFrictionProbeCommonVelocity
+                               : 0.0f),
+      double(isFrictionProbe() ? gFrictionProbeInertia : 0.0f),
+      isPositionTargetVelocityProbe() ? 1u : 0u,
+      getPositionTargetVelocityName(
+          gHeadlessConfig.positionTargetVelocity),
+      double(isPositionTargetVelocityProbe()
+                 ? getCanonicalPositionTargetVelocity()
+                 : 0.0f),
+      isPositionAnchorProbe() ? 1u : 0u,
+      isPositionFrameProbe() ? 1u : 0u,
       isPositionLikeCase(gHeadlessCase) ? "ACTIVE" : "NOT_COVERED",
       gHeadlessCase == eCASE_ACCELERATION_MODE ? "ACTIVE" : "NOT_COVERED",
       gHeadlessCase == eCASE_MASS_SCALING ? "ACTIVE" : "NOT_COVERED",
