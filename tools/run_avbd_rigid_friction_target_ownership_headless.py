@@ -27,6 +27,17 @@ BASE_CASES = (
 )
 DIAG_PREFIX = "[avbd:friction-target] "
 ITER_DIAG_PREFIX = "[avbd:iters] "
+OBJECTIVE_IR_PREFIX = "[avbd:objective-ir] "
+OBJECTIVE_IR_PARTITION_FIELDS = (
+    "objectivePositionRows",
+    "objectivePointRows",
+    "objectiveManifoldRows",
+    "objectiveComponentRows",
+    "objectiveJointRows",
+    "objectiveUnsupportedRows",
+    "objectiveLegacyRows",
+    "objectiveInvalidRows",
+)
 RESTITUTION_CORRECTIONS_PATTERN = re.compile(
     r"\brestitutionCorrections=(\d+)"
 )
@@ -127,6 +138,11 @@ def run_one(
         for line in combined.splitlines()
         if line.startswith(ITER_DIAG_PREFIX)
     ]
+    objective_ir_lines = [
+        line.strip()
+        for line in combined.splitlines()
+        if line.startswith(OBJECTIVE_IR_PREFIX)
+    ]
     errors: list[str] = []
     gate: dict[str, str] = {}
     if result.timed_out:
@@ -201,10 +217,27 @@ def run_one(
         "genericNormalImpulseFrameMax": 0.0,
         "genericTangentImpulseFrameMax": 0.0,
         "restitutionCorrections": 0.0,
+        "objectiveRows": 0.0,
+        "objectivePositionRows": 0.0,
+        "objectivePointRows": 0.0,
+        "objectiveManifoldRows": 0.0,
+        "objectiveComponentRows": 0.0,
+        "objectiveJointRows": 0.0,
+        "objectiveUnsupportedRows": 0.0,
+        "objectiveLegacyRows": 0.0,
+        "objectiveInvalidRows": 0.0,
+        "objectiveFingerprint": 0,
     }
     if spec.solver == "avbd":
         if not diag_lines:
             errors.append("missing AVBD friction-target diagnostics")
+        if not objective_ir_lines:
+            errors.append("missing AVBD compiled-objective diagnostics")
+        if len(objective_ir_lines) != len(iter_diag_lines):
+            errors.append(
+                "compiled-objective/iteration diagnostic count mismatch: "
+                f"{len(objective_ir_lines)}/{len(iter_diag_lines)}"
+            )
         for line in diag_lines:
             fields, parse_errors = parse_fields(line)
             errors.extend(parse_errors)
@@ -230,7 +263,27 @@ def run_one(
                 )
                 continue
             diagnostics["restitutionCorrections"] += float(match.group(1))
-    elif diag_lines:
+        for line in objective_ir_lines:
+            fields, parse_errors = parse_fields(line)
+            errors.extend(parse_errors)
+            rows = as_int(fields, "rows", errors)
+            partition = 0
+            for key in OBJECTIVE_IR_PARTITION_FIELDS:
+                value = as_int(fields, key, errors)
+                diagnostics[key] += value
+                partition += value
+            diagnostics["objectiveRows"] += rows
+            diagnostics["objectiveFingerprint"] += as_int(
+                fields, "objectiveFingerprint", errors
+            )
+            if rows != partition:
+                errors.append(
+                    f"compiled-objective rows={rows}, "
+                    f"partition={partition}"
+                )
+            if as_int(fields, "objectiveInvalidRows", errors) != 0:
+                errors.append("compiled-objective Invalid row detected")
+    elif diag_lines or objective_ir_lines:
         errors.append("unexpected AVBD diagnostics on TGS lane")
 
     actor0_count = as_int(gate, "body0Actor0Count", errors)

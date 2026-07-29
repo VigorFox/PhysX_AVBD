@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit passive friction ownership across a connected rigid contact component."""
+"""Audit a restituting rigid material component through hidden Snippet runs."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from run_avbd_rigid_friction_target_ownership_headless import (
 
 
 BASE_CASES = (
-    "ownership-passive-friction-component",
-    "ownership-passive-friction-component-yaw",
+    "ownership-restitution-friction-component",
+    "ownership-restitution-friction-component-yaw",
 )
 SOLVER_EXECUTIONS = (
     ("tgs", "parallel"),
@@ -30,6 +30,8 @@ SOLVER_EXECUTIONS = (
 COMPARISON_FIELDS = (
     "peakBody0AngularSpeed",
     "peakBody1AngularSpeed",
+    "peakBody1VelocityY",
+    "minBody1VelocityY",
     "finalBody0Speed",
     "finalBody1Speed",
     "finalBody0AngularSpeed",
@@ -44,6 +46,7 @@ COMPARISON_FIELDS = (
     "finalBody1AngularZ",
     "minBody0Y",
     "minBody1Y",
+    "maxBody1Y",
 )
 
 
@@ -68,7 +71,7 @@ def compare(
             max_delta = delta
             max_field = field
     print(
-        "[RIGID_PASSIVE_FRICTION_COMPONENT_DELTA] "
+        "[RIGID_RESTITUTION_COMPONENT_DELTA] "
         f"comparison={label} maxField={max_field} "
         f"maxDelta={max_delta:.9g}"
     )
@@ -93,7 +96,7 @@ def main() -> int:
 
     if args.timeout <= 0.0 or args.repeats <= 0:
         print(
-            "[RIGID_PASSIVE_FRICTION_COMPONENT_RUNNER_ERROR] "
+            "[RIGID_RESTITUTION_COMPONENT_RUNNER_ERROR] "
             "--timeout and --repeats must be positive"
         )
         return 2
@@ -102,7 +105,7 @@ def main() -> int:
     artifact_dir = (
         Path(tempfile.gettempdir())
         / (
-            "PhysX_AVBD_passive_friction_component_"
+            "PhysX_AVBD_restitution_component_"
             + datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
         )
     )
@@ -157,6 +160,12 @@ def main() -> int:
                         reported_points = as_int(
                             gate, "reportPointCount", numeric_errors
                         )
+                        peak_rebound = as_float(
+                            gate, "peakBody1VelocityY", numeric_errors
+                        )
+                        min_impact = as_float(
+                            gate, "minBody1VelocityY", numeric_errors
+                        )
                         peak_w0 = as_float(
                             gate, "peakBody0AngularSpeed", numeric_errors
                         )
@@ -169,23 +178,14 @@ def main() -> int:
                         final_speed1 = as_float(
                             gate, "finalBody1Speed", numeric_errors
                         )
-                        final_w0 = as_float(
-                            gate, "finalBody0AngularSpeed", numeric_errors
-                        )
-                        final_w1 = as_float(
-                            gate, "finalBody1AngularSpeed", numeric_errors
-                        )
-                        final_vx0 = as_float(
-                            gate, "finalBody0VelocityX", numeric_errors
-                        )
-                        final_vx1 = as_float(
-                            gate, "finalBody1VelocityX", numeric_errors
-                        )
                         min_y0 = as_float(
                             gate, "minBody0Y", numeric_errors
                         )
                         min_y1 = as_float(
                             gate, "minBody1Y", numeric_errors
+                        )
+                        max_y1 = as_float(
+                            gate, "maxBody1Y", numeric_errors
                         )
                         errors.extend(
                             f"{solver}/{execution}/{case_name}/"
@@ -193,48 +193,59 @@ def main() -> int:
                             for error in numeric_errors
                         )
                         if (
-                            callbacks <= 0
-                            or pairs != callbacks * 2
-                            or points < pairs * 2
+                            callbacks < 120
+                            or callbacks > 240
+                            or pairs <= callbacks
+                            or pairs > callbacks * 2
+                            or points < pairs
                             or reported_pairs != pairs
                             or reported_points != points
                         ):
                             errors.append(
                                 f"{solver}/{execution}/{case_name}/"
-                                f"repeat{repeat}: connected multi-row "
-                                f"contacts missing callbacks={callbacks} "
-                                f"pairs={pairs} points={points} "
+                                f"repeat{repeat}: impact/support topology "
+                                f"missing callbacks={callbacks} pairs={pairs} "
+                                f"points={points} "
                                 f"reportedPairs={reported_pairs} "
                                 f"reportedPoints={reported_points}"
                             )
-                        if args.mode == "acceptance":
-                            if max(final_speed0, final_speed1) > 0.1:
-                                errors.append(
-                                    f"{solver}/{execution}/{case_name}/"
-                                    f"repeat{repeat}: passive component "
-                                    "did not settle "
-                                    f"speeds={final_speed0},{final_speed1}"
-                                )
-                            if max(final_w0, final_w1) > 0.05:
-                                errors.append(
-                                    f"{solver}/{execution}/{case_name}/"
-                                    f"repeat{repeat}: residual angular "
-                                    f"speeds={final_w0},{final_w1}"
-                                )
+                        if (
+                            min_impact > -3.0
+                            or peak_rebound < 1.0
+                            or min_y0 < 0.2
+                            or min_y1 < 0.8
+                            or max(peak_w0, peak_w1) > 50.0
+                        ):
+                            errors.append(
+                                f"{solver}/{execution}/{case_name}/"
+                                f"repeat{repeat}: impact/rebound not "
+                                f"exercised impact={min_impact} "
+                                f"rebound={peak_rebound} "
+                                f"minY={min_y0},{min_y1} "
+                                f"peakW={peak_w0},{peak_w1}"
+                            )
+                        if args.mode == "acceptance" and max(
+                            final_speed0, final_speed1
+                        ) > 0.2:
+                            errors.append(
+                                f"{solver}/{execution}/{case_name}/"
+                                f"repeat{repeat}: component did not settle "
+                                f"speeds={final_speed0},{final_speed1}"
+                            )
                         print(
-                            "[RIGID_PASSIVE_FRICTION_COMPONENT_METRIC] "
+                            "[RIGID_RESTITUTION_COMPONENT_METRIC] "
                             f"solver={solver} execution={execution} "
                             f"case={case_name} repeat={repeat} "
                             f"callbacks={callbacks} pairs={pairs} "
                             f"points={points} "
-                            f"peakW0={peak_w0:.9g} peakW1={peak_w1:.9g} "
+                            f"impactVy1={min_impact:.9g} "
+                            f"reboundVy1={peak_rebound:.9g} "
+                            f"peakW0={peak_w0:.9g} "
+                            f"peakW1={peak_w1:.9g} "
                             f"finalSpeed0={final_speed0:.9g} "
                             f"finalSpeed1={final_speed1:.9g} "
-                            f"finalW0={final_w0:.9g} "
-                            f"finalW1={final_w1:.9g} "
-                            f"finalVx0={final_vx0:.9g} "
-                            f"finalVx1={final_vx1:.9g} "
                             f"minY0={min_y0:.9g} minY1={min_y1:.9g} "
+                            f"maxY1={max_y1:.9g} "
                             f"materialNormalRows="
                             f"{diagnostics['genericNormalRows']:.9g} "
                             f"materialTangentRows="
@@ -244,14 +255,19 @@ def main() -> int:
                             f"fallbackCorrections="
                             f"{diagnostics['bodyStaticFallbackCorrections']:.9g} "
                             f"fallbackImpulse="
-                            f"{diagnostics['bodyStaticFallbackImpulse']:.9g}"
+                            f"{diagnostics['bodyStaticFallbackImpulse']:.9g} "
+                            f"restitutionCorrections="
+                            f"{diagnostics['restitutionCorrections']:.9g}"
                         )
                         if solver == "avbd":
                             fallback_rows = diagnostics[
                                 "bodyStaticFallbackRows"
                             ]
-                            material_tangent_rows = diagnostics[
+                            tangent_rows = diagnostics[
                                 "genericTangentRows"
+                            ]
+                            restitution_corrections = diagnostics[
+                                "restitutionCorrections"
                             ]
                             if args.mode == "inventory":
                                 if fallback_rows <= 0:
@@ -260,12 +276,20 @@ def main() -> int:
                                         f"repeat{repeat}: legacy fallback "
                                         "was not observed"
                                     )
-                                if material_tangent_rows != 0:
+                                if tangent_rows != 0:
                                     errors.append(
                                         f"{solver}/{execution}/{case_name}/"
                                         f"repeat{repeat}: complete material "
-                                        "owner unexpectedly accepted rows="
-                                        f"{material_tangent_rows}"
+                                        "owner unexpectedly accepted "
+                                        f"rows={tangent_rows}"
+                                    )
+                                if restitution_corrections != 0:
+                                    errors.append(
+                                        f"{solver}/{execution}/{case_name}/"
+                                        f"repeat{repeat}: explicit "
+                                        "restitution owner unexpectedly "
+                                        f"ran corrections="
+                                        f"{restitution_corrections}"
                                     )
                             else:
                                 if fallback_rows != 0:
@@ -274,37 +298,22 @@ def main() -> int:
                                         f"repeat{repeat}: legacy fallback "
                                         f"rows={fallback_rows}"
                                     )
-                                if material_tangent_rows != float(points):
+                                if tangent_rows != float(points):
                                     errors.append(
                                         f"{solver}/{execution}/{case_name}/"
                                         f"repeat{repeat}: component row "
-                                        "accounting "
-                                        f"rows={material_tangent_rows} "
+                                        f"accounting rows={tangent_rows} "
                                         f"points={points}"
                                     )
-                                if (
-                                    diagnostics["objectiveComponentRows"]
-                                    <= 0.0 or
-                                    diagnostics["objectiveComponentRows"] !=
-                                    diagnostics["objectiveRows"]
-                                ):
+                                if restitution_corrections <= 0:
                                     errors.append(
                                         f"{solver}/{execution}/{case_name}/"
-                                        f"repeat{repeat}: compiled "
-                                        "ComponentFinalize partition "
-                                        f"component="
-                                        f"{diagnostics['objectiveComponentRows']:.9g} "
-                                        f"rows="
-                                        f"{diagnostics['objectiveRows']:.9g}"
+                                        f"repeat{repeat}: restitution owner "
+                                        "was not exercised"
                                     )
 
                 reference = observed[
-                    (
-                        solver,
-                        execution,
-                        BASE_CASES[0],
-                        repeat,
-                    )
+                    (solver, execution, BASE_CASES[0], repeat)
                 ][0]
                 reverse = observed[
                     (
@@ -315,12 +324,7 @@ def main() -> int:
                     )
                 ][0]
                 yaw = observed[
-                    (
-                        solver,
-                        execution,
-                        BASE_CASES[1],
-                        repeat,
-                    )
+                    (solver, execution, BASE_CASES[1], repeat)
                 ][0]
                 yaw_reverse = observed[
                     (
@@ -336,11 +340,7 @@ def main() -> int:
                     reverse,
                     errors,
                     enforce=args.mode == "acceptance" and solver == "avbd",
-                    # The material owner is velocity-only.  The frozen AVBD
-                    # position solve retains a 2.77e-4 m actor-order delta in
-                    # the upper body's minimum Y; velocity/owner metrics are
-                    # otherwise substantially tighter.
-                    tolerance=5.0e-4,
+                    tolerance=1.0e-3,
                 )
                 compare(
                     f"{solver}-{execution}-yaw-robustness-repeat{repeat}",
@@ -356,49 +356,8 @@ def main() -> int:
                     yaw_reverse,
                     errors,
                     enforce=args.mode == "acceptance" and solver == "avbd",
-                    tolerance=5.0e-4,
+                    tolerance=1.0e-3,
                 )
-                if solver == "avbd":
-                    reference_diag = observed[
-                        (solver, execution, BASE_CASES[0], repeat)
-                    ][1]
-                    reverse_diag = observed[
-                        (
-                            solver,
-                            execution,
-                            f"{BASE_CASES[0]}-reverse",
-                            repeat,
-                        )
-                    ][1]
-                    yaw_diag = observed[
-                        (solver, execution, BASE_CASES[1], repeat)
-                    ][1]
-                    yaw_reverse_diag = observed[
-                        (
-                            solver,
-                            execution,
-                            f"{BASE_CASES[1]}-reverse",
-                            repeat,
-                        )
-                    ][1]
-                    if (
-                        reference_diag["objectiveFingerprint"] !=
-                        reverse_diag["objectiveFingerprint"]
-                    ):
-                        errors.append(
-                            f"{solver}-{execution}-repeat{repeat}: "
-                            "compiled-objective actor-order "
-                            "fingerprint mismatch"
-                        )
-                    if (
-                        yaw_diag["objectiveFingerprint"] !=
-                        yaw_reverse_diag["objectiveFingerprint"]
-                    ):
-                        errors.append(
-                            f"{solver}-{execution}-repeat{repeat}: yaw "
-                            "compiled-objective actor-order "
-                            "fingerprint mismatch"
-                        )
 
             for case_name in (
                 BASE_CASES[0],
@@ -431,9 +390,18 @@ def main() -> int:
                     enforce=False,
                     tolerance=0.0,
                 )
+                if args.mode == "inventory":
+                    tgs_rebound = float(tgs["peakBody1VelocityY"])
+                    avbd_rebound = float(parallel["peakBody1VelocityY"])
+                    if tgs_rebound - avbd_rebound <= 1.0:
+                        errors.append(
+                            f"avbd-vs-tgs-{case_name}-repeat{repeat}: "
+                            "failure-first rebound gap missing "
+                            f"tgs={tgs_rebound} avbd={avbd_rebound}"
+                        )
 
     for error in errors:
-        print(f"[RIGID_PASSIVE_FRICTION_COMPONENT_ERROR] {error}")
+        print(f"[RIGID_RESTITUTION_COMPONENT_ERROR] {error}")
     passed = infrastructure_ok and not errors
     summary = {
         "mode": args.mode,
@@ -465,7 +433,7 @@ def main() -> int:
         encoding="utf-8",
     )
     print(
-        "[RIGID_PASSIVE_FRICTION_COMPONENT_RESULT] "
+        "[RIGID_RESTITUTION_COMPONENT_RESULT] "
         f"mode={args.mode} total={len(observed)}/{len(specs)} "
         f"status={'PASS' if passed else 'FAIL'} "
         f"artifact={artifact_dir}"

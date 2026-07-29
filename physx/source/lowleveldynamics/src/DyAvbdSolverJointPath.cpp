@@ -413,7 +413,9 @@ static bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
     const AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
     const physx::PxVec3 &gravity, physx::PxU32 numGear,
     physx::PxU32 numSoftParticles,
-    physx::PxU32 numSoftBodies, physx::PxU32 numSoftContacts) {
+    physx::PxU32 numSoftBodies, physx::PxU32 numSoftContacts,
+    bool &unsupportedTransientContact) {
+  unsupportedTransientContact = false;
   if (!bodies || numBodies != 2u || !contacts || numContacts < 2u ||
       numContacts > 8u || !d6Joints || numD6 != 1u || numGear != 0u ||
       numSoftParticles != 0u || numSoftBodies != 0u ||
@@ -473,6 +475,7 @@ static bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
   physx::PxU32 contactsPerBody[2] = {0u, 0u};
   physx::PxVec3 referenceNormal(0.0f);
   bool haveReferenceNormal = false;
+  bool haveUnsupportedTransientContact = false;
   for (physx::PxU32 contactIndex = 0; contactIndex < numContacts;
        ++contactIndex) {
     const AvbdContactConstraint &contact = contacts[contactIndex];
@@ -485,9 +488,10 @@ static bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
         !physx::PxIsFinite(contact.staticFriction) ||
         !physx::PxIsFinite(contact.restitution) ||
         contact.restitution < 0.0f ||
-        contact.contactManagerEstablished == 0u ||
         contact.targetVelocity.magnitudeSquared() > 1e-12f)
       return false;
+    if (contact.contactManagerEstablished == 0u)
+      haveUnsupportedTransientContact = true;
 
     const bool dynamicIsA = contact.header.bodyIndexA < numBodies;
     const physx::PxU32 bodyIndex =
@@ -517,7 +521,7 @@ static bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
         bodies[bodyIndex].linearVelocity +
         bodies[bodyIndex].angularVelocity.cross(contactArm);
     if (pointVelocity.dot(dynamicNormal) < -0.25f)
-      return false;
+      haveUnsupportedTransientContact = true;
     if (!haveReferenceNormal) {
       referenceNormal = dynamicNormal;
       haveReferenceNormal = true;
@@ -525,7 +529,11 @@ static bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
       return false;
     }
   }
-  return contactsPerBody[0] != 0u && contactsPerBody[1] != 0u;
+  const bool completeSupport =
+      contactsPerBody[0] != 0u && contactsPerBody[1] != 0u;
+  unsupportedTransientContact =
+      completeSupport && haveUnsupportedTransientContact;
+  return completeSupport && !haveUnsupportedTransientContact;
 }
 
 struct ContactCoupledVelocityRow {
@@ -1990,9 +1998,15 @@ static bool isSinglePassiveGenericHard1DVelocityProjectionSupported(
     return false;
 
   for (physx::PxU32 i = 0; i < numD6; ++i) {
-    if ((d6Joints[i].sourceFlags &
-         (AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
-          AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) == 0)
+    if (!hasAvbdJointObjective(
+            d6Joints[i].objectiveProgram,
+            AvbdJointObjectiveKind::GenericHard1D) &&
+        !hasAvbdJointObjective(
+            d6Joints[i].objectiveProgram,
+            AvbdJointObjectiveKind::ArticulationHardMimic) &&
+        !hasAvbdJointObjective(
+            d6Joints[i].objectiveProgram,
+            AvbdJointObjectiveKind::GenericRestitution1D))
       continue;
     if (genericIndex != PX_MAX_U32)
       return false;
@@ -2129,8 +2143,9 @@ static void projectSinglePassiveGenericHard1DVelocity(
     return;
 
   physx::PxReal velocityTarget = generic.genericVelocityTarget;
-  if ((generic.sourceFlags &
-       AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW) != 0) {
+  if (hasAvbdJointObjective(
+          generic.objectiveProgram,
+          AvbdJointObjectiveKind::GenericRestitution1D)) {
     const physx::PxReal bounceVelocity =
         -generic.genericRestitution * startSpeed;
     if (-startSpeed > generic.genericBounceThreshold &&
@@ -4745,35 +4760,8 @@ void AvbdSolver::solveLocalSystemWithJoints(
 
   const physx::PxU32 bodyIndex = body.nodeIndex;
 
-  // Same-artic external spherical loop closures (Entry 081): mildly stiffen the
-  // local body diagonal so block-descent does not over-respond on scissor links.
-  physx::PxReal bodyResponseScale = 1.0f;
-  if (d6Joints && numD6 > 0) {
-    const physx::PxU32 *mapIndices = nullptr;
-    physx::PxU32 mapCount = 0;
-    if (d6Map && d6Map->numBodies > 0)
-      d6Map->getBodyConstraints(bodyIndex, mapIndices, mapCount);
-    const physx::PxU32 loopCount = mapIndices ? mapCount : numD6;
-    for (physx::PxU32 ji = 0; ji < loopCount; ++ji) {
-      const physx::PxU32 j = mapIndices ? mapIndices[ji] : ji;
-      if (j >= numD6)
-        continue;
-      const AvbdD6JointConstraint &jnt = d6Joints[j];
-      if (jnt.header.bodyIndexA != bodyIndex && jnt.header.bodyIndexB != bodyIndex)
-        continue;
-      if ((jnt.sourceFlags & AvbdD6JointConstraint::
-                                 eSAME_ARTICULATION_EXTERNAL_SPHERICAL) &&
-          jnt.linearMotion == 0 &&
-          jnt.angularMotion == 0x2A) {
-        bodyResponseScale = 0.75f;
-        break;
-      }
-    }
-  }
-
-  const physx::PxReal scaledInvMass = body.invMass * bodyResponseScale;
-  const physx::PxMat33 scaledInvInertia =
-      body.invInertiaWorld * bodyResponseScale;
+  const physx::PxReal scaledInvMass = body.invMass;
+  const physx::PxMat33 scaledInvInertia = body.invInertiaWorld;
 
   // =========================================================================
   // Step 1: Initialize LHS with mass matrix M/h^2
@@ -4839,30 +4827,47 @@ void AvbdSolver::solveLocalSystemWithJoints(
         continue;
 
       const bool isBodyA = (bodyAIdx == bodyIndex);
+      const physx::PxU32 compiledSourceRows =
+          getAvbdJointObjectiveSourceRows(jnt.objectiveProgram);
+      const physx::PxU32 compiledDriveRows =
+          compiledSourceRows & 0x3fu;
+      const bool compiledConeObjective =
+          (compiledSourceRows &
+           eJOINT_SOURCE_ANGULAR_CONE) != 0;
 
       const bool genericHard1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::GenericHard1D) ||
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::ArticulationHardMimic);
       const bool genericAccelerationDamping1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::
-               eGENERIC_ACCELERATION_DAMPING_1D_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::
+                  GenericAccelerationDamping1D);
       const bool genericForceSpring1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::GenericForceSpring1D);
       const bool compliantMimic1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::
-               eARTICULATION_COMPLIANT_MIMIC_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::
+                  ArticulationCompliantMimic);
       const bool fixedTendon1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::eARTICULATION_FIXED_TENDON_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::ArticulationFixedTendon);
       const bool spatialTendon1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::eARTICULATION_SPATIAL_TENDON_ROW) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::ArticulationSpatialTendon);
       const bool coupledSpatialTendon1D =
-          (jnt.sourceFlags &
-           AvbdD6JointConstraint::eCOUPLED_SPATIAL_TENDON_ACTIVE) != 0;
+          hasAvbdJointObjective(
+              jnt.objectiveProgram,
+              AvbdJointObjectiveKind::CoupledSpatialTendon);
       const bool compliantTendon1D =
           fixedTendon1D || spatialTendon1D;
       if (coupledSpatialTendon1D)
@@ -5185,10 +5190,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
         } else {
           // Generic per-axis angular constraint handling
           for (int axis = 0; axis < 3; ++axis) {
-            if ((jnt.sourceFlags &
-                 AvbdD6JointConstraint::
-                     eD6_LEGACY_CONE_LIMIT_ACTIVE) != 0 &&
-                axis >= 1)
+            if (compiledConeObjective && axis >= 1)
               continue;
             physx::PxU32 motion = jnt.getAngularMotion(axis);
             if (motion == 2) // FREE
@@ -5241,7 +5243,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
       // Public D6 legacy swing limits and native spherical limits both use
       // ConeLimitHelperTanLess so unequal Y/Z limits preserve the same
       // elliptical geometry as their Extensions solver preps.
-      if (jnt.coneAngleLimit > 0.0f) {
+      if (compiledConeObjective) {
         physx::PxQuat rotA_cone, rotB_cone;
         if (isBodyA) {
           rotA_cone = body.rotation;
@@ -5323,9 +5325,9 @@ void AvbdSolver::solveLocalSystemWithJoints(
         bodyBRef = (bodyBIdx < numBodies) ? &bodies[bodyBIdx] : nullptr;
 
         // --- Linear velocity drive (AL constraint) ---
-        if ((jnt.driveFlags & 0x7) != 0) {
+        if ((compiledDriveRows & 0x7u) != 0) {
           for (int a = 0; a < 3; ++a) {
-            if ((jnt.driveFlags & (1 << a)) == 0)
+            if ((compiledDriveRows & (1u << a)) == 0)
               continue;
             physx::PxReal damping = (&jnt.linearDamping.x)[a];
             if (damping <= 0.0f)
@@ -5367,8 +5369,9 @@ void AvbdSolver::solveLocalSystemWithJoints(
                 stiffness <= 0.0f && (bodyARef == nullptr || bodyBRef == nullptr);
             const bool usePositionObjective =
                 a == 0 &&
-                (jnt.sourceFlags & AvbdD6JointConstraint::
-                                       eLINEAR_POSITION_DRIVE_ACTIVE) != 0;
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::LinearPositionDrive);
             // In the verified exactly-one-dynamic, stiffness-zero subset,
             // PxD6JointDrive::damping is a force-per-velocity coefficient.
             // With C = (dxB-dxA)-targetVelocity*dt, its position objective
@@ -5452,7 +5455,7 @@ void AvbdSolver::solveLocalSystemWithJoints(
         }
 
         // --- Angular velocity drive (AL constraint) ---
-        if ((jnt.driveFlags & 0x38) != 0) {
+        if ((compiledDriveRows & 0x38u) != 0) {
           // Angular displacement from start-of-step for this body
           physx::PxQuat dqThis =
               body.rotation * body.prevRotation.getConjugate();
@@ -5486,18 +5489,31 @@ void AvbdSolver::solveLocalSystemWithJoints(
           physx::PxReal signAL = isBodyA ? -1.0f : 1.0f;
 
           const bool slerpDrive =
-              (jnt.sourceFlags &
-               AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
+              hasAvbdJointObjective(
+                  jnt.objectiveProgram,
+                  AvbdJointObjectiveKind::SlerpVelocityDrive) ||
+              hasAvbdJointObjective(
+                  jnt.objectiveProgram,
+                  AvbdJointObjectiveKind::SlerpPositionDrive) ||
+              hasAvbdJointObjective(
+                  jnt.objectiveProgram,
+                  AvbdJointObjectiveKind::
+                      CoupledAngularPositionDrive) ||
+              hasAvbdJointObjective(
+                  jnt.objectiveProgram,
+                  AvbdJointObjectiveKind::OrdinaryD6SlerpDrive);
           if (slerpDrive) {
             physx::PxReal damping =
                 jnt.angularDamping.z; // SLERP uses Z damping slot
             if (damping > 0.0f) {
               const bool usePhysicalSlerpVelocityObjective =
-                  (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::SlerpVelocityDrive);
               const bool usePhysicalSlerpPositionObjective =
-                  (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eSLERP_POSITION_DRIVE_ACTIVE) != 0;
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::SlerpPositionDrive);
               if (usePhysicalSlerpPositionObjective) {
                 physx::PxQuat worldFrameA =
                     bodyARef ? bodyARef->rotation * jnt.localFrameA
@@ -5600,7 +5616,8 @@ void AvbdSolver::solveLocalSystemWithJoints(
             };
 
             for (int a = 0; a < 3; ++a) {
-              if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
+              if ((compiledDriveRows &
+                   (1u << axes[a].bit)) == 0)
                 continue;
               const physx::PxReal damping =
                   (&jnt.angularDamping.x)[axes[a].dampIdx];
@@ -5622,12 +5639,15 @@ void AvbdSolver::solveLocalSystemWithJoints(
               physx::PxReal C = relDW.dot(wAxis) - targetOmega_dt;
 
               const bool usePhysicalAngularAxisVelocityObjective =
-                  (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
-                      0;
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::
+                          AngularAxisVelocityDrive);
               const bool usePhysicalAngularPositionObjective =
-                  (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eANGULAR_AXIS_POSITION_DRIVE_ACTIVE) != 0;
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::
+                          AngularAxisPositionDrive);
               physx::PxReal positionResidual = 0.0f;
               physx::PxReal positionTangent = 0.0f;
               if (usePhysicalAngularPositionObjective) {
@@ -6139,118 +6159,631 @@ void AvbdSolver::solveWithJoints(
   const physx::PxReal invDt2 = invDt * invDt;
 
   for (physx::PxU32 i = 0; i < numD6; ++i)
-    d6Joints[i].sourceFlags &=
-        ~(AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::eLINEAR_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::
-              eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::
-              eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::
-              eANGULAR_AXIS_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::eSLERP_VELOCITY_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::eSLERP_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::
-              eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::eCOUPLED_SPATIAL_TENDON_ACTIVE);
-  const bool linearPositionDriveIsland =
+    resetAvbdJointObjectiveProgram(d6Joints[i].objectiveProgram);
+
+  const auto getJointObjectiveSourceRowMask =
+      [](const AvbdD6JointConstraint &joint,
+         AvbdJointObjectiveKind kind) -> physx::PxU32 {
+        const physx::PxU32 linearDriveRows =
+            joint.driveFlags & 0x7u;
+        const physx::PxU32 angularDriveRows =
+            joint.driveFlags & 0x38u;
+        switch (kind) {
+        case AvbdJointObjectiveKind::CoupledLinearVelocityDrive:
+        case AvbdJointObjectiveKind::LinearPositionDrive:
+        case AvbdJointObjectiveKind::CoupledLinearPositionDrive:
+        case AvbdJointObjectiveKind::OrdinaryD6LinearDrive:
+          return linearDriveRows;
+        case AvbdJointObjectiveKind::AngularAxisVelocityDrive:
+        case AvbdJointObjectiveKind::AngularAxisPositionDrive:
+        case AvbdJointObjectiveKind::SlerpVelocityDrive:
+        case AvbdJointObjectiveKind::SlerpPositionDrive:
+        case AvbdJointObjectiveKind::CoupledAngularPositionDrive:
+        case AvbdJointObjectiveKind::OrdinaryD6AngularAxisDrive:
+        case AvbdJointObjectiveKind::OrdinaryD6SlerpDrive:
+          return angularDriveRows;
+        case AvbdJointObjectiveKind::CoupledSpatialTendon:
+        case AvbdJointObjectiveKind::GenericHard1D:
+        case AvbdJointObjectiveKind::GenericAccelerationDamping1D:
+        case AvbdJointObjectiveKind::GenericForceSpring1D:
+        case AvbdJointObjectiveKind::GenericRestitution1D:
+        case AvbdJointObjectiveKind::ArticulationHardMimic:
+        case AvbdJointObjectiveKind::ArticulationCompliantMimic:
+        case AvbdJointObjectiveKind::ArticulationFixedTendon:
+        case AvbdJointObjectiveKind::ArticulationSpatialTendon:
+          return eJOINT_SOURCE_GENERIC_ROW;
+        case AvbdJointObjectiveKind::NativeRevoluteMotor:
+          return eJOINT_SOURCE_NATIVE_MOTOR;
+        case AvbdJointObjectiveKind::CoupledFixedD6:
+          return eJOINT_SOURCE_LINEAR_MOTION_X |
+                 eJOINT_SOURCE_LINEAR_MOTION_Y |
+                 eJOINT_SOURCE_LINEAR_MOTION_Z |
+                 eJOINT_SOURCE_ANGULAR_MOTION_X |
+                 eJOINT_SOURCE_ANGULAR_MOTION_Y |
+                 eJOINT_SOURCE_ANGULAR_MOTION_Z;
+        case AvbdJointObjectiveKind::CoupledSphericalCone:
+          return eJOINT_SOURCE_LINEAR_MOTION_X |
+                 eJOINT_SOURCE_LINEAR_MOTION_Y |
+                 eJOINT_SOURCE_LINEAR_MOTION_Z |
+                 eJOINT_SOURCE_ANGULAR_CONE;
+        case AvbdJointObjectiveKind::NativePassiveReaction: {
+          physx::PxU32 sourceRows = 0;
+          const physx::PxU32 linearRows[3] = {
+              eJOINT_SOURCE_LINEAR_MOTION_X,
+              eJOINT_SOURCE_LINEAR_MOTION_Y,
+              eJOINT_SOURCE_LINEAR_MOTION_Z};
+          const physx::PxU32 angularRows[3] = {
+              eJOINT_SOURCE_ANGULAR_MOTION_X,
+              eJOINT_SOURCE_ANGULAR_MOTION_Y,
+              eJOINT_SOURCE_ANGULAR_MOTION_Z};
+          for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+            if (joint.getLinearMotion(axis) != 2)
+              sourceRows |= linearRows[axis];
+            if (joint.getAngularMotion(axis) != 2)
+              sourceRows |= angularRows[axis];
+          }
+          return sourceRows;
+        }
+        case AvbdJointObjectiveKind::OrdinaryD6Position: {
+          physx::PxU32 sourceRows = 0;
+          const physx::PxU32 linearRows[3] = {
+              eJOINT_SOURCE_LINEAR_MOTION_X,
+              eJOINT_SOURCE_LINEAR_MOTION_Y,
+              eJOINT_SOURCE_LINEAR_MOTION_Z};
+          const physx::PxU32 angularRows[3] = {
+              eJOINT_SOURCE_ANGULAR_MOTION_X,
+              eJOINT_SOURCE_ANGULAR_MOTION_Y,
+              eJOINT_SOURCE_ANGULAR_MOTION_Z};
+          const physx::PxU32 ellipticalConeFlags =
+              AvbdD6JointConstraint::
+                  eD6_LEGACY_CONE_LIMIT_ACTIVE |
+              AvbdD6JointConstraint::
+                  eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE;
+          const bool ellipticalCone =
+              (joint.sourceFlags & ellipticalConeFlags) != 0;
+          for (physx::PxU32 axis = 0; axis < 3; ++axis) {
+            if (joint.getLinearMotion(axis) != 2)
+              sourceRows |= linearRows[axis];
+            if (joint.getAngularMotion(axis) != 2 &&
+                !(ellipticalCone && axis >= 1))
+              sourceRows |= angularRows[axis];
+          }
+          if (joint.coneAngleLimit > 0.0f)
+            sourceRows |= eJOINT_SOURCE_ANGULAR_CONE;
+          return sourceRows;
+        }
+        case AvbdJointObjectiveKind::None:
+        case AvbdJointObjectiveKind::Invalid:
+          break;
+        }
+        return 0;
+      };
+  const auto countJointObjectiveSourceRows =
+      [](physx::PxU32 sourceRowMask) -> physx::PxU16 {
+        physx::PxU16 count = 0;
+        while (sourceRowMask != 0) {
+          count += physx::PxU16(sourceRowMask & 1u);
+          sourceRowMask >>= 1;
+        }
+        return count;
+      };
+
+  const auto compileSingleJointObjective =
+      [&](bool candidate, AvbdVelocityObjectiveOwner owner,
+          AvbdJointObjectiveKind kind) {
+        if (!candidate || numD6 == 0)
+          return;
+        const physx::PxU32 sourceRowMask =
+            getJointObjectiveSourceRowMask(d6Joints[0], kind);
+        const physx::PxU16 objectiveRowCount =
+            kind == AvbdJointObjectiveKind::CoupledFixedD6
+                ? 6u
+                : (kind ==
+                           AvbdJointObjectiveKind::
+                               CoupledSphericalCone
+                       ? 4u
+                       : (kind ==
+                                  AvbdJointObjectiveKind::
+                                      NativePassiveReaction
+                              ? countJointObjectiveSourceRows(
+                                    sourceRowMask)
+                              : 1u));
+        assignAvbdJointObjective(
+            d6Joints[0].objectiveProgram, owner, kind,
+            objectiveRowCount,
+            sourceRowMask,
+            d6Joints[0].cacheKey);
+      };
+
+  const bool linearPositionDriveCandidate =
       isLinearPositionDriveIslandSupported(
           bodies, numBodies, numContacts, d6Joints, numD6, numGear,
           numSoftParticles, numSoftBodies, numSoftContacts);
-  if (linearPositionDriveIsland)
-    d6Joints[0].sourceFlags |=
-        AvbdD6JointConstraint::eLINEAR_POSITION_DRIVE_ACTIVE;
-  bool coupledLinearPositionDriveIsland =
+  compileSingleJointObjective(
+      linearPositionDriveCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::LinearPositionDrive);
+  const bool coupledLinearPositionDriveCandidate =
       isCoupledLinearPositionDriveIslandSupported(
           bodies, numBodies, contacts, numContacts, d6Joints, numD6,
           gravity, numGear, numSoftParticles, numSoftBodies,
           numSoftContacts);
-  if (coupledLinearPositionDriveIsland)
-    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
-        eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE;
+  compileSingleJointObjective(
+      coupledLinearPositionDriveCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::CoupledLinearPositionDrive);
+  const bool angularAxisVelocityDriveCandidate =
+      isAngularAxisVelocityDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      angularAxisVelocityDriveCandidate,
+      AvbdVelocityObjectiveOwner::JointFinalize,
+      AvbdJointObjectiveKind::AngularAxisVelocityDrive);
+  const bool angularAxisPositionDriveCandidate =
+      isAngularAxisPositionDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      angularAxisPositionDriveCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::AngularAxisPositionDrive);
+  const bool slerpVelocityDriveCandidate =
+      isSlerpVelocityDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      slerpVelocityDriveCandidate,
+      AvbdVelocityObjectiveOwner::JointFinalize,
+      AvbdJointObjectiveKind::SlerpVelocityDrive);
+  const bool slerpPositionDriveCandidate =
+      isSlerpPositionDriveIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      slerpPositionDriveCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::SlerpPositionDrive);
+  const bool coupledAngularPositionDriveCandidate =
+      isCoupledAngularPositionDriveIslandSupported(
+          bodies, numBodies, contacts, numContacts, d6Joints, numD6,
+          numGear, numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      coupledAngularPositionDriveCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::CoupledAngularPositionDrive);
+  const bool coupledLinearDriveCandidate =
+      isCoupledLinearDriveIslandSupported(
+          bodies, numBodies, contacts, numContacts, d6Joints, numD6,
+          numGear, numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      coupledLinearDriveCandidate,
+      AvbdVelocityObjectiveOwner::JointFinalize,
+      AvbdJointObjectiveKind::CoupledLinearVelocityDrive);
+  const bool coupledFixedD6Candidate =
+      isCoupledFixedD6IslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      coupledFixedD6Candidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::CoupledFixedD6);
+  const bool coupledSphericalConeCandidate =
+      isCoupledSphericalConeIslandSupported(
+          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
+          numSoftParticles, numSoftBodies, numSoftContacts);
+  compileSingleJointObjective(
+      coupledSphericalConeCandidate,
+      AvbdVelocityObjectiveOwner::PositionAL,
+      AvbdJointObjectiveKind::CoupledSphericalCone);
+  const auto isNativePassiveReactionSource =
+      [](const AvbdD6JointConstraint &joint) {
+        return joint.header.type ==
+                   AvbdConstraintType::eJOINT_FIXED ||
+               (joint.header.type ==
+                    AvbdConstraintType::eJOINT_PRISMATIC &&
+                joint.linearMotion == 0x02u &&
+                joint.angularMotion == 0u) ||
+               (joint.header.type ==
+                    AvbdConstraintType::eJOINT_REVOLUTE &&
+                joint.linearMotion == 0u &&
+                joint.angularMotion == 0x02u &&
+                joint.motorEnabled == 0u);
+      };
+  for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
+       ++jointIndex) {
+    AvbdD6JointConstraint &joint = d6Joints[jointIndex];
+    if (!isNativePassiveReactionSource(joint) ||
+        hasAvbdJointObjective(
+            joint.objectiveProgram,
+            AvbdJointObjectiveKind::CoupledFixedD6))
+      continue;
+    const physx::PxU32 sourceRowMask =
+        getJointObjectiveSourceRowMask(
+            joint,
+            AvbdJointObjectiveKind::NativePassiveReaction);
+    assignAvbdJointObjective(
+        joint.objectiveProgram,
+        AvbdVelocityObjectiveOwner::PositionAL,
+        AvbdJointObjectiveKind::NativePassiveReaction,
+        countJointObjectiveSourceRows(sourceRowMask),
+        sourceRowMask, joint.cacheKey);
+  }
+
+  bool coupledLinearPositionDriveIsland =
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::CoupledLinearPositionDrive);
   bool coupledLinearPositionDriveFrictionPositionOwnerIsland =
       coupledLinearPositionDriveIsland &&
       areStrictFrictionalTorqueFreeBodyVsStaticContactsSupported(
           bodies, numBodies, contacts, numContacts, gravity);
-  const bool angularAxisVelocityDriveIsland =
-      isAngularAxisVelocityDriveIslandSupported(
-          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-          numSoftParticles, numSoftBodies, numSoftContacts);
-  if (angularAxisVelocityDriveIsland)
-    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
-        eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE;
-  const bool angularAxisPositionDriveIsland =
-      isAngularAxisPositionDriveIslandSupported(
-          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-          numSoftParticles, numSoftBodies, numSoftContacts);
-  if (angularAxisPositionDriveIsland)
-    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
-        eANGULAR_AXIS_POSITION_DRIVE_ACTIVE;
   const bool slerpVelocityDriveIsland =
-      isSlerpVelocityDriveIslandSupported(
-          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-          numSoftParticles, numSoftBodies, numSoftContacts);
-  if (slerpVelocityDriveIsland)
-    d6Joints[0].sourceFlags |=
-        AvbdD6JointConstraint::eSLERP_VELOCITY_DRIVE_ACTIVE;
-  const bool slerpPositionDriveIsland =
-      isSlerpPositionDriveIslandSupported(
-          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-          numSoftParticles, numSoftBodies, numSoftContacts);
-  if (slerpPositionDriveIsland)
-    d6Joints[0].sourceFlags |=
-        AvbdD6JointConstraint::eSLERP_POSITION_DRIVE_ACTIVE;
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::SlerpVelocityDrive);
   bool coupledAngularPositionDriveIsland =
-      isCoupledAngularPositionDriveIslandSupported(
-          bodies, numBodies, contacts, numContacts, d6Joints, numD6,
-          numGear, numSoftParticles, numSoftBodies, numSoftContacts);
-  if (coupledAngularPositionDriveIsland)
-    d6Joints[0].sourceFlags |= AvbdD6JointConstraint::
-        eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE;
-  bool coupledLinearDriveIsland = isCoupledLinearDriveIslandSupported(
-      bodies, numBodies, contacts, numContacts, d6Joints, numD6, numGear,
-      numSoftParticles, numSoftBodies, numSoftContacts);
-  if (coupledLinearDriveIsland)
-    d6Joints[0].sourceFlags |=
-        AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE;
-  bool coupledFixedD6Island = isCoupledFixedD6IslandSupported(
-      bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-      numSoftParticles, numSoftBodies, numSoftContacts);
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::CoupledAngularPositionDrive);
+  bool coupledLinearDriveIsland =
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::CoupledLinearVelocityDrive);
+  bool coupledFixedD6Island =
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::CoupledFixedD6);
   bool coupledSphericalConeIsland =
-      isCoupledSphericalConeIslandSupported(
-          bodies, numBodies, numContacts, d6Joints, numD6, numGear,
-          numSoftParticles, numSoftBodies, numSoftContacts);
+      numD6 > 0 &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::CoupledSphericalCone);
   physx::PxArray<physx::PxU32> coupledSpatialTendonRowIndices;
-  bool coupledSpatialTendonIsland = findCoupledSpatialTendonRows(
+  const bool coupledSpatialTendonCandidate = findCoupledSpatialTendonRows(
       bodies, numBodies, numContacts, d6Joints, numD6, numGear,
       numSoftParticles, numSoftBodies, numSoftContacts,
       coupledSpatialTendonRowIndices);
-  if (coupledSpatialTendonIsland) {
+  if (coupledSpatialTendonCandidate) {
+    bool supported =
+        coupledSpatialTendonRowIndices.size() <= PX_MAX_U16;
+    physx::PxU64 objectiveKey = ~physx::PxU64(0);
     for (physx::PxU32 row = 0;
-         row < coupledSpatialTendonRowIndices.size(); ++row)
-      d6Joints[coupledSpatialTendonRowIndices[row]].sourceFlags |=
-          AvbdD6JointConstraint::
-              eCOUPLED_SPATIAL_TENDON_ACTIVE;
+         row < coupledSpatialTendonRowIndices.size(); ++row) {
+      objectiveKey = physx::PxMin(
+          objectiveKey,
+          d6Joints[coupledSpatialTendonRowIndices[row]].cacheKey);
+    }
+    for (physx::PxU32 row = 0;
+         row < coupledSpatialTendonRowIndices.size() && supported;
+         ++row) {
+      supported = canAssignAvbdJointObjective(
+          d6Joints[coupledSpatialTendonRowIndices[row]]
+              .objectiveProgram,
+          AvbdVelocityObjectiveOwner::PositionAL,
+          AvbdJointObjectiveKind::CoupledSpatialTendon,
+          physx::PxU16(coupledSpatialTendonRowIndices.size()),
+          eJOINT_SOURCE_GENERIC_ROW,
+          objectiveKey);
+    }
+    if (supported) {
+      for (physx::PxU32 row = 0;
+           row < coupledSpatialTendonRowIndices.size(); ++row) {
+        assignAvbdJointObjective(
+            d6Joints[coupledSpatialTendonRowIndices[row]]
+                .objectiveProgram,
+            AvbdVelocityObjectiveOwner::PositionAL,
+            AvbdJointObjectiveKind::CoupledSpatialTendon,
+            physx::PxU16(coupledSpatialTendonRowIndices.size()),
+            eJOINT_SOURCE_GENERIC_ROW,
+            objectiveKey);
+      }
+    } else {
+      for (physx::PxU32 row = 0;
+           row < coupledSpatialTendonRowIndices.size(); ++row) {
+        invalidateAvbdJointObjective(
+            d6Joints[coupledSpatialTendonRowIndices[row]]
+                .objectiveProgram);
+      }
+    }
+  }
+  for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
+       ++jointIndex) {
+    AvbdD6JointConstraint &joint = d6Joints[jointIndex];
+    if (hasAvbdJointObjective(
+            joint.objectiveProgram,
+            AvbdJointObjectiveKind::CoupledSpatialTendon))
+      continue;
+
+    const physx::PxU32 sourceFlags = joint.sourceFlags;
+    AvbdJointObjectiveKind kind = AvbdJointObjectiveKind::None;
+    AvbdVelocityObjectiveOwner owner =
+        AvbdVelocityObjectiveOwner::PositionAL;
+    if ((sourceFlags &
+         AvbdD6JointConstraint::eARTICULATION_MIMIC_ROW) != 0)
+      kind = AvbdJointObjectiveKind::ArticulationHardMimic;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eARTICULATION_COMPLIANT_MIMIC_ROW) != 0)
+      kind = AvbdJointObjectiveKind::ArticulationCompliantMimic;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eARTICULATION_FIXED_TENDON_ROW) != 0)
+      kind = AvbdJointObjectiveKind::ArticulationFixedTendon;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eARTICULATION_SPATIAL_TENDON_ROW) != 0)
+      kind = AvbdJointObjectiveKind::ArticulationSpatialTendon;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eGENERIC_ACCELERATION_DAMPING_1D_ROW) != 0)
+      kind =
+          AvbdJointObjectiveKind::GenericAccelerationDamping1D;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eGENERIC_FORCE_SPRING_1D_ROW) != 0)
+      kind = AvbdJointObjectiveKind::GenericForceSpring1D;
+    else if ((sourceFlags &
+              AvbdD6JointConstraint::
+                  eGENERIC_RESTITUTION_1D_ROW) != 0) {
+      kind = AvbdJointObjectiveKind::GenericRestitution1D;
+      owner = AvbdVelocityObjectiveOwner::JointFinalize;
+    } else if ((sourceFlags &
+                AvbdD6JointConstraint::
+                    eGENERIC_HARD_1D_ROW) != 0)
+      kind = AvbdJointObjectiveKind::GenericHard1D;
+
+    if (kind == AvbdJointObjectiveKind::None)
+      continue;
+    assignAvbdJointObjective(
+        joint.objectiveProgram, owner, kind, 1u,
+        eJOINT_SOURCE_GENERIC_ROW, joint.cacheKey);
+  }
+  const physx::PxU32 genericSourceFlags =
+      AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
+      AvbdD6JointConstraint::
+          eARTICULATION_MIMIC_ROW |
+      AvbdD6JointConstraint::
+          eARTICULATION_FIXED_TENDON_ROW |
+      AvbdD6JointConstraint::
+          eARTICULATION_SPATIAL_TENDON_ROW |
+      AvbdD6JointConstraint::
+          eGENERIC_ACCELERATION_DAMPING_1D_ROW |
+      AvbdD6JointConstraint::
+          eGENERIC_FORCE_SPRING_1D_ROW |
+      AvbdD6JointConstraint::
+          eGENERIC_RESTITUTION_1D_ROW |
+      AvbdD6JointConstraint::
+          eARTICULATION_COMPLIANT_MIMIC_ROW;
+  for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
+       ++jointIndex) {
+    AvbdD6JointConstraint &joint = d6Joints[jointIndex];
+    AvbdCompiledJointObjectiveProgram &program =
+        joint.objectiveProgram;
+    if (program.invalid)
+      continue;
+
+    physx::PxU32 compiledSourceRows = 0;
+    for (physx::PxU32 entryIndex = 0;
+         entryIndex < program.entryCount; ++entryIndex)
+      compiledSourceRows |=
+          program.entries[entryIndex].sourceRowMask;
+
+    const physx::PxU32 positionSourceRows =
+        getJointObjectiveSourceRowMask(
+            joint,
+            AvbdJointObjectiveKind::OrdinaryD6Position);
+    const physx::PxU32 remainingPositionSourceRows =
+        positionSourceRows & ~compiledSourceRows;
+    if (remainingPositionSourceRows != 0) {
+      assignAvbdJointObjective(
+          program, AvbdVelocityObjectiveOwner::PositionAL,
+          AvbdJointObjectiveKind::OrdinaryD6Position,
+          countJointObjectiveSourceRows(
+              remainingPositionSourceRows),
+          remainingPositionSourceRows, joint.cacheKey);
+      if (program.invalid)
+        continue;
+      compiledSourceRows |= remainingPositionSourceRows;
+    }
+
+    const physx::PxU32 remainingLinearDriveSourceRows =
+        (joint.driveFlags & 0x7u) & ~compiledSourceRows;
+    if (remainingLinearDriveSourceRows != 0) {
+      assignAvbdJointObjective(
+          program, AvbdVelocityObjectiveOwner::PositionAL,
+          AvbdJointObjectiveKind::OrdinaryD6LinearDrive,
+          countJointObjectiveSourceRows(
+              remainingLinearDriveSourceRows),
+          remainingLinearDriveSourceRows, joint.cacheKey);
+      if (program.invalid)
+        continue;
+      compiledSourceRows |= remainingLinearDriveSourceRows;
+    }
+
+    const physx::PxU32 remainingAngularDriveSourceRows =
+        (joint.driveFlags & 0x38u) & ~compiledSourceRows;
+    if (remainingAngularDriveSourceRows != 0) {
+      const bool slerpDrive =
+          (joint.sourceFlags &
+           AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
+      assignAvbdJointObjective(
+          program, AvbdVelocityObjectiveOwner::PositionAL,
+          slerpDrive
+              ? AvbdJointObjectiveKind::OrdinaryD6SlerpDrive
+              : AvbdJointObjectiveKind::OrdinaryD6AngularAxisDrive,
+          countJointObjectiveSourceRows(
+              remainingAngularDriveSourceRows),
+          remainingAngularDriveSourceRows, joint.cacheKey);
+    }
+  }
+  bool coupledSpatialTendonIsland =
+      coupledSpatialTendonCandidate;
+  for (physx::PxU32 row = 0;
+       row < coupledSpatialTendonRowIndices.size() &&
+       coupledSpatialTendonIsland;
+       ++row) {
+    coupledSpatialTendonIsland = hasAvbdJointObjective(
+        d6Joints[coupledSpatialTendonRowIndices[row]]
+            .objectiveProgram,
+        AvbdJointObjectiveKind::CoupledSpatialTendon);
   }
   const bool passiveCenteredGearVelocityProjectionIsland =
       isPassiveCenteredGearVelocityProjectionSupported(
           bodies, numBodies, numContacts, d6Joints, numD6, gearJoints,
           numGear, numSoftParticles, numSoftBodies, numSoftContacts);
   physx::PxU32 nativeRevoluteMotorGearJointIndex = PX_MAX_U32;
-  const bool nativeRevoluteMotorGearVelocityProjectionIsland =
+  const bool nativeRevoluteMotorGearVelocityProjectionCandidate =
       isNativeRevoluteMotorGearVelocityProjectionSupported(
           bodies, numBodies, numContacts, d6Joints, numD6, gearJoints,
           numGear, numSoftParticles, numSoftBodies, numSoftContacts,
           nativeRevoluteMotorGearJointIndex);
-  const bool nativeRevoluteMotorVelocityProjectionIsland =
+  const bool nativeRevoluteMotorVelocityProjectionCandidate =
       isSingleNativeRevoluteMotorVelocityProjectionSupported(
           bodies, numBodies, numContacts, d6Joints, numD6, numGear,
           numSoftParticles, numSoftBodies, numSoftContacts);
-  const bool contactCoupledNativeRevoluteMotorVelocityProjectionIsland =
+  bool contactCoupledNativeRevoluteMotorUnsupportedTransientContact =
+      false;
+  const bool contactCoupledNativeRevoluteMotorVelocityProjectionCandidate =
       isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
           bodies, numBodies, contacts, numContacts, d6Joints, numD6,
           gravity, numGear, numSoftParticles, numSoftBodies,
-          numSoftContacts);
+          numSoftContacts,
+          contactCoupledNativeRevoluteMotorUnsupportedTransientContact);
+
+  for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
+       ++jointIndex) {
+    AvbdD6JointConstraint &joint = d6Joints[jointIndex];
+    if (joint.motorEnabled == 0u)
+      continue;
+    const bool supported =
+        (nativeRevoluteMotorVelocityProjectionCandidate &&
+         jointIndex == 0u) ||
+        (nativeRevoluteMotorGearVelocityProjectionCandidate &&
+         jointIndex == nativeRevoluteMotorGearJointIndex) ||
+        (contactCoupledNativeRevoluteMotorVelocityProjectionCandidate &&
+         jointIndex == 0u);
+    assignAvbdJointObjective(
+        joint.objectiveProgram,
+        supported ? AvbdVelocityObjectiveOwner::JointFinalize
+                  : AvbdVelocityObjectiveOwner::Unsupported,
+        AvbdJointObjectiveKind::NativeRevoluteMotor, 1u,
+        eJOINT_SOURCE_NATIVE_MOTOR, joint.cacheKey);
+  }
+
+  bool nativeRevoluteMotorVelocityProjectionIsland =
+      nativeRevoluteMotorVelocityProjectionCandidate && numD6 > 0u &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::NativeRevoluteMotor);
+  bool nativeRevoluteMotorGearVelocityProjectionIsland =
+      nativeRevoluteMotorGearVelocityProjectionCandidate &&
+      nativeRevoluteMotorGearJointIndex < numD6 &&
+      hasAvbdJointObjective(
+          d6Joints[nativeRevoluteMotorGearJointIndex].objectiveProgram,
+          AvbdJointObjectiveKind::NativeRevoluteMotor);
+  bool contactCoupledNativeRevoluteMotorVelocityProjectionIsland =
+      contactCoupledNativeRevoluteMotorVelocityProjectionCandidate &&
+      numD6 > 0u &&
+      hasAvbdJointObjective(
+          d6Joints[0].objectiveProgram,
+          AvbdJointObjectiveKind::NativeRevoluteMotor);
+  const bool compileContactCoupledNativeRevoluteMotorObjective =
+      contactCoupledNativeRevoluteMotorVelocityProjectionCandidate ||
+      contactCoupledNativeRevoluteMotorUnsupportedTransientContact;
+  if (compileContactCoupledNativeRevoluteMotorObjective) {
+    const AvbdVelocityObjectiveOwner objectiveOwner =
+        contactCoupledNativeRevoluteMotorVelocityProjectionIsland
+            ? AvbdVelocityObjectiveOwner::JointFinalize
+            : AvbdVelocityObjectiveOwner::Unsupported;
+    bool objectiveAssignmentSupported = true;
+    physx::PxU64 objectiveKey = ~physx::PxU64(0);
+    for (physx::PxU32 c = 0; c < numContacts; ++c)
+      objectiveKey =
+          physx::PxMin(objectiveKey, contacts[c].cacheKey);
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      if (!canAssignAvbdVelocityObjective(
+              contacts[c].objectiveProgram,
+              objectiveOwner,
+              AvbdVelocityObjectiveKind::PassiveFriction,
+              AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+              AvbdVelocityObjectiveReconstruction::
+                  SolveStartInertial,
+              numContacts,
+              objectiveKey)) {
+        contactCoupledNativeRevoluteMotorVelocityProjectionIsland =
+            false;
+        objectiveAssignmentSupported = false;
+        break;
+      }
+    }
+    if (objectiveAssignmentSupported) {
+      for (physx::PxU32 c = 0; c < numContacts; ++c) {
+        assignAvbdVelocityObjective(
+            contacts[c].objectiveProgram,
+            objectiveOwner,
+            AvbdVelocityObjectiveKind::PassiveFriction,
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+            numContacts,
+            objectiveKey);
+      }
+    } else {
+      contactCoupledNativeRevoluteMotorUnsupportedTransientContact =
+          false;
+      if (numD6 > 0u)
+        fallbackAvbdJointObjective(
+            d6Joints[0].objectiveProgram,
+            AvbdJointObjectiveKind::NativeRevoluteMotor);
+      for (physx::PxU32 c = 0; c < numContacts; ++c) {
+        invalidateAvbdVelocityObjective(
+            contacts[c].objectiveProgram);
+      }
+    }
+  }
+
+  // Specialized contact-coupled joint objectives have first claim on their
+  // physical contact sources. Compile every remaining ordinary rigid contact
+  // only after that priority decision, so later solve stages consume an
+  // immutable unique-owner program rather than overriding earlier flags.
+  if (numSoftParticles == 0 && numSoftBodies == 0 &&
+      numSoftContacts == 0) {
+    compileAvbdOrdinaryRigidContactObjectives(
+        contacts, numContacts, numBodies);
+  }
+
+  for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
+       ++jointIndex) {
+    AvbdD6JointConstraint &joint = d6Joints[jointIndex];
+    AvbdCompiledJointObjectiveProgram &program =
+        joint.objectiveProgram;
+    if (program.invalid)
+      continue;
+
+    physx::PxU32 compiledSourceRows = 0;
+    for (physx::PxU32 entryIndex = 0;
+         entryIndex < program.entryCount; ++entryIndex)
+      compiledSourceRows |=
+          program.entries[entryIndex].sourceRowMask;
+
+    const physx::PxU32 positionSourceRows =
+        getJointObjectiveSourceRowMask(
+            joint,
+            AvbdJointObjectiveKind::OrdinaryD6Position);
+    physx::PxU32 allSourceRows =
+        positionSourceRows | (joint.driveFlags & 0x3fu);
+    if ((joint.sourceFlags & genericSourceFlags) != 0)
+      allSourceRows |= eJOINT_SOURCE_GENERIC_ROW;
+    if (joint.motorEnabled != 0u)
+      allSourceRows |= eJOINT_SOURCE_NATIVE_MOTOR;
+    program.legacySourceRowMask =
+        allSourceRows & ~compiledSourceRows;
+  }
   bool conserveNativeRevoluteMotorAngularMomentum = false;
   physx::PxReal nativeRevoluteMotorExpectedAngularMomentum = 0.0f;
   bool conserveNativeRevoluteMotorAngularMomentumVector = false;
@@ -6963,13 +7496,22 @@ void AvbdSolver::solveWithJoints(
         if (coupledFixedD6Island) {
           coupledSolved = solveCoupledFixedD6Island(
               bodies, numBodies, d6Joints[0], invDt2);
-          if (!coupledSolved)
+          if (!coupledSolved) {
             coupledFixedD6Island = false;
+            fallbackAvbdJointObjective(
+                d6Joints[0].objectiveProgram,
+                AvbdJointObjectiveKind::CoupledFixedD6);
+          }
         } else if (coupledSphericalConeIsland) {
           coupledSolved = solveCoupledSphericalConeIsland(
               bodies, numBodies, d6Joints[0], invDt2);
-          if (!coupledSolved)
+          if (!coupledSolved) {
             coupledSphericalConeIsland = false;
+            fallbackAvbdJointObjective(
+                d6Joints[0].objectiveProgram,
+                AvbdJointObjectiveKind::
+                    CoupledSphericalCone);
+          }
         } else if (coupledLinearPositionDriveIsland) {
           coupledSolved = solveCoupledLinearPositionDriveIsland(
               bodies, numBodies, contacts, numContacts, d6Joints[0], dt,
@@ -6978,8 +7520,10 @@ void AvbdSolver::solveWithJoints(
             coupledLinearPositionDriveIsland = false;
             coupledLinearPositionDriveFrictionPositionOwnerIsland =
                 false;
-            d6Joints[0].sourceFlags &= ~AvbdD6JointConstraint::
-                eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE;
+            fallbackAvbdJointObjective(
+                d6Joints[0].objectiveProgram,
+                AvbdJointObjectiveKind::
+                    CoupledLinearPositionDrive);
           }
         } else if (coupledLinearDriveIsland) {
           coupledSolved = solveCoupledLinearDriveIsland(
@@ -6987,8 +7531,10 @@ void AvbdSolver::solveWithJoints(
               invDt2, mConfig);
           if (!coupledSolved) {
             coupledLinearDriveIsland = false;
-            d6Joints[0].sourceFlags &=
-                ~AvbdD6JointConstraint::eCOUPLED_LINEAR_DRIVE_ACTIVE;
+            fallbackAvbdJointObjective(
+                d6Joints[0].objectiveProgram,
+                AvbdJointObjectiveKind::
+                    CoupledLinearVelocityDrive);
           }
         } else if (coupledAngularPositionDriveIsland) {
           coupledSolved = solveCoupledAngularPositionDriveIsland(
@@ -6996,8 +7542,10 @@ void AvbdSolver::solveWithJoints(
               invDt2, mConfig);
           if (!coupledSolved) {
             coupledAngularPositionDriveIsland = false;
-            d6Joints[0].sourceFlags &= ~AvbdD6JointConstraint::
-                eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE;
+            fallbackAvbdJointObjective(
+                d6Joints[0].objectiveProgram,
+                AvbdJointObjectiveKind::
+                    CoupledAngularPositionDrive);
           }
         }
 
@@ -7060,10 +7608,12 @@ void AvbdSolver::solveWithJoints(
             coupledSpatialTendonIsland = false;
             for (physx::PxU32 row = 0;
                  row < coupledSpatialTendonRowIndices.size();
-                 ++row)
-              d6Joints[coupledSpatialTendonRowIndices[row]].sourceFlags &=
-                  ~AvbdD6JointConstraint::
-                      eCOUPLED_SPATIAL_TENDON_ACTIVE;
+                 ++row) {
+              fallbackAvbdJointObjective(
+                  d6Joints[coupledSpatialTendonRowIndices[row]]
+                      .objectiveProgram,
+                  AvbdJointObjectiveKind::CoupledSpatialTendon);
+            }
           }
         }
 
@@ -7245,23 +7795,50 @@ void AvbdSolver::solveWithJoints(
             jnt.writebackLinearImpulseValid = 0;
             jnt.writebackAngularImpulse = physx::PxVec3(0.0f);
             jnt.writebackAngularImpulseValid = 0;
+            const physx::PxU32 compiledSourceRows =
+                getAvbdJointObjectiveSourceRows(
+                    jnt.objectiveProgram);
+            const physx::PxU32 compiledDriveRows =
+                compiledSourceRows & 0x3fu;
+            const bool compiledConeObjective =
+                (compiledSourceRows &
+                 eJOINT_SOURCE_ANGULAR_CONE) != 0;
 
-            if ((jnt.sourceFlags &
-                 (AvbdD6JointConstraint::eARTICULATION_FIXED_TENDON_ROW |
-                  AvbdD6JointConstraint::eARTICULATION_SPATIAL_TENDON_ROW |
-                  AvbdD6JointConstraint::
-                      eARTICULATION_COMPLIANT_MIMIC_ROW |
-                  AvbdD6JointConstraint::
-                      eGENERIC_ACCELERATION_DAMPING_1D_ROW |
-                  AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) !=
-                0) {
+            const bool noDualObjective =
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        ArticulationFixedTendon) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        ArticulationSpatialTendon) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        CoupledSpatialTendon) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        ArticulationCompliantMimic) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        GenericAccelerationDamping1D) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        GenericRestitution1D);
+            if (noDualObjective) {
               jnt.lambdaLinear = physx::PxVec3(0.0f);
               jnt.lambdaAngular = physx::PxVec3(0.0f);
               continue;
             }
 
-            if ((jnt.sourceFlags &
-                 AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW) != 0) {
+            if (hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        GenericForceSpring1D)) {
               if (dt <= 0.0f)
                 continue;
               const physx::PxReal C =
@@ -7291,8 +7868,13 @@ void AvbdSolver::solveWithJoints(
               continue;
             }
 
-            if ((jnt.sourceFlags &
-                 AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW) != 0) {
+            if (hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::GenericHard1D) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        ArticulationHardMimic)) {
               const physx::PxReal effectiveMass =
                   computeGeneric1DEffectiveMass(jnt, bodies, numBodies);
               if (effectiveMass <= 0.0f || dt <= 0.0f)
@@ -7447,11 +8029,13 @@ void AvbdSolver::solveWithJoints(
             }
 
             const bool positionDriveActive =
-                (jnt.sourceFlags &
-                 (AvbdD6JointConstraint::
-                      eLINEAR_POSITION_DRIVE_ACTIVE |
-                  AvbdD6JointConstraint::
-                      eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE)) != 0;
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::LinearPositionDrive) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        CoupledLinearPositionDrive);
             if (positionDriveActive) {
               const physx::PxVec3 axis = linearAxes[0];
               const physx::PxVec3 dxA =
@@ -7557,10 +8141,7 @@ void AvbdSolver::solveWithJoints(
             } else {
               // Generic per-axis dual
               for (int axis = 0; axis < 3; ++axis) {
-                if ((jnt.sourceFlags &
-                     AvbdD6JointConstraint::
-                         eD6_LEGACY_CONE_LIMIT_ACTIVE) != 0 &&
-                    axis >= 1)
+                if (compiledConeObjective && axis >= 1)
                   continue;
                 physx::PxU32 motion = jnt.getAngularMotion(axis);
                 if (motion == 2) // FREE
@@ -7623,12 +8204,14 @@ void AvbdSolver::solveWithJoints(
             }
 
             const bool angularAxisVelocityDriveActive =
-                (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
-                0;
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        AngularAxisVelocityDrive);
             const bool slerpVelocityDriveActive =
-                (jnt.sourceFlags & AvbdD6JointConstraint::
-                         eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::SlerpVelocityDrive);
             if (angularAxisVelocityDriveActive ||
                 slerpVelocityDriveActive) {
               physx::PxVec3 dThetaA = aStatic
@@ -7681,9 +8264,10 @@ void AvbdSolver::solveWithJoints(
                   actor0AngularTorque += driveTorque;
               } else {
                 const physx::PxU32 driveIndex =
-                    jnt.driveFlags == (1u << 3)
+                    compiledDriveRows == (1u << 3)
                         ? 0u
-                        : (jnt.driveFlags == (1u << 4) ? 1u : 2u);
+                        : (compiledDriveRows == (1u << 4) ? 1u
+                                                         : 2u);
                 physx::PxVec3 localDriveAxis(0.0f);
                 localDriveAxis[driveIndex] = 1.0f;
                 const physx::PxVec3 worldDriveAxis =
@@ -7707,10 +8291,15 @@ void AvbdSolver::solveWithJoints(
             }
 
             const bool passiveNativeReaction =
-                (jnt.sourceFlags & AvbdD6JointConstraint::
-                     eNATIVE_PASSIVE_REACTION_ACTIVE) != 0;
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::
+                        NativePassiveReaction) ||
+                hasAvbdJointObjective(
+                    jnt.objectiveProgram,
+                    AvbdJointObjectiveKind::CoupledFixedD6);
             if ((jnt.angularMotion == 0 &&
-                 (jnt.driveFlags & 0x38u) == 0) ||
+                 (compiledDriveRows & 0x38u) == 0) ||
                 passiveNativeReaction ||
                 angularAxisVelocityDriveActive ||
                 slerpVelocityDriveActive) {
@@ -7719,7 +8308,7 @@ void AvbdSolver::solveWithJoints(
             }
 
             // --- Cone limit dual update ---
-            if (jnt.coneAngleLimit > 0.0f) {
+            if (compiledConeObjective) {
               physx::PxVec3 coneAxis(0.0f);
               physx::PxReal coneViol = 0.0f;
               const bool ellipticalCone =
@@ -7759,7 +8348,7 @@ void AvbdSolver::solveWithJoints(
               jointFrameA *= 1.0f / physx::PxSqrt(qMag2);
 
             // Linear velocity drive dual
-            if ((jnt.driveFlags & 0x7) != 0) {
+            if ((compiledDriveRows & 0x7u) != 0) {
               // Body displacements from start-of-step
               const physx::PxVec3 dxA =
                   aStatic ? physx::PxVec3(0.0f)
@@ -7771,23 +8360,27 @@ void AvbdSolver::solveWithJoints(
                              bodies[jnt.header.bodyIndexB].prevPosition);
 
               for (int a = 0; a < 3; ++a) {
-                if ((jnt.driveFlags & (1 << a)) == 0)
+                if ((compiledDriveRows & (1u << a)) == 0)
                   continue;
                 const physx::PxReal stiffness =
                     (&jnt.linearStiffness.x)[a];
                 const bool usePhysicalVelocityObjective =
                     stiffness <= 0.0f &&
                     ((aStatic || bStatic) ||
-                     (jnt.sourceFlags & AvbdD6JointConstraint::
-                                            eCOUPLED_LINEAR_DRIVE_ACTIVE) !=
-                          0);
+                     hasAvbdJointObjective(
+                         jnt.objectiveProgram,
+                         AvbdJointObjectiveKind::
+                             CoupledLinearVelocityDrive));
                 const bool usePositionObjective =
                     a == 0 &&
-                    (jnt.sourceFlags &
-                     (AvbdD6JointConstraint::
-                          eLINEAR_POSITION_DRIVE_ACTIVE |
-                      AvbdD6JointConstraint::
-                          eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE)) != 0;
+                    (hasAvbdJointObjective(
+                         jnt.objectiveProgram,
+                         AvbdJointObjectiveKind::
+                             LinearPositionDrive) ||
+                     hasAvbdJointObjective(
+                         jnt.objectiveProgram,
+                         AvbdJointObjectiveKind::
+                             CoupledLinearPositionDrive));
                 if (usePhysicalVelocityObjective || usePositionObjective) {
                   // The scoped force/acceleration objective carries its mass
                   // distinction in the primal penalty, not in an AL dual.
@@ -7841,7 +8434,7 @@ void AvbdSolver::solveWithJoints(
             }
 
             // Angular velocity drive dual
-            if ((jnt.driveFlags & 0x38) != 0) {
+            if ((compiledDriveRows & 0x38u) != 0) {
               // Angular displacements from start-of-step
               physx::PxVec3 dThetaA = aStatic
                                           ? jnt.externalAngularStepA
@@ -7871,18 +8464,34 @@ void AvbdSolver::solveWithJoints(
                   jointFrameA.rotate(jnt.driveAngularVelocity) * dt;
 
               const bool slerpDrive =
-                  (jnt.sourceFlags &
-                   AvbdD6JointConstraint::eD6_SLERP_DRIVE) != 0;
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::SlerpVelocityDrive) ||
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::SlerpPositionDrive) ||
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::
+                          CoupledAngularPositionDrive) ||
+                  hasAvbdJointObjective(
+                      jnt.objectiveProgram,
+                      AvbdJointObjectiveKind::
+                          OrdinaryD6SlerpDrive);
               if (slerpDrive) {
                 const bool usePhysicalSlerpVelocityObjective =
-                    (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+                    hasAvbdJointObjective(
+                        jnt.objectiveProgram,
+                        AvbdJointObjectiveKind::SlerpVelocityDrive);
                 const bool usePhysicalSlerpPositionObjective =
-                    (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eSLERP_POSITION_DRIVE_ACTIVE) != 0;
+                    hasAvbdJointObjective(
+                        jnt.objectiveProgram,
+                        AvbdJointObjectiveKind::SlerpPositionDrive);
                 const bool useCoupledAngularPositionObjective =
-                    (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE) != 0;
+                    hasAvbdJointObjective(
+                        jnt.objectiveProgram,
+                        AvbdJointObjectiveKind::
+                            CoupledAngularPositionDrive);
                 if (usePhysicalSlerpVelocityObjective ||
                     usePhysicalSlerpPositionObjective ||
                     useCoupledAngularPositionObjective) {
@@ -7931,18 +8540,24 @@ void AvbdSolver::solveWithJoints(
                 };
 
                 for (int a = 0; a < 3; ++a) {
-                  if ((jnt.driveFlags & (1 << axes[a].bit)) == 0)
+                  if ((compiledDriveRows &
+                       (1u << axes[a].bit)) == 0)
                     continue;
                   const bool usePhysicalAngularAxisVelocityObjective =
-                      (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
-                          0;
+                      hasAvbdJointObjective(
+                          jnt.objectiveProgram,
+                          AvbdJointObjectiveKind::
+                              AngularAxisVelocityDrive);
                   const bool usePhysicalAngularPositionObjective =
-                      (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eANGULAR_AXIS_POSITION_DRIVE_ACTIVE) != 0;
+                      hasAvbdJointObjective(
+                          jnt.objectiveProgram,
+                          AvbdJointObjectiveKind::
+                              AngularAxisPositionDrive);
                   const bool useCoupledAngularPositionObjective =
-                      (jnt.sourceFlags & AvbdD6JointConstraint::
-                           eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE) != 0;
+                      hasAvbdJointObjective(
+                          jnt.objectiveProgram,
+                          AvbdJointObjectiveKind::
+                              CoupledAngularPositionDrive);
                   if (usePhysicalAngularAxisVelocityObjective ||
                       usePhysicalAngularPositionObjective ||
                       useCoupledAngularPositionObjective) {
@@ -8235,14 +8850,16 @@ void AvbdSolver::solveWithJoints(
   // remains in the generic-hard AL path for hard mimic rows and in the
   // compliant position path for compliant mimic rows.
   for (physx::PxU32 i = 0; i < numD6; ++i) {
-    if ((d6Joints[i].sourceFlags &
-         AvbdD6JointConstraint::eARTICULATION_MIMIC_ROW) != 0) {
+    if (hasAvbdJointObjective(
+            d6Joints[i].objectiveProgram,
+            AvbdJointObjectiveKind::ArticulationHardMimic)) {
       PX_PROFILE_ZONE("AVBD.projectArticulationMimicVelocity1D", 0);
       projectArticulationMimicVelocity1D(
           bodies, numBodies, d6Joints[i]);
-    } else if ((d6Joints[i].sourceFlags &
-                AvbdD6JointConstraint::
-                    eARTICULATION_COMPLIANT_MIMIC_ROW) != 0) {
+    } else if (hasAvbdJointObjective(
+                   d6Joints[i].objectiveProgram,
+                   AvbdJointObjectiveKind::
+                       ArticulationCompliantMimic)) {
       PX_PROFILE_ZONE("AVBD.projectArticulationMimicVelocity1D", 0);
       projectArticulationMimicVelocity1D(
           bodies, numBodies, d6Joints[i]);
@@ -8253,6 +8870,46 @@ void AvbdSolver::solveWithJoints(
       bodies[i].projectLockedPose(bodies[i].prevPosition,
                                   bodies[i].prevRotation);
       bodies[i].projectLockedVelocities();
+    }
+  }
+
+  // Preserve an auditable partition of every published objective-program
+  // entry after runtime fallback decisions. An empty valid program contributes
+  // one Legacy sentinel for its source D6 record until prep enumerates that
+  // record's ordinary physical objectives.
+  for (physx::PxU32 i = 0; i < numD6; ++i) {
+    const AvbdCompiledJointObjectiveProgram &program =
+        d6Joints[i].objectiveProgram;
+    stats.jointObjectiveFingerprint +=
+        fingerprintAvbdJointObjectiveProgram(program);
+    if (!isValidAvbdJointObjectiveProgram(program)) {
+      stats.jointObjectiveInvalidRows++;
+      continue;
+    }
+    if (program.entryCount == 0 ||
+        program.legacySourceRowMask != 0) {
+      stats.jointObjectiveLegacyRows++;
+    }
+    for (physx::PxU32 entryIndex = 0;
+         entryIndex < program.entryCount; ++entryIndex) {
+      const AvbdCompiledJointObjective &objective =
+          program.entries[entryIndex];
+      switch (objective.owner) {
+      case AvbdVelocityObjectiveOwner::PositionAL:
+        stats.jointObjectivePositionRows++;
+        break;
+      case AvbdVelocityObjectiveOwner::JointFinalize:
+        stats.jointObjectiveFinalizeRows++;
+        break;
+      case AvbdVelocityObjectiveOwner::Unsupported:
+        stats.jointObjectiveUnsupportedRows++;
+        break;
+      case AvbdVelocityObjectiveOwner::PointFinalize:
+      case AvbdVelocityObjectiveOwner::ManifoldFinalize:
+      case AvbdVelocityObjectiveOwner::ComponentFinalize:
+        stats.jointObjectiveInvalidRows++;
+        break;
+      }
     }
   }
 

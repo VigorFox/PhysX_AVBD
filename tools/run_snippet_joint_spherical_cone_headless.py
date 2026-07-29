@@ -33,6 +33,14 @@ INSIDE_DEVIATION_TOLERANCE = 0.01
 MINIMUM_RADIUS_CORRECTION = 0.10
 ANGULAR_MOMENTUM_MAXIMUM = 1.0e-3
 ANCHOR_SEPARATION_MAXIMUM = 1.0e-3
+JOINT_OBJECTIVE_IR_PREFIX = "[avbd:joint-objective-ir] "
+JOINT_OBJECTIVE_PARTITION_FIELDS = (
+    "jointObjectivePositionRows",
+    "jointObjectiveFinalizeRows",
+    "jointObjectiveUnsupportedRows",
+    "jointObjectiveLegacyRows",
+    "jointObjectiveInvalidRows",
+)
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,94 @@ def check_close(
     return value
 
 
+def validate_joint_objective_ir(
+    output: str, expect_position_owner: bool
+) -> list[str]:
+    errors: list[str] = []
+    lines = [
+        line.strip()
+        for line in output.splitlines()
+        if line.startswith(JOINT_OBJECTIVE_IR_PREFIX)
+    ]
+    if not lines:
+        return ["no [avbd:joint-objective-ir] diagnostic samples"]
+
+    total_position = 0
+    total_legacy = 0
+    total_unsupported = 0
+    for line_number, line in enumerate(lines, start=1):
+        fields: dict[str, str] = {}
+        for token in line[len(JOINT_OBJECTIVE_IR_PREFIX) :].split():
+            if "=" not in token:
+                errors.append(
+                    f"joint objective diagnostic {line_number} "
+                    f"has malformed token {token!r}"
+                )
+                continue
+            key, value = token.split("=", 1)
+            if key in fields:
+                errors.append(
+                    f"joint objective diagnostic {line_number} "
+                    f"duplicates {key}"
+                )
+            fields[key] = value
+        required = (
+            "jointObjectiveRows",
+            *JOINT_OBJECTIVE_PARTITION_FIELDS,
+            "jointObjectiveFingerprint",
+        )
+        values: dict[str, int] = {}
+        for key in required:
+            try:
+                values[key] = int(fields[key])
+            except (KeyError, ValueError):
+                errors.append(
+                    f"joint objective diagnostic {line_number} "
+                    f"has {key}={fields.get(key)!r}, expected integer"
+                )
+        if len(values) != len(required):
+            continue
+        partition = sum(
+            values[key] for key in JOINT_OBJECTIVE_PARTITION_FIELDS
+        )
+        if values["jointObjectiveRows"] != partition:
+            errors.append(
+                f"joint objective diagnostic {line_number} has "
+                f"jointObjectiveRows={values['jointObjectiveRows']} "
+                f"but partition={partition}"
+            )
+        if values["jointObjectiveInvalidRows"] != 0:
+            errors.append(
+                f"joint objective diagnostic {line_number} has "
+                f"jointObjectiveInvalidRows="
+                f"{values['jointObjectiveInvalidRows']}"
+            )
+        total_position += values["jointObjectivePositionRows"]
+        total_legacy += values["jointObjectiveLegacyRows"]
+        total_unsupported += values["jointObjectiveUnsupportedRows"]
+
+    if expect_position_owner:
+        if total_position == 0:
+            errors.append(
+                "coupled spherical cone compiled no PositionAL objective"
+            )
+        if total_unsupported != 0:
+            errors.append(
+                "coupled spherical cone fell back to Unsupported"
+            )
+    else:
+        if total_position == 0:
+            errors.append(
+                "static-dynamic spherical cone compiled no ordinary "
+                "PositionAL objective"
+            )
+        if total_unsupported != 0:
+            errors.append(
+                "static-dynamic spherical cone fell back to Unsupported"
+            )
+    return errors
+
+
 def run_one(
     spec: RunSpec, bin_dir: Path, timeout: float
 ) -> tuple[bool, dict[str, str]]:
@@ -139,6 +235,9 @@ def run_one(
     ]
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
+    if spec.solver == "avbd":
+        env["PHYSX_AVBD_ITER_DIAG"] = "1"
+        env["PHYSX_AVBD_ITER_DIAG_EVERY"] = "60"
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout
     )
@@ -279,6 +378,15 @@ def run_one(
         "spherical_cone_conservation",
     }:
         errors.append(f"unexpected baseline reason: {reason!r}")
+    if spec.solver == "avbd" and spec.expected_status == "PASS":
+        errors.extend(
+            validate_joint_objective_ir(
+                combined,
+                expect_position_owner=(
+                    spec.topology == "dynamic-dynamic"
+                ),
+            )
+        )
 
     check_close(fixture, "limitY", LIMIT_Y, 1.0e-6, errors)
     check_close(fixture, "limitZ", LIMIT_Z, 1.0e-6, errors)

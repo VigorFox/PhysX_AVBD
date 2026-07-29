@@ -173,6 +173,9 @@ bool test151_restitutionRigidMaterialComponentAuthority();
 bool test152_transientRestitutionBroadMaterialComponentAuthority();
 bool probe153_scalableBroadMaterialComponentAccelerated();
 bool probe154_broadMaterialComponentScalingAuthority();
+bool probe155_materialInterfaceWrenchAuthority();
+bool probe156_materialMultilevelGraphAuthority();
+bool probe157_materialSpatialTransferAuthority();
 bool probe127_canonicalPyramidFrictionOrder();
 bool probe128_canonicalBridgeFrictionOrder();
 bool probe129_contactPcgFixedPairDrop();
@@ -208,6 +211,21 @@ int main(int argc, char **argv) {
     return probe154_broadMaterialComponentScalingAuthority()
                ? 0
                : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=material-interface-wrench-authority") {
+    return probe155_materialInterfaceWrenchAuthority() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=material-multilevel-graph-authority") {
+    return probe156_materialMultilevelGraphAuthority() ? 0 : 1;
+  }
+  if (argc == 2 &&
+      std::string(argv[1]) ==
+          "--probe=material-spatial-transfer-authority") {
+    return probe157_materialSpatialTransferAuthority() ? 0 : 1;
   }
   if (argc == 2 &&
       std::string(argv[1]) == "--probe=canonical-pyramid-friction") {
@@ -290,6 +308,9 @@ int main(int argc, char **argv) {
             "--probe=transient-broad-material|"
             "--probe=scalable-broad-material|"
             "--probe=broad-material-scaling-authority|"
+            "--probe=material-interface-wrench-authority|"
+            "--probe=material-multilevel-graph-authority|"
+            "--probe=material-spatial-transfer-authority|"
             "--suite=canonical-contact-pcg|"
             "--suite=contact-pcg-legacy-authoring]\n");
     return 2;

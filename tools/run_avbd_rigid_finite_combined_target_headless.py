@@ -187,6 +187,16 @@ def main() -> int:
                             f"{diag['genericTangentImpulse']:.9g}, "
                             f"expected {expected_tangent_impulse:.9g}"
                         )
+                    if (
+                        diag["objectivePointRows"] <= 0.0 or
+                        diag["objectivePointRows"] !=
+                        diag["objectiveRows"]
+                    ):
+                        errors.append(
+                            f"{prefix}: compiled PointFinalize partition "
+                            f"point={diag['objectivePointRows']:.9g} "
+                            f"rows={diag['objectiveRows']:.9g}"
+                        )
                     tgs_gate = observed[
                         ("tgs", "parallel", case_name, 1)
                     ][0]
@@ -258,6 +268,21 @@ def main() -> int:
             if parallel_diag != sequential_diag:
                 errors.append(
                     f"{case_name}: diagnostic parallel/sequential mismatch"
+                )
+        for execution in ("parallel", "sequential"):
+            forward_diag = observed[
+                ("avbd", execution, BASE_CASE, 1)
+            ][1]
+            reverse_diag = observed[
+                ("avbd", execution, f"{BASE_CASE}-reverse", 1)
+            ][1]
+            if (
+                forward_diag["objectiveFingerprint"] !=
+                reverse_diag["objectiveFingerprint"]
+            ):
+                errors.append(
+                    f"{execution}: compiled-objective actor-order "
+                    "fingerprint mismatch"
                 )
     else:
         errors.append(

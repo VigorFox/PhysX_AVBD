@@ -55,6 +55,40 @@ ALL_SPECS = {
 }
 
 INTEGER_FIELDS = (
+    "rows",
+    "objectivePositionRows",
+    "objectivePointRows",
+    "objectiveManifoldRows",
+    "objectiveComponentRows",
+    "objectiveJointRows",
+    "objectiveUnsupportedRows",
+    "objectiveLegacyRows",
+    "objectiveInvalidRows",
+    "objectiveFingerprint",
+    "contactObjectiveSlots",
+    "contactObjectivePositionSlots",
+    "contactObjectivePointSlots",
+    "contactObjectiveManifoldSlots",
+    "contactObjectiveComponentSlots",
+    "contactObjectiveJointSlots",
+    "contactObjectiveUnsupportedSlots",
+    "contactObjectiveLegacySlots",
+    "contactObjectiveInvalidSlots",
+    "contactObjectiveLegacyNormalSlots",
+    "contactObjectiveLegacyTangentSlots",
+    "contactObjectiveLegacyRigidStaticTangentSlots",
+    "contactObjectiveLegacyDynamicTangentSlots",
+    "contactObjectiveLegacyDeformableTangentSlots",
+    "contactObjectiveLegacyJointMixedTangentSlots",
+    "contactObjectiveLegacyOtherTangentSlots",
+    "contactObjectiveFingerprint",
+    "jointObjectiveRows",
+    "jointObjectivePositionRows",
+    "jointObjectiveFinalizeRows",
+    "jointObjectiveUnsupportedRows",
+    "jointObjectiveLegacyRows",
+    "jointObjectiveInvalidRows",
+    "jointObjectiveFingerprint",
     "alRows",
     "velocityCorrections",
     "restitutionCorrections",
@@ -89,9 +123,50 @@ REAL_FIELDS = (
     "deformFrictionImpulse",
 )
 DIAGNOSTIC_PREFIXES = (
+    "[avbd:objective-ir] ",
+    "[avbd:contact-objective-ir] ",
+    "[avbd:joint-objective-ir] ",
     "[avbd:iters] ",
     "[avbd:friction-target] ",
     "[avbd:surface-ownership] ",
+)
+OBJECTIVE_PARTITION_FIELDS = (
+    "objectivePositionRows",
+    "objectivePointRows",
+    "objectiveManifoldRows",
+    "objectiveComponentRows",
+    "objectiveJointRows",
+    "objectiveUnsupportedRows",
+    "objectiveLegacyRows",
+    "objectiveInvalidRows",
+)
+CONTACT_OBJECTIVE_PARTITION_FIELDS = (
+    "contactObjectivePositionSlots",
+    "contactObjectivePointSlots",
+    "contactObjectiveManifoldSlots",
+    "contactObjectiveComponentSlots",
+    "contactObjectiveJointSlots",
+    "contactObjectiveUnsupportedSlots",
+    "contactObjectiveLegacySlots",
+    "contactObjectiveInvalidSlots",
+)
+CONTACT_OBJECTIVE_LEGACY_SOURCE_FIELDS = (
+    "contactObjectiveLegacyNormalSlots",
+    "contactObjectiveLegacyTangentSlots",
+)
+CONTACT_OBJECTIVE_LEGACY_TANGENT_TOPOLOGY_FIELDS = (
+    "contactObjectiveLegacyRigidStaticTangentSlots",
+    "contactObjectiveLegacyDynamicTangentSlots",
+    "contactObjectiveLegacyDeformableTangentSlots",
+    "contactObjectiveLegacyJointMixedTangentSlots",
+    "contactObjectiveLegacyOtherTangentSlots",
+)
+JOINT_OBJECTIVE_PARTITION_FIELDS = (
+    "jointObjectivePositionRows",
+    "jointObjectiveFinalizeRows",
+    "jointObjectiveUnsupportedRows",
+    "jointObjectiveLegacyRows",
+    "jointObjectiveInvalidRows",
 )
 NUMBER_PATTERN = re.compile(
     r"([A-Za-z][A-Za-z0-9]*)="
@@ -228,6 +303,137 @@ def aggregate_diagnostics(
             errors.append(
                 f"diagnostic line {line_number} is missing frame"
             )
+        if prefix == "[avbd:objective-ir] ":
+            missing = [
+                field
+                for field in (
+                    "rows",
+                    *OBJECTIVE_PARTITION_FIELDS,
+                    "objectiveFingerprint",
+                )
+                if field not in parsed
+            ]
+            if missing:
+                errors.append(
+                    f"diagnostic line {line_number} is missing "
+                    + ", ".join(missing)
+                )
+            else:
+                partition_rows = sum(
+                    parsed[field] for field in OBJECTIVE_PARTITION_FIELDS
+                )
+                if parsed["rows"] != partition_rows:
+                    errors.append(
+                        f"diagnostic line {line_number} has rows="
+                        f"{parsed['rows']} but partition={partition_rows}"
+                    )
+                if parsed["objectiveInvalidRows"] != 0:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "objectiveInvalidRows="
+                        f"{parsed['objectiveInvalidRows']}"
+                    )
+        elif prefix == "[avbd:contact-objective-ir] ":
+            missing = [
+                field
+                for field in (
+                    "contactObjectiveSlots",
+                    *CONTACT_OBJECTIVE_PARTITION_FIELDS,
+                    *CONTACT_OBJECTIVE_LEGACY_SOURCE_FIELDS,
+                    *CONTACT_OBJECTIVE_LEGACY_TANGENT_TOPOLOGY_FIELDS,
+                    "contactObjectiveFingerprint",
+                )
+                if field not in parsed
+            ]
+            if missing:
+                errors.append(
+                    f"diagnostic line {line_number} is missing "
+                    + ", ".join(missing)
+                )
+            else:
+                partition_slots = sum(
+                    parsed[field]
+                    for field in CONTACT_OBJECTIVE_PARTITION_FIELDS
+                )
+                if parsed["contactObjectiveSlots"] != partition_slots:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "contactObjectiveSlots="
+                        f"{parsed['contactObjectiveSlots']} but "
+                        f"partition={partition_slots}"
+                    )
+                if parsed["contactObjectiveInvalidSlots"] != 0:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "contactObjectiveInvalidSlots="
+                        f"{parsed['contactObjectiveInvalidSlots']}"
+                    )
+                legacy_sources = sum(
+                    parsed[field]
+                    for field in CONTACT_OBJECTIVE_LEGACY_SOURCE_FIELDS
+                )
+                if parsed["contactObjectiveLegacySlots"] != legacy_sources:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "contactObjectiveLegacySlots="
+                        f"{parsed['contactObjectiveLegacySlots']} but "
+                        f"legacy source partition={legacy_sources}"
+                    )
+                legacy_tangent_topologies = sum(
+                    parsed[field]
+                    for field in
+                    CONTACT_OBJECTIVE_LEGACY_TANGENT_TOPOLOGY_FIELDS
+                )
+                if (
+                    parsed["contactObjectiveLegacyTangentSlots"] !=
+                    legacy_tangent_topologies
+                ):
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "contactObjectiveLegacyTangentSlots="
+                        f"{parsed['contactObjectiveLegacyTangentSlots']} "
+                        "but topology partition="
+                        f"{legacy_tangent_topologies}"
+                    )
+                if (parsed["contactObjectiveSlots"] > 0 and
+                        parsed["contactObjectivePositionSlots"] == 0):
+                    errors.append(
+                        f"diagnostic line {line_number} has contact "
+                        "source slots but no PositionAL geometry owner"
+                    )
+        elif prefix == "[avbd:joint-objective-ir] ":
+            missing = [
+                field
+                for field in (
+                    "jointObjectiveRows",
+                    *JOINT_OBJECTIVE_PARTITION_FIELDS,
+                    "jointObjectiveFingerprint",
+                )
+                if field not in parsed
+            ]
+            if missing:
+                errors.append(
+                    f"diagnostic line {line_number} is missing "
+                    + ", ".join(missing)
+                )
+            else:
+                partition_rows = sum(
+                    parsed[field]
+                    for field in JOINT_OBJECTIVE_PARTITION_FIELDS
+                )
+                if parsed["jointObjectiveRows"] != partition_rows:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "jointObjectiveRows="
+                        f"{parsed['jointObjectiveRows']} but "
+                        f"partition={partition_rows}"
+                    )
+                if parsed["jointObjectiveInvalidRows"] != 0:
+                    errors.append(
+                        f"diagnostic line {line_number} has "
+                        "jointObjectiveInvalidRows="
+                        f"{parsed['jointObjectiveInvalidRows']}"
+                    )
         for field in INTEGER_FIELDS:
             if field in parsed:
                 value = parsed[field]

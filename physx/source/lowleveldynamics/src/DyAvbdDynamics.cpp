@@ -240,7 +240,39 @@ AvbdDynamicsContext::AvbdDynamicsContext(
       mIterationDiagnosticsEvery(getEnvUInt("PHYSX_AVBD_ITER_DIAG_EVERY", 60)),
       mDiagIslandCount(0), mDiagJointIslandCount(0),
       mDiagRequestedIterations(0), mDiagExecutedIterations(0),
-      mDiagEarlyStopIslands(0), mDiagBodyStaticNormalAlRows(0),
+      mDiagEarlyStopIslands(0),
+      mDiagVelocityObjectivePositionRows(0),
+      mDiagVelocityObjectivePointRows(0),
+      mDiagVelocityObjectiveManifoldRows(0),
+      mDiagVelocityObjectiveComponentRows(0),
+      mDiagVelocityObjectiveJointRows(0),
+      mDiagVelocityObjectiveUnsupportedRows(0),
+      mDiagVelocityObjectiveLegacyRows(0),
+      mDiagVelocityObjectiveInvalidRows(0),
+      mDiagVelocityObjectiveFingerprint(0),
+      mDiagContactObjectivePositionSlots(0),
+      mDiagContactObjectivePointSlots(0),
+      mDiagContactObjectiveManifoldSlots(0),
+      mDiagContactObjectiveComponentSlots(0),
+      mDiagContactObjectiveJointSlots(0),
+      mDiagContactObjectiveUnsupportedSlots(0),
+      mDiagContactObjectiveLegacySlots(0),
+      mDiagContactObjectiveInvalidSlots(0),
+      mDiagContactObjectiveLegacyNormalSlots(0),
+      mDiagContactObjectiveLegacyTangentSlots(0),
+      mDiagContactObjectiveLegacyRigidStaticTangentSlots(0),
+      mDiagContactObjectiveLegacyDynamicTangentSlots(0),
+      mDiagContactObjectiveLegacyDeformableTangentSlots(0),
+      mDiagContactObjectiveLegacyJointMixedTangentSlots(0),
+      mDiagContactObjectiveLegacyOtherTangentSlots(0),
+      mDiagContactObjectiveFingerprint(0),
+      mDiagJointObjectivePositionRows(0),
+      mDiagJointObjectiveFinalizeRows(0),
+      mDiagJointObjectiveUnsupportedRows(0),
+      mDiagJointObjectiveLegacyRows(0),
+      mDiagJointObjectiveInvalidRows(0),
+      mDiagJointObjectiveFingerprint(0),
+      mDiagBodyStaticNormalAlRows(0),
       mDiagBodyStaticNormalAlEvaluations(0),
       mDiagBodyStaticDepenetrationCorrections(0),
       mDiagBodyStaticDepenetrationEligibleRows(0),
@@ -613,6 +645,68 @@ void AvbdDynamicsContext::beginIterationDiagnosticsFrame() {
   mDiagRequestedIterations.store(0, std::memory_order_relaxed);
   mDiagExecutedIterations.store(0, std::memory_order_relaxed);
   mDiagEarlyStopIslands.store(0, std::memory_order_relaxed);
+  mDiagVelocityObjectivePositionRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectivePointRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveManifoldRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveComponentRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveJointRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveUnsupportedRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveLegacyRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveInvalidRows.store(
+      0, std::memory_order_relaxed);
+  mDiagVelocityObjectiveFingerprint.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectivePositionSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectivePointSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveManifoldSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveComponentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveJointSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveUnsupportedSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacySlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveInvalidSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyNormalSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyRigidStaticTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyDynamicTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyDeformableTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyJointMixedTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyOtherTangentSlots.store(
+      0, std::memory_order_relaxed);
+  mDiagContactObjectiveFingerprint.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectivePositionRows.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectiveFinalizeRows.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectiveUnsupportedRows.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectiveLegacyRows.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectiveInvalidRows.store(
+      0, std::memory_order_relaxed);
+  mDiagJointObjectiveFingerprint.store(
+      0, std::memory_order_relaxed);
   mDiagBodyStaticNormalAlRows.store(0, std::memory_order_relaxed);
   mDiagBodyStaticNormalAlEvaluations.store(0, std::memory_order_relaxed);
   mDiagBodyStaticDepenetrationCorrections.store(0,
@@ -1092,6 +1186,77 @@ void AvbdDynamicsContext::recordIterationDiagnostics(
   if (stats.totalIterations < requestedIterations)
     mDiagEarlyStopIslands.fetch_add(1, std::memory_order_relaxed);
 
+  mDiagVelocityObjectivePositionRows.fetch_add(
+      stats.velocityObjectivePositionRows, std::memory_order_relaxed);
+  mDiagVelocityObjectivePointRows.fetch_add(
+      stats.velocityObjectivePointRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveManifoldRows.fetch_add(
+      stats.velocityObjectiveManifoldRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveComponentRows.fetch_add(
+      stats.velocityObjectiveComponentRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveJointRows.fetch_add(
+      stats.velocityObjectiveJointRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveUnsupportedRows.fetch_add(
+      stats.velocityObjectiveUnsupportedRows,
+      std::memory_order_relaxed);
+  mDiagVelocityObjectiveLegacyRows.fetch_add(
+      stats.velocityObjectiveLegacyRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveInvalidRows.fetch_add(
+      stats.velocityObjectiveInvalidRows, std::memory_order_relaxed);
+  mDiagVelocityObjectiveFingerprint.fetch_add(
+      stats.velocityObjectiveFingerprint, std::memory_order_relaxed);
+  mDiagContactObjectivePositionSlots.fetch_add(
+      stats.contactObjectivePositionSlots, std::memory_order_relaxed);
+  mDiagContactObjectivePointSlots.fetch_add(
+      stats.contactObjectivePointSlots, std::memory_order_relaxed);
+  mDiagContactObjectiveManifoldSlots.fetch_add(
+      stats.contactObjectiveManifoldSlots, std::memory_order_relaxed);
+  mDiagContactObjectiveComponentSlots.fetch_add(
+      stats.contactObjectiveComponentSlots, std::memory_order_relaxed);
+  mDiagContactObjectiveJointSlots.fetch_add(
+      stats.contactObjectiveJointSlots, std::memory_order_relaxed);
+  mDiagContactObjectiveUnsupportedSlots.fetch_add(
+      stats.contactObjectiveUnsupportedSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacySlots.fetch_add(
+      stats.contactObjectiveLegacySlots, std::memory_order_relaxed);
+  mDiagContactObjectiveInvalidSlots.fetch_add(
+      stats.contactObjectiveInvalidSlots, std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyNormalSlots.fetch_add(
+      stats.contactObjectiveLegacyNormalSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyRigidStaticTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyRigidStaticTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyDynamicTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyDynamicTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyDeformableTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyDeformableTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyJointMixedTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyJointMixedTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveLegacyOtherTangentSlots.fetch_add(
+      stats.contactObjectiveLegacyOtherTangentSlots,
+      std::memory_order_relaxed);
+  mDiagContactObjectiveFingerprint.fetch_add(
+      stats.contactObjectiveFingerprint, std::memory_order_relaxed);
+  mDiagJointObjectivePositionRows.fetch_add(
+      stats.jointObjectivePositionRows, std::memory_order_relaxed);
+  mDiagJointObjectiveFinalizeRows.fetch_add(
+      stats.jointObjectiveFinalizeRows, std::memory_order_relaxed);
+  mDiagJointObjectiveUnsupportedRows.fetch_add(
+      stats.jointObjectiveUnsupportedRows, std::memory_order_relaxed);
+  mDiagJointObjectiveLegacyRows.fetch_add(
+      stats.jointObjectiveLegacyRows, std::memory_order_relaxed);
+  mDiagJointObjectiveInvalidRows.fetch_add(
+      stats.jointObjectiveInvalidRows, std::memory_order_relaxed);
+  mDiagJointObjectiveFingerprint.fetch_add(
+      stats.jointObjectiveFingerprint, std::memory_order_relaxed);
   mDiagBodyStaticNormalAlRows.fetch_add(
       stats.bodyStaticNormalAlRows, std::memory_order_relaxed);
   mDiagBodyStaticNormalAlEvaluations.fetch_add(
@@ -1891,6 +2056,99 @@ void AvbdDynamicsContext::flushIterationDiagnosticsFrame() {
       mDiagExecutedIterations.load(std::memory_order_relaxed);
   const PxU64 earlyStopIslands =
       mDiagEarlyStopIslands.load(std::memory_order_relaxed);
+  const PxU64 velocityObjectivePositionRows =
+      mDiagVelocityObjectivePositionRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectivePointRows =
+      mDiagVelocityObjectivePointRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveManifoldRows =
+      mDiagVelocityObjectiveManifoldRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveComponentRows =
+      mDiagVelocityObjectiveComponentRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveJointRows =
+      mDiagVelocityObjectiveJointRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveUnsupportedRows =
+      mDiagVelocityObjectiveUnsupportedRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveLegacyRows =
+      mDiagVelocityObjectiveLegacyRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveInvalidRows =
+      mDiagVelocityObjectiveInvalidRows.load(
+          std::memory_order_relaxed);
+  const PxU64 velocityObjectiveFingerprint =
+      mDiagVelocityObjectiveFingerprint.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectivePositionSlots =
+      mDiagContactObjectivePositionSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectivePointSlots =
+      mDiagContactObjectivePointSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveManifoldSlots =
+      mDiagContactObjectiveManifoldSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveComponentSlots =
+      mDiagContactObjectiveComponentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveJointSlots =
+      mDiagContactObjectiveJointSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveUnsupportedSlots =
+      mDiagContactObjectiveUnsupportedSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacySlots =
+      mDiagContactObjectiveLegacySlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveInvalidSlots =
+      mDiagContactObjectiveInvalidSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyNormalSlots =
+      mDiagContactObjectiveLegacyNormalSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyTangentSlots =
+      mDiagContactObjectiveLegacyTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyRigidStaticTangentSlots =
+      mDiagContactObjectiveLegacyRigidStaticTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyDynamicTangentSlots =
+      mDiagContactObjectiveLegacyDynamicTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyDeformableTangentSlots =
+      mDiagContactObjectiveLegacyDeformableTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyJointMixedTangentSlots =
+      mDiagContactObjectiveLegacyJointMixedTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveLegacyOtherTangentSlots =
+      mDiagContactObjectiveLegacyOtherTangentSlots.load(
+          std::memory_order_relaxed);
+  const PxU64 contactObjectiveFingerprint =
+      mDiagContactObjectiveFingerprint.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectivePositionRows =
+      mDiagJointObjectivePositionRows.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectiveFinalizeRows =
+      mDiagJointObjectiveFinalizeRows.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectiveUnsupportedRows =
+      mDiagJointObjectiveUnsupportedRows.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectiveLegacyRows =
+      mDiagJointObjectiveLegacyRows.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectiveInvalidRows =
+      mDiagJointObjectiveInvalidRows.load(
+          std::memory_order_relaxed);
+  const PxU64 jointObjectiveFingerprint =
+      mDiagJointObjectiveFingerprint.load(
+          std::memory_order_relaxed);
   const PxU64 bodyStaticNormalAlRows =
       mDiagBodyStaticNormalAlRows.load(std::memory_order_relaxed);
   const PxU64 bodyStaticNormalAlEvaluations =
@@ -2618,6 +2876,100 @@ void AvbdDynamicsContext::flushIterationDiagnosticsFrame() {
     jointAvgConstraints = double(jointConstraints) / double(jointIslands);
     }
 
+    const PxU64 velocityObjectiveRows =
+        velocityObjectivePositionRows + velocityObjectivePointRows +
+        velocityObjectiveManifoldRows + velocityObjectiveComponentRows +
+        velocityObjectiveJointRows + velocityObjectiveUnsupportedRows +
+        velocityObjectiveLegacyRows + velocityObjectiveInvalidRows;
+    printf(
+        "[avbd:objective-ir] frame=%llu rows=%llu "
+        "objectivePositionRows=%llu objectivePointRows=%llu "
+        "objectiveManifoldRows=%llu objectiveComponentRows=%llu "
+        "objectiveJointRows=%llu objectiveUnsupportedRows=%llu "
+        "objectiveLegacyRows=%llu "
+        "objectiveInvalidRows=%llu objectiveFingerprint=%llu\n",
+        static_cast<unsigned long long>(frame),
+        static_cast<unsigned long long>(velocityObjectiveRows),
+        static_cast<unsigned long long>(velocityObjectivePositionRows),
+        static_cast<unsigned long long>(velocityObjectivePointRows),
+        static_cast<unsigned long long>(velocityObjectiveManifoldRows),
+        static_cast<unsigned long long>(velocityObjectiveComponentRows),
+        static_cast<unsigned long long>(velocityObjectiveJointRows),
+        static_cast<unsigned long long>(velocityObjectiveUnsupportedRows),
+        static_cast<unsigned long long>(velocityObjectiveLegacyRows),
+        static_cast<unsigned long long>(velocityObjectiveInvalidRows),
+        static_cast<unsigned long long>(velocityObjectiveFingerprint));
+    const PxU64 contactObjectiveSlots =
+        contactObjectivePositionSlots + contactObjectivePointSlots +
+        contactObjectiveManifoldSlots + contactObjectiveComponentSlots +
+        contactObjectiveJointSlots + contactObjectiveUnsupportedSlots +
+        contactObjectiveLegacySlots + contactObjectiveInvalidSlots;
+    printf(
+        "[avbd:contact-objective-ir] frame=%llu "
+        "contactObjectiveSlots=%llu "
+        "contactObjectivePositionSlots=%llu "
+        "contactObjectivePointSlots=%llu "
+        "contactObjectiveManifoldSlots=%llu "
+        "contactObjectiveComponentSlots=%llu "
+        "contactObjectiveJointSlots=%llu "
+        "contactObjectiveUnsupportedSlots=%llu "
+        "contactObjectiveLegacySlots=%llu "
+        "contactObjectiveInvalidSlots=%llu "
+        "contactObjectiveLegacyNormalSlots=%llu "
+        "contactObjectiveLegacyTangentSlots=%llu "
+        "contactObjectiveLegacyRigidStaticTangentSlots=%llu "
+        "contactObjectiveLegacyDynamicTangentSlots=%llu "
+        "contactObjectiveLegacyDeformableTangentSlots=%llu "
+        "contactObjectiveLegacyJointMixedTangentSlots=%llu "
+        "contactObjectiveLegacyOtherTangentSlots=%llu "
+        "contactObjectiveFingerprint=%llu\n",
+        static_cast<unsigned long long>(frame),
+        static_cast<unsigned long long>(contactObjectiveSlots),
+        static_cast<unsigned long long>(contactObjectivePositionSlots),
+        static_cast<unsigned long long>(contactObjectivePointSlots),
+        static_cast<unsigned long long>(contactObjectiveManifoldSlots),
+        static_cast<unsigned long long>(contactObjectiveComponentSlots),
+        static_cast<unsigned long long>(contactObjectiveJointSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveUnsupportedSlots),
+        static_cast<unsigned long long>(contactObjectiveLegacySlots),
+        static_cast<unsigned long long>(contactObjectiveInvalidSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyNormalSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyTangentSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyRigidStaticTangentSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyDynamicTangentSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyDeformableTangentSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyJointMixedTangentSlots),
+        static_cast<unsigned long long>(
+            contactObjectiveLegacyOtherTangentSlots),
+        static_cast<unsigned long long>(contactObjectiveFingerprint));
+    const PxU64 jointObjectiveRows =
+        jointObjectivePositionRows + jointObjectiveFinalizeRows +
+        jointObjectiveUnsupportedRows + jointObjectiveLegacyRows +
+        jointObjectiveInvalidRows;
+    printf(
+        "[avbd:joint-objective-ir] frame=%llu "
+        "jointObjectiveRows=%llu "
+        "jointObjectivePositionRows=%llu "
+        "jointObjectiveFinalizeRows=%llu "
+        "jointObjectiveUnsupportedRows=%llu "
+        "jointObjectiveLegacyRows=%llu "
+        "jointObjectiveInvalidRows=%llu "
+        "jointObjectiveFingerprint=%llu\n",
+        static_cast<unsigned long long>(frame),
+        static_cast<unsigned long long>(jointObjectiveRows),
+        static_cast<unsigned long long>(jointObjectivePositionRows),
+        static_cast<unsigned long long>(jointObjectiveFinalizeRows),
+        static_cast<unsigned long long>(jointObjectiveUnsupportedRows),
+        static_cast<unsigned long long>(jointObjectiveLegacyRows),
+        static_cast<unsigned long long>(jointObjectiveInvalidRows),
+        static_cast<unsigned long long>(jointObjectiveFingerprint));
     printf("[avbd:iters] frame=%llu islands=%llu jointIslands=%llu avgExec=%.2f avgReq=%.2f maxExec=%u maxReq=%u saved=%lld earlyStopIslands=%llu normalOwnership(alRows=%llu alEvals=%llu depenEligibleRows=%llu depenCorrections=%llu finiteImpulseSkips=%llu authoredFiniteSkips=%llu depenDistance=%.9f depenMax=%.9f velocityCorrections=%llu restitutionCorrections=%llu velocityDelta=%.9f velocityMax=%.9f) jointAvgExec=%.2f jointAvgReq=%.2f jointMaxExec=%u jointBudgetHits=%llu jointEarlyStops=%llu jointAvgContacts=%.2f jointAvgConstraints=%.2f jointRows(lockLin=%llu limLin=%llu lockAng=%llu limAng=%llu linDrv=%llu angDrv=%llu cone=%llu) jointLambdaMax(lin=%.3f ang=%.3f linDrv=%.3f angDrv=%.3f cone=%.3f) jointMaxSource(lin=d6[%u]:%u-%u linDrv=d6[%u]:%u-%u)\n",
          static_cast<unsigned long long>(frame),
          static_cast<unsigned long long>(islandCount),
@@ -3468,25 +3820,40 @@ void writeJointConstraintWriteback(
       continue;
 
     const bool positionDriveOwned =
-        (constraint.sourceFlags &
-         (AvbdD6JointConstraint::eLINEAR_POSITION_DRIVE_ACTIVE |
-          AvbdD6JointConstraint::
-              eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE)) != 0;
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::LinearPositionDrive) ||
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::CoupledLinearPositionDrive);
     const bool angularAxisVelocityDriveOwned =
-        (constraint.sourceFlags & AvbdD6JointConstraint::
-                       eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE) !=
-        0;
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::AngularAxisVelocityDrive);
     const bool slerpVelocityDriveOwned =
-        (constraint.sourceFlags & AvbdD6JointConstraint::
-                        eSLERP_VELOCITY_DRIVE_ACTIVE) != 0;
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::SlerpVelocityDrive);
     const bool genericPhysical1DOwned =
-        (constraint.sourceFlags &
-         (AvbdD6JointConstraint::eGENERIC_HARD_1D_ROW |
-          AvbdD6JointConstraint::eGENERIC_FORCE_SPRING_1D_ROW |
-          AvbdD6JointConstraint::eGENERIC_RESTITUTION_1D_ROW)) != 0;
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::GenericHard1D) ||
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::ArticulationHardMimic) ||
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::GenericForceSpring1D) ||
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::GenericRestitution1D);
     const bool passiveNativeReactionOwned =
-        (constraint.sourceFlags &
-         AvbdD6JointConstraint::eNATIVE_PASSIVE_REACTION_ACTIVE) != 0;
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::NativePassiveReaction) ||
+        hasAvbdJointObjective(
+            constraint.objectiveProgram,
+            AvbdJointObjectiveKind::CoupledFixedD6);
     const bool physicalWritebackOwned =
         positionDriveOwned || angularAxisVelocityDriveOwned ||
         slerpVelocityDriveOwned || genericPhysical1DOwned ||

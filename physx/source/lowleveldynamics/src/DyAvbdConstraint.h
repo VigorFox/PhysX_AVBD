@@ -117,7 +117,512 @@ PX_FORCE_INLINE bool isBodyVsStaticContact(physx::PxU32 bodyAIdx,
   return dynA != dynB;
 }
 
-/** Set in prep when static partner has negative rest (e.g. deformable mesh). */
+/**
+ * The one stage that owns a compiled velocity objective.
+ *
+ * This is intentionally not a bit mask: one physical objective cannot be
+ * consumed by more than one stage in the same substep.
+ */
+enum class AvbdVelocityObjectiveOwner : physx::PxU8 {
+  PositionAL,
+  PointFinalize,
+  ManifoldFinalize,
+  ComponentFinalize,
+  JointFinalize,
+  Unsupported
+};
+
+/** Physical material objective represented by one compiled record. */
+enum class AvbdVelocityObjectiveKind : physx::PxU8 {
+  None,
+  GeometryNormal,
+  TangentTarget,
+  PassiveFriction,
+  MaterialNormal,
+  Invalid
+};
+
+/** Rows atomically consumed by the compiled objective. */
+enum class AvbdVelocityObjectiveSpan : physx::PxU8 {
+  None,
+  Normal,
+  TangentCone,
+  NormalAndTangentCone
+};
+
+/**
+ * Physical contact-objective slots.
+ *
+ * These are not scalar Jacobian rows. Geometry and material normal objectives
+ * legitimately share the contact normal direction while remaining distinct
+ * objectives with independent owners.
+ */
+enum AvbdContactObjectiveSourceSlot : physx::PxU8 {
+  eCONTACT_SOURCE_GEOMETRY_NORMAL = 1u << 0,
+  eCONTACT_SOURCE_MATERIAL_NORMAL = 1u << 1,
+  eCONTACT_SOURCE_MATERIAL_TANGENT = 1u << 2,
+  eCONTACT_SOURCE_ALL = eCONTACT_SOURCE_GEOMETRY_NORMAL |
+                        eCONTACT_SOURCE_MATERIAL_NORMAL |
+                        eCONTACT_SOURCE_MATERIAL_TANGENT
+};
+
+/** Velocity state from which the unique owner evaluates its objective. */
+enum class AvbdVelocityObjectiveReconstruction : physx::PxU8 {
+  PoseDerived,
+  SolveStartInertial,
+  NormalResponseSpan
+};
+
+/**
+ * Compiled IR attached to each physical contact row.
+ *
+ * Rows in one manifold/component share objectiveKey.  Kind::None is the
+ * explicit not-yet-compiled legacy state; Kind::Invalid is fail-closed after
+ * a conflicting assignment.  Consumers dispatch on owner instead of
+ * reconstructing ownership from combinations of flags.
+ */
+struct AvbdCompiledVelocityObjective {
+  AvbdVelocityObjectiveOwner owner;
+  AvbdVelocityObjectiveKind kind;
+  AvbdVelocityObjectiveSpan span;
+  AvbdVelocityObjectiveReconstruction reconstruction;
+  physx::PxU8 sourceSlotMask;
+  physx::PxU8 padding[3];
+  physx::PxU32 objectiveRowCount;
+  physx::PxU64 objectiveKey;
+
+  PX_FORCE_INLINE AvbdCompiledVelocityObjective()
+      : owner(AvbdVelocityObjectiveOwner::Unsupported),
+        kind(AvbdVelocityObjectiveKind::None),
+        span(AvbdVelocityObjectiveSpan::None),
+        reconstruction(
+            AvbdVelocityObjectiveReconstruction::PoseDerived),
+        sourceSlotMask(0), padding{0, 0, 0}, objectiveRowCount(0),
+        objectiveKey(0) {}
+};
+
+/**
+ * Prep-compiled objective program for one contact row.
+ *
+ * Capacity three is the physical upper bound: geometry normal, material
+ * normal, and material tangent. A composite material entry may claim the last
+ * two slots atomically.
+ */
+struct AvbdCompiledContactObjectiveProgram {
+  enum { eMAX_OBJECTIVES = 3 };
+
+  AvbdCompiledVelocityObjective entries[eMAX_OBJECTIVES];
+  physx::PxU8 authoredSourceSlotMask;
+  physx::PxU8 legacySourceSlotMask;
+  physx::PxU8 entryCount;
+  physx::PxU8 invalid;
+
+  PX_FORCE_INLINE AvbdCompiledContactObjectiveProgram()
+      : authoredSourceSlotMask(0), legacySourceSlotMask(0),
+        entryCount(0), invalid(0) {}
+};
+
+PX_FORCE_INLINE void resetAvbdContactObjectiveProgram(
+    AvbdCompiledContactObjectiveProgram &program) {
+  for (physx::PxU32 i = 0;
+       i < AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES; ++i)
+    program.entries[i] = AvbdCompiledVelocityObjective();
+  program.authoredSourceSlotMask = 0;
+  program.legacySourceSlotMask = 0;
+  program.entryCount = 0;
+  program.invalid = 0;
+}
+
+PX_FORCE_INLINE physx::PxU8 getAvbdContactObjectiveSourceSlots(
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span) {
+  if (kind == AvbdVelocityObjectiveKind::GeometryNormal &&
+      span == AvbdVelocityObjectiveSpan::Normal)
+    return eCONTACT_SOURCE_GEOMETRY_NORMAL;
+  if (kind == AvbdVelocityObjectiveKind::MaterialNormal &&
+      span == AvbdVelocityObjectiveSpan::Normal)
+    return eCONTACT_SOURCE_MATERIAL_NORMAL;
+  if (span == AvbdVelocityObjectiveSpan::TangentCone)
+    return eCONTACT_SOURCE_MATERIAL_TANGENT;
+  if (span == AvbdVelocityObjectiveSpan::NormalAndTangentCone)
+    return eCONTACT_SOURCE_MATERIAL_NORMAL |
+           eCONTACT_SOURCE_MATERIAL_TANGENT;
+  return 0;
+}
+
+PX_FORCE_INLINE bool isSameAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU8 sourceSlotMask,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  return compiled.owner == owner && compiled.kind == kind &&
+         compiled.span == span &&
+         compiled.reconstruction == reconstruction &&
+         compiled.sourceSlotMask == sourceSlotMask &&
+         compiled.objectiveRowCount == objectiveRowCount &&
+         compiled.objectiveKey == objectiveKey;
+}
+
+PX_FORCE_INLINE bool canAssignAvbdVelocityObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  const physx::PxU8 sourceSlotMask =
+      getAvbdContactObjectiveSourceSlots(kind, span);
+  if (program.invalid || kind == AvbdVelocityObjectiveKind::None ||
+      kind == AvbdVelocityObjectiveKind::Invalid ||
+      sourceSlotMask == 0 || objectiveRowCount == 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (isSameAvbdVelocityObjective(
+            compiled, owner, kind, span, reconstruction, sourceSlotMask,
+            objectiveRowCount, objectiveKey))
+      return true;
+    if ((compiled.sourceSlotMask & sourceSlotMask) != 0)
+      return false;
+  }
+  return program.entryCount <
+         AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES;
+}
+
+PX_FORCE_INLINE void invalidateAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program) {
+  const physx::PxU8 authoredSourceSlotMask =
+      program.authoredSourceSlotMask;
+  resetAvbdContactObjectiveProgram(program);
+  program.authoredSourceSlotMask = authoredSourceSlotMask;
+  program.invalid = 1;
+}
+
+PX_FORCE_INLINE bool assignAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  const physx::PxU8 sourceSlotMask =
+      getAvbdContactObjectiveSourceSlots(kind, span);
+  if (!canAssignAvbdVelocityObjective(
+          program, owner, kind, span, reconstruction,
+          objectiveRowCount, objectiveKey)) {
+    invalidateAvbdVelocityObjective(program);
+    return false;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    if (isSameAvbdVelocityObjective(
+            program.entries[i], owner, kind, span, reconstruction,
+            sourceSlotMask, objectiveRowCount, objectiveKey))
+      return true;
+  }
+  AvbdCompiledVelocityObjective &compiled =
+      program.entries[program.entryCount++];
+  compiled.owner = owner;
+  compiled.kind = kind;
+  compiled.span = span;
+  compiled.reconstruction = reconstruction;
+  compiled.sourceSlotMask = sourceSlotMask;
+  compiled.objectiveRowCount = objectiveRowCount;
+  compiled.objectiveKey = objectiveKey;
+  program.authoredSourceSlotMask = physx::PxU8(
+      program.authoredSourceSlotMask | sourceSlotMask);
+  program.legacySourceSlotMask =
+      physx::PxU8(program.legacySourceSlotMask & ~sourceSlotMask);
+  return true;
+}
+
+PX_FORCE_INLINE void setAvbdContactObjectiveLegacySources(
+    AvbdCompiledContactObjectiveProgram &program,
+    physx::PxU8 authoredSourceSlotMask) {
+  program.authoredSourceSlotMask =
+      physx::PxU8(authoredSourceSlotMask & eCONTACT_SOURCE_ALL);
+  if (program.invalid) {
+    program.legacySourceSlotMask = 0;
+    return;
+  }
+  physx::PxU8 compiledSourceSlotMask = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    compiledSourceSlotMask = physx::PxU8(
+        compiledSourceSlotMask | program.entries[i].sourceSlotMask);
+  program.legacySourceSlotMask = physx::PxU8(
+      authoredSourceSlotMask & ~compiledSourceSlotMask);
+}
+
+PX_FORCE_INLINE bool isValidAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled) {
+  if (compiled.kind == AvbdVelocityObjectiveKind::None) {
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported &&
+           compiled.span == AvbdVelocityObjectiveSpan::None &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::PoseDerived &&
+           compiled.sourceSlotMask == 0 &&
+           compiled.objectiveRowCount == 0 &&
+           compiled.objectiveKey == 0;
+  }
+  if (compiled.kind == AvbdVelocityObjectiveKind::Invalid) {
+    return false;
+  }
+  if (compiled.objectiveRowCount == 0)
+    return false;
+  switch (compiled.owner) {
+  case AvbdVelocityObjectiveOwner::PositionAL:
+    return ((compiled.kind ==
+                 AvbdVelocityObjectiveKind::GeometryNormal &&
+             compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_GEOMETRY_NORMAL) ||
+            (compiled.kind ==
+                 AvbdVelocityObjectiveKind::PassiveFriction &&
+             compiled.span ==
+                 AvbdVelocityObjectiveSpan::TangentCone &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_MATERIAL_TANGENT) ||
+            (compiled.kind ==
+                 AvbdVelocityObjectiveKind::MaterialNormal &&
+             compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_MATERIAL_NORMAL)) &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::PoseDerived;
+  case AvbdVelocityObjectiveOwner::PointFinalize:
+    return (compiled.kind ==
+                AvbdVelocityObjectiveKind::TangentTarget &&
+            (compiled.span ==
+                 AvbdVelocityObjectiveSpan::TangentCone ||
+             compiled.span ==
+                 AvbdVelocityObjectiveSpan::
+                     NormalAndTangentCone) &&
+            (compiled.reconstruction ==
+                 AvbdVelocityObjectiveReconstruction::PoseDerived ||
+             compiled.reconstruction ==
+                 AvbdVelocityObjectiveReconstruction::
+                     NormalResponseSpan)) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal &&
+            compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_NORMAL &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial);
+  case AvbdVelocityObjectiveOwner::ManifoldFinalize:
+    return ((compiled.kind ==
+                 AvbdVelocityObjectiveKind::TangentTarget ||
+             compiled.kind ==
+                 AvbdVelocityObjectiveKind::PassiveFriction) &&
+            compiled.span ==
+                AvbdVelocityObjectiveSpan::
+                    NormalAndTangentCone &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal &&
+            compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_NORMAL &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::PassiveFriction &&
+            compiled.span ==
+                AvbdVelocityObjectiveSpan::TangentCone &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_TANGENT &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::PoseDerived);
+  case AvbdVelocityObjectiveOwner::ComponentFinalize:
+    return compiled.kind ==
+               AvbdVelocityObjectiveKind::PassiveFriction &&
+           compiled.span ==
+               AvbdVelocityObjectiveSpan::
+                   NormalAndTangentCone &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::
+                   SolveStartInertial;
+  case AvbdVelocityObjectiveOwner::JointFinalize:
+    return compiled.kind ==
+               AvbdVelocityObjectiveKind::PassiveFriction &&
+           compiled.span ==
+               AvbdVelocityObjectiveSpan::
+                   NormalAndTangentCone &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::
+                   SolveStartInertial;
+  case AvbdVelocityObjectiveOwner::Unsupported:
+    return (compiled.kind ==
+                AvbdVelocityObjectiveKind::TangentTarget ||
+            compiled.kind ==
+                AvbdVelocityObjectiveKind::PassiveFriction ||
+            compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal) &&
+           compiled.span != AvbdVelocityObjectiveSpan::None &&
+           (compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::PoseDerived ||
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::SolveStartInertial ||
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::NormalResponseSpan);
+  }
+  return false;
+}
+
+PX_FORCE_INLINE bool isValidAvbdContactObjectiveProgram(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (program.invalid ||
+      program.entryCount >
+          AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES)
+    return false;
+  physx::PxU8 sourceSlotMask = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (!isValidAvbdVelocityObjective(compiled) ||
+        (sourceSlotMask & compiled.sourceSlotMask) != 0)
+      return false;
+    sourceSlotMask =
+        physx::PxU8(sourceSlotMask | compiled.sourceSlotMask);
+  }
+  if ((sourceSlotMask & program.legacySourceSlotMask) != 0 ||
+      ((sourceSlotMask | program.legacySourceSlotMask) &
+       ~eCONTACT_SOURCE_ALL) != 0 ||
+      physx::PxU8(sourceSlotMask |
+                  program.legacySourceSlotMask) !=
+          program.authoredSourceSlotMask)
+    return false;
+  return true;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdVelocityObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner == owner && compiled.kind == kind)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE AvbdCompiledVelocityObjective *
+findAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner == owner && compiled.kind == kind)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdCompleteManifoldObjective(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner ==
+            AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.span ==
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdContactMaterialObjective(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  // Preserve the established compatibility diagnostic: when the physical
+  // program contains independent normal and tangent records, report the
+  // tangent material objective first. Composite entries still match here.
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_TANGENT) != 0)
+      return &compiled;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_NORMAL) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdContactSourceObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    physx::PxU8 sourceSlot) {
+  if (!isValidAvbdContactObjectiveProgram(program) ||
+      sourceSlot == 0 ||
+      (sourceSlot & physx::PxU8(sourceSlot - 1u)) != 0)
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask & sourceSlot) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  // Identity keys intentionally encode body/contact numbering and can change
+  // under actor-order reversal. Group completeness validates them within one
+  // compiled island; this cross-run fingerprint covers semantic allocation.
+  hash = (hash ^ compiled.objectiveRowCount) * prime;
+  hash = (hash ^ compiled.sourceSlotMask) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.owner)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.kind)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.span)) * prime;
+  hash =
+      (hash ^ static_cast<physx::PxU8>(compiled.reconstruction)) * prime;
+  return hash;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdContactObjectiveProgram(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ program.entryCount) * prime;
+  hash = (hash ^ program.invalid) * prime;
+  hash = (hash ^ program.authoredSourceSlotMask) * prime;
+  hash = (hash ^ program.legacySourceSlotMask) * prime;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    hash += fingerprintAvbdVelocityObjective(program.entries[i]);
+  return hash;
+}
+
+/** Orthogonal contact state flags; velocity ownership lives in typed IR. */
 struct AvbdContactConstraintFlags {
   enum Enum : physx::PxU16 {
     eNONE = 0,
@@ -125,39 +630,6 @@ struct AvbdContactConstraintFlags {
     eKINEMATIC_SHELL_ANCHOR = 1u << 1,
     /** Last dual step was inside Coulomb cone (static μ for next evaluation). */
     eFRICTION_STICK = 1u << 2,
-    /** Contact-only AVBD velocity row owns this target's tangent objective. */
-    eVELOCITY_TANGENT_TARGET_OWNER = 1u << 3,
-    /**
-     * Reconstruct this target body's pre-material velocity only in the
-     * physical normal response span before applying its tangent target.
-     */
-    eVELOCITY_TANGENT_TARGET_NORMAL_SPAN = 1u << 4,
-    /**
-     * Two-to-four-point rigid-static target manifold. Its tangent objective
-     * is projected as one coupled block after velocity reconstruction; the
-     * individual contacts must not replay point-wise target impulses.
-     */
-    eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER = 1u << 5,
-    /**
-     * Deformable/static tangent is owned by the contact's position-level
-     * primal/dual row. The post friction sweep must not replay this row.
-     */
-    eDEFORMABLE_POSITION_TANGENT_OWNER = 1u << 6,
-    /**
-     * Two-to-four-point, zero-target rigid-static friction manifold.  The
-     * material owner reconstructs solve-start inertial velocity and consumes
-     * each normal-supported Coulomb disk once; position friction and ordered
-     * body-static sweeps must not replay these rows.
-     */
-    eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER = 1u << 7,
-    /**
-     * Zero-target rigid contact rows in one connected component containing
-     * both rigid-static and dynamic-dynamic contacts.  One post-reconstruction
-     * owner closes all normal complementarity rows and all Coulomb disks from
-     * the same solve-start inertial state; no body-wise or point-wise
-     * material fallback may replay these rows.
-     */
-    eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER = 1u << 8,
   };
 };
 
@@ -362,6 +834,9 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
    * source. This never replaces the position lambda or its warm-start cache.
    */
   physx::PxReal velocityNormalImpulse;
+
+  /** Prep-compiled physical-objective program for this contact row. */
+  AvbdCompiledContactObjectiveProgram objectiveProgram;
 
   //-------------------------------------------------------------------------
   // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
@@ -590,57 +1065,328 @@ PX_FORCE_INLINE bool hasFrictionStick(const AvbdContactConstraint &c) {
 
 PX_FORCE_INLINE bool hasVelocityTangentTargetOwner(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::eVELOCITY_TANGENT_TARGET_OWNER) != 0;
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PointFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL ||
+         findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ManifoldFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL;
 }
 
 PX_FORCE_INLINE bool hasVelocityTangentTargetNormalSpan(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::
-              eVELOCITY_TANGENT_TARGET_NORMAL_SPAN) != 0;
+  const AvbdCompiledVelocityObjective *point =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::PointFinalize,
+          AvbdVelocityObjectiveKind::TangentTarget);
+  const AvbdCompiledVelocityObjective *manifold =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::TangentTarget);
+  const AvbdCompiledVelocityObjective *objective =
+      point ? point : manifold;
+  return objective &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::NormalResponseSpan;
 }
 
 PX_FORCE_INLINE bool hasVelocityTangentTargetManifoldOwner(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::
-              eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER) != 0;
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ManifoldFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL;
 }
 
 PX_FORCE_INLINE bool hasVelocityPassiveFrictionManifoldOwner(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::
-              eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER) != 0;
+  const AvbdCompiledVelocityObjective *objective =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::PassiveFriction);
+  return objective &&
+         objective->span ==
+             AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::SolveStartInertial;
+}
+
+PX_FORCE_INLINE bool hasVelocityBodyStaticFrictionSweepOwner(
+    const AvbdContactConstraint &c) {
+  const AvbdCompiledVelocityObjective *objective =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::PassiveFriction);
+  return objective &&
+         objective->span ==
+             AvbdVelocityObjectiveSpan::TangentCone &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::PoseDerived;
 }
 
 PX_FORCE_INLINE bool hasVelocityPassiveFrictionComponentOwner(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::
-              eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER) != 0;
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ComponentFinalize,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
 }
 
 PX_FORCE_INLINE bool hasVelocityFrictionManifoldOwner(
     const AvbdContactConstraint &c) {
-  return hasVelocityTangentTargetManifoldOwner(c) ||
-         hasVelocityPassiveFrictionManifoldOwner(c) ||
-         hasVelocityPassiveFrictionComponentOwner(c);
+  return hasVelocityPassiveFrictionManifoldOwner(c) ||
+         hasVelocityPassiveFrictionComponentOwner(c) ||
+         hasVelocityTangentTargetManifoldOwner(c);
 }
 
 PX_FORCE_INLINE bool hasVelocityTangentMaterialOwner(
     const AvbdContactConstraint &c) {
   return hasVelocityTangentTargetOwner(c) ||
          hasVelocityPassiveFrictionManifoldOwner(c) ||
-         hasVelocityPassiveFrictionComponentOwner(c);
+         hasVelocityPassiveFrictionComponentOwner(c) ||
+         hasVelocityBodyStaticFrictionSweepOwner(c);
+}
+
+PX_FORCE_INLINE bool hasVelocityJointFinalizeOwner(
+    const AvbdContactConstraint &c) {
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::JointFinalize,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
 }
 
 PX_FORCE_INLINE bool hasDeformablePositionTangentOwner(
     const AvbdContactConstraint &c) {
-  return (c.header.flags &
-          AvbdContactConstraintFlags::
-              eDEFORMABLE_POSITION_TANGENT_OWNER) != 0;
+  return hasDeformableStaticAnchor(c) &&
+         findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PositionAL,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
+}
+
+/**
+ * Compile ordinary rigid contact material sources that remain unclaimed after
+ * specialized target/component/joint programs have been built.
+ *
+ * Call ordering is the ownership priority: contact-only islands invoke this
+ * after their strict manifold/component compilers; joint islands invoke it
+ * after contact-coupled motor compilation. Existing material source records
+ * are never replaced.
+ */
+PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxU32 numBodies) {
+  if (!contacts || numContacts == 0 || numBodies == 0)
+    return;
+
+  // Body-static material normal is reconstructed once per rigid body.
+  // Passive tangents are consumed by the pose-derived body manifold sweep.
+  for (physx::PxU32 bodyIndex = 0; bodyIndex < numBodies; ++bodyIndex) {
+    bool found = false;
+    bool supported = true;
+    physx::PxU32 normalRowCount = 0;
+    physx::PxU32 tangentRowCount = 0;
+    physx::PxU64 normalObjectiveKey = ~physx::PxU64(0);
+    physx::PxU64 tangentObjectiveKey = ~physx::PxU64(0);
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      const AvbdContactConstraint &contact = contacts[c];
+      if ((contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex) ||
+          !isBodyVsStaticContact(
+              contact.header.bodyIndexA,
+              contact.header.bodyIndexB, numBodies))
+        continue;
+      found = true;
+      const bool dynamicIsA =
+          contact.header.bodyIndexA == bodyIndex;
+      const physx::PxReal linearScale =
+          dynamicIsA ? contact.invMassScaleA
+                     : contact.invMassScaleB;
+      const physx::PxReal angularScale =
+          dynamicIsA ? contact.invInertiaScaleA
+                     : contact.invInertiaScaleB;
+      const bool hasPassiveTangent =
+          contact.friction > 0.0f ||
+          contact.staticFriction > 0.0f;
+      if (hasDeformableStaticAnchor(contact) ||
+          hasKinematicShellAnchor(contact) ||
+          contact.targetVelocity.magnitudeSquared() > 1.0e-12f ||
+          !physx::PxIsFinite(contact.restitution) ||
+          contact.restitution < 0.0f ||
+          contact.restitution > 1.0f ||
+          contact.maxImpulse < PX_MAX_REAL ||
+          !physx::PxIsFinite(linearScale) ||
+          !physx::PxIsFinite(angularScale) ||
+          linearScale < 0.0f || angularScale < 0.0f ||
+          findAvbdContactSourceObjective(
+              contact.objectiveProgram,
+              eCONTACT_SOURCE_MATERIAL_NORMAL) ||
+          (hasPassiveTangent &&
+           findAvbdContactSourceObjective(
+               contact.objectiveProgram,
+               eCONTACT_SOURCE_MATERIAL_TANGENT))) {
+        supported = false;
+        break;
+      }
+      normalObjectiveKey =
+          physx::PxMin(normalObjectiveKey, contact.cacheKey);
+      ++normalRowCount;
+      if (hasPassiveTangent) {
+        tangentObjectiveKey =
+            physx::PxMin(tangentObjectiveKey, contact.cacheKey);
+        ++tangentRowCount;
+      }
+    }
+    if (!found || !supported || normalRowCount == 0)
+      continue;
+
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      const AvbdContactConstraint &contact = contacts[c];
+      if ((contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex) ||
+          !isBodyVsStaticContact(
+              contact.header.bodyIndexA,
+              contact.header.bodyIndexB, numBodies))
+        continue;
+      const bool hasPassiveTangent =
+          contact.friction > 0.0f ||
+          contact.staticFriction > 0.0f;
+      if (!canAssignAvbdVelocityObjective(
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::ManifoldFinalize,
+              AvbdVelocityObjectiveKind::MaterialNormal,
+              AvbdVelocityObjectiveSpan::Normal,
+              AvbdVelocityObjectiveReconstruction::
+                  SolveStartInertial,
+              normalRowCount, normalObjectiveKey) ||
+          (hasPassiveTangent &&
+           !canAssignAvbdVelocityObjective(
+               contact.objectiveProgram,
+               AvbdVelocityObjectiveOwner::ManifoldFinalize,
+               AvbdVelocityObjectiveKind::PassiveFriction,
+               AvbdVelocityObjectiveSpan::TangentCone,
+               AvbdVelocityObjectiveReconstruction::PoseDerived,
+               tangentRowCount, tangentObjectiveKey))) {
+        supported = false;
+        break;
+      }
+    }
+    if (!supported) {
+      for (physx::PxU32 c = 0; c < numContacts; ++c) {
+        AvbdContactConstraint &contact = contacts[c];
+        if ((contact.header.bodyIndexA == bodyIndex ||
+             contact.header.bodyIndexB == bodyIndex) &&
+            isBodyVsStaticContact(
+                contact.header.bodyIndexA,
+                contact.header.bodyIndexB, numBodies))
+          invalidateAvbdVelocityObjective(
+              contact.objectiveProgram);
+      }
+      continue;
+    }
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      AvbdContactConstraint &contact = contacts[c];
+      if ((contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex) ||
+          !isBodyVsStaticContact(
+              contact.header.bodyIndexA,
+              contact.header.bodyIndexB, numBodies))
+        continue;
+      assignAvbdVelocityObjective(
+          contact.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::MaterialNormal,
+          AvbdVelocityObjectiveSpan::Normal,
+          AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+          normalRowCount, normalObjectiveKey);
+      if (contact.friction > 0.0f ||
+          contact.staticFriction > 0.0f) {
+        assignAvbdVelocityObjective(
+            contact.objectiveProgram,
+            AvbdVelocityObjectiveOwner::ManifoldFinalize,
+            AvbdVelocityObjectiveKind::PassiveFriction,
+            AvbdVelocityObjectiveSpan::TangentCone,
+            AvbdVelocityObjectiveReconstruction::PoseDerived,
+            tangentRowCount, tangentObjectiveKey);
+      }
+    }
+  }
+
+  // Dynamic-dynamic geometry and passive tangents are position AL. Positive
+  // restitution owns only material normal in point finalize.
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    AvbdContactConstraint &contact = contacts[c];
+    const bool dynamicA = contact.header.bodyIndexA < numBodies;
+    const bool dynamicB = contact.header.bodyIndexB < numBodies;
+    if (!dynamicA || !dynamicB ||
+        contact.targetVelocity.magnitudeSquared() > 1.0e-12f ||
+        !physx::PxIsFinite(contact.restitution) ||
+        contact.restitution < 0.0f ||
+        contact.restitution > 1.0f ||
+        !physx::PxIsFinite(contact.maxImpulse) ||
+        !physx::PxIsFinite(contact.invMassScaleA) ||
+        !physx::PxIsFinite(contact.invInertiaScaleA) ||
+        !physx::PxIsFinite(contact.invMassScaleB) ||
+        !physx::PxIsFinite(contact.invInertiaScaleB) ||
+        contact.invMassScaleA < 0.0f ||
+        contact.invInertiaScaleA < 0.0f ||
+        contact.invMassScaleB < 0.0f ||
+        contact.invInertiaScaleB < 0.0f ||
+        findAvbdContactSourceObjective(
+            contact.objectiveProgram,
+            eCONTACT_SOURCE_MATERIAL_NORMAL) ||
+        findAvbdContactSourceObjective(
+            contact.objectiveProgram,
+            eCONTACT_SOURCE_MATERIAL_TANGENT))
+      continue;
+
+    const bool hasPassiveTangent =
+        contact.friction > 0.0f ||
+        contact.staticFriction > 0.0f;
+    const AvbdVelocityObjectiveOwner normalOwner =
+        contact.restitution > 0.0f
+            ? AvbdVelocityObjectiveOwner::PointFinalize
+            : AvbdVelocityObjectiveOwner::PositionAL;
+    const AvbdVelocityObjectiveReconstruction normalReconstruction =
+        contact.restitution > 0.0f
+            ? AvbdVelocityObjectiveReconstruction::SolveStartInertial
+            : AvbdVelocityObjectiveReconstruction::PoseDerived;
+    if (!canAssignAvbdVelocityObjective(
+            contact.objectiveProgram, normalOwner,
+            AvbdVelocityObjectiveKind::MaterialNormal,
+            AvbdVelocityObjectiveSpan::Normal,
+            normalReconstruction, 1u, contact.cacheKey) ||
+        (hasPassiveTangent &&
+         !canAssignAvbdVelocityObjective(
+             contact.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PositionAL,
+             AvbdVelocityObjectiveKind::PassiveFriction,
+             AvbdVelocityObjectiveSpan::TangentCone,
+             AvbdVelocityObjectiveReconstruction::PoseDerived,
+             1u, contact.cacheKey)))
+      continue;
+
+    assignAvbdVelocityObjective(
+        contact.objectiveProgram, normalOwner,
+        AvbdVelocityObjectiveKind::MaterialNormal,
+        AvbdVelocityObjectiveSpan::Normal,
+        normalReconstruction, 1u, contact.cacheKey);
+    if (hasPassiveTangent) {
+      assignAvbdVelocityObjective(
+          contact.objectiveProgram,
+          AvbdVelocityObjectiveOwner::PositionAL,
+          AvbdVelocityObjectiveKind::PassiveFriction,
+          AvbdVelocityObjectiveSpan::TangentCone,
+          AvbdVelocityObjectiveReconstruction::PoseDerived,
+          1u, contact.cacheKey);
+    }
+  }
 }
 
 PX_FORCE_INLINE void setFrictionStick(AvbdContactConstraint &c, bool stick) {
@@ -1498,6 +2244,335 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
 } PX_ALIGN_SUFFIX(16);
 
 /**
+ * Semantic joint objective selected once by the pre-solve island compile.
+ *
+ * SourceFlag continues to describe authored/prep row types. These values
+ * replace only transient ACTIVE ownership bits that used to be written into
+ * SourceFlag and decoded again by multiple solve stages. Kind::None is the
+ * explicit backlog for joint objective families not migrated yet.
+ */
+enum class AvbdJointObjectiveKind : physx::PxU8 {
+  None,
+  CoupledLinearVelocityDrive,
+  LinearPositionDrive,
+  CoupledLinearPositionDrive,
+  AngularAxisVelocityDrive,
+  AngularAxisPositionDrive,
+  SlerpVelocityDrive,
+  SlerpPositionDrive,
+  CoupledAngularPositionDrive,
+  CoupledSpatialTendon,
+  CoupledFixedD6,
+  CoupledSphericalCone,
+  NativePassiveReaction,
+  GenericHard1D,
+  GenericAccelerationDamping1D,
+  GenericForceSpring1D,
+  GenericRestitution1D,
+  ArticulationHardMimic,
+  ArticulationCompliantMimic,
+  ArticulationFixedTendon,
+  ArticulationSpatialTendon,
+  NativeRevoluteMotor,
+  OrdinaryD6LinearDrive,
+  OrdinaryD6AngularAxisDrive,
+  OrdinaryD6SlerpDrive,
+  OrdinaryD6Position,
+  Invalid
+};
+
+enum AvbdJointObjectiveSourceRow : physx::PxU32 {
+  eJOINT_SOURCE_LINEAR_DRIVE_X = 1u << 0,
+  eJOINT_SOURCE_LINEAR_DRIVE_Y = 1u << 1,
+  eJOINT_SOURCE_LINEAR_DRIVE_Z = 1u << 2,
+  eJOINT_SOURCE_ANGULAR_DRIVE_X = 1u << 3,
+  eJOINT_SOURCE_ANGULAR_DRIVE_Y = 1u << 4,
+  eJOINT_SOURCE_ANGULAR_DRIVE_Z = 1u << 5,
+  eJOINT_SOURCE_GENERIC_ROW = 1u << 6,
+  eJOINT_SOURCE_LINEAR_MOTION_X = 1u << 7,
+  eJOINT_SOURCE_LINEAR_MOTION_Y = 1u << 8,
+  eJOINT_SOURCE_LINEAR_MOTION_Z = 1u << 9,
+  eJOINT_SOURCE_ANGULAR_MOTION_X = 1u << 10,
+  eJOINT_SOURCE_ANGULAR_MOTION_Y = 1u << 11,
+  eJOINT_SOURCE_ANGULAR_MOTION_Z = 1u << 12,
+  eJOINT_SOURCE_ANGULAR_CONE = 1u << 13,
+  eJOINT_SOURCE_NATIVE_MOTOR = 1u << 14
+};
+
+struct AvbdCompiledJointObjective {
+  AvbdVelocityObjectiveOwner owner;
+  AvbdJointObjectiveKind kind;
+  physx::PxU16 objectiveRowCount;
+  physx::PxU32 sourceRowMask;
+  physx::PxU64 objectiveKey;
+
+  PX_FORCE_INLINE AvbdCompiledJointObjective()
+      : owner(AvbdVelocityObjectiveOwner::Unsupported),
+        kind(AvbdJointObjectiveKind::None),
+        objectiveRowCount(0),
+        sourceRowMask(0),
+        objectiveKey(0) {}
+};
+
+/**
+ * Prep-compiled objective program for one source D6 record.
+ *
+ * The source mask has fifteen distinct slots: six native motion rows, one
+ * cone composite, six drive rows, one generic solverPrep row, and one native
+ * motor row. Most objectives span several slots, but sizing for the
+ * one-objective-per-slot worst case keeps compile failure independent of
+ * authored row combinations and avoids heap state in the constraint stream.
+ */
+struct AvbdCompiledJointObjectiveProgram {
+  enum { eMAX_OBJECTIVES = 15 };
+
+  AvbdCompiledJointObjective entries[eMAX_OBJECTIVES];
+  physx::PxU32 legacySourceRowMask;
+  physx::PxU8 entryCount;
+  physx::PxU8 invalid;
+  physx::PxU16 padding;
+
+  PX_FORCE_INLINE AvbdCompiledJointObjectiveProgram()
+      : legacySourceRowMask(0), entryCount(0), invalid(0), padding(0) {}
+};
+
+PX_FORCE_INLINE void resetAvbdJointObjectiveProgram(
+    AvbdCompiledJointObjectiveProgram &program) {
+  for (physx::PxU32 i = 0;
+       i < AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES; ++i)
+    program.entries[i] = AvbdCompiledJointObjective();
+  program.entryCount = 0;
+  program.invalid = 0;
+  program.padding = 0;
+  program.legacySourceRowMask = 0;
+}
+
+PX_FORCE_INLINE bool isSameAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  return compiled.owner == owner && compiled.kind == kind &&
+         compiled.objectiveRowCount == objectiveRowCount &&
+         compiled.sourceRowMask == sourceRowMask &&
+         compiled.objectiveKey == objectiveKey;
+}
+
+PX_FORCE_INLINE bool canAssignAvbdJointObjective(
+    const AvbdCompiledJointObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  if (program.invalid || kind == AvbdJointObjectiveKind::None ||
+      kind == AvbdJointObjectiveKind::Invalid ||
+      objectiveRowCount == 0 || sourceRowMask == 0 ||
+      (program.legacySourceRowMask & sourceRowMask) != 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (isSameAvbdJointObjective(
+            compiled, owner, kind, objectiveRowCount, sourceRowMask,
+            objectiveKey))
+      return true;
+    if ((compiled.sourceRowMask & sourceRowMask) != 0)
+      return false;
+  }
+  return program.entryCount <
+         AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES;
+}
+
+PX_FORCE_INLINE void invalidateAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program) {
+  resetAvbdJointObjectiveProgram(program);
+  program.invalid = 1;
+}
+
+PX_FORCE_INLINE bool assignAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  if (!canAssignAvbdJointObjective(
+          program, owner, kind, objectiveRowCount, sourceRowMask,
+          objectiveKey)) {
+    invalidateAvbdJointObjective(program);
+    return false;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    if (isSameAvbdJointObjective(
+            program.entries[i], owner, kind, objectiveRowCount,
+            sourceRowMask, objectiveKey))
+      return true;
+  }
+  AvbdCompiledJointObjective &compiled =
+      program.entries[program.entryCount++];
+  compiled.owner = owner;
+  compiled.kind = kind;
+  compiled.objectiveRowCount = objectiveRowCount;
+  compiled.sourceRowMask = sourceRowMask;
+  compiled.objectiveKey = objectiveKey;
+  return true;
+}
+
+PX_FORCE_INLINE bool fallbackAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program,
+    AvbdJointObjectiveKind kind) {
+  bool found = false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (compiled.kind != kind)
+      continue;
+    compiled.owner = AvbdVelocityObjectiveOwner::Unsupported;
+    found = true;
+  }
+  return found;
+}
+
+PX_FORCE_INLINE bool isValidAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled) {
+  if (compiled.kind == AvbdJointObjectiveKind::None) {
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported &&
+           compiled.objectiveRowCount == 0 &&
+           compiled.objectiveKey == 0;
+  }
+  if (compiled.kind == AvbdJointObjectiveKind::Invalid ||
+      compiled.objectiveRowCount == 0 ||
+      compiled.sourceRowMask == 0)
+    return false;
+
+  switch (compiled.kind) {
+  case AvbdJointObjectiveKind::CoupledLinearVelocityDrive:
+  case AvbdJointObjectiveKind::AngularAxisVelocityDrive:
+  case AvbdJointObjectiveKind::SlerpVelocityDrive:
+  case AvbdJointObjectiveKind::GenericRestitution1D:
+  case AvbdJointObjectiveKind::NativeRevoluteMotor:
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::JointFinalize ||
+           compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported;
+  case AvbdJointObjectiveKind::LinearPositionDrive:
+  case AvbdJointObjectiveKind::CoupledLinearPositionDrive:
+  case AvbdJointObjectiveKind::AngularAxisPositionDrive:
+  case AvbdJointObjectiveKind::SlerpPositionDrive:
+  case AvbdJointObjectiveKind::CoupledAngularPositionDrive:
+  case AvbdJointObjectiveKind::CoupledSpatialTendon:
+  case AvbdJointObjectiveKind::CoupledFixedD6:
+  case AvbdJointObjectiveKind::CoupledSphericalCone:
+  case AvbdJointObjectiveKind::NativePassiveReaction:
+  case AvbdJointObjectiveKind::GenericHard1D:
+  case AvbdJointObjectiveKind::GenericAccelerationDamping1D:
+  case AvbdJointObjectiveKind::GenericForceSpring1D:
+  case AvbdJointObjectiveKind::ArticulationHardMimic:
+  case AvbdJointObjectiveKind::ArticulationCompliantMimic:
+  case AvbdJointObjectiveKind::ArticulationFixedTendon:
+  case AvbdJointObjectiveKind::ArticulationSpatialTendon:
+  case AvbdJointObjectiveKind::OrdinaryD6LinearDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6AngularAxisDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6SlerpDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6Position:
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::PositionAL ||
+           compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported;
+  case AvbdJointObjectiveKind::None:
+  case AvbdJointObjectiveKind::Invalid:
+    break;
+  }
+  return false;
+}
+
+PX_FORCE_INLINE bool isValidAvbdJointObjectiveProgram(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  if (program.invalid ||
+      program.entryCount >
+          AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES)
+    return false;
+  physx::PxU32 sourceRows = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (!isValidAvbdJointObjective(compiled) ||
+        (sourceRows & compiled.sourceRowMask) != 0)
+      return false;
+    sourceRows |= compiled.sourceRowMask;
+  }
+  if ((sourceRows & program.legacySourceRowMask) != 0)
+    return false;
+  return true;
+}
+
+PX_FORCE_INLINE bool hasAvbdJointObjective(
+    const AvbdCompiledJointObjectiveProgram &program,
+    AvbdJointObjectiveKind kind) {
+  if (!isValidAvbdJointObjectiveProgram(program))
+    return false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (compiled.kind == kind &&
+        compiled.owner !=
+            AvbdVelocityObjectiveOwner::Unsupported)
+      return true;
+  }
+  return false;
+}
+
+PX_FORCE_INLINE const AvbdCompiledJointObjective *
+findAvbdJointObjectiveForSourceRow(
+    const AvbdCompiledJointObjectiveProgram &program,
+    physx::PxU32 sourceRow) {
+  if (!isValidAvbdJointObjectiveProgram(program) ||
+      sourceRow == 0 || (sourceRow & (sourceRow - 1u)) != 0 ||
+      (program.legacySourceRowMask & sourceRow) != 0)
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if ((compiled.sourceRowMask & sourceRow) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE physx::PxU32 getAvbdJointObjectiveSourceRows(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  if (!isValidAvbdJointObjectiveProgram(program))
+    return 0;
+  physx::PxU32 sourceRows = program.legacySourceRowMask;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    sourceRows |= program.entries[i].sourceRowMask;
+  return sourceRows;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ compiled.objectiveRowCount) * prime;
+  hash = (hash ^ compiled.sourceRowMask) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.owner)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.kind)) * prime;
+  return hash;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdJointObjectiveProgram(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ program.entryCount) * prime;
+  hash = (hash ^ program.invalid) * prime;
+  hash = (hash ^ program.legacySourceRowMask) * prime;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    hash += fingerprintAvbdJointObjective(program.entries[i]);
+  return hash;
+}
+
+/**
  * @brief D6 (Configurable) joint constraint for AVBD solver
  *
  * The D6 joint is the most flexible joint type, allowing independent control
@@ -1522,41 +2597,7 @@ struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
 struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   enum SourceFlag {
     eD6_SLERP_DRIVE = 1u << 0,
-    eSAME_ARTICULATION_EXTERNAL_SPHERICAL = 1u << 1,
     eD6_DRIVE_LIMITS_ARE_FORCES = 1u << 2,
-    // Transient two-dynamic, all-free linear-X velocity-drive ownership tag.
-    // The scoped physical path supports force mode and linear-X acceleration
-    // mode, with or without the predicate-approved contact rows. Prep never
-    // authors this bit.
-    eCOUPLED_LINEAR_DRIVE_ACTIVE = 1u << 3,
-    // Transient exactly-one-dynamic linear-X position-drive ownership tag.
-    eLINEAR_POSITION_DRIVE_ACTIVE = 1u << 4,
-    // Transient exactly-one-dynamic, all-free, force-mode
-    // TWIST/SWING1/SWING2
-    // velocity-drive ownership tag. This is intentionally narrower than the
-    // angular drive bits: SLERP, acceleration and spring drives need independent
-    // semantic gates before they can consume the physical path.
-    eANGULAR_AXIS_VELOCITY_DRIVE_ACTIVE = 1u << 5,
-    // Transient exactly-one-dynamic, all-free, force-mode SLERP velocity-drive
-    // ownership tag.  SLERP is a three-row fixed-world-axis objective and must
-    // not share the single-axis TWIST/SWING physical path.
-    eSLERP_VELOCITY_DRIVE_ACTIVE = 1u << 6,
-    // Transient exactly-one-dynamic, centered, force-mode single-axis angular
-    // position-drive ownership tag.  This path owns the SWING_TWIST target
-    // quaternion for a free TWIST, SWING1, or SWING2 axis with the other
-    // angular axes locked. Wider angular spring families remain on the legacy
-    // path until separately validated.
-    eANGULAR_AXIS_POSITION_DRIVE_ACTIVE = 1u << 7,
-    // Transient exactly-one-dynamic, centered, force-mode SLERP position-drive
-    // ownership tag.  This is a three-row quaternion-Jacobian spring with all
-    // angular axes free and is intentionally separate from stiffness-zero
-    // fixed-world-axis SLERP velocity ownership.
-    eSLERP_POSITION_DRIVE_ACTIVE = 1u << 8,
-    // Transient two-dynamic, centered, force-mode angular-position ownership
-    // tag.  Both endpoints, locked companion rows, and the selected
-    // TWIST/SWING or SLERP objective are solved from one frozen island system
-    // so an internal drive cannot create net angular momentum.
-    eCOUPLED_ANGULAR_POSITION_DRIVE_ACTIVE = 1u << 9,
     // Prep-owned tag for a hard Px1DConstraint row emitted by an otherwise
     // unknown/custom PxConstraintSolverPrep. The stored body-B Jacobians have
     // already consumed Px1DConstraint's public minus convention.
@@ -1575,12 +2616,6 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     // fixed-middle/two-sibling-endpoint prep predicate.  It shares compliant
     // spring/damper consumption with fixed tendons, not hard-row AL state.
     eARTICULATION_SPATIAL_TENDON_ROW = 1u << 13,
-    // Transient ownership tag for the strict two-sibling spatial-tendon
-    // island.  The tagged row is excluded from per-body block descent and
-    // solved against both reduced free-angle inertial coordinates in one
-    // frozen Newton system, preventing body ordering from assigning the
-    // response to only one articulation branch.
-    eCOUPLED_SPATIAL_TENDON_ACTIVE = 1u << 14,
     // A pure velocity-damping Px1DConstraint row with
     // eSPRING|eACCELERATION_SPRING, zero stiffness and zero geometric error.
     // Its physical damping is converted to a mass-independent implicit
@@ -1613,20 +2648,10 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     // Extensions solver prep.  Keep the two authored half-angles instead of
     // reducing the public limit to a circle with min(yAngle, zAngle).
     eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE = 1u << 22,
-    // Native passive Fixed/Prismatic/Revolute rows whose public reaction is
-    // reconstructed from the converged physical row force.  This owns both
-    // PxConstraint::getForce() writeback and force-unit break comparison;
-    // limited, driven and motorized variants require separate authority.
-    eNATIVE_PASSIVE_REACTION_ACTIVE = 1u << 23,
     // Public native-revolute free-spin semantics use a one-sided motor
     // impulse bound. The strict isolated world-dynamic owner consumes this
     // tag; mixed limit, gear, contact, and dynamic-pair cases remain rejected.
-    eNATIVE_REVOLUTE_MOTOR_FREESPIN = 1u << 24,
-    // Transient two-dynamic, centered, force-mode linear-X position-drive
-    // ownership tag.  The position row, five locked companion rows, both
-    // endpoint responses, and every predicate-approved contact normal are
-    // solved from one frozen island objective.
-    eCOUPLED_LINEAR_POSITION_DRIVE_ACTIVE = 1u << 25
+    eNATIVE_REVOLUTE_MOTOR_FREESPIN = 1u << 24
   };
 
   AvbdConstraintHeader header;
@@ -1771,6 +2796,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
   physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
   physx::PxU32 driveOutputForceFlags; //!< eOUTPUT_FORCE flags matching drive bits
   physx::PxU32 sourceFlags; //!< Prep-side SourceFlag tags
+  AvbdCompiledJointObjectiveProgram objectiveProgram;
   physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
   physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
   physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)
@@ -2002,6 +3028,7 @@ struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
     driveAccelerationFlags = 0;
     driveOutputForceFlags = 0;
     sourceFlags = 0;
+    resetAvbdJointObjectiveProgram(objectiveProgram);
     cacheIndex = 0xFFFFFFFFu; // PX_MAX_U32 = not cached
     cacheKey = 0;
     padding0 = 0.0f;

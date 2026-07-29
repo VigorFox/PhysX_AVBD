@@ -914,6 +914,10 @@ static void finalizeMetrics()
 
 void cleanupPhysics(bool /*interactive*/)
 {
+	// PxArray uses the PhysX foundation allocator. Interactive shutdown does
+	// not pass through finalizePerformanceMetrics(), so release the sample
+	// storage here while the foundation broadcast allocator is still alive.
+	gPerformance.stepSamplesMs.reset();
 	gSoftBodyRenderData.reset();
 	gContacts.reset();
 	gRigidBoxes.reset();
@@ -1061,10 +1065,6 @@ static void finalizePerformanceMetrics()
 	gPerformance.p95StepMs =
 		gPerformance.stepSamplesMs[PxU32(PxCeil(0.95f * PxReal(last)))];
 	gPerformance.maxStepMs = gPerformance.stepSamplesMs[last];
-	// PxArray uses the PhysX foundation allocator. Release its storage while
-	// the foundation is still alive; the scalar summary remains printable
-	// after cleanup.
-	gPerformance.stepSamplesMs.reset();
 }
 
 static void printPerformanceResult()

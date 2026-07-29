@@ -190,6 +190,20 @@ def main() -> int:
                                         "complete manifold row accounting "
                                         f"rows={manifold_rows} points={points}"
                                     )
+                                if (
+                                    diagnostics["objectiveManifoldRows"]
+                                    <= 0.0 or
+                                    diagnostics["objectiveManifoldRows"] !=
+                                    diagnostics["objectiveRows"]
+                                ):
+                                    errors.append(
+                                        f"{solver}/{execution}/{case_name}: "
+                                        "compiled ManifoldFinalize partition "
+                                        f"manifold="
+                                        f"{diagnostics['objectiveManifoldRows']:.9g} "
+                                        f"rows="
+                                        f"{diagnostics['objectiveRows']:.9g}"
+                                    )
 
         comparison_fields = (
             "peakBody0AngularSpeed",
@@ -287,6 +301,46 @@ def main() -> int:
                     yaw_reverse,
                     1.0e-6,
                 )
+                if solver == "avbd":
+                    reference_diag = observed[
+                        (solver, execution, BASE_CASES[0], 1)
+                    ][1]
+                    reverse_diag = observed[
+                        (
+                            solver,
+                            execution,
+                            f"{BASE_CASES[0]}-reverse",
+                            1,
+                        )
+                    ][1]
+                    yaw_diag = observed[
+                        (solver, execution, BASE_CASES[1], 1)
+                    ][1]
+                    yaw_reverse_diag = observed[
+                        (
+                            solver,
+                            execution,
+                            f"{BASE_CASES[1]}-reverse",
+                            1,
+                        )
+                    ][1]
+                    if (
+                        reference_diag["objectiveFingerprint"] !=
+                        reverse_diag["objectiveFingerprint"]
+                    ):
+                        errors.append(
+                            f"{solver}-{execution}: compiled-objective "
+                            "actor-order fingerprint mismatch"
+                        )
+                    if (
+                        yaw_diag["objectiveFingerprint"] !=
+                        yaw_reverse_diag["objectiveFingerprint"]
+                    ):
+                        errors.append(
+                            f"{solver}-{execution}: yaw "
+                            "compiled-objective actor-order "
+                            "fingerprint mismatch"
+                        )
 
         for case_name in (
             BASE_CASES[0],

@@ -171,6 +171,18 @@ def main() -> int:
                                         f"rows={diag['genericTangentRows']} "
                                         f"points={points}"
                                     )
+                                if (
+                                    diag["objectiveManifoldRows"] <= 0.0 or
+                                    diag["objectiveManifoldRows"] !=
+                                    diag["objectiveRows"]
+                                ):
+                                    errors.append(
+                                        f"{prefix}: compiled "
+                                        "ManifoldFinalize partition "
+                                        f"manifold="
+                                        f"{diag['objectiveManifoldRows']:.9g} "
+                                        f"rows={diag['objectiveRows']:.9g}"
+                                    )
                                 if abs(final_vx - 3.0) > 2.0e-3:
                                     errors.append(
                                         f"{prefix}: final COM target "
@@ -280,6 +292,20 @@ def main() -> int:
                             f"{case_name}: AVBD peak angular gap "
                             f"avbd={avbd_peak_w} tgs={tgs_peak_w}"
                         )
+            forward_diag = observed[
+                ("avbd", "parallel", base_case, 1)
+            ][1]
+            reverse_diag = observed[
+                ("avbd", "parallel", f"{base_case}-reverse", 1)
+            ][1]
+            if (
+                forward_diag["objectiveFingerprint"] !=
+                reverse_diag["objectiveFingerprint"]
+            ):
+                errors.append(
+                    f"{base_case}: compiled-objective actor-order "
+                    "fingerprint mismatch"
+                )
 
         if args.mode == "acceptance":
             reference_gate = observed[

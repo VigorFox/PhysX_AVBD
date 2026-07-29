@@ -567,6 +567,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         constraint.frictionImpulseWriteback = nullptr;
         constraint.frictionSweepImpulse = PxVec3(0.0f);
         constraint.velocityNormalImpulse = -1.0f;
+        resetAvbdContactObjectiveProgram(
+            constraint.objectiveProgram);
         if (reportFrictionPatch && reportAnchorCount > 0) {
           PxU32 anchorIndex = 0;
           if (reportAnchorCount > 1) {
@@ -1309,18 +1311,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
           // (see DyAvbdDynamics.cpp).
           if (numD6 > d6CountBefore) {
             AvbdD6JointConstraint &c = d6Constraints[numD6 - 1];
-            const bool passiveNativeReaction =
-                c.header.type == AvbdConstraintType::eJOINT_FIXED ||
-                (c.header.type ==
-                     AvbdConstraintType::eJOINT_PRISMATIC &&
-                 c.linearMotion == 0x02u && c.angularMotion == 0u) ||
-                (c.header.type ==
-                     AvbdConstraintType::eJOINT_REVOLUTE &&
-                 c.linearMotion == 0u && c.angularMotion == 0x02u &&
-                 c.motorEnabled == 0u);
-            if (passiveNativeReaction)
-              c.sourceFlags |= AvbdD6JointConstraint::
-                  eNATIVE_PASSIVE_REACTION_ACTIVE;
             // A kinematic is represented by the same no-solver-body sentinel
             // as rigid static/world, but its prescribed motion remains part
             // of every velocity/damping objective.  Preserve that motion
@@ -1331,23 +1321,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             if (body1IsKinematic && constraint->bodyCore1)
               c.externalAngularStepB =
                   constraint->bodyCore1->angularVelocity * dt;
-            // Same-articulation external spherical loop closures (scissor
-            // crossings): linear locked + all angular free. Tag before warmstart
-            // restore so downstream local-solve policy can key off sourceFlags.
-            if (!body0IsStatic && !body1IsStatic && localBody0 != PX_MAX_U32 &&
-                localBody1 != PX_MAX_U32 && !nodeIndex0.isStaticBody() &&
-                !nodeIndex1.isStaticBody()) {
-              const IG::Node &node0 = islandSim.getNode(nodeIndex0);
-              const IG::Node &node1 = islandSim.getNode(nodeIndex1);
-              if (node0.getNodeType() == IG::Node::eARTICULATION_TYPE &&
-                  node1.getNodeType() == IG::Node::eARTICULATION_TYPE &&
-                  islandSim.getActiveNodeIndex(nodeIndex0) ==
-                      islandSim.getActiveNodeIndex(nodeIndex1) &&
-                  c.linearMotion == 0 && c.angularMotion == 0x2A) {
-                c.sourceFlags |= AvbdD6JointConstraint::
-                    eSAME_ARTICULATION_EXTERNAL_SPHERICAL;
-              }
-            }
             c.linBreakImpulse = constraint->linBreakForce;
             c.angBreakImpulse = constraint->angBreakForce;
             c.writeBackIndex = constraint->index;

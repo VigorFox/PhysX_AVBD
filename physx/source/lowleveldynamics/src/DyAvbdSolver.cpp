@@ -107,10 +107,32 @@ static void projectBodyStaticLockedD6LinearVelocities(
     const physx::PxVec3 r = body.rotation.rotate(
         aDynamic ? joint.anchorA : joint.anchorB);
     const bool allLinearLocked = joint.linearMotion == 0;
+    const physx::PxU32 linearSourceRows[3] = {
+        eJOINT_SOURCE_LINEAR_MOTION_X,
+        eJOINT_SOURCE_LINEAR_MOTION_Y,
+        eJOINT_SOURCE_LINEAR_MOTION_Z};
+    const physx::PxU32 angularSourceRows[3] = {
+        eJOINT_SOURCE_ANGULAR_MOTION_X,
+        eJOINT_SOURCE_ANGULAR_MOTION_Y,
+        eJOINT_SOURCE_ANGULAR_MOTION_Z};
+    const auto isPositionGeometrySource =
+        [&](physx::PxU32 sourceRow) -> bool {
+      const AvbdCompiledJointObjective *objective =
+          findAvbdJointObjectiveForSourceRow(
+              joint.objectiveProgram, sourceRow);
+      if (!objective ||
+          objective->owner !=
+              AvbdVelocityObjectiveOwner::PositionAL)
+        return false;
+      return objective->kind ==
+                 AvbdJointObjectiveKind::OrdinaryD6Position ||
+             objective->kind ==
+                 AvbdJointObjectiveKind::CoupledFixedD6;
+    };
 
     for (physx::PxU32 axis = 0; axis < 3; ++axis) {
       if (joint.getLinearMotion(axis) != 0 ||
-          joint.isLinearDriveEnabled(axis))
+          !isPositionGeometrySource(linearSourceRows[axis]))
         continue;
 
       physx::PxVec3 worldAxis(0.0f);
@@ -143,8 +165,15 @@ static void projectBodyStaticLockedD6LinearVelocities(
     // spatial velocity.  Project the complete six-dimensional locked
     // subspace after pose-to-velocity reconstruction; the row-wise linear
     // projection above remains responsible for partially locked joints.
-    if (allLinearLocked && joint.angularMotion == 0 &&
-        joint.driveFlags == 0) {
+    bool completeFixedPositionObjective =
+        allLinearLocked && joint.angularMotion == 0;
+    for (physx::PxU32 axis = 0;
+         axis < 3 && completeFixedPositionObjective; ++axis) {
+      completeFixedPositionObjective =
+          isPositionGeometrySource(linearSourceRows[axis]) &&
+          isPositionGeometrySource(angularSourceRows[axis]);
+    }
+    if (completeFixedPositionObjective) {
       body.linearVelocity = physx::PxVec3(0.0f);
       body.angularVelocity = physx::PxVec3(0.0f);
     }
@@ -244,26 +273,33 @@ static void applyAvbdPassiveFrictionComponents(
         bodyQueue.pushBack(bodyIndex);
       }
     };
-    visitedContacts[seed] = 1;
-    componentContacts.pushBack(seed);
-    enqueueBody(contacts[seed].header.bodyIndexA);
-    enqueueBody(contacts[seed].header.bodyIndexB);
-    for (physx::PxU32 queueIndex = 0;
-         queueIndex < bodyQueue.size(); ++queueIndex) {
-      const physx::PxU32 bodyIndex = bodyQueue[queueIndex];
-      for (physx::PxU32 c = 0; c < numContacts; ++c) {
-        if (visitedContacts[c] ||
-            !hasVelocityPassiveFrictionComponentOwner(contacts[c]) ||
-            (contacts[c].header.bodyIndexA != bodyIndex &&
-             contacts[c].header.bodyIndexB != bodyIndex))
-          continue;
-        visitedContacts[c] = 1;
-        componentContacts.pushBack(c);
-        enqueueBody(contacts[c].header.bodyIndexA);
-        enqueueBody(contacts[c].header.bodyIndexB);
-      }
+    const AvbdCompiledVelocityObjective *seedObjective =
+        findAvbdVelocityObjective(
+            contacts[seed].objectiveProgram,
+            AvbdVelocityObjectiveOwner::ComponentFinalize,
+            AvbdVelocityObjectiveKind::PassiveFriction);
+    if (!seedObjective)
+      continue;
+    const physx::PxU64 objectiveKey = seedObjective->objectiveKey;
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      const AvbdCompiledVelocityObjective *objective =
+          findAvbdVelocityObjective(
+              contacts[c].objectiveProgram,
+              AvbdVelocityObjectiveOwner::ComponentFinalize,
+              AvbdVelocityObjectiveKind::PassiveFriction);
+      if (visitedContacts[c] ||
+          !hasVelocityPassiveFrictionComponentOwner(contacts[c]) ||
+          !objective || objective->objectiveKey != objectiveKey)
+        continue;
+      visitedContacts[c] = 1;
+      componentContacts.pushBack(c);
+      enqueueBody(contacts[c].header.bodyIndexA);
+      enqueueBody(contacts[c].header.bodyIndexB);
     }
-    bool supported = componentContacts.size() >= 2;
+    bool supported =
+        componentContacts.size() >= 2 &&
+        componentContacts.size() ==
+            seedObjective->objectiveRowCount;
     for (physx::PxU32 index = 0;
          index < componentContacts.size(); ++index) {
       supported =
@@ -661,24 +697,46 @@ static void applyAvbdContactMaterialFrictionManifolds(
       bodies, numBodies, contacts, numContacts,
       dt, stats);
 
-  for (physx::PxU32 bodyIndex = 0; bodyIndex < numBodies; ++bodyIndex) {
+  physx::PxArray<physx::PxU8> visitedManifoldRows(numContacts);
+  for (physx::PxU32 c = 0; c < numContacts; ++c)
+    visitedManifoldRows[c] = 0;
+  for (physx::PxU32 seed = 0; seed < numContacts; ++seed) {
+    const AvbdCompiledVelocityObjective *seedObjective =
+        findAvbdCompleteManifoldObjective(
+            contacts[seed].objectiveProgram);
+    if (visitedManifoldRows[seed] || !seedObjective)
+      continue;
+    const physx::PxU32 bodyIndex =
+        contacts[seed].header.bodyIndexA < numBodies
+            ? contacts[seed].header.bodyIndexA
+            : contacts[seed].header.bodyIndexB;
+    if (bodyIndex >= numBodies)
+      continue;
     AvbdSolverBody &body = bodies[bodyIndex];
     if (body.invMass <= 0.0f)
       continue;
 
     physx::PxU32 contactIndices[4] = {};
     physx::PxU32 contactCount = 0;
+    const physx::PxU64 objectiveKey = seedObjective->objectiveKey;
+    bool supportedGroup = true;
     for (physx::PxU32 c = 0; c < numContacts; ++c) {
       const AvbdContactConstraint &contact = contacts[c];
-      if (!hasVelocityFrictionManifoldOwner(contact) ||
-          hasVelocityPassiveFrictionComponentOwner(contact) ||
-          (contact.header.bodyIndexA != bodyIndex &&
-           contact.header.bodyIndexB != bodyIndex))
+      const AvbdCompiledVelocityObjective *objective =
+          findAvbdCompleteManifoldObjective(
+              contact.objectiveProgram);
+      if (!objective || objective->objectiveKey != objectiveKey)
         continue;
+      visitedManifoldRows[c] = 1;
+      if (contact.header.bodyIndexA != bodyIndex &&
+          contact.header.bodyIndexB != bodyIndex)
+        supportedGroup = false;
       if (contactCount < 4)
-        contactIndices[contactCount++] = c;
+        contactIndices[contactCount] = c;
+      ++contactCount;
     }
-    if (contactCount < 2 || contactCount > 4)
+    if (!supportedGroup || contactCount < 2 || contactCount > 4 ||
+        contactCount != seedObjective->objectiveRowCount)
       continue;
 
     // Rebuild the inelastic normal response as a coupled nonnegative block.
@@ -3683,6 +3741,17 @@ static void applyAvbdMaterialNormalVelocity(
   // dominant this frame would double-count; dyn-dyn contacts are exclusive.
   for (physx::PxU32 c = 0; c < numContacts; ++c) {
     const AvbdContactConstraint &cc = contacts[c];
+    const AvbdCompiledVelocityObjective *materialNormalObjective =
+        findAvbdContactSourceObjective(
+            cc.objectiveProgram,
+            eCONTACT_SOURCE_MATERIAL_NORMAL);
+    // A compiled material-normal source is consumed only by its unique
+    // owner. Legacy rows retain the historical path until their compile
+    // classification is made explicit.
+    if (materialNormalObjective &&
+        materialNormalObjective->owner !=
+            AvbdVelocityObjectiveOwner::PointFinalize)
+      continue;
     if (hasDeformableStaticAnchor(cc) ||
         hasVelocityPassiveFrictionComponentOwner(cc))
       continue;
@@ -4674,6 +4743,7 @@ void AvbdSolver::postAlStages(
             PX_MAX_U32;
         for (physx::PxU32 c = 0; c < numContacts; ++c) {
           if (hasVelocityTangentMaterialOwner(contacts[c]) &&
+              !hasVelocityBodyStaticFrictionSweepOwner(contacts[c]) &&
               (contacts[c].header.bodyIndexA == i ||
                contacts[c].header.bodyIndexB == i)) {
             physicalContactTangentMaterialOwner = true;
@@ -4754,9 +4824,9 @@ void AvbdSolver::postAlStages(
             if (joint.header.bodyIndexA != i &&
                 joint.header.bodyIndexB != i)
               continue;
-            if ((joint.sourceFlags &
-                 AvbdD6JointConstraint::
-                     eSLERP_POSITION_DRIVE_ACTIVE) != 0)
+            if (hasAvbdJointObjective(
+                    joint.objectiveProgram,
+                    AvbdJointObjectiveKind::SlerpPositionDrive))
               physicalSlerpPositionDrive = true;
             if (physicalSlerpPositionDrive)
               break;
@@ -4982,19 +5052,16 @@ void AvbdSolver::solveIsland(
   for (physx::PxU32 i = 0; i < numBodies; ++i)
     rigidStaticContactsPerBody[i] = 0;
   for (physx::PxU32 c = 0; c < numContacts; ++c) {
-    contacts[c].header.flags = physx::PxU16(
-        contacts[c].header.flags &
-        ~(AvbdContactConstraintFlags::eVELOCITY_TANGENT_TARGET_OWNER |
-          AvbdContactConstraintFlags::
-              eVELOCITY_TANGENT_TARGET_NORMAL_SPAN |
-          AvbdContactConstraintFlags::
-              eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER |
-          AvbdContactConstraintFlags::
-              eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER |
-          AvbdContactConstraintFlags::
-              eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER |
-          AvbdContactConstraintFlags::
-              eDEFORMABLE_POSITION_TANGENT_OWNER));
+    resetAvbdContactObjectiveProgram(contacts[c].objectiveProgram);
+    if (!assignAvbdVelocityObjective(
+            contacts[c].objectiveProgram,
+            AvbdVelocityObjectiveOwner::PositionAL,
+            AvbdVelocityObjectiveKind::GeometryNormal,
+            AvbdVelocityObjectiveSpan::Normal,
+            AvbdVelocityObjectiveReconstruction::PoseDerived,
+            1u,
+            contacts[c].cacheKey))
+      continue;
     if (!contactOnlyTargetOwnership ||
         !isBodyVsStaticContact(contacts[c].header.bodyIndexA,
                                contacts[c].header.bodyIndexB, numBodies) ||
@@ -5061,9 +5128,17 @@ void AvbdSolver::solveIsland(
         hasTangentTarget && contact.restitution == 0.0f &&
         defaultDynamicScales &&
         (pureUnlimitedTangentTarget || strictFiniteCombinedTarget)) {
-      contact.header.flags = physx::PxU16(
-          contact.header.flags |
-          AvbdContactConstraintFlags::eVELOCITY_TANGENT_TARGET_OWNER);
+      if (!assignAvbdVelocityObjective(
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::PointFinalize,
+              AvbdVelocityObjectiveKind::TangentTarget,
+              strictFiniteCombinedTarget
+                  ? AvbdVelocityObjectiveSpan::NormalAndTangentCone
+                  : AvbdVelocityObjectiveSpan::TangentCone,
+              AvbdVelocityObjectiveReconstruction::PoseDerived,
+              1u,
+              contact.cacheKey))
+        continue;
 
       // The nonlinear position solve may rotate a cached local contact point
       // while enforcing its normal row.  For a central contact on an
@@ -5104,10 +5179,14 @@ void AvbdSolver::solveIsland(
           normalAngularJacobian.magnitudeSquared() <=
           lengthTolerance * lengthTolerance;
       if (isotropicInertia && centralNormal && stationaryStatic) {
-        contact.header.flags = physx::PxU16(
-            contact.header.flags |
-            AvbdContactConstraintFlags::
-                eVELOCITY_TANGENT_TARGET_NORMAL_SPAN);
+        AvbdCompiledVelocityObjective *objective =
+            findAvbdVelocityObjective(
+                contact.objectiveProgram,
+                AvbdVelocityObjectiveOwner::PointFinalize,
+                AvbdVelocityObjectiveKind::TangentTarget);
+        if (objective)
+          objective->reconstruction =
+              AvbdVelocityObjectiveReconstruction::NormalResponseSpan;
       }
     }
   }
@@ -5224,14 +5303,49 @@ void AvbdSolver::solveIsland(
               kMaxPassiveMaterialComponentContacts ||
           !passiveSupportComponent)
         continue;
+      physx::PxU64 objectiveKey = ~physx::PxU64(0);
       for (physx::PxU32 index = 0;
            index < componentContacts.size(); ++index) {
-        AvbdContactConstraint &contact =
+        objectiveKey =
+            physx::PxMin(
+                objectiveKey,
+                contacts[componentContacts[index]].cacheKey);
+      }
+      for (physx::PxU32 index = 0;
+           index < componentContacts.size(); ++index) {
+        const AvbdContactConstraint &contact =
             contacts[componentContacts[index]];
-        contact.header.flags = physx::PxU16(
-            contact.header.flags |
-            AvbdContactConstraintFlags::
-                eVELOCITY_PASSIVE_FRICTION_COMPONENT_OWNER);
+        if (!canAssignAvbdVelocityObjective(
+                contact.objectiveProgram,
+                AvbdVelocityObjectiveOwner::ComponentFinalize,
+                AvbdVelocityObjectiveKind::PassiveFriction,
+                AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial,
+                componentContacts.size(),
+                objectiveKey)) {
+          supported = false;
+          break;
+        }
+      }
+      if (!supported) {
+        for (physx::PxU32 index = 0;
+             index < componentContacts.size(); ++index) {
+          invalidateAvbdVelocityObjective(
+              contacts[componentContacts[index]].objectiveProgram);
+        }
+        continue;
+      }
+      for (physx::PxU32 index = 0;
+           index < componentContacts.size(); ++index) {
+        assignAvbdVelocityObjective(
+            contacts[componentContacts[index]].objectiveProgram,
+            AvbdVelocityObjectiveOwner::ComponentFinalize,
+            AvbdVelocityObjectiveKind::PassiveFriction,
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+            componentContacts.size(),
+            objectiveKey);
       }
     }
   }
@@ -5249,6 +5363,7 @@ void AvbdSolver::solveIsland(
     bool supported = true;
     bool haveReferenceTarget = false;
     physx::PxVec3 referenceDynamicTarget(0.0f);
+    physx::PxU64 objectiveKey = ~physx::PxU64(0);
     for (physx::PxU32 c = 0; c < numContacts && supported; ++c) {
       AvbdContactConstraint &contact = contacts[c];
       if (contact.header.bodyIndexA != bodyIndex &&
@@ -5295,31 +5410,64 @@ void AvbdSolver::solveIsland(
                  1.0e-10f) {
         supported = false;
       }
+      objectiveKey = physx::PxMin(objectiveKey, contact.cacheKey);
     }
     if (!supported || !haveReferenceTarget)
       continue;
     const bool passiveFriction =
         referenceDynamicTarget.magnitudeSquared() <= 1.0e-12f;
     for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      const AvbdContactConstraint &contact = contacts[c];
+      if ((contact.header.bodyIndexA == bodyIndex ||
+           contact.header.bodyIndexB == bodyIndex) &&
+          !canAssignAvbdVelocityObjective(
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::ManifoldFinalize,
+              passiveFriction
+                  ? AvbdVelocityObjectiveKind::PassiveFriction
+                  : AvbdVelocityObjectiveKind::TangentTarget,
+              AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+              AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+              rigidStaticContactsPerBody[bodyIndex],
+              objectiveKey)) {
+        supported = false;
+        break;
+      }
+    }
+    if (!supported) {
+      for (physx::PxU32 c = 0; c < numContacts; ++c) {
+        AvbdContactConstraint &contact = contacts[c];
+        if (contact.header.bodyIndexA == bodyIndex ||
+            contact.header.bodyIndexB == bodyIndex)
+          invalidateAvbdVelocityObjective(contact.objectiveProgram);
+      }
+      continue;
+    }
+    for (physx::PxU32 c = 0; c < numContacts; ++c) {
       AvbdContactConstraint &contact = contacts[c];
       if (contact.header.bodyIndexA == bodyIndex ||
           contact.header.bodyIndexB == bodyIndex) {
-        if (passiveFriction) {
-          contact.header.flags = physx::PxU16(
-              contact.header.flags |
-              AvbdContactConstraintFlags::
-                  eVELOCITY_PASSIVE_FRICTION_MANIFOLD_OWNER);
-        } else {
-          contact.header.flags = physx::PxU16(
-              contact.header.flags |
-              AvbdContactConstraintFlags::
-                  eVELOCITY_TANGENT_TARGET_OWNER |
-              AvbdContactConstraintFlags::
-                  eVELOCITY_TANGENT_TARGET_MANIFOLD_OWNER);
-        }
+        assignAvbdVelocityObjective(
+            contact.objectiveProgram,
+            AvbdVelocityObjectiveOwner::ManifoldFinalize,
+            passiveFriction
+                ? AvbdVelocityObjectiveKind::PassiveFriction
+                : AvbdVelocityObjectiveKind::TangentTarget,
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone,
+            AvbdVelocityObjectiveReconstruction::
+                SolveStartInertial,
+            rigidStaticContactsPerBody[bodyIndex],
+            objectiveKey);
       }
     }
   }
+
+  // Specialized target/manifold/component programs have first claim.
+  // Compile all remaining ordinary rigid contact sources through the same
+  // helper used by joint islands, so owner classification has one entry point.
+  if (contactOnlyTargetOwnership)
+    compileAvbdOrdinaryRigidContactObjectives(
+        contacts, numContacts, numBodies);
 
   // Strict Phase-3 owner: ordinary zero-target deformable/static tangents use
   // the same position-level row in primal and dual. Joint-mixed islands remain
@@ -5368,9 +5516,49 @@ void AvbdSolver::solveIsland(
       stats.surfaceDeformablePositionTangentScaleRejectRows++;
       continue;
     }
-    contact.header.flags = physx::PxU16(
-        contact.header.flags |
-        AvbdContactConstraintFlags::eDEFORMABLE_POSITION_TANGENT_OWNER);
+    if (!assignAvbdVelocityObjective(
+            contact.objectiveProgram,
+            AvbdVelocityObjectiveOwner::PositionAL,
+            AvbdVelocityObjectiveKind::PassiveFriction,
+            AvbdVelocityObjectiveSpan::TangentCone,
+            AvbdVelocityObjectiveReconstruction::PoseDerived,
+            1u,
+            contact.cacheKey))
+      continue;
+  }
+
+  // Publish the remaining authored source slots as an explicit migration
+  // backlog. Geometry normal is already compiled independently above.
+  // Material normal exists for every contact; material tangent exists only
+  // when friction or an authored tangential target is present.
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    AvbdContactConstraint &contact = contacts[c];
+    physx::PxU8 authoredSourceSlots =
+        eCONTACT_SOURCE_GEOMETRY_NORMAL |
+        eCONTACT_SOURCE_MATERIAL_NORMAL;
+    const physx::PxReal targetTangent0 =
+        contact.targetVelocity.dot(contact.tangent0);
+    const physx::PxReal targetTangent1 =
+        contact.targetVelocity.dot(contact.tangent1);
+    if (contact.friction > 0.0f || contact.staticFriction > 0.0f ||
+        physx::PxAbs(targetTangent0) > 1.0e-6f ||
+        physx::PxAbs(targetTangent1) > 1.0e-6f)
+      authoredSourceSlots = physx::PxU8(
+          authoredSourceSlots |
+          eCONTACT_SOURCE_MATERIAL_TANGENT);
+    setAvbdContactObjectiveLegacySources(
+        contact.objectiveProgram, authoredSourceSlots);
+  }
+
+  // The compiled program is the only ownership authority consumed below.
+  // Any internally inconsistent program is converted to the explicit
+  // fail-closed state before position or velocity stages can inspect it.
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    if (!isValidAvbdContactObjectiveProgram(
+            contacts[c].objectiveProgram)) {
+      invalidateAvbdVelocityObjective(
+          contacts[c].objectiveProgram);
+    }
   }
 
   // One island entry: joint/genuine-soft module vs contact-only module. NP
@@ -5385,6 +5573,126 @@ void AvbdSolver::solveIsland(
   } else {
     solve(dt, bodies, numBodies, contacts, numContacts, gravity, contactMap,
           colorBatches, numColors, iterationOverride, stats);
+  }
+
+  // Audit the complete physical source-slot program. Composite entries count
+  // once for every physical slot they own; geometry normal and material
+  // normal therefore remain independently visible even though they share the
+  // same scalar contact direction.
+  const auto contactSourceSlotCount = [](physx::PxU8 mask) {
+    return physx::PxU32(
+        ((mask & eCONTACT_SOURCE_GEOMETRY_NORMAL) ? 1u : 0u) +
+        ((mask & eCONTACT_SOURCE_MATERIAL_NORMAL) ? 1u : 0u) +
+        ((mask & eCONTACT_SOURCE_MATERIAL_TANGENT) ? 1u : 0u));
+  };
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    const AvbdCompiledContactObjectiveProgram &program =
+        contacts[c].objectiveProgram;
+    stats.contactObjectiveFingerprint +=
+        fingerprintAvbdContactObjectiveProgram(program);
+    if (!isValidAvbdContactObjectiveProgram(program)) {
+      stats.contactObjectiveInvalidSlots +=
+          contactSourceSlotCount(program.authoredSourceSlotMask);
+      continue;
+    }
+    stats.contactObjectiveLegacySlots +=
+        contactSourceSlotCount(program.legacySourceSlotMask);
+    if ((program.legacySourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_NORMAL) != 0)
+      stats.contactObjectiveLegacyNormalSlots++;
+    if ((program.legacySourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_TANGENT) != 0) {
+      stats.contactObjectiveLegacyTangentSlots++;
+      const AvbdContactConstraint &contact = contacts[c];
+      const bool dynamicA = contact.header.bodyIndexA < numBodies;
+      const bool dynamicB = contact.header.bodyIndexB < numBodies;
+      if (hasJoints) {
+        stats.contactObjectiveLegacyJointMixedTangentSlots++;
+      } else if (hasDeformableStaticAnchor(contact)) {
+        stats.contactObjectiveLegacyDeformableTangentSlots++;
+      } else if (hasKinematicShellAnchor(contact) ||
+                 hasDeformableSoftVbd) {
+        stats.contactObjectiveLegacyOtherTangentSlots++;
+      } else if (isBodyVsStaticContact(
+                     contact.header.bodyIndexA,
+                     contact.header.bodyIndexB, numBodies)) {
+        stats.contactObjectiveLegacyRigidStaticTangentSlots++;
+      } else if (dynamicA && dynamicB) {
+        stats.contactObjectiveLegacyDynamicTangentSlots++;
+      } else {
+        stats.contactObjectiveLegacyOtherTangentSlots++;
+      }
+    }
+    for (physx::PxU32 entryIndex = 0;
+         entryIndex < program.entryCount; ++entryIndex) {
+      const AvbdCompiledVelocityObjective &objective =
+          program.entries[entryIndex];
+      const physx::PxU32 sourceSlots =
+          contactSourceSlotCount(objective.sourceSlotMask);
+      switch (objective.owner) {
+      case AvbdVelocityObjectiveOwner::PositionAL:
+        stats.contactObjectivePositionSlots += sourceSlots;
+        break;
+      case AvbdVelocityObjectiveOwner::PointFinalize:
+        stats.contactObjectivePointSlots += sourceSlots;
+        break;
+      case AvbdVelocityObjectiveOwner::ManifoldFinalize:
+        stats.contactObjectiveManifoldSlots += sourceSlots;
+        break;
+      case AvbdVelocityObjectiveOwner::ComponentFinalize:
+        stats.contactObjectiveComponentSlots += sourceSlots;
+        break;
+      case AvbdVelocityObjectiveOwner::JointFinalize:
+        stats.contactObjectiveJointSlots += sourceSlots;
+        break;
+      case AvbdVelocityObjectiveOwner::Unsupported:
+        stats.contactObjectiveUnsupportedSlots += sourceSlots;
+        break;
+      }
+    }
+  }
+
+  // Preserve the established material-row diagnostic during the source-slot
+  // migration. Geometry-normal entries do not change this compatibility
+  // partition.
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    const AvbdCompiledContactObjectiveProgram &program =
+        contacts[c].objectiveProgram;
+    if (!isValidAvbdContactObjectiveProgram(program)) {
+      stats.velocityObjectiveInvalidRows++;
+      continue;
+    }
+    const AvbdCompiledVelocityObjective *objective =
+        findAvbdContactMaterialObjective(program);
+    if (!objective) {
+      const AvbdCompiledVelocityObjective legacyObjective;
+      stats.velocityObjectiveFingerprint +=
+          fingerprintAvbdVelocityObjective(legacyObjective);
+      stats.velocityObjectiveLegacyRows++;
+      continue;
+    }
+    stats.velocityObjectiveFingerprint +=
+        fingerprintAvbdVelocityObjective(*objective);
+    switch (objective->owner) {
+    case AvbdVelocityObjectiveOwner::PositionAL:
+      stats.velocityObjectivePositionRows++;
+      break;
+    case AvbdVelocityObjectiveOwner::PointFinalize:
+      stats.velocityObjectivePointRows++;
+      break;
+    case AvbdVelocityObjectiveOwner::ManifoldFinalize:
+      stats.velocityObjectiveManifoldRows++;
+      break;
+    case AvbdVelocityObjectiveOwner::ComponentFinalize:
+      stats.velocityObjectiveComponentRows++;
+      break;
+    case AvbdVelocityObjectiveOwner::JointFinalize:
+      stats.velocityObjectiveJointRows++;
+      break;
+    case AvbdVelocityObjectiveOwner::Unsupported:
+      stats.velocityObjectiveUnsupportedRows++;
+      break;
+    }
   }
 }
 
@@ -5886,7 +6194,8 @@ void AvbdSolver::applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
     if (!isBodyVsStaticContact(cc.header.bodyIndexA, cc.header.bodyIndexB,
                                numBodies))
       continue;
-    if (hasVelocityTangentMaterialOwner(cc))
+    if (hasVelocityTangentMaterialOwner(cc) &&
+        !hasVelocityBodyStaticFrictionSweepOwner(cc))
       continue;
     if (hasDeformablePositionTangentOwner(cc))
       continue;

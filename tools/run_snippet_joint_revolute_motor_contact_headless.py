@@ -9,6 +9,8 @@ import math
 import os
 from pathlib import Path
 
+from avbd_contact_objective_ir_gate import validate_contact_objective_ir
+from avbd_joint_objective_ir_gate import validate_joint_objective_ir
 from snippet_headless_process import run_headless_process
 
 
@@ -19,6 +21,18 @@ DEFAULT_BIN_DIR = (
 EXECUTABLE = "SnippetJoint_64.exe"
 FRAMES = 360
 DT = 1.0 / 60.0
+DIAGNOSTIC_CADENCE = 4
+OBJECTIVE_IR_PREFIX = "[avbd:objective-ir] "
+OBJECTIVE_IR_PARTITION_FIELDS = (
+    "objectivePositionRows",
+    "objectivePointRows",
+    "objectiveManifoldRows",
+    "objectiveComponentRows",
+    "objectiveJointRows",
+    "objectiveUnsupportedRows",
+    "objectiveLegacyRows",
+    "objectiveInvalidRows",
+)
 
 
 @dataclass(frozen=True)
@@ -91,7 +105,9 @@ def positive_int(
     return value
 
 
-def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
+def run_one(
+    spec: RunSpec, bin_dir: Path, timeout: float
+) -> tuple[bool, int, int, int]:
     argv = [
         str(bin_dir / EXECUTABLE),
         "--headless",
@@ -105,6 +121,14 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
     ]
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
+    env["PHYSX_AVBD_ITER_DIAG"] = "1" if spec.solver == "avbd" else "0"
+    # Frame 1 is always emitted by the engine, so the transient Unsupported
+    # owner remains covered while a lower cadence keeps diagnostics from
+    # consuming the fixed 60-second physics budget.
+    env["PHYSX_AVBD_ITER_DIAG_EVERY"] = str(DIAGNOSTIC_CADENCE)
+    env["PHYSX_AVBD_ITER_DIAG_SEQUENTIAL"] = (
+        "1" if spec.execution == "sequential" else "0"
+    )
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout
     )
@@ -134,6 +158,97 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
     gate = parsed["gate"]
     fixture = parsed["fixture"]
     cleanup = parsed["cleanup"]
+
+    objective_lines = [
+        line.strip()
+        for line in combined.splitlines()
+        if line.startswith(OBJECTIVE_IR_PREFIX)
+    ]
+    objective_joint_rows = 0
+    objective_unsupported_rows = 0
+    objective_fingerprint = 0
+    if spec.solver == "avbd":
+        joint_objective_errors, _ = validate_joint_objective_ir(
+            combined,
+            expected_owner="JointFinalize",
+            allow_unsupported=True,
+            require_unsupported=True,
+        )
+        errors.extend(joint_objective_errors)
+        contact_objective_errors, _ = validate_contact_objective_ir(
+            combined,
+            required_owners=(
+                "PositionAL",
+                "JointFinalize",
+                "Unsupported",
+            ),
+            allow_unsupported=True,
+        )
+        errors.extend(contact_objective_errors)
+        if not objective_lines:
+            errors.append("missing compiled-objective diagnostics")
+        for line in objective_lines:
+            fields, parse_errors = parse_fields(
+                line, OBJECTIVE_IR_PREFIX
+            )
+            errors.extend(parse_errors)
+            try:
+                rows = int(fields["rows"])
+                objective_fingerprint += int(
+                    fields["objectiveFingerprint"]
+                )
+                partition_values = {
+                    key: int(fields[key])
+                    for key in OBJECTIVE_IR_PARTITION_FIELDS
+                }
+            except (KeyError, ValueError):
+                errors.append(
+                    "compiled-objective line has missing/non-integer field"
+                )
+                continue
+            partition = sum(partition_values.values())
+            if rows != partition:
+                errors.append(
+                    f"compiled-objective rows={rows}, "
+                    f"partition={partition}"
+                )
+            if partition_values["objectiveInvalidRows"] != 0:
+                errors.append("compiled-objective Invalid row detected")
+            explicit_rows = (
+                partition_values["objectiveJointRows"] +
+                partition_values["objectiveUnsupportedRows"]
+            )
+            if rows > 0 and explicit_rows != rows:
+                errors.append(
+                    f"frame={fields.get('frame', 'MISSING')} "
+                    "contact-coupled objective is not explicitly owned: "
+                    f"joint="
+                    f"{partition_values['objectiveJointRows']} "
+                    f"unsupported="
+                    f"{partition_values['objectiveUnsupportedRows']} "
+                    f"legacy="
+                    f"{partition_values['objectiveLegacyRows']} "
+                    f"invalid="
+                    f"{partition_values['objectiveInvalidRows']} "
+                    f"rows={rows}"
+                )
+            objective_joint_rows += partition_values[
+                "objectiveJointRows"
+            ]
+            objective_unsupported_rows += partition_values[
+                "objectiveUnsupportedRows"
+            ]
+        if objective_joint_rows <= 0:
+            errors.append("compiled JointFinalize owner was not observed")
+        if objective_unsupported_rows <= 0:
+            errors.append(
+                "explicit Unsupported transient-contact owner was not "
+                "observed"
+            )
+    elif objective_lines:
+        errors.append("unexpected compiled-objective diagnostics on TGS")
+    elif "[avbd:joint-objective-ir] " in combined:
+        errors.append("unexpected joint-objective diagnostics on TGS")
 
     if result.timed_out:
         errors.append("timed out")
@@ -259,6 +374,9 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
         f"normalImpulse={fixture.get('totalNormalImpulse', 'MISSING')} "
         f"driveReaction="
         f"{fixture.get('meanLateDriveReaction', 'MISSING')} "
+        f"jointOwnerRows={objective_joint_rows} "
+        f"unsupportedOwnerRows={objective_unsupported_rows} "
+        f"objectiveFingerprint={objective_fingerprint} "
         f"anchor={fixture.get('maximumAnchorError', 'MISSING')} "
         f"height={fixture.get('maximumCenterHeightError', 'MISSING')} "
         f"exit={result.returncode} "
@@ -269,7 +387,12 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
             f"[REVOLUTE_MOTOR_CONTACT_ERROR] solver={spec.solver} "
             f"execution={spec.execution} error={error}"
         )
-    return not errors
+    return (
+        not errors,
+        objective_joint_rows,
+        objective_unsupported_rows,
+        objective_fingerprint,
+    )
 
 
 def main() -> int:
@@ -291,10 +414,24 @@ def main() -> int:
         parser.error("--timeout must be positive")
 
     specs = specs_for(args.mode)
-    passes = sum(
+    results = [
         run_one(spec, bin_dir, args.timeout) for spec in specs
+    ]
+    passes = sum(result[0] for result in results)
+    avbd_ir = [
+        result[1:]
+        for spec, result in zip(specs, results)
+        if spec.solver == "avbd"
+    ]
+    ir_consistent = len(avbd_ir) < 2 or all(
+        result == avbd_ir[0] for result in avbd_ir[1:]
     )
-    passed = passes == len(specs)
+    if not ir_consistent:
+        print(
+            "[REVOLUTE_MOTOR_CONTACT_ERROR] "
+            "parallel/sequential compiled-objective fingerprint mismatch"
+        )
+    passed = passes == len(specs) and ir_consistent
     print(
         f"[REVOLUTE_MOTOR_CONTACT_SUMMARY] mode={args.mode} "
         f"runs={passes}/{len(specs)} "

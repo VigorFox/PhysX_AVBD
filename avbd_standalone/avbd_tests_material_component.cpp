@@ -1,4 +1,7 @@
 #include "avbd_component_unilateral_projection.h"
+#include "avbd_material_graph_multilevel.h"
+#include "avbd_material_interface_wrench.h"
+#include "avbd_material_spatial_transfer.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -758,20 +761,6 @@ static double projectedMaterialResidualFromResponse(
   return maximum;
 }
 
-static double projectedMaterialResidualMatrixFree(
-    const std::vector<BroadMaterialContact> &contacts,
-    const std::vector<ComponentProjectionRow> &rows,
-    const std::vector<ComponentProjectionBody> &bodies,
-    const std::vector<double> &impulses, int *matvecCounter,
-    int *evaluationCounter = nullptr) {
-  std::vector<double> responseVelocity;
-  multiplyBroadAllRows(rows, bodies, impulses, responseVelocity,
-                       matvecCounter);
-  return projectedMaterialResidualFromResponse(
-      contacts, rows, impulses, responseVelocity,
-      evaluationCounter);
-}
-
 static BroadMaterialLane runBroadMaterialLane(
     bool includeTransientImpact, float yaw, bool reverseContacts,
     bool reverseBodyStorage, int outerBudget,
@@ -1384,7 +1373,6 @@ static BroadMaterialLane runBroadMaterialLane(
         fixedResidualHistory.erase(
             fixedResidualHistory.begin());
       }
-
       std::vector<double> bestCandidate = mappedCandidate;
       std::vector<double> bestResponse = mappedResponse;
       int bestChoice = 0;
@@ -1994,4 +1982,1514 @@ bool probe154_broadMaterialComponentScalingAuthority() {
         "24-body failure-first boundary no longer rejects atomically");
 
   PASS("12-/24-body fixtures preserve the strict material authority and expose candidate scaling");
+}
+
+bool probe155_materialInterfaceWrenchAuthority() {
+  printf("\n--- Probe 155: Material interface-wrench restriction/prolongation authority ---\n");
+
+  const auto makePoints =
+      [](float yaw, bool reverseOrder) {
+        const Vec3 normal(0.0f, 1.0f, 0.0f);
+        const Vec3 tangent0 =
+            rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), yaw);
+        const Vec3 tangent1 =
+            rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), yaw);
+        const Vec3 localPoints[4] = {
+            Vec3(-0.5f, 0.0f, -0.5f),
+            Vec3(-0.5f, 0.0f, 0.5f),
+            Vec3(0.5f, 0.0f, -0.5f),
+            Vec3(0.5f, 0.0f, 0.5f)};
+        std::vector<MaterialInterfacePoint> points;
+        for (size_t point = 0; point < 4u; ++point) {
+          MaterialInterfacePoint value;
+          value.worldPoint = rotateAboutY(localPoints[point], yaw);
+          value.normal = normal;
+          value.tangent0 = tangent0;
+          value.tangent1 = tangent1;
+          value.stableKey = 1000u + static_cast<uint64_t>(point);
+          points.push_back(value);
+        }
+        if (reverseOrder)
+          std::reverse(points.begin(), points.end());
+        return points;
+      };
+  const auto maximumVectorDelta =
+      [](const std::vector<double> &a,
+         const std::vector<double> &b) {
+        if (a.size() != b.size())
+          return std::numeric_limits<double>::infinity();
+        double maximum = 0.0;
+        for (size_t index = 0; index < a.size(); ++index) {
+          maximum =
+              std::max(maximum, std::fabs(a[index] - b[index]));
+        }
+        return maximum;
+      };
+  const auto maximumWrenchDelta =
+      [](const MaterialSpatialWrench &a,
+         const MaterialSpatialWrench &b) {
+        double maximum = 0.0;
+        for (size_t component = 0; component < 6u; ++component) {
+          maximum =
+              std::max(maximum,
+                       std::fabs(a[component] - b[component]));
+        }
+        return maximum;
+      };
+  const auto squaredNorm =
+      [](const std::vector<double> &values) {
+        double norm = 0.0;
+        for (double value : values)
+          norm += value * value;
+        return norm;
+      };
+  const auto rotateWrench =
+      [](const MaterialSpatialWrench &wrench, float yaw) {
+        const Vec3 force = rotateAboutY(
+            Vec3(static_cast<float>(wrench[0]),
+                 static_cast<float>(wrench[1]),
+                 static_cast<float>(wrench[2])),
+            yaw);
+        const Vec3 moment = rotateAboutY(
+            Vec3(static_cast<float>(wrench[3]),
+                 static_cast<float>(wrench[4]),
+                 static_cast<float>(wrench[5])),
+            yaw);
+        MaterialSpatialWrench result = {
+            force.x, force.y, force.z,
+            moment.x, moment.y, moment.z};
+        return result;
+      };
+  const auto applyPointImpulses =
+      [](const MaterialInterfaceWrenchMap &map,
+         const std::vector<double> &impulses,
+         const Vec3 &bodyPosition, float inverseMass,
+         const Mat33 &inverseInertia, float sign) {
+        Vec3 linear;
+        Vec3 angular;
+        for (size_t point = 0; point < map.points.size(); ++point) {
+          const size_t row = point * 3u;
+          const Vec3 impulse =
+              map.points[point].normal *
+                  static_cast<float>(impulses[row]) +
+              map.points[point].tangent0 *
+                  static_cast<float>(impulses[row + 1u]) +
+              map.points[point].tangent1 *
+                  static_cast<float>(impulses[row + 2u]);
+          const Vec3 signedImpulse = impulse * sign;
+          linear += signedImpulse * inverseMass;
+          angular +=
+              inverseInertia *
+              ((map.points[point].worldPoint - bodyPosition)
+                   .cross(signedImpulse));
+        }
+        return Vec6(linear, angular);
+      };
+  const auto applyWrench =
+      [](const MaterialSpatialWrench &wrench,
+         const Vec3 &bodyPosition, float inverseMass,
+         const Mat33 &inverseInertia, float sign) {
+        const Vec3 force(
+            static_cast<float>(wrench[0]),
+            static_cast<float>(wrench[1]),
+            static_cast<float>(wrench[2]));
+        const Vec3 moment(
+            static_cast<float>(wrench[3]),
+            static_cast<float>(wrench[4]),
+            static_cast<float>(wrench[5]));
+        const Vec3 signedForce = force * sign;
+        const Vec3 signedMoment = moment * sign;
+        return Vec6(
+            signedForce * inverseMass,
+            inverseInertia *
+                (signedMoment -
+                 bodyPosition.cross(signedForce)));
+      };
+
+  const MaterialInterfaceWrenchMap canonical =
+      buildMaterialInterfaceWrenchMap(makePoints(0.0f, false));
+  const MaterialInterfaceWrenchMap reverse =
+      buildMaterialInterfaceWrenchMap(makePoints(0.0f, true));
+  CHECK(canonical.finite && reverse.finite &&
+            canonical.rank == 6 && reverse.rank == 6,
+        "four-point interface did not produce a full-rank wrench map");
+
+  double rangeIdentityError = 0.0;
+  for (int row = 0; row < 6; ++row) {
+    for (int column = 0; column < 6; ++column) {
+      const double expected = row == column ? 1.0 : 0.0;
+      rangeIdentityError =
+          std::max(rangeIdentityError,
+                   std::fabs(canonical.rangeProjector[
+                                 row * 6 + column] -
+                             expected));
+    }
+  }
+  const double orderRestrictionDelta =
+      maximumVectorDelta(canonical.restriction,
+                         reverse.restriction);
+  const double orderProlongationDelta =
+      maximumVectorDelta(canonical.prolongation,
+                         reverse.prolongation);
+
+  std::vector<double> feasibleImpulse(
+      canonical.points.size() * 3u, 0.0);
+  for (size_t point = 0; point < canonical.points.size();
+       ++point) {
+    feasibleImpulse[point * 3u] = 2.0;
+    feasibleImpulse[point * 3u + 1u] = 0.25;
+    feasibleImpulse[point * 3u + 2u] = -0.1;
+  }
+  MaterialSpatialWrench feasibleWrench{};
+  CHECK(restrictMaterialPointImpulses(
+            canonical, feasibleImpulse, feasibleWrench),
+        "failed to restrict a feasible point impulse");
+  std::vector<double> minimumImpulse;
+  CHECK(prolongMaterialInterfaceWrench(
+            canonical, feasibleWrench, minimumImpulse),
+        "failed to prolong a full-rank interface wrench");
+  MaterialSpatialWrench reconstructedWrench{};
+  CHECK(restrictMaterialPointImpulses(
+            canonical, minimumImpulse, reconstructedWrench),
+        "failed to reconstruct the prolonged wrench");
+  const double wrenchRoundTripError =
+      maximumWrenchDelta(feasibleWrench, reconstructedWrench);
+
+  std::vector<double> arbitrary(feasibleImpulse.size(), 0.0);
+  for (size_t coordinate = 0; coordinate < arbitrary.size();
+       ++coordinate) {
+    arbitrary[coordinate] =
+        std::sin(0.73 * static_cast<double>(coordinate + 1u));
+  }
+  MaterialSpatialWrench arbitraryWrench{};
+  CHECK(restrictMaterialPointImpulses(
+            canonical, arbitrary, arbitraryWrench),
+        "failed to restrict the nullspace witness");
+  std::vector<double> arbitraryMinimum;
+  CHECK(prolongMaterialInterfaceWrench(
+            canonical, arbitraryWrench, arbitraryMinimum),
+        "failed to remove the point-contact nullspace");
+  std::vector<double> nullspace(arbitrary.size(), 0.0);
+  double minimumNullDot = 0.0;
+  for (size_t coordinate = 0; coordinate < arbitrary.size();
+       ++coordinate) {
+    nullspace[coordinate] =
+        arbitrary[coordinate] - arbitraryMinimum[coordinate];
+    minimumNullDot +=
+        arbitraryMinimum[coordinate] * nullspace[coordinate];
+  }
+  MaterialSpatialWrench nullWrench{};
+  CHECK(restrictMaterialPointImpulses(
+            canonical, nullspace, nullWrench),
+        "failed to restrict the removed nullspace");
+  MaterialSpatialWrench zeroWrench{};
+  const double nullWrenchError =
+      maximumWrenchDelta(nullWrench, zeroWrench);
+
+  const Vec3 bodyPositionA(0.0f, 0.5f, 0.0f);
+  const Vec3 bodyPositionB(0.0f, -0.5f, 0.0f);
+  const Mat33 inverseInertiaA = Mat33::diag(0.4f, 0.3f, 0.2f);
+  const Mat33 inverseInertiaB = Mat33::diag(0.7f, 0.5f, 0.25f);
+  const Vec6 pointDeltaA = applyPointImpulses(
+      canonical, minimumImpulse, bodyPositionA, 0.25f,
+      inverseInertiaA, 1.0f);
+  const Vec6 pointDeltaB = applyPointImpulses(
+      canonical, minimumImpulse, bodyPositionB, 0.5f,
+      inverseInertiaB, -1.0f);
+  const Vec6 wrenchDeltaA = applyWrench(
+      reconstructedWrench, bodyPositionA, 0.25f,
+      inverseInertiaA, 1.0f);
+  const Vec6 wrenchDeltaB = applyWrench(
+      reconstructedWrench, bodyPositionB, 0.5f,
+      inverseInertiaB, -1.0f);
+  double bodyResponseError = 0.0;
+  for (int component = 0; component < 6; ++component) {
+    bodyResponseError =
+        std::max(bodyResponseError,
+                 std::fabs(static_cast<double>(
+                               pointDeltaA[component]) -
+                           static_cast<double>(
+                               wrenchDeltaA[component])));
+    bodyResponseError =
+        std::max(bodyResponseError,
+                 std::fabs(static_cast<double>(
+                               pointDeltaB[component]) -
+                           static_cast<double>(
+                               wrenchDeltaB[component])));
+  }
+
+  const float yaw = 0.41f;
+  const MaterialInterfaceWrenchMap yawed =
+      buildMaterialInterfaceWrenchMap(makePoints(yaw, false));
+  MaterialSpatialWrench yawedWrench{};
+  CHECK(yawed.finite && yawed.rank == 6 &&
+            restrictMaterialPointImpulses(
+                yawed, feasibleImpulse, yawedWrench),
+        "yawed interface map is not full-rank");
+  const double yawWrenchError = maximumWrenchDelta(
+      rotateWrench(feasibleWrench, yaw), yawedWrench);
+  std::vector<double> yawedMinimumImpulse;
+  CHECK(prolongMaterialInterfaceWrench(
+            yawed, yawedWrench, yawedMinimumImpulse),
+        "failed to prolong the yawed interface wrench");
+  const double yawImpulseError =
+      maximumVectorDelta(minimumImpulse, yawedMinimumImpulse);
+
+  MaterialInterfacePoint degeneratePoint;
+  degeneratePoint.worldPoint = Vec3(0.25f, 0.0f, 0.5f);
+  degeneratePoint.normal = Vec3(0.0f, 1.0f, 0.0f);
+  degeneratePoint.tangent0 = Vec3(1.0f, 0.0f, 0.0f);
+  degeneratePoint.tangent1 = Vec3(0.0f, 0.0f, 1.0f);
+  degeneratePoint.stableKey = 42u;
+  const MaterialInterfaceWrenchMap degenerate =
+      buildMaterialInterfaceWrenchMap({degeneratePoint});
+  const std::vector<double> degenerateImpulse = {1.0, -0.25, 0.5};
+  MaterialSpatialWrench degenerateWrench{};
+  std::vector<double> degenerateRoundTrip;
+  CHECK(degenerate.finite && degenerate.rank == 3 &&
+            restrictMaterialPointImpulses(
+                degenerate, degenerateImpulse,
+                degenerateWrench) &&
+            prolongMaterialInterfaceWrench(
+                degenerate, degenerateWrench,
+                degenerateRoundTrip),
+        "rank-deficient interface map did not preserve its range");
+  const double degenerateImpulseError =
+      maximumVectorDelta(degenerateImpulse,
+                         degenerateRoundTrip);
+  MaterialSpatialWrench unavailableWrench = {
+      0.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+  const MaterialSpatialWrench projectedUnavailable =
+      projectMaterialInterfaceWrenchToRange(
+          degenerate, unavailableWrench);
+  const MaterialSpatialWrench projectedTwice =
+      projectMaterialInterfaceWrenchToRange(
+          degenerate, projectedUnavailable);
+  const double degenerateIdempotenceError =
+      maximumWrenchDelta(projectedUnavailable, projectedTwice);
+  const double unavailableProjectionGap =
+      maximumWrenchDelta(unavailableWrench,
+                         projectedUnavailable);
+
+  std::vector<double> projectedCorrection = minimumImpulse;
+  projectedCorrection[0] = -1.0;
+  projectedCorrection[1] = 10.0;
+  projectedCorrection[2] = -7.0;
+  const std::vector<double> friction(
+      canonical.points.size(), 0.8);
+  CHECK(projectMaterialPointImpulses(
+            canonical, friction, projectedCorrection),
+        "failed to project a coarse point correction");
+  double feasibilityViolation = 0.0;
+  for (size_t point = 0; point < canonical.points.size();
+       ++point) {
+    const size_t row = point * 3u;
+    const double magnitude =
+        std::sqrt(projectedCorrection[row + 1u] *
+                      projectedCorrection[row + 1u] +
+                  projectedCorrection[row + 2u] *
+                      projectedCorrection[row + 2u]);
+    feasibilityViolation =
+        std::max(feasibilityViolation,
+                 -projectedCorrection[row]);
+    feasibilityViolation =
+        std::max(feasibilityViolation,
+                 magnitude -
+                     friction[point] * projectedCorrection[row]);
+  }
+  MaterialSpatialWrench projectedCorrectionWrench{};
+  CHECK(restrictMaterialPointImpulses(
+            canonical, projectedCorrection,
+            projectedCorrectionWrench),
+        "projected correction did not produce a finite wrench");
+  const Vec6 projectedPointDelta = applyPointImpulses(
+      canonical, projectedCorrection, bodyPositionA, 0.25f,
+      inverseInertiaA, 1.0f);
+  const Vec6 projectedWrenchDelta = applyWrench(
+      projectedCorrectionWrench, bodyPositionA, 0.25f,
+      inverseInertiaA, 1.0f);
+  double projectedResponseError = 0.0;
+  for (int component = 0; component < 6; ++component) {
+    projectedResponseError =
+        std::max(projectedResponseError,
+                 std::fabs(static_cast<double>(
+                               projectedPointDelta[component]) -
+                           static_cast<double>(
+                               projectedWrenchDelta[component])));
+  }
+
+  uint32_t randomState = 0x155A11CEu;
+  const auto randomUnit =
+      [&randomState]() {
+        randomState =
+            randomState * 1664525u + 1013904223u;
+        return static_cast<double>(randomState >> 8u) /
+               16777216.0;
+      };
+  const auto randomSigned =
+      [&randomUnit]() {
+        return randomUnit() * 2.0 - 1.0;
+      };
+  double randomOrderError = 0.0;
+  double randomRoundTripError = 0.0;
+  double randomNullWrenchError = 0.0;
+  double randomMinimumOrthogonality = 0.0;
+  double randomBodyResponseError = 0.0;
+  double randomFeasibilityViolation = 0.0;
+  double randomProjectedResponseError = 0.0;
+  for (uint32_t sample = 0; sample < 64u; ++sample) {
+    const size_t pointCount =
+        4u + static_cast<size_t>(sample % 5u);
+    const float randomYaw =
+        static_cast<float>(randomSigned() * 3.0);
+    const Vec3 randomNormal(0.0f, 1.0f, 0.0f);
+    const Vec3 randomTangent0 =
+        rotateAboutY(Vec3(1.0f, 0.0f, 0.0f), randomYaw);
+    const Vec3 randomTangent1 =
+        rotateAboutY(Vec3(0.0f, 0.0f, 1.0f), randomYaw);
+    const Vec3 translation(
+        static_cast<float>(randomSigned()),
+        static_cast<float>(0.25 * randomSigned()),
+        static_cast<float>(randomSigned()));
+    std::vector<MaterialInterfacePoint> randomPoints;
+    randomPoints.reserve(pointCount);
+    for (size_t point = 0; point < pointCount; ++point) {
+      const double angle =
+          6.28318530717958647692 *
+              static_cast<double>(point) /
+              static_cast<double>(pointCount) +
+          0.08 * randomSigned();
+      const float radius =
+          static_cast<float>(0.35 + 0.45 * randomUnit());
+      const Vec3 local(
+          radius * static_cast<float>(std::cos(angle)),
+          static_cast<float>(0.04 * randomSigned()),
+          radius * static_cast<float>(std::sin(angle)));
+      MaterialInterfacePoint value;
+      value.worldPoint =
+          translation + rotateAboutY(local, randomYaw);
+      value.normal = randomNormal;
+      value.tangent0 = randomTangent0;
+      value.tangent1 = randomTangent1;
+      value.stableKey =
+          10000u + static_cast<uint64_t>(sample) * 16u +
+          static_cast<uint64_t>(point);
+      randomPoints.push_back(value);
+    }
+    std::vector<MaterialInterfacePoint> randomReordered =
+        randomPoints;
+    std::reverse(randomReordered.begin(),
+                 randomReordered.end());
+    const MaterialInterfaceWrenchMap randomMap =
+        buildMaterialInterfaceWrenchMap(randomPoints);
+    const MaterialInterfaceWrenchMap randomOrderMap =
+        buildMaterialInterfaceWrenchMap(randomReordered);
+    CHECK(randomMap.finite && randomMap.rank == 6 &&
+              randomOrderMap.finite &&
+              randomOrderMap.rank == 6,
+          "random interface %u did not produce a full-rank map",
+          sample);
+    randomOrderError =
+        std::max(randomOrderError,
+                 maximumVectorDelta(
+                     randomMap.restriction,
+                     randomOrderMap.restriction));
+    randomOrderError =
+        std::max(randomOrderError,
+                 maximumVectorDelta(
+                     randomMap.prolongation,
+                     randomOrderMap.prolongation));
+
+    std::vector<double> randomImpulse(
+        pointCount * 3u, 0.0);
+    for (double &value : randomImpulse)
+      value = 2.0 * randomSigned();
+    MaterialSpatialWrench randomWrench{};
+    std::vector<double> randomMinimum;
+    MaterialSpatialWrench randomReconstructed{};
+    CHECK(restrictMaterialPointImpulses(
+              randomMap, randomImpulse, randomWrench) &&
+              prolongMaterialInterfaceWrench(
+                  randomMap, randomWrench, randomMinimum) &&
+              restrictMaterialPointImpulses(
+                  randomMap, randomMinimum,
+                  randomReconstructed),
+          "random interface %u failed its wrench round trip",
+          sample);
+    randomRoundTripError =
+        std::max(randomRoundTripError,
+                 maximumWrenchDelta(
+                     randomWrench, randomReconstructed));
+
+    std::vector<double> randomNull(
+        randomImpulse.size(), 0.0);
+    double randomDot = 0.0;
+    for (size_t coordinate = 0;
+         coordinate < randomImpulse.size(); ++coordinate) {
+      randomNull[coordinate] =
+          randomImpulse[coordinate] -
+          randomMinimum[coordinate];
+      randomDot += randomMinimum[coordinate] *
+                   randomNull[coordinate];
+    }
+    MaterialSpatialWrench randomNullWrench{};
+    CHECK(restrictMaterialPointImpulses(
+              randomMap, randomNull, randomNullWrench),
+          "random interface %u failed to restrict nullspace",
+          sample);
+    randomNullWrenchError =
+        std::max(randomNullWrenchError,
+                 maximumWrenchDelta(
+                     randomNullWrench, zeroWrench));
+    randomMinimumOrthogonality =
+        std::max(randomMinimumOrthogonality,
+                 std::fabs(randomDot));
+
+    const Vec3 randomBodyPosition =
+        translation +
+        Vec3(static_cast<float>(0.5 * randomSigned()),
+             static_cast<float>(0.5 + 0.5 * randomUnit()),
+             static_cast<float>(0.5 * randomSigned()));
+    const float randomInverseMass =
+        static_cast<float>(0.1 + randomUnit());
+    const Mat33 randomInverseInertia = Mat33::diag(
+        static_cast<float>(0.1 + randomUnit()),
+        static_cast<float>(0.1 + randomUnit()),
+        static_cast<float>(0.1 + randomUnit()));
+    const Vec6 randomPointDelta = applyPointImpulses(
+        randomMap, randomMinimum, randomBodyPosition,
+        randomInverseMass, randomInverseInertia, 1.0f);
+    const Vec6 randomWrenchDelta = applyWrench(
+        randomReconstructed, randomBodyPosition,
+        randomInverseMass, randomInverseInertia, 1.0f);
+    for (int component = 0; component < 6; ++component) {
+      randomBodyResponseError =
+          std::max(
+              randomBodyResponseError,
+              std::fabs(
+                  static_cast<double>(
+                      randomPointDelta[component]) -
+                  static_cast<double>(
+                      randomWrenchDelta[component])));
+    }
+
+    std::vector<double> randomFriction(pointCount, 0.0);
+    std::vector<double> randomProjected(pointCount * 3u, 0.0);
+    for (size_t point = 0; point < pointCount; ++point) {
+      randomFriction[point] = 0.1 + randomUnit();
+      randomProjected[point * 3u] =
+          3.0 * randomSigned();
+      randomProjected[point * 3u + 1u] =
+          5.0 * randomSigned();
+      randomProjected[point * 3u + 2u] =
+          5.0 * randomSigned();
+    }
+    CHECK(projectMaterialPointImpulses(
+              randomMap, randomFriction, randomProjected),
+          "random interface %u failed material projection",
+          sample);
+    for (size_t point = 0; point < pointCount; ++point) {
+      const size_t row = point * 3u;
+      const double tangentMagnitude =
+          std::sqrt(
+              randomProjected[row + 1u] *
+                  randomProjected[row + 1u] +
+              randomProjected[row + 2u] *
+                  randomProjected[row + 2u]);
+      randomFeasibilityViolation =
+          std::max(randomFeasibilityViolation,
+                   -randomProjected[row]);
+      randomFeasibilityViolation =
+          std::max(
+              randomFeasibilityViolation,
+              tangentMagnitude -
+                  randomFriction[point] *
+                      randomProjected[row]);
+    }
+    MaterialSpatialWrench randomProjectedWrench{};
+    CHECK(restrictMaterialPointImpulses(
+              randomMap, randomProjected,
+              randomProjectedWrench),
+          "random interface %u projected wrench is not finite",
+          sample);
+    const Vec6 randomProjectedPointDelta =
+        applyPointImpulses(
+            randomMap, randomProjected, randomBodyPosition,
+            randomInverseMass, randomInverseInertia, -1.0f);
+    const Vec6 randomProjectedWrenchDelta =
+        applyWrench(
+            randomProjectedWrench, randomBodyPosition,
+            randomInverseMass, randomInverseInertia, -1.0f);
+    for (int component = 0; component < 6; ++component) {
+      randomProjectedResponseError =
+          std::max(
+              randomProjectedResponseError,
+              std::fabs(
+                  static_cast<double>(
+                      randomProjectedPointDelta[component]) -
+                  static_cast<double>(
+                      randomProjectedWrenchDelta[component])));
+    }
+  }
+
+  printf("  full rank=%d RP=%.9g wrench=%.9g order=(%.9g,%.9g) "
+         "yaw=(%.9g,%.9g)\n",
+         canonical.rank, rangeIdentityError,
+         wrenchRoundTripError, orderRestrictionDelta,
+         orderProlongationDelta, yawWrenchError,
+         yawImpulseError);
+  printf("  null wrench=%.9g orthogonality=%.9g norms=(%.9g,%.9g) "
+         "body=%.9g\n",
+         nullWrenchError, minimumNullDot,
+         squaredNorm(arbitraryMinimum), squaredNorm(arbitrary),
+         bodyResponseError);
+  printf("  degenerate rank=%d impulse=%.9g idempotence=%.9g "
+         "rangeGap=%.9g projected=(feasibility=%.9g body=%.9g)\n",
+         degenerate.rank, degenerateImpulseError,
+         degenerateIdempotenceError, unavailableProjectionGap,
+         feasibilityViolation, projectedResponseError);
+  printf("  random64 order=%.9g roundtrip=%.9g null=%.9g "
+         "orthogonality=%.9g body=%.9g feasibility=%.9g "
+         "projectedBody=%.9g\n",
+         randomOrderError, randomRoundTripError,
+         randomNullWrenchError, randomMinimumOrthogonality,
+         randomBodyResponseError, randomFeasibilityViolation,
+         randomProjectedResponseError);
+
+  CHECK(rangeIdentityError <= 2.0e-12 &&
+            wrenchRoundTripError <= 2.0e-12,
+        "full-rank R*P authority failed: %.9g %.9g",
+        rangeIdentityError, wrenchRoundTripError);
+  CHECK(orderRestrictionDelta == 0.0 &&
+            orderProlongationDelta == 0.0,
+        "wrench map depends on point storage order");
+  CHECK(nullWrenchError <= 2.0e-12 &&
+            std::fabs(minimumNullDot) <= 2.0e-12 &&
+            squaredNorm(arbitraryMinimum) <=
+                squaredNorm(arbitrary) + 2.0e-12,
+        "minimum-norm prolongation retained point nullspace");
+  CHECK(bodyResponseError <= 2.0e-6,
+        "interface wrench does not reproduce direct body response: %.9g",
+        bodyResponseError);
+  CHECK(yawWrenchError <= 2.0e-6 &&
+            yawImpulseError <= 2.0e-6,
+        "wrench map depends on world yaw: %.9g %.9g",
+        yawWrenchError, yawImpulseError);
+  CHECK(degenerateImpulseError <= 2.0e-12 &&
+            degenerateIdempotenceError <= 2.0e-12 &&
+            unavailableProjectionGap >= 1.0e-2,
+        "rank-deficient range projector is not authoritative");
+  CHECK(feasibilityViolation <= 2.0e-12 &&
+            projectedResponseError <= 2.0e-6,
+        "projected coarse correction is infeasible or changes body response");
+  CHECK(randomOrderError == 0.0 &&
+            randomRoundTripError <= 2.0e-10 &&
+            randomNullWrenchError <= 2.0e-10 &&
+            randomMinimumOrthogonality <= 2.0e-10,
+        "random interface algebra authority failed: %.9g %.9g %.9g %.9g",
+        randomOrderError, randomRoundTripError,
+        randomNullWrenchError, randomMinimumOrthogonality);
+  CHECK(randomBodyResponseError <= 2.0e-5 &&
+            randomFeasibilityViolation <= 2.0e-12 &&
+            randomProjectedResponseError <= 2.0e-5,
+        "random interface physical authority failed: %.9g %.9g %.9g",
+        randomBodyResponseError, randomFeasibilityViolation,
+        randomProjectedResponseError);
+
+  PASS("interface-wrench restriction/prolongation removes point nullspace and preserves physical body response");
+}
+
+bool probe156_materialMultilevelGraphAuthority() {
+  printf("\n--- Probe 156: Material multilevel graph authority ---\n");
+
+  struct GraphEdge {
+    int bodyA = -1;
+    int bodyB = -1;
+    uint64_t stableKey = 0;
+  };
+  struct SolveResult {
+    int cycles = 0;
+    double relativeResidual = 0.0;
+    double solutionError = 0.0;
+    bool converged = false;
+  };
+  const auto makeBodyOperator =
+      [](size_t bodyCount, const std::vector<GraphEdge> &edges) {
+        std::vector<double> matrix(
+            bodyCount * bodyCount, 0.0);
+        for (size_t edge = 0; edge < edges.size(); ++edge) {
+          const double weight =
+              0.5 + 0.05 * static_cast<double>(edge % 7u);
+          if (edges[edge].bodyA >= 0) {
+            const size_t bodyA =
+                static_cast<size_t>(edges[edge].bodyA);
+            matrix[bodyA * bodyCount + bodyA] += weight;
+          }
+          if (edges[edge].bodyB >= 0) {
+            const size_t bodyB =
+                static_cast<size_t>(edges[edge].bodyB);
+            matrix[bodyB * bodyCount + bodyB] += weight;
+            if (edges[edge].bodyA >= 0) {
+              const size_t bodyA =
+                  static_cast<size_t>(edges[edge].bodyA);
+              matrix[bodyA * bodyCount + bodyB] -= weight;
+              matrix[bodyB * bodyCount + bodyA] -= weight;
+            }
+          }
+        }
+        return matrix;
+      };
+  const auto bodyKeys =
+      [](size_t bodyCount, uint64_t base) {
+        std::vector<uint64_t> keys(bodyCount, 0u);
+        for (size_t body = 0; body < bodyCount; ++body)
+          keys[body] = base + body;
+        return keys;
+      };
+  const auto makeChain =
+      [](size_t count, uint64_t keyBase) {
+        std::vector<GraphEdge> edges;
+        edges.reserve(count);
+        for (size_t body = 0; body < count; ++body) {
+          GraphEdge edge;
+          edge.bodyA = static_cast<int>(body);
+          edge.bodyB =
+              body == 0u ? -1 : static_cast<int>(body - 1u);
+          edge.stableKey = keyBase + body;
+          edges.push_back(edge);
+        }
+        return edges;
+      };
+  const auto multiply =
+      [](const std::vector<double> &matrix,
+         const std::vector<double> &input) {
+        std::vector<double> output(input.size(), 0.0);
+        for (size_t row = 0; row < input.size(); ++row) {
+          for (size_t column = 0; column < input.size();
+               ++column) {
+            output[row] +=
+                matrix[row * input.size() + column] *
+                input[column];
+          }
+        }
+        return output;
+      };
+  const auto maximumVectorDelta =
+      [](const std::vector<double> &a,
+         const std::vector<double> &b) {
+        if (a.size() != b.size())
+          return std::numeric_limits<double>::infinity();
+        double maximum = 0.0;
+        for (size_t index = 0; index < a.size(); ++index) {
+          maximum =
+              std::max(maximum, std::fabs(a[index] - b[index]));
+        }
+        return maximum;
+      };
+  const auto solve =
+      [&](const std::vector<uint64_t> &keys,
+          const std::vector<double> &matrix) {
+        SolveResult result;
+        const MaterialGraphMultilevelHierarchy hierarchy =
+            buildMaterialGraphMultilevelHierarchy(keys, matrix);
+        if (!hierarchy.finite)
+          return result;
+        std::vector<double> expected(keys.size(), 0.0);
+        for (size_t row = 0; row < keys.size(); ++row) {
+          expected[row] =
+              0.35 +
+              std::sin(3.14159265358979323846 *
+                       (static_cast<double>(keys[row] % 1000u) +
+                        0.5) /
+                       (static_cast<double>(keys.size()) + 1.0));
+        }
+        const std::vector<double> rhs = multiply(matrix, expected);
+        double initialResidual = 0.0;
+        for (double value : rhs)
+          initialResidual =
+              std::max(initialResidual, std::fabs(value));
+        std::vector<double> solution(keys.size(), 0.0);
+        for (int cycle = 1; cycle <= 64; ++cycle) {
+          if (!applyMaterialGraphMultilevelVCycle(
+                  hierarchy, rhs, solution, 2, 2)) {
+            return SolveResult{};
+          }
+          const std::vector<double> applied =
+              multiply(matrix, solution);
+          double residual = 0.0;
+          for (size_t row = 0; row < keys.size(); ++row) {
+            residual =
+                std::max(residual,
+                         std::fabs(rhs[row] - applied[row]));
+          }
+          result.cycles = cycle;
+          result.relativeResidual =
+              residual / std::max(1.0e-30, initialResidual);
+          if (result.relativeResidual <= 1.0e-10) {
+            result.converged = true;
+            break;
+          }
+        }
+        result.solutionError =
+            maximumVectorDelta(solution, expected);
+        return result;
+      };
+  const auto reverseFixture =
+      [](const std::vector<uint64_t> &keys,
+         const std::vector<double> &matrix,
+         std::vector<uint64_t> &reverseKeys,
+         std::vector<double> &reverseMatrix) {
+        const size_t count = keys.size();
+        reverseKeys.resize(count);
+        reverseMatrix.assign(count * count, 0.0);
+        for (size_t row = 0; row < count; ++row) {
+          reverseKeys[row] = keys[count - 1u - row];
+          for (size_t column = 0; column < count; ++column) {
+            reverseMatrix[row * count + column] =
+                matrix[(count - 1u - row) * count +
+                       (count - 1u - column)];
+          }
+        }
+      };
+  const auto hierarchyDelta =
+      [&](const MaterialGraphMultilevelHierarchy &a,
+          const MaterialGraphMultilevelHierarchy &b) {
+        if (!a.finite || !b.finite ||
+            a.levels.size() != b.levels.size()) {
+          return std::numeric_limits<double>::infinity();
+        }
+        double maximum = 0.0;
+        for (size_t level = 0; level < a.levels.size();
+             ++level) {
+          if (a.levels[level].stableKeys !=
+                  b.levels[level].stableKeys ||
+              a.levels[level].coarseCount !=
+                  b.levels[level].coarseCount) {
+            return std::numeric_limits<double>::infinity();
+          }
+          maximum =
+              std::max(maximum,
+                       maximumVectorDelta(
+                           a.levels[level].matrix,
+                           b.levels[level].matrix));
+          maximum =
+              std::max(maximum,
+                       maximumVectorDelta(
+                           a.levels[level].prolongation,
+                           b.levels[level].prolongation));
+        }
+        return maximum;
+      };
+  const auto maximumGalerkinEnergyError =
+      [&](const MaterialGraphMultilevelHierarchy &hierarchy) {
+        double maximum = 0.0;
+        for (size_t level = 0;
+             level + 1u < hierarchy.levels.size(); ++level) {
+          const MaterialGraphMultilevelLevel &fine =
+              hierarchy.levels[level];
+          const MaterialGraphMultilevelLevel &coarse =
+              hierarchy.levels[level + 1u];
+          std::vector<double> coarseVector(
+              fine.coarseCount, 0.0);
+          for (size_t entry = 0;
+               entry < coarseVector.size(); ++entry) {
+            coarseVector[entry] =
+                std::sin(0.61 *
+                         static_cast<double>(entry + 1u));
+          }
+          std::vector<double> fineVector(
+              fine.stableKeys.size(), 0.0);
+          for (size_t row = 0; row < fineVector.size(); ++row) {
+            for (size_t column = 0;
+                 column < coarseVector.size(); ++column) {
+              fineVector[row] +=
+                  fine.prolongation[
+                      row * coarseVector.size() + column] *
+                  coarseVector[column];
+            }
+          }
+          const std::vector<double> fineApplied =
+              multiply(fine.matrix, fineVector);
+          const std::vector<double> coarseApplied =
+              multiply(coarse.matrix, coarseVector);
+          double fineEnergy = 0.0;
+          double coarseEnergy = 0.0;
+          for (size_t row = 0; row < fineVector.size(); ++row)
+            fineEnergy += fineVector[row] * fineApplied[row];
+          for (size_t row = 0; row < coarseVector.size(); ++row)
+            coarseEnergy +=
+                coarseVector[row] * coarseApplied[row];
+          maximum =
+              std::max(maximum,
+                       std::fabs(fineEnergy - coarseEnergy) /
+                           std::max(
+                               1.0,
+                               std::max(std::fabs(fineEnergy),
+                                        std::fabs(coarseEnergy))));
+        }
+        return maximum;
+      };
+
+  const std::vector<GraphEdge> chain6 = makeChain(6u, 1000u);
+  const std::vector<GraphEdge> chain12 = makeChain(12u, 1000u);
+  const std::vector<GraphEdge> chain24 = makeChain(24u, 1000u);
+  const std::vector<double> chain6Matrix =
+      makeBodyOperator(6u, chain6);
+  const std::vector<double> chain12Matrix =
+      makeBodyOperator(12u, chain12);
+  const std::vector<double> chain24Matrix =
+      makeBodyOperator(24u, chain24);
+  const std::vector<uint64_t> chain6Keys =
+      bodyKeys(6u, 1000u);
+  const std::vector<uint64_t> chain12Keys =
+      bodyKeys(12u, 1000u);
+  const std::vector<uint64_t> chain24Keys =
+      bodyKeys(24u, 1000u);
+  double phase2aMatrixHash = 0.0;
+  for (size_t entry = 0; entry < chain24Matrix.size(); ++entry)
+    phase2aMatrixHash +=
+        static_cast<double>(entry + 1u) * chain24Matrix[entry];
+  printf("  [FasDiag] phase2a matrixHash=%.17g\n",
+         phase2aMatrixHash);
+  const MaterialGraphMultilevelHierarchy chain24Hierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          chain24Keys, chain24Matrix);
+  const SolveResult chain6Solve =
+      solve(chain6Keys, chain6Matrix);
+  const SolveResult chain12Solve =
+      solve(chain12Keys, chain12Matrix);
+  const SolveResult chain24Solve =
+      solve(chain24Keys, chain24Matrix);
+
+  std::vector<uint64_t> reverseKeys;
+  std::vector<double> reverseMatrix;
+  reverseFixture(chain24Keys, chain24Matrix,
+                 reverseKeys, reverseMatrix);
+  const MaterialGraphMultilevelHierarchy reverseHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          reverseKeys, reverseMatrix);
+  const double orderError =
+      hierarchyDelta(chain24Hierarchy, reverseHierarchy);
+  const SolveResult reverseSolve =
+      solve(reverseKeys, reverseMatrix);
+
+  std::vector<GraphEdge> branch;
+  branch.reserve(15u);
+  for (size_t body = 0; body < 15u; ++body) {
+    GraphEdge edge;
+    edge.bodyA = static_cast<int>(body);
+    edge.bodyB =
+        body == 0u
+            ? -1
+            : static_cast<int>((body - 1u) / 2u);
+    edge.stableKey = 2000u + body;
+    branch.push_back(edge);
+  }
+  const std::vector<uint64_t> branchKeys =
+      bodyKeys(15u, 2000u);
+  const std::vector<double> branchMatrix =
+      makeBodyOperator(15u, branch);
+  const MaterialGraphMultilevelHierarchy branchHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          branchKeys, branchMatrix);
+  const SolveResult branchSolve =
+      solve(branchKeys, branchMatrix);
+
+  std::vector<GraphEdge> loop = makeChain(8u, 3000u);
+  GraphEdge closing;
+  closing.bodyA = 0;
+  closing.bodyB = 7;
+  closing.stableKey = 3008u;
+  loop.push_back(closing);
+  const std::vector<uint64_t> loopKeys =
+      bodyKeys(8u, 3000u);
+  const std::vector<double> loopMatrix =
+      makeBodyOperator(8u, loop);
+  const MaterialGraphMultilevelHierarchy loopHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          loopKeys, loopMatrix);
+  const SolveResult loopSolve = solve(loopKeys, loopMatrix);
+
+  const size_t nullCount = 12u;
+  std::vector<uint64_t> nullKeys(nullCount, 0u);
+  std::vector<double> nullLaplacian(
+      nullCount * nullCount, 0.0);
+  for (size_t row = 0; row < nullCount; ++row) {
+    nullKeys[row] = 4000u + row;
+    const size_t previous =
+        (row + nullCount - 1u) % nullCount;
+    const size_t next = (row + 1u) % nullCount;
+    nullLaplacian[row * nullCount + row] = 2.0;
+    nullLaplacian[row * nullCount + previous] = -1.0;
+    nullLaplacian[row * nullCount + next] = -1.0;
+  }
+  const MaterialGraphMultilevelHierarchy nullHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          nullKeys, nullLaplacian);
+  double rigidNullError = 0.0;
+  if (nullHierarchy.finite) {
+    for (const MaterialGraphMultilevelLevel &level :
+         nullHierarchy.levels) {
+      std::vector<double> ones(level.stableKeys.size(), 1.0);
+      const std::vector<double> response =
+          multiply(level.matrix, ones);
+      for (double value : response) {
+        rigidNullError =
+            std::max(rigidNullError, std::fabs(value));
+      }
+    }
+  } else {
+    rigidNullError = std::numeric_limits<double>::infinity();
+  }
+
+  std::vector<GraphEdge> beforeMerge;
+  beforeMerge.push_back({0, -1, 5000u});
+  beforeMerge.push_back({1, 0, 5001u});
+  beforeMerge.push_back({2, 1, 5002u});
+  beforeMerge.push_back({4, 3, 5010u});
+  beforeMerge.push_back({5, 4, 5011u});
+  std::vector<GraphEdge> afterMerge = beforeMerge;
+  afterMerge.push_back({3, 2, 5020u});
+  const std::vector<uint64_t> mergeKeys =
+      bodyKeys(6u, 5000u);
+  const MaterialGraphMultilevelHierarchy beforeMergeHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          mergeKeys,
+          makeBodyOperator(6u, beforeMerge));
+  const MaterialGraphMultilevelHierarchy afterMergeHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          mergeKeys,
+          makeBodyOperator(6u, afterMerge));
+  const SolveResult afterMergeSolve =
+      solve(mergeKeys, makeBodyOperator(6u, afterMerge));
+
+  const float yaw = 0.73f;
+  const Vec3 axis(1.0f, 0.0f, 0.0f);
+  const Vec3 yawAxis = rotateAboutY(axis, yaw);
+  const double yawScale =
+      static_cast<double>(yawAxis.dot(yawAxis)) /
+      static_cast<double>(axis.dot(axis));
+  std::vector<double> yawMatrix = chain24Matrix;
+  for (double &value : yawMatrix)
+    value *= yawScale;
+  const MaterialGraphMultilevelHierarchy yawHierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          chain24Keys, yawMatrix);
+  const double yawError =
+      hierarchyDelta(chain24Hierarchy, yawHierarchy);
+
+  const double energyError =
+      std::max(
+          maximumGalerkinEnergyError(chain24Hierarchy),
+          std::max(
+              maximumGalerkinEnergyError(branchHierarchy),
+              maximumGalerkinEnergyError(loopHierarchy)));
+
+  printf("  chain cycles=(%d,%d,%d) residual=(%.3g,%.3g,%.3g) "
+         "solution=(%.3g,%.3g,%.3g) levels=%zu\n",
+         chain6Solve.cycles, chain12Solve.cycles,
+         chain24Solve.cycles, chain6Solve.relativeResidual,
+         chain12Solve.relativeResidual,
+         chain24Solve.relativeResidual,
+         chain6Solve.solutionError, chain12Solve.solutionError,
+         chain24Solve.solutionError,
+         chain24Hierarchy.levels.size());
+  printf("  branch cycles=%d residual=%.3g "
+         "loop=(cycles=%d residual=%.3g) rigidNull=%.3g "
+         "merge=(%zu->%zu cycles=%d residual=%.3g)\n",
+         branchSolve.cycles, branchSolve.relativeResidual,
+         loopSolve.cycles, loopSolve.relativeResidual,
+         rigidNullError,
+         beforeMergeHierarchy.levels.size(),
+         afterMergeHierarchy.levels.size(),
+         afterMergeSolve.cycles,
+         afterMergeSolve.relativeResidual);
+  printf("  invariance order=%.3g reverse=(cycles=%d residual=%.3g) "
+         "yaw=%.3g energy=%.3g\n",
+         orderError, reverseSolve.cycles,
+         reverseSolve.relativeResidual, yawError, energyError);
+
+  CHECK(chain24Hierarchy.finite &&
+            branchHierarchy.finite &&
+            loopHierarchy.finite &&
+            beforeMergeHierarchy.finite &&
+            afterMergeHierarchy.finite &&
+            yawHierarchy.finite,
+        "multilevel hierarchy construction failed");
+  CHECK(chain6Solve.converged && chain12Solve.converged &&
+            chain24Solve.converged && branchSolve.converged &&
+            loopSolve.converged && afterMergeSolve.converged,
+        "multilevel V-cycle did not close an anchored graph");
+  CHECK(chain24Solve.cycles <= chain6Solve.cycles + 4 &&
+            chain24Solve.cycles <= 20,
+        "chain V-cycle still scales with graph diameter: %d %d %d",
+        chain6Solve.cycles, chain12Solve.cycles,
+        chain24Solve.cycles);
+  CHECK(branchSolve.cycles <= 20 &&
+            loopSolve.cycles <= 20 &&
+            afterMergeSolve.cycles <= 20,
+        "branch, loop, or transient-merge V-cycle remains topology-bound: %d %d %d",
+        branchSolve.cycles, loopSolve.cycles,
+        afterMergeSolve.cycles);
+  CHECK(orderError <= 2.0e-12 &&
+            yawError <= 2.0e-6 &&
+            reverseSolve.converged &&
+            reverseSolve.cycles == chain24Solve.cycles,
+        "multilevel graph depends on input order or yaw");
+  CHECK(energyError <= 2.0e-12,
+        "Galerkin hierarchy does not preserve coarse work: %.9g",
+        energyError);
+  CHECK(rigidNullError <= 2.0e-12,
+        "rigid null mode was not preserved");
+  CHECK(chain24Solve.solutionError <= 2.0e-8 &&
+            branchSolve.solutionError <= 2.0e-8 &&
+            loopSolve.solutionError <= 2.0e-8 &&
+            afterMergeSolve.solutionError <= 2.0e-8,
+        "multilevel solution disagrees with the dense graph authority");
+
+  PASS("multilevel body/manifold aggregation preserves work and removes chain-diameter low-frequency scaling");
+}
+
+bool probe157_materialSpatialTransferAuthority() {
+  printf("\n--- Probe 157: Material spatial transfer authority ---\n");
+
+  const auto rotateInertia =
+      [](const Mat33 &inertia, float yaw) {
+        const float cosine = std::cos(yaw);
+        const float sine = std::sin(yaw);
+        Mat33 rotation;
+        rotation.m[0][0] = cosine;
+        rotation.m[0][2] = -sine;
+        rotation.m[1][1] = 1.0f;
+        rotation.m[2][0] = sine;
+        rotation.m[2][2] = cosine;
+        return rotation.mul(inertia).mul(rotation.transpose());
+      };
+  const auto rotateSpatial =
+      [](const MaterialWorldSpatialVector &value, float yaw) {
+        const Vec3 linear = rotateAboutY(
+            Vec3(static_cast<float>(value[0]),
+                 static_cast<float>(value[1]),
+                 static_cast<float>(value[2])),
+            yaw);
+        const Vec3 angular = rotateAboutY(
+            Vec3(static_cast<float>(value[3]),
+                 static_cast<float>(value[4]),
+                 static_cast<float>(value[5])),
+            yaw);
+        return MaterialWorldSpatialVector{
+            linear.x, linear.y, linear.z,
+            angular.x, angular.y, angular.z};
+      };
+  const auto maximumSpatialDelta =
+      [](const std::vector<MaterialWorldSpatialVector> &a,
+         const std::vector<MaterialWorldSpatialVector> &b) {
+        if (a.size() != b.size())
+          return std::numeric_limits<double>::infinity();
+        double maximum = 0.0;
+        for (size_t entry = 0; entry < a.size(); ++entry) {
+          for (size_t component = 0; component < 6u;
+               ++component) {
+            maximum =
+                std::max(maximum,
+                         std::fabs(a[entry][component] -
+                                   b[entry][component]));
+          }
+        }
+        return maximum;
+      };
+  const auto reverseSpatial =
+      [](const std::vector<MaterialWorldSpatialVector> &values) {
+        std::vector<MaterialWorldSpatialVector> result = values;
+        std::reverse(result.begin(), result.end());
+        return result;
+      };
+
+  std::vector<MaterialSpatialBody> bodies(5u);
+  const uint64_t bodyKeys[5] = {100u, 200u, 300u, 400u, 500u};
+  const Vec3 positions[5] = {
+      Vec3(-1.0f, 0.25f, 0.5f),
+      Vec3(0.2f, 1.0f, -0.4f),
+      Vec3(1.25f, 1.8f, 0.75f),
+      Vec3(-0.6f, 2.6f, -1.1f),
+      Vec3(0.9f, 3.4f, 0.3f)};
+  for (size_t body = 0; body < bodies.size(); ++body) {
+    bodies[body].stableKey = bodyKeys[body];
+    bodies[body].worldPosition = positions[body];
+    bodies[body].inverseMass =
+        0.2 + 0.15 * static_cast<double>(body);
+    bodies[body].worldInverseInertia = rotateInertia(
+        Mat33::diag(
+            0.25f + 0.05f * static_cast<float>(body),
+            0.4f + 0.03f * static_cast<float>(body),
+            0.65f + 0.04f * static_cast<float>(body)),
+        0.13f * static_cast<float>(body + 1u));
+  }
+
+  std::vector<MaterialSpatialInterface> interfaces;
+  interfaces.push_back({1000u, 100u, 200u, false});
+  interfaces.push_back({1010u, 200u, 300u, false});
+  interfaces.push_back({1020u, 200u, 400u, false});
+  interfaces.push_back({1030u, 300u, 400u, false});
+  interfaces.push_back({1040u, 400u, 0u, true});
+  interfaces.push_back({1050u, 400u, 500u, false});
+  const MaterialSpatialTransfer transfer =
+      buildMaterialSpatialTransfer(bodies, interfaces);
+  CHECK(transfer.finite,
+        "failed to build canonical spatial transfer");
+
+  std::vector<MaterialWorldSpatialVector> interfaceWrenches(
+      interfaces.size());
+  std::vector<MaterialWorldSpatialVector> bodyTwists(
+      bodies.size());
+  for (size_t entry = 0; entry < interfaceWrenches.size();
+       ++entry) {
+    for (size_t component = 0; component < 6u; ++component) {
+      interfaceWrenches[entry][component] =
+          std::sin(0.37 *
+                   static_cast<double>(
+                       1u + entry * 6u + component));
+    }
+  }
+  for (size_t entry = 0; entry < bodyTwists.size(); ++entry) {
+    for (size_t component = 0; component < 6u; ++component) {
+      bodyTwists[entry][component] =
+          std::cos(0.29 *
+                   static_cast<double>(
+                       1u + entry * 6u + component));
+    }
+  }
+
+  std::vector<MaterialWorldSpatialVector> bodyLoads;
+  std::vector<MaterialWorldSpatialVector> relativeTwists;
+  CHECK(scatterMaterialInterfaceWrenchesToBodies(
+            transfer, interfaceWrenches, bodyLoads) &&
+            gatherMaterialBodyTwistsToInterfaces(
+                transfer, bodyTwists, relativeTwists),
+        "spatial scatter/gather failed");
+  const double interfaceWork =
+      materialSpatialWork(interfaceWrenches, relativeTwists);
+  const double bodyWork =
+      materialSpatialWork(bodyLoads, bodyTwists);
+  const double adjointWorkError =
+      std::fabs(interfaceWork - bodyWork);
+
+  double comWork = 0.0;
+  double twistRoundTripError = 0.0;
+  for (size_t body = 0; body < bodies.size(); ++body) {
+    const Vec6 comTwist =
+        materialBodyWorldOriginTwistToCom(
+            bodyTwists[body], bodies[body].worldPosition);
+    const MaterialWorldSpatialVector roundTrip =
+        materialBodyComTwistToWorldOrigin(
+            comTwist, bodies[body].worldPosition);
+    for (size_t component = 0; component < 6u; ++component) {
+      twistRoundTripError =
+          std::max(twistRoundTripError,
+                   std::fabs(roundTrip[component] -
+                             bodyTwists[body][component]));
+    }
+    const Vec3 force(
+        static_cast<float>(bodyLoads[body][0]),
+        static_cast<float>(bodyLoads[body][1]),
+        static_cast<float>(bodyLoads[body][2]));
+    const Vec3 worldMoment(
+        static_cast<float>(bodyLoads[body][3]),
+        static_cast<float>(bodyLoads[body][4]),
+        static_cast<float>(bodyLoads[body][5]));
+    const Vec3 comTorque =
+        worldMoment - bodies[body].worldPosition.cross(force);
+    comWork +=
+        static_cast<double>(force.dot(comTwist.linear())) +
+        static_cast<double>(comTorque.dot(comTwist.angular()));
+  }
+  const double comWorkError = std::fabs(comWork - bodyWork);
+
+  std::vector<MaterialWorldSpatialVector> secondWrenches(
+      interfaces.size());
+  for (size_t entry = 0; entry < secondWrenches.size(); ++entry) {
+    for (size_t component = 0; component < 6u; ++component) {
+      secondWrenches[entry][component] =
+          0.25 +
+          std::cos(0.43 *
+                   static_cast<double>(
+                       1u + entry * 6u + component));
+    }
+  }
+  std::vector<MaterialWorldSpatialVector> secondLoads;
+  std::vector<MaterialWorldSpatialVector> responseBodiesA;
+  std::vector<MaterialWorldSpatialVector> responseBodiesB;
+  std::vector<MaterialWorldSpatialVector> responseInterfacesA;
+  std::vector<MaterialWorldSpatialVector> responseInterfacesB;
+  CHECK(scatterMaterialInterfaceWrenchesToBodies(
+            transfer, secondWrenches, secondLoads) &&
+            applyMaterialBodyWorldOriginMobility(
+                transfer, bodyLoads, responseBodiesA) &&
+            applyMaterialBodyWorldOriginMobility(
+                transfer, secondLoads, responseBodiesB) &&
+            gatherMaterialBodyTwistsToInterfaces(
+                transfer, responseBodiesA,
+                responseInterfacesA) &&
+            gatherMaterialBodyTwistsToInterfaces(
+                transfer, responseBodiesB,
+                responseInterfacesB),
+        "spatial mobility response failed");
+  const double mobilitySymmetryError =
+      std::fabs(
+          materialSpatialWork(
+              interfaceWrenches, responseInterfacesB) -
+          materialSpatialWork(
+              secondWrenches, responseInterfacesA));
+  const double mobilityEnergy =
+      materialSpatialWork(
+          interfaceWrenches, responseInterfacesA);
+
+  std::vector<MaterialSpatialInterface> freeInterfaces =
+      interfaces;
+  freeInterfaces.erase(freeInterfaces.begin() + 4);
+  const MaterialSpatialTransfer freeTransfer =
+      buildMaterialSpatialTransfer(bodies, freeInterfaces);
+  CHECK(freeTransfer.finite,
+        "failed to build free spatial transfer");
+  const MaterialWorldSpatialVector rigidMode = {
+      0.3, -0.2, 0.1, 0.25, -0.4, 0.15};
+  std::vector<MaterialWorldSpatialVector> rigidBodyTwists(
+      bodies.size(), rigidMode);
+  std::vector<MaterialWorldSpatialVector>
+      rigidInterfaceTwists;
+  CHECK(gatherMaterialBodyTwistsToInterfaces(
+            freeTransfer, rigidBodyTwists,
+            rigidInterfaceTwists),
+        "failed to gather rigid spatial mode");
+  double rigidModeError = 0.0;
+  for (const MaterialWorldSpatialVector &value :
+       rigidInterfaceTwists) {
+    for (double component : value)
+      rigidModeError =
+          std::max(rigidModeError, std::fabs(component));
+  }
+
+  std::vector<MaterialWorldSpatialVector> freeWrenches(
+      freeInterfaces.size());
+  for (size_t entry = 0; entry < freeWrenches.size(); ++entry)
+    freeWrenches[entry] = interfaceWrenches[
+        entry < 4u ? entry : entry + 1u];
+  std::vector<MaterialWorldSpatialVector> freeBodyLoads;
+  CHECK(scatterMaterialInterfaceWrenchesToBodies(
+            freeTransfer, freeWrenches, freeBodyLoads),
+        "failed to scatter free interface wrenches");
+  double freeWrenchBalanceError = 0.0;
+  for (size_t component = 0; component < 6u; ++component) {
+    double sum = 0.0;
+    for (const MaterialWorldSpatialVector &load :
+         freeBodyLoads) {
+      sum += load[component];
+    }
+    freeWrenchBalanceError =
+        std::max(freeWrenchBalanceError, std::fabs(sum));
+  }
+
+  std::vector<MaterialSpatialBody> reverseBodies = bodies;
+  std::vector<MaterialSpatialInterface> reverseInterfaces =
+      interfaces;
+  std::reverse(reverseBodies.begin(), reverseBodies.end());
+  std::reverse(reverseInterfaces.begin(),
+               reverseInterfaces.end());
+  const MaterialSpatialTransfer reverseTransfer =
+      buildMaterialSpatialTransfer(
+          reverseBodies, reverseInterfaces);
+  const std::vector<MaterialWorldSpatialVector> reverseWrenches =
+      reverseSpatial(interfaceWrenches);
+  const std::vector<MaterialWorldSpatialVector> reverseTwists =
+      reverseSpatial(bodyTwists);
+  std::vector<MaterialWorldSpatialVector> reverseLoads;
+  std::vector<MaterialWorldSpatialVector> reverseRelative;
+  CHECK(reverseTransfer.finite &&
+            scatterMaterialInterfaceWrenchesToBodies(
+                reverseTransfer, reverseWrenches,
+                reverseLoads) &&
+            gatherMaterialBodyTwistsToInterfaces(
+                reverseTransfer, reverseTwists,
+                reverseRelative),
+        "reversed spatial transfer failed");
+  reverseLoads = reverseSpatial(reverseLoads);
+  reverseRelative = reverseSpatial(reverseRelative);
+  const double orderLoadError =
+      maximumSpatialDelta(bodyLoads, reverseLoads);
+  const double orderGatherError =
+      maximumSpatialDelta(relativeTwists, reverseRelative);
+
+  const float yaw = 0.61f;
+  std::vector<MaterialSpatialBody> yawBodies = bodies;
+  for (MaterialSpatialBody &body : yawBodies) {
+    body.worldPosition =
+        rotateAboutY(body.worldPosition, yaw);
+    body.worldInverseInertia =
+        rotateInertia(body.worldInverseInertia, yaw);
+  }
+  const MaterialSpatialTransfer yawTransfer =
+      buildMaterialSpatialTransfer(yawBodies, interfaces);
+  std::vector<MaterialWorldSpatialVector> yawWrenches(
+      interfaceWrenches.size());
+  std::vector<MaterialWorldSpatialVector> yawBodyTwists(
+      bodyTwists.size());
+  for (size_t entry = 0; entry < yawWrenches.size(); ++entry)
+    yawWrenches[entry] =
+        rotateSpatial(interfaceWrenches[entry], yaw);
+  for (size_t entry = 0; entry < yawBodyTwists.size(); ++entry)
+    yawBodyTwists[entry] = rotateSpatial(bodyTwists[entry], yaw);
+  std::vector<MaterialWorldSpatialVector> yawLoads;
+  std::vector<MaterialWorldSpatialVector> yawRelative;
+  std::vector<MaterialWorldSpatialVector> yawResponseBodies;
+  CHECK(yawTransfer.finite &&
+            scatterMaterialInterfaceWrenchesToBodies(
+                yawTransfer, yawWrenches, yawLoads) &&
+            gatherMaterialBodyTwistsToInterfaces(
+                yawTransfer, yawBodyTwists, yawRelative) &&
+            applyMaterialBodyWorldOriginMobility(
+                yawTransfer, yawLoads, yawResponseBodies),
+        "yawed spatial transfer failed");
+  std::vector<MaterialWorldSpatialVector> expectedYawLoads(
+      bodyLoads.size());
+  std::vector<MaterialWorldSpatialVector> expectedYawRelative(
+      relativeTwists.size());
+  std::vector<MaterialWorldSpatialVector>
+      expectedYawResponseBodies(responseBodiesA.size());
+  for (size_t entry = 0; entry < bodyLoads.size(); ++entry) {
+    expectedYawLoads[entry] = rotateSpatial(bodyLoads[entry], yaw);
+    expectedYawResponseBodies[entry] =
+        rotateSpatial(responseBodiesA[entry], yaw);
+  }
+  for (size_t entry = 0; entry < relativeTwists.size(); ++entry) {
+    expectedYawRelative[entry] =
+        rotateSpatial(relativeTwists[entry], yaw);
+  }
+  const double yawLoadError =
+      maximumSpatialDelta(yawLoads, expectedYawLoads);
+  const double yawGatherError =
+      maximumSpatialDelta(yawRelative, expectedYawRelative);
+  const double yawMobilityError =
+      maximumSpatialDelta(
+          yawResponseBodies, expectedYawResponseBodies);
+
+  const size_t nullCount = 8u;
+  std::vector<uint64_t> nullKeys(nullCount, 0u);
+  std::vector<double> nullLaplacian(
+      nullCount * nullCount, 0.0);
+  for (size_t row = 0; row < nullCount; ++row) {
+    nullKeys[row] = 6000u + row;
+    const size_t previous =
+        (row + nullCount - 1u) % nullCount;
+    const size_t next = (row + 1u) % nullCount;
+    nullLaplacian[row * nullCount + row] = 2.0;
+    nullLaplacian[row * nullCount + previous] = -1.0;
+    nullLaplacian[row * nullCount + next] = -1.0;
+  }
+  const MaterialGraphMultilevelHierarchy hierarchy =
+      buildMaterialGraphMultilevelHierarchy(
+          nullKeys, nullLaplacian);
+  double tensorRigidModeError = 0.0;
+  if (hierarchy.finite) {
+    for (size_t level = 0;
+         level + 1u < hierarchy.levels.size(); ++level) {
+      const MaterialGraphMultilevelLevel &value =
+          hierarchy.levels[level];
+      for (size_t row = 0; row < value.stableKeys.size(); ++row) {
+        double sum = 0.0;
+        for (size_t coarse = 0;
+             coarse < value.coarseCount; ++coarse) {
+          sum += value.prolongation[
+              row * value.coarseCount + coarse];
+        }
+        for (size_t component = 0; component < 6u;
+             ++component) {
+          tensorRigidModeError =
+              std::max(tensorRigidModeError,
+                       std::fabs(sum - 1.0));
+        }
+      }
+    }
+  } else {
+    tensorRigidModeError =
+        std::numeric_limits<double>::infinity();
+  }
+
+  std::vector<MaterialInterfacePoint> points(4u);
+  const Vec3 pointCenter(0.1f, 1.35f, -0.2f);
+  const Vec3 pointOffsets[4] = {
+      Vec3(-0.3f, 0.0f, -0.25f),
+      Vec3(-0.3f, 0.0f, 0.25f),
+      Vec3(0.3f, 0.0f, -0.25f),
+      Vec3(0.3f, 0.0f, 0.25f)};
+  for (size_t point = 0; point < points.size(); ++point) {
+    points[point].worldPoint = pointCenter + pointOffsets[point];
+    points[point].normal = Vec3(0.0f, 1.0f, 0.0f);
+    points[point].tangent0 = Vec3(1.0f, 0.0f, 0.0f);
+    points[point].tangent1 = Vec3(0.0f, 0.0f, 1.0f);
+    points[point].stableKey = 7000u + point;
+  }
+  const MaterialInterfaceWrenchMap pointMap =
+      buildMaterialInterfaceWrenchMap(points);
+  const std::vector<double> pointImpulses = {
+      1.0, 0.2, -0.1, 0.7, -0.1, 0.15,
+      1.3, 0.05, 0.2, 0.9, -0.2, -0.05};
+  MaterialSpatialWrench pointWrench{};
+  CHECK(pointMap.finite &&
+            restrictMaterialPointImpulses(
+                pointMap, pointImpulses, pointWrench),
+        "point-to-interface bridge failed");
+  std::vector<MaterialWorldSpatialVector> pointBridgeWrenches(
+      interfaces.size());
+  pointBridgeWrenches[0] = pointWrench;
+  std::vector<MaterialWorldSpatialVector> pointBridgeLoads;
+  CHECK(scatterMaterialInterfaceWrenchesToBodies(
+            transfer, pointBridgeWrenches,
+            pointBridgeLoads),
+        "interface-to-body bridge failed");
+  double pointBridgeError = 0.0;
+  for (size_t component = 0; component < 6u; ++component) {
+    pointBridgeError =
+        std::max(pointBridgeError,
+                 std::fabs(pointBridgeLoads[0][component] -
+                           pointWrench[component]));
+    pointBridgeError =
+        std::max(pointBridgeError,
+                 std::fabs(pointBridgeLoads[1][component] +
+                           pointWrench[component]));
+  }
+
+  printf("  work adjoint=%.9g com=%.9g roundtrip=%.9g "
+         "mobility=(sym=%.9g energy=%.9g)\n",
+         adjointWorkError, comWorkError, twistRoundTripError,
+         mobilitySymmetryError, mobilityEnergy);
+  printf("  rigid=(interface=%.9g balance=%.9g tensor=%.9g) "
+         "order=(%.9g,%.9g) pointBridge=%.9g\n",
+         rigidModeError, freeWrenchBalanceError,
+         tensorRigidModeError, orderLoadError,
+         orderGatherError, pointBridgeError);
+  printf("  yaw=(load=%.9g gather=%.9g mobility=%.9g)\n",
+         yawLoadError, yawGatherError, yawMobilityError);
+
+  CHECK(adjointWorkError <= 2.0e-12 &&
+            comWorkError <= 2.0e-5 &&
+            twistRoundTripError <= 2.0e-6,
+        "world-origin transfer is not work-adjoint to COM dynamics");
+  CHECK(mobilitySymmetryError <= 2.0e-5 &&
+            mobilityEnergy >= -2.0e-8 &&
+            std::isfinite(mobilityEnergy),
+        "world-origin body mobility is not symmetric positive");
+  CHECK(rigidModeError <= 2.0e-12 &&
+            freeWrenchBalanceError <= 2.0e-12 &&
+            tensorRigidModeError <= 2.0e-12,
+        "spatial transfer does not preserve rigid modes or internal balance");
+  CHECK(orderLoadError == 0.0 && orderGatherError == 0.0,
+        "spatial transfer depends on input storage order");
+  CHECK(yawLoadError <= 2.0e-6 &&
+            yawGatherError <= 2.0e-6 &&
+            yawMobilityError <= 2.0e-5,
+        "spatial transfer or body mobility depends on world yaw");
+  CHECK(pointBridgeError <= 2.0e-12,
+        "point/interface/body spatial bridge changed the net wrench");
+
+  PASS("world-origin spatial transfers are work-adjoint and preserve six rigid body modes");
 }
