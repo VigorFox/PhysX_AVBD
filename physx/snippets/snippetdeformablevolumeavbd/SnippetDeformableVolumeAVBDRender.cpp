@@ -27,7 +27,7 @@
 #ifdef RENDER_SNIPPET
 
 #include "PxPhysicsAPI.h"
-#include "PxAvbdSoftBody.h"
+#include "DyAvbdSoftBodyComponent.h"
 
 #include "../snippetrender/SnippetRender.h"
 #include "../snippetrender/SnippetCamera.h"
@@ -36,6 +36,10 @@
 
 using namespace physx;
 using namespace physx::Dy;
+
+#ifndef AVBD_VOLUME_RENDER_TITLE
+#define AVBD_VOLUME_RENDER_TITLE "PhysX Snippet Deformable Volume AVBD"
+#endif
 
 extern void initPhysics(bool interactive);
 extern void stepPhysics(bool interactive);
@@ -78,6 +82,64 @@ static void buildSurfaceMesh(
 		outTris.pushBack(base);
 		outTris.pushBack(base + 1);
 		outTris.pushBack(base + 2);
+	}
+}
+
+static void buildPublicVolumeSurfaceMesh(
+	PxDeformableVolume& volume,
+	PxArray<PxVec3>& outVerts, PxArray<PxU32>& outTris,
+	PxArray<PxVec3>& outNormals)
+{
+	outVerts.clear();
+	outTris.clear();
+	outNormals.clear();
+	const PxTetrahedronMesh* mesh = volume.getCollisionMesh();
+	const PxVec4* positions = volume.getPositionInvMassBufferH();
+	if(!mesh || !positions)
+		return;
+	const bool has16BitIndices =
+		mesh->getTetrahedronMeshFlags() &
+			PxTetrahedronMeshFlag::e16_BIT_INDICES;
+	const PxU16* tets16 = has16BitIndices
+		? static_cast<const PxU16*>(mesh->getTetrahedrons())
+		: NULL;
+	const PxU32* tets32 = has16BitIndices
+		? NULL
+		: static_cast<const PxU32*>(mesh->getTetrahedrons());
+	static const PxU32 faces[4][3] =
+	{
+		{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}
+	};
+	for(PxU32 tet = 0; tet < mesh->getNbTetrahedrons(); ++tet)
+	{
+		PxU32 indices[4];
+		for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
+			indices[endpoint] = has16BitIndices
+				? PxU32(tets16[4 * tet + endpoint])
+				: tets32[4 * tet + endpoint];
+		for(PxU32 face = 0; face < 4; ++face)
+		{
+			const PxVec3 p0 =
+				positions[indices[faces[face][0]]].getXYZ();
+			const PxVec3 p1 =
+				positions[indices[faces[face][1]]].getXYZ();
+			const PxVec3 p2 =
+				positions[indices[faces[face][2]]].getXYZ();
+			PxVec3 normal = (p1 - p0).cross(p2 - p0);
+			const PxReal magnitude = normal.magnitude();
+			if(magnitude > 1.0e-12f)
+				normal *= 1.0f / magnitude;
+			const PxU32 base = outVerts.size();
+			outVerts.pushBack(p0);
+			outVerts.pushBack(p1);
+			outVerts.pushBack(p2);
+			outNormals.pushBack(normal);
+			outNormals.pushBack(normal);
+			outNormals.pushBack(normal);
+			outTris.pushBack(base);
+			outTris.pushBack(base + 1);
+			outTris.pushBack(base + 2);
+		}
 	}
 }
 
@@ -127,6 +189,36 @@ void renderCallback()
 			color, triNormals.begin());
 	}
 
+	if(gVolumeAvbdSkinningRenderData.positions &&
+		gVolumeAvbdSkinningRenderData.triangles)
+	{
+		Snippets::renderMesh(
+			gVolumeAvbdSkinningRenderData.numVertices,
+			gVolumeAvbdSkinningRenderData.positions,
+			gVolumeAvbdSkinningRenderData.numTriangles,
+			gVolumeAvbdSkinningRenderData.triangles,
+			PxVec3(0.95f, 0.34f, 0.16f),
+			gVolumeAvbdSkinningRenderData.normals);
+	}
+	else
+	{
+		PxDeformableVolume* publicVolume =
+			getPrimaryCpuAvbdVolume();
+		if(publicVolume)
+		{
+			buildPublicVolumeSurfaceMesh(
+				*publicVolume, triVerts, triIndices, triNormals);
+			if(!triVerts.empty())
+			{
+				Snippets::renderMesh(
+					triVerts.size(), triVerts.begin(),
+					triIndices.size() / 3, triIndices.begin(),
+					PxVec3(0.95f, 0.34f, 0.16f),
+					triNormals.begin());
+			}
+		}
+	}
+
 	Snippets::finishRender();
 }
 
@@ -141,7 +233,9 @@ void renderLoop()
 {
 	sCamera = new Snippets::Camera(PxVec3(10.0f, 10.0f, 10.0f), PxVec3(-0.6f, -0.2f, -0.7f));
 
-	Snippets::setupDefault("PhysX Snippet Deformable Volume AVBD", sCamera, keyPress, renderCallback, exitCallback);
+	Snippets::setupDefault(
+		AVBD_VOLUME_RENDER_TITLE, sCamera, keyPress,
+		renderCallback, exitCallback);
 
 	initPhysics(true);
 	glutMainLoop();

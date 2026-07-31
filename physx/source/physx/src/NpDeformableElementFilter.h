@@ -33,8 +33,8 @@
 #include "foundation/PxPreprocessor.h"
 #include "foundation/PxArray.h"
 
-#if PX_SUPPORT_GPU_PHYSX
 #include "PxDeformableElementFilter.h"
+#include "NpDeformableAttachment.h"
 
 namespace physx
 {
@@ -43,6 +43,20 @@ struct ElementFilterInfo
 {
 	NpInternalAttachmentType::Enum internalAttachmentType;
 	PxU32 actorIndex[2];
+	bool cpuAvbdRigidActorFilter;
+	bool cpuAvbdDeformablePairFilter;
+	bool cpuAvbdFilterAllElements;
+
+	ElementFilterInfo()
+		: internalAttachmentType(
+			NpInternalAttachmentType::eUNDEFINED),
+		  cpuAvbdRigidActorFilter(false),
+		  cpuAvbdDeformablePairFilter(false),
+		  cpuAvbdFilterAllElements(false)
+	{
+		actorIndex[0] = 0;
+		actorIndex[1] = 1;
+	}
 };
 
 class NpDeformableElementFilter : public PxDeformableElementFilter, public NpBase
@@ -73,10 +87,12 @@ private:
 	PxU32 mActorIndex[2];
 
 	bool mEnabled;
+	bool mCpuAvbdRigidActorFilter;
+	bool mCpuAvbdDeformablePairFilter;
+	bool mCpuAvbdFilterAllElements;
+	PxU32 mCpuAvbdFilterHandle;
 };
 
 }
-
-#endif
 
 #endif

@@ -27,20 +27,26 @@
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
 #include "foundation/PxPreprocessor.h"
+#include "ScDeformableSurfaceCore.h"
+#include "ScPhysics.h"
 
 #if PX_SUPPORT_GPU_PHYSX
-
-#include "ScDeformableSurfaceCore.h"
-
-#include "ScPhysics.h"
 #include "ScDeformableSurfaceSim.h"
 #include "DyDeformableSurface.h"
 #include "GuTetrahedronMesh.h"
 #include "GuBV4.h"
 #include "geometry/PxTetrahedronMesh.h"
 #include "cudamanager/PxCudaContextManager.h"
+#endif
 
 using namespace physx;
+
+static PX_FORCE_INLINE void requestCpuAvbdWake(
+	Dy::DeformableBodyCore& core)
+{
+	core.cpuAvbdSleeping = false;
+	core.cpuAvbdWakeRequested = true;
+}
 
 Sc::DeformableSurfaceCore::DeformableSurfaceCore() :
 	ActorCore(PxActorType::eDEFORMABLE_SURFACE, PxActorFlag::eVISUALIZATION, PX_DEFAULT_CLIENT, 0),
@@ -65,6 +71,7 @@ void Sc::DeformableSurfaceCore::setActorFlags(PxActorFlags flags)
 {
 	mCore.actorFlags = flags;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -75,54 +82,63 @@ void Sc::DeformableSurfaceCore::setBodyFlags(PxDeformableBodyFlags flags)
 {
 	mCore.bodyFlags = flags;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setLinearDamping(const PxReal v)
 {
 	mCore.linearDamping = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setMaxLinearVelocity(const PxReal v)
 {
 	mCore.maxLinearVelocity = (v > 1e15f) ? PX_MAX_REAL : v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setMaxPenetrationBias(const PxReal v)
 {
 	mCore.maxPenetrationBias = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setSolverIterationCounts(const PxU16 c)
 {
 	mCore.solverIterationCounts = c;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setSleepThreshold(const PxReal v)
 {
 	mCore.sleepThreshold = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setSettlingThreshold(const PxReal v)
 {
 	mCore.settlingThreshold = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setSettlingDamping(const PxReal v)
 {
 	mCore.settlingDamping = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setSelfCollisionFilterDistance(const PxReal v)
 {
 	mCore.selfCollisionFilterDistance = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 //deprecated
@@ -130,6 +146,7 @@ void Sc::DeformableSurfaceCore::setSelfCollisionStressTolerance(const PxReal v)
 {
 	mCore.selfCollisionStressTolerance = v;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setWakeCounter(const PxReal v)
@@ -141,12 +158,16 @@ void Sc::DeformableSurfaceCore::setWakeCounterInternal(const PxReal v)
 {
 	mCore.wakeCounter = v;
 	mCore.dirty = true;
+	if(v > 0.0f)
+		requestCpuAvbdWake(mCore);
 
+#if PX_SUPPORT_GPU_PHYSX
 	Sc::DeformableSurfaceSim* sim = getSim();
 	if (sim)
 	{
 		sim->onSetWakeCounter();
 	}
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -157,24 +178,28 @@ void Sc::DeformableSurfaceCore::setSurfaceFlags(PxDeformableSurfaceFlags flags)
 {
 	mCore.surfaceFlags = flags;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setNbCollisionPairUpdatesPerTimestep(const PxU32 frequency)
 {
 	mCore.nbCollisionPairUpdatesPerTimestep = frequency;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 void Sc::DeformableSurfaceCore::setNbCollisionSubsteps(const PxU32 frequency)
 {
 	mCore.nbCollisionSubsteps = frequency;
 	mCore.dirty = true;
+	requestCpuAvbdWake(mCore);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
 // Internal API
 /////////////////////////////////////////////////////////////////////////////////////////
 
+#if PX_SUPPORT_GPU_PHYSX
 PxU32 Sc::DeformableSurfaceCore::addRigidAttachment(Sc::BodyCore* core, PxU32 particleId, const PxVec3& actorSpacePose)
 {
 	Sc::DeformableSurfaceSim* sim = getSim();
@@ -267,6 +292,7 @@ void Sc::DeformableSurfaceCore::removeClothAttachment(Sc::DeformableSurfaceCore*
 	if (sim)
 		sim->getScene().removeTriClothAttachment(*otherCore, *sim, handle);
 }
+#endif
 
 void Sc::DeformableSurfaceCore::addMaterial(const PxU16 handle)
 {
@@ -285,15 +311,19 @@ PxActor* Sc::DeformableSurfaceCore::getPxActor() const
 	return PxPointerOffset<PxActor*>(const_cast<DeformableSurfaceCore*>(this), gOffsetTable.scCore2PxActor[getActorCoreType()]);
 }
 
+#if PX_SUPPORT_GPU_PHYSX
 void Sc::DeformableSurfaceCore::attachShapeCore(ShapeCore* shapeCore)
 {
 	Sc::DeformableSurfaceSim* sim = getSim();
 	if (sim)
 		sim->attachShapeCore(shapeCore);
 }
+#endif
 
 void Sc::DeformableSurfaceCore::onShapeChange(ShapeCore& shape, ShapeChangeNotifyFlags notifyFlags)
 {
+	requestCpuAvbdWake(mCore);
+#if PX_SUPPORT_GPU_PHYSX
 	PX_UNUSED(shape);
 	DeformableSurfaceSim* sim = getSim();
 	if (!sim)
@@ -312,12 +342,15 @@ void Sc::DeformableSurfaceCore::onShapeChange(ShapeCore& shape, ShapeChangeNotif
 		s.onContactOffsetChange();
 	if (notifyFlags & ShapeChangeNotifyFlag::eRESTOFFSET)
 		s.onRestOffsetChange();
+#else
+	PX_UNUSED(shape);
+	PX_UNUSED(notifyFlags);
+#endif
 }
 
+#if PX_SUPPORT_GPU_PHYSX
 Sc::DeformableSurfaceSim* Sc::DeformableSurfaceCore::getSim() const
 {
 	return static_cast<Sc::DeformableSurfaceSim*>(ActorCore::getSim());
 }
-
-#endif //PX_SUPPORT_GPU_PHYSX
-
+#endif

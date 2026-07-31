@@ -228,8 +228,9 @@ AvbdDynamicsContext::AvbdDynamicsContext(
     : DynamicsContextBase(memBlockPool, taskPool, simStats, allocator,
                           materialManager, islandManager, contextID,
                           maxBiasCoefficient, lengthScale, sceneFlags),
-      mScratchAllocator(scratchAllocator), mScratchAdapter(scratchAllocator),
-      mAllocatorAdapter(allocator), mTaskManager(taskManager),
+      mScratchAllocator(scratchAllocator), mSoftIslandProvider(nullptr),
+      mScratchAdapter(scratchAllocator), mAllocatorAdapter(allocator),
+      mTaskManager(taskManager),
       mFrictionEveryIteration(
           sceneFlags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION),
       mIterationDiagnosticsEnabled(isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG")),
@@ -3984,6 +3985,11 @@ void AvbdDynamicsContext::update(
 
   // Calculate total body count including articulation links
   PxU32 totalBodyCount = numDynamicBodies + numArticulations * maxArticulationLinks;
+  // A complete soft selection is a first-class main-solver island even when
+  // it has no rigid endpoint. Keep one non-addressable allocation slot so the
+  // gather/provider/task plumbing stays valid while every physical loop still
+  // observes totalBodyCount == 0.
+  const PxU32 bodyAllocationCount = PxMax<PxU32>(totalBodyCount, 1u);
   ensureBodyVelocityHistoryCapacity(totalBodyCount);
 
   // Allocate global arrays - use scratch with main allocator fallback
@@ -3994,15 +4000,15 @@ void AvbdDynamicsContext::update(
     PX_PROFILE_ZONE("AVBD.allocateMemory", mContextID);
     avbdBodies = reinterpret_cast<AvbdSolverBody *>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-        sizeof(AvbdSolverBody) * totalBodyCount, "AvbdSolverBody"));
+        sizeof(AvbdSolverBody) * bodyAllocationCount, "AvbdSolverBody"));
 
     rigidBodies = reinterpret_cast<PxsRigidBody **>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-        sizeof(PxsRigidBody *) * totalBodyCount, "RigidBodies"));
+        sizeof(PxsRigidBody *) * bodyAllocationCount, "RigidBodies"));
 
     staticTouchCounts = reinterpret_cast<PxU32 *>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-        sizeof(PxU32) * totalBodyCount, "StaticTouchCounts"));
+        sizeof(PxU32) * bodyAllocationCount, "StaticTouchCounts"));
   }
 
   // Check if allocation failed completely
@@ -4010,7 +4016,7 @@ void AvbdDynamicsContext::update(
     return;
   }
 
-  memset(staticTouchCounts, 0, sizeof(PxU32) * totalBodyCount);
+  memset(staticTouchCounts, 0, sizeof(PxU32) * bodyAllocationCount);
 
   // Track articulation info for writeback
   FeatherstoneArticulation **articulationForBody = nullptr;
@@ -4090,7 +4096,11 @@ void AvbdDynamicsContext::update(
   const IG::IslandId *islandIds = islandSim.getActiveIslands();
 
   // 1. Gather bodies per island (including articulation links)
-  for (PxU32 i = 0; i < islandCount && bodyIndex < totalBodyCount; ++i) {
+  // Every active island needs a defined body range, including native
+  // deformable-only islands.  Stopping once the rigid-body array is full
+  // leaves later soft-only island records uninitialized and lets a provider
+  // interpret arbitrary body starts/counts as rigid-array indices.
+  for (PxU32 i = 0; i < islandCount; ++i) {
     AvbdIslandInfo &info = islandInfos[i];
     info.bodyStart = bodyIndex;
     info.articulationJointCount = 0;
@@ -4368,6 +4378,44 @@ void AvbdDynamicsContext::update(
     setupBodies(avbdBodies, rigidBodies, bodyIndex, dt, gravity);
   }
 
+  // The Scene may bind one complete soft/VBD tuple to each already gathered
+  // native island. Selection happens before any solve task is submitted, so
+  // the provider can compile stable island-local particle/body/contact slices
+  // and rigid target indices without racing later islands.
+  PxArray<AvbdSoftIslandSelection> softSelections;
+  if (mSoftIslandProvider) {
+    PxArray<PxU32> islandBodyStarts;
+    PxArray<PxU32> islandBodyCounts;
+    islandBodyStarts.resize(islandCount);
+    islandBodyCounts.resize(islandCount);
+    for (PxU32 i = 0; i < islandCount; ++i) {
+      islandBodyStarts[i] = islandInfos[i].bodyStart;
+      islandBodyCounts[i] = islandInfos[i].bodyCount;
+    }
+    if (!mSoftIslandProvider->prepareSoftIslandSelections(
+            avbdBodies, rigidBodies, articulationForBody, linkIndexForBody,
+            islandBodyStarts.begin(),
+            islandBodyCounts.begin(), islandIds, islandCount, dt,
+            gravity, softSelections)) {
+      softSelections.clear();
+    }
+    for (PxU32 selectionIndex = 0;
+         selectionIndex < softSelections.size(); ++selectionIndex) {
+      const AvbdSoftIslandSelection &selection =
+          softSelections[selectionIndex];
+      bool uniqueIsland = true;
+      for (PxU32 priorIndex = 0; priorIndex < selectionIndex; ++priorIndex)
+        uniqueIsland = uniqueIsland &&
+                       softSelections[priorIndex].islandIndex !=
+                           selection.islandIndex;
+      if (!selection.isComplete() ||
+          selection.islandIndex >= islandCount || !uniqueIsland) {
+        softSelections.clear();
+        break;
+      }
+    }
+  }
+
   // 4. Initialize Solver
   if (!mSolverInitialized) {
     AvbdSolverConfig config;
@@ -4612,16 +4660,36 @@ void AvbdDynamicsContext::update(
       }
     }
 
+    const AvbdSoftIslandSelection *softSelection = nullptr;
+    for (PxU32 selectionIndex = 0;
+         selectionIndex < softSelections.size(); ++selectionIndex) {
+      if (softSelections[selectionIndex].islandIndex == i) {
+        softSelection = &softSelections[selectionIndex];
+        break;
+      }
+    }
+    const bool ownsSoftSelection =
+        softSelection && softSelection->isComplete();
+
     // Skip empty islands
     if (numConstraints == 0 && numD6 == 0 && numGear == 0 &&
-        info.bodyCount == 0) {
+        info.bodyCount == 0 && !ownsSoftSelection) {
       continue;
     }
 
     // Create Island Batch
     AvbdIslandBatch batch;
-    batch.bodies = &avbdBodies[info.bodyStart];
+    batch.bodies =
+        info.bodyCount > 0 ? &avbdBodies[info.bodyStart] : nullptr;
     batch.numBodies = info.bodyCount;
+    batch.articulationForBody =
+        info.bodyCount > 0 && articulationForBody
+            ? &articulationForBody[info.bodyStart]
+            : nullptr;
+    batch.linkIndexForBody =
+        info.bodyCount > 0 && linkIndexForBody
+            ? &linkIndexForBody[info.bodyStart]
+            : nullptr;
     batch.constraints =
         avbdConstraints ? &avbdConstraints[currentConstraintIdx] : nullptr;
     batch.numConstraints = numConstraints;
@@ -4631,15 +4699,17 @@ void AvbdDynamicsContext::update(
     batch.gearJoints = &gearJoints[currGearIdx];
     batch.numGear = numGear;
 
-    // This update currently gathers rigid NP islands only. Genuine soft/VBD
-    // integration must populate the complete tuple; partial data is rejected
-    // by solveIsland and can never select the rigid contact-only primal.
-    batch.softParticles = nullptr;
-    batch.numSoftParticles = 0;
-    batch.softBodies = nullptr;
-    batch.numSoftBodies = 0;
-    batch.softContacts = nullptr;
-    batch.numSoftContacts = 0;
+    batch.softParticles =
+        ownsSoftSelection ? softSelection->particles : nullptr;
+    batch.numSoftParticles =
+        ownsSoftSelection ? softSelection->numParticles : 0;
+    batch.softBodies = ownsSoftSelection ? softSelection->bodies : nullptr;
+    batch.numSoftBodies =
+        ownsSoftSelection ? softSelection->numBodies : 0;
+    batch.softContacts =
+        ownsSoftSelection ? softSelection->contacts : nullptr;
+    batch.numSoftContacts =
+        ownsSoftSelection ? softSelection->numContacts : 0;
 
     batch.islandStart = i;
     batch.islandEnd = i + 1;
@@ -4650,7 +4720,11 @@ void AvbdDynamicsContext::update(
     if (numD6 == 0 && numGear == 0 &&
         (batch.numConstraints > 0 || batch.numSoftContacts > 0))
       contactOnlyIters = AvbdConstants::AVBD_MIN_INNER_ITERS_BODY_VS_STATIC;
-    batch.iterationOverride = PxMax(islandArticIterations, contactOnlyIters);
+    const PxU32 softIterations =
+        ownsSoftSelection ? softSelection->iterationOverride : 0;
+    batch.iterationOverride =
+        PxMax(PxMax(islandArticIterations, contactOnlyIters),
+              softIterations);
 
     // Build constraint-to-body mappings for O(1) lookup in solver
     // This eliminates O(N^2) complexity in the inner loop
@@ -4745,7 +4819,8 @@ void AvbdDynamicsContext::update(
           &batch.gearMap, batch.colorBatches, batch.numColors,
           batch.iterationOverride, batch.softParticles,
           batch.numSoftParticles, batch.softBodies, batch.numSoftBodies,
-          batch.softContacts, batch.numSoftContacts, stats);
+          batch.softContacts, batch.numSoftContacts,
+          batch.articulationForBody, batch.linkIndexForBody, stats);
 
       const PxU32 baseIterations =
           batch.iterationOverride > 0 ? batch.iterationOverride

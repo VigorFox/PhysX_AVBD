@@ -38,12 +38,14 @@
 #include "ScScene.h"
 #include "foundation/PxErrors.h"
 #include "foundation/PxFoundation.h"
+#include "NpDeformableVolume.h"
+#include "NpDeformableVolumeMaterial.h"
+#include "NpDeformableSurface.h"
+#include "NpDeformableSurfaceMaterial.h"
+#include "NpDeformableAttachment.h"
+#include "NpDeformableElementFilter.h"
 #if PX_SUPPORT_GPU_PHYSX
 	#include "NpPBDParticleSystem.h"
-	#include "NpDeformableSurface.h"
-	#include "NpDeformableVolume.h"
-	#include "NpDeformableAttachment.h"
-	#include "NpDeformableElementFilter.h"
 	#include "cudamanager/PxCudaContextManager.h"
 	#include "cudamanager/PxCudaContext.h"
 #endif
@@ -259,6 +261,7 @@ NpScene::~NpScene()
 	PxU32 particleCount = mPBDParticleSystems.size();
 	while(particleCount--)
 		removeParticleSystem(*mPBDParticleSystems.getEntries()[particleCount], false);
+#endif
 
 	PxU32 deformableSurfaceCount = mDeformableSurfaces.size();
 	while (deformableSurfaceCount--)
@@ -267,7 +270,6 @@ NpScene::~NpScene()
 	PxU32 deformableVolumeCount = mDeformableVolumes.size();
 	while(deformableVolumeCount--)
 		removeDeformableVolume(*mDeformableVolumes.getEntries()[deformableVolumeCount], false);
-#endif
 	bool unlock = mScene.getFlags() & PxSceneFlag::eREQUIRE_RW_LOCK;
 
 #if PX_SUPPORT_PVD
@@ -560,15 +562,15 @@ bool NpScene::addActorInternal(PxActor& actor, const PxBVH* bvh)
 		{
 			return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__, "PxScene::addActor(): Individual articulation links can not be added to the scene");
 		}
-#if PX_SUPPORT_GPU_PHYSX
-		case (PxConcreteType::eDEFORMABLE_SURFACE):
-		{
-			return addDeformableSurface(static_cast<PxDeformableSurface&>(actor));
-		}
 		case (PxConcreteType::eDEFORMABLE_VOLUME):
 		{
 			return addDeformableVolume(static_cast<PxDeformableVolume&>(actor));
 		}
+		case (PxConcreteType::eDEFORMABLE_SURFACE):
+		{
+			return addDeformableSurface(static_cast<PxDeformableSurface&>(actor));
+		}
+#if PX_SUPPORT_GPU_PHYSX
 		case (PxConcreteType::ePBD_PARTICLESYSTEM):
 		{
 			return addParticleSystem(static_cast<PxPBDParticleSystem&>(actor));
@@ -880,19 +882,20 @@ void NpScene::removeActorInternal(PxActor& actor, bool wakeOnLostTouch, bool rem
 		}
 		break;
 
-#if PX_SUPPORT_GPU_PHYSX
-		case PxActorType::eDEFORMABLE_SURFACE:
-		{
-			NpDeformableSurface& npDeformableSurface = static_cast<NpDeformableSurface&>(actor);
-			removeDeformableSurface(npDeformableSurface, wakeOnLostTouch);
-		}
-		break;
 		case PxActorType::eDEFORMABLE_VOLUME:
 		{
 			NpDeformableVolume& npDeformableVolume = static_cast<NpDeformableVolume&>(actor);
 			removeDeformableVolume(npDeformableVolume, wakeOnLostTouch);
 		}
 		break;
+
+		case PxActorType::eDEFORMABLE_SURFACE:
+		{
+			NpDeformableSurface& npDeformableSurface = static_cast<NpDeformableSurface&>(actor);
+			removeDeformableSurface(npDeformableSurface, wakeOnLostTouch);
+		}
+		break;
+#if PX_SUPPORT_GPU_PHYSX
 		case PxActorType::ePBD_PARTICLESYSTEM:
 		{
 			PxPBDParticleSystem& npParticleSystem = static_cast<PxPBDParticleSystem&>(actor);
@@ -928,10 +931,8 @@ static PX_FORCE_INLINE bool addRigidActorT(T& rigidActor, PxArray<T*>& rigidActo
 	if(!isNoSimActor)
 		rigidActor.addConstraintsToScene();
 
-#if PX_SUPPORT_GPU_PHYSX
 	rigidActor.addAttachments(rigidActor);
 	rigidActor.addElementFilters(rigidActor);
-#endif
 
 	OMNI_PVD_SET(OMNI_PVD_CONTEXT_HANDLE, PxActor, worldBounds, static_cast<PxActor &>(rigidActor), rigidActor.getWorldBounds())
 	OMNI_PVD_ADD(OMNI_PVD_CONTEXT_HANDLE, PxScene, actors, static_cast<PxScene &>(*scene), static_cast<PxActor &>(rigidActor))
@@ -992,10 +993,8 @@ static PX_FORCE_INLINE void removeRigidActorT(T& rigidActor, NpScene* scene, boo
 		}
 	}
 
-#if PX_SUPPORT_GPU_PHYSX
 	rigidActor.removeAttachments(rigidActor, false);
 	rigidActor.removeElementFilters(rigidActor, false);
-#endif
 
 	rigidActor.getShapeManager().teardownAllSceneQuery(scene->getSQAPI(), rigidActor);
 	if(!isNoSimActor)
@@ -1543,11 +1542,22 @@ void NpScene::removeArticulationInternal(PxArticulationReducedCoordinate& pxa, b
 
 bool NpScene::addDeformableSurface(PxDeformableSurface& deformableSurface)
 {
-	if (!(getFlags() & PxSceneFlag::eENABLE_GPU_DYNAMICS))
-		return PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL,
-			"PxScene::addActor(): Deformable surfaces can only be simulated by GPU-accelerated scenes!");
+	const bool cpuAvbd =
+		deformableSurface.getDeformableSurfaceBackend() ==
+		PxDeformableSurfaceBackend::eCPU_AVBD;
+	if(cpuAvbd)
+	{
+		if(mScene.getSolverType() != PxSolverType::eAVBD)
+			return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
+				"PxScene::addActor(): CPU AVBD deformable surfaces require PxSolverType::eAVBD.");
+		if(mScene.isUsingGpuDynamics())
+			return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
+				"PxScene::addActor(): CPU AVBD deformable surfaces cannot be added to a GPU dynamics scene.");
+	}
+	else if(!(getFlags() & PxSceneFlag::eENABLE_GPU_DYNAMICS))
+		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
+			"PxScene::addActor(): GPU deformable surfaces require PxSceneFlag::eENABLE_GPU_DYNAMICS.");
 
-#if PX_SUPPORT_GPU_PHYSX
 	if (mDeformableSurfaces.size() == PX_MAX_NB_DEFORMABLE_SURFACE)
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
 			"PxScene::addActor(): Deformable surface exceeds maximum number of instances per scene (PX_MAX_NB_DEFORMABLE_SURFACE)!");
@@ -1559,57 +1569,73 @@ bool NpScene::addDeformableSurface(PxDeformableSurface& deformableSurface)
 	if (!npShape)
 		return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
 			"PxScene::addActor(): Deformable surface does not have a shape attached, will not be added to scene!");
+	if(cpuAvbd &&
+		(!deformableSurface.getPositionInvMassBufferH() ||
+		 !deformableSurface.getVelocityBufferH() ||
+		 !deformableSurface.getRestPositionBufferH()))
+		return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
+			"PxScene::addActor(): CPU AVBD deformable-surface host buffers are incomplete.");
 
 	scAddDeformableSurface(this, npSurface);
 
-	Sc::ShapeCore* shapeCore = &npShape->getCore();
-	npSurface.getCore().attachShapeCore(shapeCore);
-
 	mDeformableSurfaces.insert(&deformableSurface);
-
-	//for gpu deformable surface
-	mScene.addDeformableSurfaceSimControl(npSurface.getCore());
-
 	npSurface.addAttachments(deformableSurface);
 	npSurface.addElementFilters(deformableSurface);
+
+	if(!cpuAvbd)
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		Sc::ShapeCore* shapeCore = &npShape->getCore();
+		npSurface.getCore().attachShapeCore(shapeCore);
+		mScene.addDeformableSurfaceSimControl(npSurface.getCore());
+
+#else
+		PX_ASSERT(0);
+#endif
+	}
 
 	OMNI_PVD_ADD(OMNI_PVD_CONTEXT_HANDLE, PxScene, actors, static_cast<PxScene&>(*this), static_cast<PxActor&>(deformableSurface));
 
 	return true;
-#else
-	PX_UNUSED(deformableSurface);
-	return false;
-#endif
 }
 
 void NpScene::removeDeformableSurface(PxDeformableSurface& deformableSurface, bool /*wakeOnLostTouch*/)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NpDeformableSurface& npSurface = reinterpret_cast<NpDeformableSurface&>(deformableSurface);
-
 	npSurface.removeAttachments(deformableSurface, false);
 	npSurface.removeElementFilters(deformableSurface, false);
 
 	scRemoveDeformableSurface(npSurface);
 	removeFromDeformableSurfaceList(deformableSurface);
 	OMNI_PVD_REMOVE(OMNI_PVD_CONTEXT_HANDLE, PxScene, actors, static_cast<PxScene&>(*this), static_cast<PxActor&>(deformableSurface));
-#else
-	PX_UNUSED(deformableSurface);
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 bool NpScene::addDeformableVolume(PxDeformableVolume& deformableVolume)
 {
-	if (!(getFlags() & PxSceneFlag::eENABLE_GPU_DYNAMICS))
+	const bool cpuAvbd =
+		deformableVolume.getDeformableVolumeBackend() ==
+		PxDeformableVolumeBackend::eCPU_AVBD;
+	if(cpuAvbd)
+	{
+		if(mScene.getSolverType() != PxSolverType::eAVBD)
+			return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
+				"PxScene::addActor(): CPU AVBD deformable volumes require PxSolverType::eAVBD.");
+		if(mScene.isUsingGpuDynamics())
+			return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
+				"PxScene::addActor(): CPU AVBD deformable volumes cannot be added to a GPU dynamics scene.");
+	}
+	else if(!(getFlags() & PxSceneFlag::eENABLE_GPU_DYNAMICS))
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
-			"PxScene::addActor(): Deformable volumes can only be simulated by GPU-accelerated scenes!");
+			"PxScene::addActor(): GPU deformable volumes require PxSceneFlag::eENABLE_GPU_DYNAMICS.");
 
-#if PX_SUPPORT_GPU_PHYSX
 	if (!deformableVolume.getSimulationMesh())
 		return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
 			"PxScene::addActor(): Deformable volume does not have simulation mesh, will not be added to scene!");
+	if (!deformableVolume.getDeformableVolumeAuxData())
+		return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
+			"PxScene::addActor(): Deformable volume does not have auxiliary simulation data, will not be added to scene!");
 
 	if (mDeformableVolumes.size() == PX_MAX_NB_DEFORMABLE_VOLUME)
 		return outputError<PxErrorCode::eINVALID_OPERATION>(__LINE__,
@@ -1622,93 +1648,104 @@ bool NpScene::addDeformableVolume(PxDeformableVolume& deformableVolume)
 		return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
 			"PxScene::addActor(): Deformable volume does not have a shape attached, will not be added to scene!");
 
+	if(cpuAvbd)
+	{
+		PxVec4* simPositionInvMass =
+			npVolume.getSimPositionInvMassBufferH();
+		PxVec4* simVelocity =
+			npVolume.getSimVelocityBufferH();
+		PxVec4* collisionPositionInvMass =
+			npVolume.getPositionInvMassBufferH();
+		PxVec4* collisionRestPosition =
+			npVolume.getRestPositionBufferH();
+		if(!simPositionInvMass || !simVelocity ||
+			!collisionPositionInvMass || !collisionRestPosition)
+			return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
+				"PxScene::addActor(): CPU AVBD deformable-volume host buffers are incomplete.");
+		const PxU32 vertexCount =
+			deformableVolume.getSimulationMesh()->getNbVertices();
+		for(PxU32 i = 0; i < vertexCount; i++)
+		{
+			if(!simPositionInvMass[i].getXYZ().isFinite() ||
+				!PxIsFinite(simPositionInvMass[i].w) ||
+				simPositionInvMass[i].w < 0.0f ||
+				!simVelocity[i].getXYZ().isFinite())
+				return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
+					"PxScene::addActor(): CPU AVBD deformable-volume host buffers contain invalid data.");
+		}
+		const PxU32 collisionVertexCount =
+			deformableVolume.getCollisionMesh()->getNbVertices();
+		for(PxU32 i = 0; i < collisionVertexCount; i++)
+		{
+			if(!collisionPositionInvMass[i].isFinite() ||
+				!collisionRestPosition[i].isFinite())
+				return outputError<PxErrorCode::eINVALID_PARAMETER>(__LINE__,
+					"PxScene::addActor(): CPU AVBD deformable-volume collision host buffers contain invalid data.");
+		}
+	}
+
 	scAddDeformableVolume(npVolume);
 
-	Sc::ShapeCore* shapeCore = &npShape->getCore();
-	npVolume.getCore().attachShapeCore(shapeCore);
-	npVolume.getCore().attachSimulationMesh(deformableVolume.getSimulationMesh(), deformableVolume.getDeformableVolumeAuxData());
-
 	mDeformableVolumes.insert(&deformableVolume);
-
-	//for gpu deformable volume
-	mScene.addDeformableVolumeSimControl(npVolume.getCore());
-
 	npVolume.addAttachments(deformableVolume);
 	npVolume.addElementFilters(deformableVolume);
+
+	if(!cpuAvbd)
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		Sc::ShapeCore* shapeCore = &npShape->getCore();
+		npVolume.getCore().attachShapeCore(shapeCore);
+		npVolume.getCore().attachSimulationMesh(
+			deformableVolume.getSimulationMesh(),
+			deformableVolume.getDeformableVolumeAuxData());
+		mScene.addDeformableVolumeSimControl(npVolume.getCore());
+#else
+		PX_ASSERT(0);
+#endif
+	}
 
 	OMNI_PVD_ADD(OMNI_PVD_CONTEXT_HANDLE, PxScene, actors, static_cast<PxScene&>(*this), static_cast<PxActor&>(deformableVolume));
 
 	return true;
-#else
-	PX_UNUSED(deformableVolume);
-	return false;
-#endif
 }
 
 void NpScene::removeDeformableVolume(PxDeformableVolume& deformableVolume, bool /*wakeOnLostTouch*/)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NpDeformableVolume& npVolume = reinterpret_cast<NpDeformableVolume&>(deformableVolume);
-
 	npVolume.removeAttachments(deformableVolume, false);
 	npVolume.removeElementFilters(deformableVolume, false);
 
 	scRemoveDeformableVolume(npVolume);
 	removeFromDeformableVolumeList(deformableVolume);
 	OMNI_PVD_REMOVE(OMNI_PVD_CONTEXT_HANDLE, PxScene, actors, static_cast<PxScene&>(*this), static_cast<PxActor&>(deformableVolume));
-#else
-	PX_UNUSED(deformableVolume);
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 PxU32 NpScene::getNbDeformableSurfaces() const
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NP_READ_CHECK(this);
 	return mDeformableSurfaces.size();
-#else
-	return 0;
-#endif
 }
 
 PxU32 NpScene::getDeformableSurfaces(PxDeformableSurface** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NP_READ_CHECK(this);
 	return Cm::getArrayOfPointers(userBuffer, bufferSize, startIndex, mDeformableSurfaces.getEntries(), mDeformableSurfaces.size());
-#else
-	PX_UNUSED(userBuffer);
-	PX_UNUSED(bufferSize);
-	PX_UNUSED(startIndex);
-	return 0;
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 PxU32 NpScene::getNbDeformableVolumes() const
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NP_READ_CHECK(this);
 	return mDeformableVolumes.size();
-#else
-	return 0;
-#endif
 }
 
 PxU32 NpScene::getDeformableVolumes(PxDeformableVolume** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NP_READ_CHECK(this);
 	return Cm::getArrayOfPointers(userBuffer, bufferSize, startIndex, mDeformableVolumes.getEntries(), mDeformableVolumes.size());
-#else
-	PX_UNUSED(userBuffer);
-	PX_UNUSED(bufferSize);
-	PX_UNUSED(startIndex);
-	return 0;
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2890,10 +2927,15 @@ void NpScene::syncMaterialEvents()
 
 	PxvNphaseImplementationContext* context = mScene.getLowLevelContext()->getNphaseImplementationContext();
 	updateLowLevelMaterials<NpMaterial, PxsMaterialManager, PxsMaterialCore>(mPhysics, mScene.getMaterialManager(), mSceneMaterialBuffer, context);
+	updateLowLevelMaterials<NpDeformableVolumeMaterial, PxsDeformableVolumeMaterialManager, PxsDeformableVolumeMaterialCore>(
+	mPhysics, mScene.getDeformableVolumeMaterialManager(),
+		mSceneDeformableVolumeMaterialBuffer, context);
+
+	updateLowLevelMaterials<NpDeformableSurfaceMaterial, PxsDeformableSurfaceMaterialManager, PxsDeformableSurfaceMaterialCore>(
+		mPhysics, mScene.getDeformableSurfaceMaterialManager(),
+		mSceneDeformableSurfaceMaterialBuffer, context);
 
 #if PX_SUPPORT_GPU_PHYSX
-	updateLowLevelMaterials<NpDeformableSurfaceMaterial, PxsDeformableSurfaceMaterialManager, PxsDeformableSurfaceMaterialCore>(mPhysics, mScene.getDeformableSurfaceMaterialManager(), mSceneDeformableSurfaceMaterialBuffer, context);
-	updateLowLevelMaterials<NpDeformableVolumeMaterial, PxsDeformableVolumeMaterialManager, PxsDeformableVolumeMaterialCore>(mPhysics, mScene.getDeformableVolumeMaterialManager(), mSceneDeformableVolumeMaterialBuffer, context);
 	updateLowLevelMaterials<NpPBDMaterial, PxsPBDMaterialManager, PxsPBDMaterialCore>(mPhysics, mScene.getPBDMaterialManager(), mScenePBDMaterialBuffer, context);
 #endif
 }
@@ -3227,11 +3269,12 @@ void NpScene::removeMaterial(const MaterialType& mat)								\
 }
 
 IMPLEMENT_MATERIAL(NpMaterial, PxsMaterialCore, mSceneMaterialBuffer)
+IMPLEMENT_MATERIAL(NpDeformableVolumeMaterial, PxsDeformableVolumeMaterialCore, mSceneDeformableVolumeMaterialBuffer)
+IMPLEMENT_MATERIAL(NpDeformableSurfaceMaterial, PxsDeformableSurfaceMaterialCore, mSceneDeformableSurfaceMaterialBuffer)
 
 #if PX_SUPPORT_GPU_PHYSX
-	IMPLEMENT_MATERIAL(NpDeformableSurfaceMaterial, PxsDeformableSurfaceMaterialCore, mSceneDeformableSurfaceMaterialBuffer)
-	IMPLEMENT_MATERIAL(NpDeformableVolumeMaterial, PxsDeformableVolumeMaterialCore, mSceneDeformableVolumeMaterialBuffer)
 	IMPLEMENT_MATERIAL(NpPBDMaterial, PxsPBDMaterialCore, mScenePBDMaterialBuffer)
+#else
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -4197,6 +4240,16 @@ PX_FORCE_INLINE NpShape* getShape(Sc::ShapeCore* const* shapeArray, const PxU32 
 	return static_cast<NpShape*>(shapeArray[i]->getPxShape());
 }
 
+static void registerAvbdCpuStaticShapes(
+	Sc::Scene& scene, NpRigidStatic& rigidStatic)
+{
+	NpShape* const* shapes = NULL;
+	const PxU32 shapeCount = getShapes(rigidStatic, shapes);
+	for(PxU32 i = 0; i < shapeCount; i++)
+		scene.addAvbdCpuStaticShape(
+			rigidStatic.getCore(), shapes[i]->getCore());
+}
+
 template<class T>
 PX_FORCE_INLINE static void addActorShapes(T* const* shapeArray, const PxU32 nbShapes, PxActor* pxActor, NpScene* scScene)
 {
@@ -4326,33 +4379,91 @@ PX_FORCE_INLINE static void addOrRemoveNonSimActor(T& rigid)
 
 template <typename T>struct ScSceneFns {};
 
-#if PX_SUPPORT_GPU_PHYSX
-template<> struct ScSceneFns<NpDeformableSurface>
-{
-	static PX_FORCE_INLINE void insert(Sc::Scene& s, NpDeformableSurface& v, PxBounds3*, const Gu::BVH*, bool)
-	{
-		s.addDeformableSurface(v.getCore());
-	}
-
-	static PX_FORCE_INLINE void remove(Sc::Scene& s, NpDeformableSurface& v, bool /*wakeOnLostTouch*/)
-	{
-		s.removeDeformableSurface(v.getCore());
-	}
-};
-
 template<> struct ScSceneFns<NpDeformableVolume>
 {
 	static PX_FORCE_INLINE void insert(Sc::Scene& s, NpDeformableVolume& v, PxBounds3*, const BVH*, bool)
 	{
-		s.addDeformableVolume(v.getCore());
+		if(v.getDeformableVolumeBackend() ==
+			PxDeformableVolumeBackend::eCPU_AVBD)
+		{
+			const bool added = s.addAvbdCpuDeformableVolume(
+				v.getCore(), *v.getSimulationMesh(),
+				*v.getCollisionMesh(),
+				*v.getDeformableVolumeAuxData());
+			PX_ASSERT(added);
+			PX_UNUSED(added);
+		}
+		else
+		{
+#if PX_SUPPORT_GPU_PHYSX
+			s.addDeformableVolume(v.getCore());
+#else
+			PX_ASSERT(0);
+#endif
+		}
 	}
 
 	static PX_FORCE_INLINE void remove(Sc::Scene& s, NpDeformableVolume& v, bool /*wakeOnLostTouch*/)
 	{
-		s.removeDeformableVolume(v.getCore());
+		if(v.getDeformableVolumeBackend() ==
+			PxDeformableVolumeBackend::eCPU_AVBD)
+			s.removeAvbdCpuDeformableVolume(v.getCore());
+		else
+		{
+#if PX_SUPPORT_GPU_PHYSX
+			s.removeDeformableVolume(v.getCore());
+#else
+			PX_ASSERT(0);
+#endif
+		}
 	}
 };
 
+template<> struct ScSceneFns<NpDeformableSurface>
+{
+	static PX_FORCE_INLINE void insert(Sc::Scene& s, NpDeformableSurface& v, PxBounds3*, const Gu::BVH*, bool)
+	{
+		if(v.getDeformableSurfaceBackend() ==
+			PxDeformableSurfaceBackend::eCPU_AVBD)
+		{
+			NpShape* shape = static_cast<NpShape*>(v.getShape());
+			PX_ASSERT(shape);
+			const PxTriangleMeshGeometry& geometry =
+				static_cast<const PxTriangleMeshGeometry&>(
+					shape->getGeometry());
+			const bool added = geometry.triangleMesh &&
+				s.addAvbdCpuDeformableSurface(
+					v.getCore(), *geometry.triangleMesh);
+			PX_ASSERT(added);
+			PX_UNUSED(added);
+		}
+		else
+		{
+#if PX_SUPPORT_GPU_PHYSX
+			s.addDeformableSurface(v.getCore());
+#else
+			PX_ASSERT(0);
+#endif
+		}
+	}
+
+	static PX_FORCE_INLINE void remove(Sc::Scene& s, NpDeformableSurface& v, bool /*wakeOnLostTouch*/)
+	{
+		if(v.getDeformableSurfaceBackend() ==
+			PxDeformableSurfaceBackend::eCPU_AVBD)
+			s.removeAvbdCpuDeformableSurface(v.getCore());
+		else
+		{
+#if PX_SUPPORT_GPU_PHYSX
+			s.removeDeformableSurface(v.getCore());
+#else
+			PX_ASSERT(0);
+#endif
+		}
+	}
+};
+
+#if PX_SUPPORT_GPU_PHYSX
 template<> struct ScSceneFns<NpPBDParticleSystem>
 {
 	static PX_FORCE_INLINE void insert(Sc::Scene& s, NpPBDParticleSystem& v, PxBounds3*, const BVH*, bool)
@@ -4460,7 +4571,10 @@ template<> struct ScSceneFns<NpRigidStatic>
 		PX_ASSERT(v.getCore().getActorFlags().isSet(PxActorFlag::eDISABLE_SIMULATION)==noSim);
 
 		if(!noSim)
+		{
 			addSimActor(s, v, uninflatedBounds, bvh);
+			registerAvbdCpuStaticShapes(s, v);
+		}
 		else
 			addOrRemoveNonSimActor<true>(v);
 	}
@@ -4468,7 +4582,10 @@ template<> struct ScSceneFns<NpRigidStatic>
 	static PX_FORCE_INLINE void remove(Sc::Scene& s, NpRigidStatic& v, bool wakeOnLostTouch)
 	{
 		if(!v.getActorFlags().isSet(PxActorFlag::eDISABLE_SIMULATION))
+		{
+			s.removeAvbdCpuStatic(v.getCore());
 			removeSimActor(s, v, wakeOnLostTouch);
+		}
 		else
 			addOrRemoveNonSimActor<false>(v);
 	}
@@ -4749,7 +4866,35 @@ void NpScene::removeFromConstraintList(PxConstraint& constraint)
 
 ///////////////////////////////////////////////////////////////////////////////
 
+void NpScene::scAddDeformableVolume(NpDeformableVolume& npVolume)
+{
+	add<NpDeformableVolume>(this, npVolume);
+	if(npVolume.getDeformableVolumeBackend() ==
+		PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		for(PxU32 i = 0; i < mRigidStatics.size(); i++)
+		{
+			NpRigidStatic& rigidStatic = *mRigidStatics[i];
+			if(!(rigidStatic.getActorFlags() &
+				PxActorFlag::eDISABLE_SIMULATION))
+				registerAvbdCpuStaticShapes(mScene, rigidStatic);
+		}
+	}
+}
+
+void NpScene::scRemoveDeformableVolume(NpDeformableVolume& npVolume)
+{
+	if(npVolume.getDeformableVolumeBackend() ==
+		PxDeformableVolumeBackend::eGPU)
+	{
 #if PX_SUPPORT_GPU_PHYSX
+		mScene.removeDeformableVolumeSimControl(npVolume.getCore());
+#endif
+	}
+	remove<NpDeformableVolume>(this, npVolume);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 void NpScene::scAddDeformableSurface(NpScene* npScene, NpDeformableSurface& npSurface)
 {
@@ -4758,25 +4903,17 @@ void NpScene::scAddDeformableSurface(NpScene* npScene, NpDeformableSurface& npSu
 
 void NpScene::scRemoveDeformableSurface(NpDeformableSurface& npSurface)
 {
-	mScene.removeDeformableSurfaceSimControl(npSurface.getCore());
+	if(npSurface.getDeformableSurfaceBackend() ==
+		PxDeformableSurfaceBackend::eGPU)
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		mScene.removeDeformableSurfaceSimControl(npSurface.getCore());
+#endif
+	}
 	remove<NpDeformableSurface>(this, npSurface, false);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-void NpScene::scAddDeformableVolume(NpDeformableVolume& npVolume)
-{
-	add<NpDeformableVolume>(this, npVolume);
-}
-
-void NpScene::scRemoveDeformableVolume(NpDeformableVolume& npVolume)
-{
-	mScene.removeDeformableVolumeSimControl(npVolume.getCore());
-	remove<NpDeformableVolume>(this, npVolume);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
+#if PX_SUPPORT_GPU_PHYSX
 void NpScene::scAddParticleSystem(NpPBDParticleSystem& particleSystem)
 {
 	add<NpPBDParticleSystem>(this, particleSystem);
@@ -4787,6 +4924,7 @@ void NpScene::scRemoveParticleSystem(NpPBDParticleSystem& particleSystem)
 	mScene.removeParticleSystemSimControl(particleSystem.getCore());
 	remove<NpPBDParticleSystem>(this, particleSystem);
 }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -4833,7 +4971,6 @@ void NpScene::removeFromElementFilterList(PxDeformableElementFilter& elementFilt
 	npElementFilter.removeElementFilter();
 	npElementFilter.setNpScene(NULL);
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 

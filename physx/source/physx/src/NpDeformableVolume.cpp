@@ -27,23 +27,24 @@
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
 #include "DyDeformableVolumeCore.h"
-#include "PxsHeapMemoryAllocator.h"
-#include "PxsMemoryManager.h"
 #include "foundation/PxPreprocessor.h"
-
-#if PX_SUPPORT_GPU_PHYSX
 #include "NpDeformableVolume.h"
 #include "NpCheck.h"
 #include "NpScene.h"
 #include "NpShape.h"
 #include "geometry/PxTetrahedronMesh.h"
 #include "geometry/PxTetrahedronMeshGeometry.h"
-#include "PxPhysXGpu.h"
-#include "PxvGlobals.h"
 #include "GuTetrahedronMesh.h"
-#include "ScDeformableVolumeSim.h"
 #include "NpDeformableVolumeMaterial.h"
 #include "omnipvd/NpOmniPvdSetData.h"
+
+#if PX_SUPPORT_GPU_PHYSX
+#include "PxsHeapMemoryAllocator.h"
+#include "PxsMemoryManager.h"
+#include "PxPhysXGpu.h"
+#include "PxvGlobals.h"
+#include "ScDeformableVolumeSim.h"
+#endif
 
 using namespace physx;
 
@@ -52,6 +53,18 @@ class PxCudaContextManager;
 namespace physx
 {
 
+NpDeformableVolume::NpDeformableVolume() :
+	NpActorTemplate	(PxConcreteType::eDEFORMABLE_VOLUME, PxBaseFlag::eOWNS_MEMORY | PxBaseFlag::eIS_RELEASABLE, NpType::eDEFORMABLE_VOLUME),
+	mShape			(NULL),
+	mSimulationMesh(NULL),
+	mAuxData		(NULL),
+	mCudaContextManager(NULL),
+	mMemoryManager(NULL),
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableVolumeBackend::eCPU_AVBD)
+{
+}
+
 NpDeformableVolume::NpDeformableVolume(PxCudaContextManager& cudaContextManager) :
 	NpActorTemplate	(PxConcreteType::eDEFORMABLE_VOLUME, PxBaseFlag::eOWNS_MEMORY | PxBaseFlag::eIS_RELEASABLE, NpType::eDEFORMABLE_VOLUME),
 	mShape			(NULL),
@@ -59,7 +72,8 @@ NpDeformableVolume::NpDeformableVolume(PxCudaContextManager& cudaContextManager)
 	mAuxData		(NULL),
 	mCudaContextManager(&cudaContextManager),
 	mMemoryManager(NULL),
-	mDeviceMemoryAllocator(NULL)
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableVolumeBackend::eGPU)
 {
 }
 
@@ -70,7 +84,8 @@ NpDeformableVolume::NpDeformableVolume(PxBaseFlags baseFlags, PxCudaContextManag
 	mAuxData		(NULL),
 	mCudaContextManager(&cudaContextManager),
 	mMemoryManager(NULL),
-	mDeviceMemoryAllocator(NULL)
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableVolumeBackend::eGPU)
 {
 }
 
@@ -107,6 +122,9 @@ PxBounds3 NpDeformableVolume::getWorldBounds(float inflation) const
 {
 	NP_READ_CHECK(getNpScene());
 
+#if PX_SUPPORT_GPU_PHYSX
+	if(mBackend == PxDeformableVolumeBackend::eGPU)
+	{
 	if (!getNpScene())
 	{
 		PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "Querying bounds of a PxDeformableBody which is not part of a PxScene is not supported.");
@@ -129,6 +147,20 @@ PxBounds3 NpDeformableVolume::getWorldBounds(float inflation) const
 	const PxVec3 center = bounds.getCenter();
 	const PxVec3 inflatedExtents = bounds.getExtents() * inflation;
 	return PxBounds3::centerExtents(center, inflatedExtents);
+	}
+#endif
+
+	if(mPositionInvMassBufferH.empty())
+		return PxBounds3::empty();
+
+	PxBounds3 bounds = PxBounds3::empty();
+	for(PxU32 i = 0; i < mPositionInvMassBufferH.size(); i++)
+	{
+		const PxVec4& position = mPositionInvMassBufferH[i];
+		bounds.include(PxVec3(position.x, position.y, position.z));
+	}
+	const PxVec3 center = bounds.getCenter();
+	return PxBounds3::centerExtents(center, bounds.getExtents() * inflation);
 }
 
 void NpDeformableVolume::setActorFlag(PxActorFlag::Enum flag, bool val)
@@ -353,11 +385,20 @@ bool NpDeformableVolume::isSleeping() const
 	if (npScene && (npScene->getFlags() & PxSceneFlag::eDISABLE_SLEEPING))
 		return false;
 
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		return npScene ? mCore.getCore().cpuAvbdSleeping : true;
+	}
+
 	Sc::DeformableVolumeSim* sim = mCore.getSim();
+#if PX_SUPPORT_GPU_PHYSX
 	if (sim)
 	{
 		return sim->isSleeping();
 	}
+#else
+	PX_UNUSED(sim);
+#endif
 	return true;
 }
 
@@ -397,10 +438,31 @@ bool NpDeformableVolume::attachShape(PxShape& shape)
 	PX_ASSERT(shape.getActor() == NULL);
 	npShape->onActorAttach(*this);
 
-	createAllocator();
 	const PxU32 numVerts = tetMesh->getNbVerticesFast();
-	core.positionInvMass = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVerts * sizeof(PxVec4), PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
-	core.restPosition = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVerts * sizeof(PxVec4), PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		mPositionInvMassBufferH.resize(numVerts);
+		mRestPositionBufferH.resize(numVerts);
+		core.positionInvMass = mPositionInvMassBufferH.begin();
+		core.restPosition = mRestPositionBufferH.begin();
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		createAllocator();
+		core.positionInvMass = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVerts * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+		core.restPosition = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVerts * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+#else
+		PX_ASSERT(0);
+		return false;
+#endif
+	}
 
 	updateMaterials();
 
@@ -419,18 +481,29 @@ void NpDeformableVolume::detachShape()
 	if (!mShape)
 		return;
 
-	PX_ASSERT(mDeviceMemoryAllocator);
-
 	Dy::DeformableVolumeCore& core = mCore.getCore();
-	if (core.restPosition)
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
 	{
-		mDeviceMemoryAllocator->deallocate(core.restPosition);
+		mRestPositionBufferH.clear();
+		mPositionInvMassBufferH.clear();
 		core.restPosition = NULL;
-	}
-	if (core.positionInvMass)
-	{
-		mDeviceMemoryAllocator->deallocate(core.positionInvMass);
 		core.positionInvMass = NULL;
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		PX_ASSERT(mDeviceMemoryAllocator);
+		if (core.restPosition)
+		{
+			mDeviceMemoryAllocator->deallocate(core.restPosition);
+			core.restPosition = NULL;
+		}
+		if (core.positionInvMass)
+		{
+			mDeviceMemoryAllocator->deallocate(core.positionInvMass);
+			core.positionInvMass = NULL;
+		}
+#endif
 	}
 
 	OMNI_PVD_REMOVE(OMNI_PVD_CONTEXT_HANDLE, PxDeformableBody, shapes, static_cast<PxDeformableBody&>(*this), *mShape);
@@ -487,6 +560,9 @@ PxReal NpDeformableVolume::getSelfCollisionStressTolerance() const
 
 PxVec4* NpDeformableVolume::getPositionInvMassBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableVolumeBackend::eGPU,
+		"PxDeformableVolume::getPositionInvMassBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mShape != NULL, "PxDeformableVolume::getPositionInvMassBufferD: Softbody does not have a shape, attach shape first.");
 
 	Dy::DeformableVolumeCore& core = mCore.getCore();
@@ -495,6 +571,9 @@ PxVec4* NpDeformableVolume::getPositionInvMassBufferD()
 
 PxVec4* NpDeformableVolume::getRestPositionBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableVolumeBackend::eGPU,
+		"PxDeformableVolume::getRestPositionBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mShape != NULL, "PxDeformableVolume::getRestPositionBufferD: Softbody does not have a shape, attach shape first.");
 
 	Dy::DeformableVolumeCore& core = mCore.getCore();
@@ -503,6 +582,9 @@ PxVec4* NpDeformableVolume::getRestPositionBufferD()
 
 PxVec4* NpDeformableVolume::getSimPositionInvMassBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableVolumeBackend::eGPU,
+		"PxDeformableVolume::getSimPositionInvMassBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mSimulationMesh != NULL, "PxDeformableVolume::getSimPositionInvMassBufferD: Softbody does not have a simulation mesh, attach simulation mesh first.");
 
 	Dy::DeformableVolumeCore& core = mCore.getCore();
@@ -511,10 +593,43 @@ PxVec4* NpDeformableVolume::getSimPositionInvMassBufferD()
 
 PxVec4* NpDeformableVolume::getSimVelocityBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableVolumeBackend::eGPU,
+		"PxDeformableVolume::getSimVelocityBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mSimulationMesh != NULL, "PxDeformableVolume::getSimVelocityBufferD: Softbody does not have a simulation mesh, attach simulation mesh first.");
 
 	Dy::DeformableVolumeCore& core = mCore.getCore();
 	return core.simVelocity;
+}
+
+PxVec4* NpDeformableVolume::getPositionInvMassBufferH()
+{
+	if(mBackend != PxDeformableVolumeBackend::eCPU_AVBD || !mShape)
+		return NULL;
+	return mCore.getCore().positionInvMass;
+}
+
+PxVec4* NpDeformableVolume::getRestPositionBufferH()
+{
+	if(mBackend != PxDeformableVolumeBackend::eCPU_AVBD || !mShape)
+		return NULL;
+	return mCore.getCore().restPosition;
+}
+
+PxVec4* NpDeformableVolume::getSimPositionInvMassBufferH()
+{
+	if(mBackend != PxDeformableVolumeBackend::eCPU_AVBD ||
+		!mSimulationMesh)
+		return NULL;
+	return mCore.getCore().simPositionInvMass;
+}
+
+PxVec4* NpDeformableVolume::getSimVelocityBufferH()
+{
+	if(mBackend != PxDeformableVolumeBackend::eCPU_AVBD ||
+		!mSimulationMesh)
+		return NULL;
+	return mCore.getCore().simVelocity;
 }
 
 void NpDeformableVolume::markDirty(PxDeformableVolumeDataFlags flags)
@@ -523,14 +638,35 @@ void NpDeformableVolume::markDirty(PxDeformableVolumeDataFlags flags)
 
 	Dy::DeformableVolumeCore& core = mCore.getCore();
 	core.dirtyFlags |= flags;
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		core.cpuAvbdSleeping = false;
+		core.cpuAvbdWakeRequested = true;
+	}
 }
 
 void NpDeformableVolume::setKinematicTargetBufferD(const PxVec4* positions)
 {
 	NP_WRITE_CHECK(getNpScene());
+	PX_CHECK_AND_RETURN(
+		mBackend == PxDeformableVolumeBackend::eGPU,
+		"PxDeformableVolume::setKinematicTargetBufferD: CPU AVBD actors require a host target buffer.");
 	PX_CHECK_SCENE_API_WRITE_FORBIDDEN(getNpScene(),
 		"PxDeformableVolume::setKinematicTargetBufferD() not allowed while simulation is running. Call will be ignored.")
 
+	mCore.setKinematicTargets(positions);
+}
+
+void NpDeformableVolume::setKinematicTargetBufferH(
+	const PxVec4* positions)
+{
+	NP_WRITE_CHECK(getNpScene());
+	PX_CHECK_AND_RETURN(
+		mBackend == PxDeformableVolumeBackend::eCPU_AVBD,
+		"PxDeformableVolume::setKinematicTargetBufferH: GPU actors require a device target buffer.");
+	PX_CHECK_SCENE_API_WRITE_FORBIDDEN(
+		getNpScene(),
+		"PxDeformableVolume::setKinematicTargetBufferH() not allowed while simulation is running. Call will be ignored.")
 	mCore.setKinematicTargets(positions);
 }
 
@@ -543,14 +679,35 @@ bool NpDeformableVolume::attachSimulationMesh(PxTetrahedronMesh& simulationMesh,
 	Gu::TetrahedronMesh& tetMesh = static_cast<Gu::TetrahedronMesh&>(simulationMesh);
 	PX_CHECK_AND_RETURN_NULL(tetMesh.getNbTetrahedronsFast() <= PX_MAX_NB_DEFORMABLE_VOLUME_TET, "PxDeformableVolume::attachSimulationMesh: simulation mesh contains too many tetrahedrons, see PX_MAX_NB_DEFORMABLE_VOLUME_TET");
 
+	mCore.clearCpuAvbdSimulationRestPositions();
 	mSimulationMesh = &tetMesh;
 	mAuxData = static_cast<Gu::DeformableVolumeAuxData*>(&deformableVolumeAuxData);
 	const PxU32 numVertsGM = tetMesh.getNbVerticesFast();
 
-	createAllocator();
-
-	core.simPositionInvMass = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVertsGM * sizeof(PxVec4), PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
-	core.simVelocity = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVertsGM * sizeof(PxVec4), PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		mSimPositionInvMassBufferH.resize(numVertsGM);
+		mSimVelocityBufferH.resize(numVertsGM);
+		core.simPositionInvMass = mSimPositionInvMassBufferH.begin();
+		core.simVelocity = mSimVelocityBufferH.begin();
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		createAllocator();
+		core.simPositionInvMass = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVertsGM * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+		core.simVelocity = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVertsGM * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_SOFTBODY, PX_FL));
+#else
+		PX_ASSERT(0);
+		return false;
+#endif
+	}
 
 	return true;
 }
@@ -560,19 +717,31 @@ void NpDeformableVolume::detachSimulationMesh()
 	if (!mSimulationMesh)
 		return;
 
-	PX_ASSERT(mDeviceMemoryAllocator);
-
 	Dy::DeformableVolumeCore& core = mCore.getCore();
-	if (core.simPositionInvMass)
+	mCore.clearCpuAvbdSimulationRestPositions();
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
 	{
-		mDeviceMemoryAllocator->deallocate(core.simPositionInvMass);
+		mSimPositionInvMassBufferH.clear();
+		mSimVelocityBufferH.clear();
 		core.simPositionInvMass = NULL;
-	}
-
-	if (core.simVelocity)
-	{
-		mDeviceMemoryAllocator->deallocate(core.simVelocity);
 		core.simVelocity = NULL;
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		PX_ASSERT(mDeviceMemoryAllocator);
+		if (core.simPositionInvMass)
+		{
+			mDeviceMemoryAllocator->deallocate(core.simPositionInvMass);
+			core.simPositionInvMass = NULL;
+		}
+
+		if (core.simVelocity)
+		{
+			mDeviceMemoryAllocator->deallocate(core.simVelocity);
+			core.simVelocity = NULL;
+		}
+#endif
 	}
 
 	mSimulationMesh = NULL;
@@ -593,6 +762,9 @@ const PxTetrahedronMesh* NpDeformableVolume::getCollisionMesh() const
 
 PxU32 NpDeformableVolume::getGpuDeformableVolumeIndex()
 {
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+		return 0xffffffff;
+
 	NP_READ_CHECK(getNpScene());
 	PX_CHECK_AND_RETURN_VAL(getNpScene(), "PxDeformableVolume::getGpuDeformableVolumeIndex: Soft body must be in a scene.", 0xffffffff);
 
@@ -616,6 +788,7 @@ void NpDeformableVolume::updateMaterials()
 
 void NpDeformableVolume::createAllocator()
 {
+#if PX_SUPPORT_GPU_PHYSX
 	if (!mMemoryManager)
 	{
 		PxPhysXGpu* physXGpu = PxvGetPhysXGpu(true);
@@ -626,29 +799,50 @@ void NpDeformableVolume::createAllocator()
 	}
 	PX_ASSERT(mMemoryManager != NULL);
 	PX_ASSERT(mDeviceMemoryAllocator != NULL);
+#else
+	PX_ASSERT(0);
+#endif
 }
 
 void NpDeformableVolume::releaseAllocator()
 {
-	// deallocate device memory if not released already.
 	Dy::DeformableVolumeCore& core = mCore.getCore();
+	if(mBackend == PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		core.simVelocity = NULL;
+		core.simPositionInvMass = NULL;
+		core.restPosition = NULL;
+		core.positionInvMass = NULL;
+		mSimVelocityBufferH.clear();
+		mSimPositionInvMassBufferH.clear();
+		mRestPositionBufferH.clear();
+		mPositionInvMassBufferH.clear();
+		return;
+	}
+
+#if PX_SUPPORT_GPU_PHYSX
+	// Deallocate device memory if the actor was not explicitly detached.
 	if (core.simVelocity)
 	{
+		PX_ASSERT(mDeviceMemoryAllocator);
 		mDeviceMemoryAllocator->deallocate(core.simVelocity);
 		core.simVelocity = NULL;
 	}
 	if (core.simPositionInvMass)
 	{
+		PX_ASSERT(mDeviceMemoryAllocator);
 		mDeviceMemoryAllocator->deallocate(core.simPositionInvMass);
 		core.simPositionInvMass = NULL;
 	}
 	if (core.restPosition)
 	{
+		PX_ASSERT(mDeviceMemoryAllocator);
 		mDeviceMemoryAllocator->deallocate(core.restPosition);
 		core.restPosition = NULL;
 	}
 	if (core.positionInvMass)
 	{
+		PX_ASSERT(mDeviceMemoryAllocator);
 		mDeviceMemoryAllocator->deallocate(core.positionInvMass);
 		core.positionInvMass = NULL;
 	}
@@ -657,7 +851,9 @@ void NpDeformableVolume::releaseAllocator()
 	{
 		mDeviceMemoryAllocator = NULL; // released by memory manager
 		PX_DELETE(mMemoryManager);
+		mMemoryManager = NULL;
 	}
+#endif
 }
 
 Sc::DeformableVolumeCore* getDeformableVolumeCore(PxActor* actor)
@@ -671,5 +867,3 @@ Sc::DeformableVolumeCore* getDeformableVolumeCore(PxActor* actor)
 }
 
 } // namespace physx
-
-#endif //PX_SUPPORT_GPU_PHYSX

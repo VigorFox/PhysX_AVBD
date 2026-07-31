@@ -30,8 +30,8 @@
 #define NP_DEFORMABLE_SURFACE
 
 #include "foundation/PxAllocator.h"
+#include "foundation/PxArray.h"
 #include "foundation/PxPreprocessor.h"
-#if PX_SUPPORT_GPU_PHYSX
 #include "PxDeformableSurface.h"
 #include "ScDeformableSurfaceCore.h"
 #include "NpActorTemplate.h"
@@ -45,6 +45,7 @@ class PxsMemoryManager;
 class NpDeformableSurface : public NpActorTemplate<PxDeformableSurface>
 {
 public:
+	NpDeformableSurface();
 	NpDeformableSurface(PxCudaContextManager& cudaContextManager);
 	NpDeformableSurface(PxBaseFlags baseFlags, PxCudaContextManager& cudaContextManager);
 	virtual ~NpDeformableSurface() { releaseAllocator(); }
@@ -100,6 +101,10 @@ public:
 
 	// PxDeformableSurface API
 
+	virtual PxDeformableSurfaceBackend::Enum
+											getDeformableSurfaceBackend() const PX_OVERRIDE
+											{ return mBackend; }
+
 	virtual	void							setDeformableSurfaceFlag(PxDeformableSurfaceFlag::Enum flag, bool val) PX_OVERRIDE;
 	virtual	void							setDeformableSurfaceFlags(PxDeformableSurfaceFlags flags) PX_OVERRIDE;
 	virtual	PxDeformableSurfaceFlags		getDeformableSurfaceFlags() const PX_OVERRIDE;
@@ -113,6 +118,9 @@ public:
 	virtual PxVec4*							getPositionInvMassBufferD() PX_OVERRIDE;
 	virtual PxVec4*							getVelocityBufferD() PX_OVERRIDE;
 	virtual PxVec4*							getRestPositionBufferD() PX_OVERRIDE;
+	virtual PxVec4*							getPositionInvMassBufferH() PX_OVERRIDE;
+	virtual PxVec4*							getVelocityBufferH() PX_OVERRIDE;
+	virtual PxVec4*							getRestPositionBufferH() PX_OVERRIDE;
 		
 	virtual void							markDirty(PxDeformableSurfaceDataFlags flags) PX_OVERRIDE;
 
@@ -133,11 +141,14 @@ private:
 	PxCudaContextManager*					mCudaContextManager;
 	PxsMemoryManager*						mMemoryManager;
 	Cm::VirtualAllocatorCallback*				mDeviceMemoryAllocator;
+	PxDeformableSurfaceBackend::Enum			mBackend;
+	PxArray<PxVec4>							mPositionInvMassBufferH;
+	PxArray<PxVec4>							mVelocityBufferH;
+	PxArray<PxVec4>							mRestPositionBufferH;
 };
 
 Sc::DeformableSurfaceCore* getDeformableSurfaceCore(PxActor* actor);
 
 } // namespace physx
 
-#endif // PX_SUPPORT_GPU_PHYSX
 #endif // NP_DEFORMABLE_SURFACE

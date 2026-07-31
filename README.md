@@ -1,6 +1,6 @@
 # NVIDIA PhysX + AVBD Solver
 
-> 🔬 **Research Fork**: Experimental AVBD (Augmented Variable Block Descent) constraint solver integrated into NVIDIA PhysX SDK.
+> 🔬 **Research Fork**: Experimental AVBD (Augmented Vertex Block Descent) constraint solver integrated into NVIDIA PhysX SDK.
 
 Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved. BSD-3-Clause License.
 
@@ -17,13 +17,13 @@ Status Legend: `Integrated` = merged into main code path; `Accepted` = integrate
 | Joint Limits | ✅ Accepted | Revolute angle, Prismatic linear, Spherical cone, D6 per-axis |
 | Motor Drive | ✅ Accepted | Post-solve torque motor for revolute; SLERP drive for D6 |
 | Gear Joint | ✅ Accepted | Velocity-ratio/phase/external-impulse physics plus binary round-trip dependency identity and post-load consumption (`30/30`) |
-| Standalone Alignment | ✅ Accepted | Rigid/joint D6 path is aligned with avbd_standalone; standalone soft body has progressed further than the current PhysX port |
+| Standalone Alignment | ✅ Accepted | Rigid/joint D6 behavior remains aligned with avbd_standalone; the PhysX port now also has an accepted public CPU Surface/Volume correctness baseline |
 | Regression Baseline | ✅ Accepted | Breadth checkpoint: standalone `149/149`; all 46 AVBD in-scope CPU Snippets have reproducible headless gates |
 | Compiled Objective Ownership | ✅ Accepted | Contact and joint velocity objectives receive one typed owner before solve-stage execution; runtime ownership bit combinations have been removed |
 | O(M) Constraint Lookup | ✅ Accepted | Eliminates O(N²) complexity |
 | Multi-threaded Islands | ✅ Accepted | Per-island constraint mappings |
 | Friction Model | ✅ Accepted | Coulomb cone, per-material coefficients from PxContactPatch |
-| Soft Body | ⚠️ Early | Existing CPU component correctness is gated by `SnippetSoftBodyAVBD` and `SnippetDeformableVolumeAVBD`; public CPU `PxScene` deformable actors and performance remain open |
+| Soft Body | ✅ Accepted (CPU correctness) | Public CPU `PxScene` Surface/Volume lifecycle, interaction, OGC collision and material semantics are accepted; whole-solver performance optimization and the GPU backend remain open |
 | Moving Triangle-Mesh Contact | 🔧 Integrated | Rigid bodies on a vertex-updated triangle mesh pass the default 7200-frame gate; the separate stress policy remains open |
 | Custom Joint | ✅ Accepted | `SnippetCustomJoint` retains the pulley public-wrench/break matrix (`12/12`) plus multi-row aggregation, force spring, restitution and force drive-limit modes (`12/12`) |
 | Rack & Pinion | ✅ Accepted | `SnippetRackJoint` gates positive/negative ratio, bidirectional passive response and binary round-trip consumption for the centered principal-axis topology (`18/18`); wider topology remains pending |
@@ -142,7 +142,7 @@ Key changes:
 - **Gear joint**: Dual update moved inside ADMM iteration loop; NaN from driveForceLimit overflow fixed.
 - **Cone limit**: Per-body joint frame axes derived from `localFrameA`/`localFrameB`, replacing shared axis.
 - **Joint frames**: `localFrameB` derived from initial relative rotation at joint creation. All factory methods updated.
-- **Standalone sync**: rigid/joint D6 behavior remains aligned with `avbd_standalone`, while standalone soft body has already moved to a VBD+AVBD path that is not yet mirrored by the current PhysX port.
+- **Standalone sync**: rigid/joint D6 behavior remains aligned with `avbd_standalone`; the PhysX port now also owns a public CPU `PxScene` VBD+AVBD Surface/Volume backend with an accepted pre-performance correctness matrix.
 
 ### Friction Integration
 
@@ -153,22 +153,45 @@ Key changes:
 - **Tangent basis**: Aligned with standalone — `PxAbs(normal.y) > 0.9f` branch for robustness.
 - **Standalone tests**: 18 friction-specific tests (slope sliding, anisotropy, Coulomb cone, geometric mean combining, warmstart, penalty growth, etc.).
 
-### Soft Body Status (EARLY)
+### Soft Body Status (CPU CORRECTNESS ACCEPTED)
 
-The PhysX AVBD soft-body path is still in an early prototype stage, but its existing CPU component now has an accepted correctness baseline.
+The PhysX AVBD soft-body path now has an accepted public CPU `PxScene` correctness
+baseline for both deformable surfaces and deformable volumes. It remains a research
+backend: the next milestone is whole-solver profiling and performance optimization,
+followed by a GPU backend.
 
-- Native AVBD soft-particle/VBD pieces and the current OGC-based collision experiments exist. `SnippetSoftBodyAVBD` passes its self-contained component suite `74/74`; `SnippetDeformableVolumeAVBD` passes five isolated component/lifecycle cases repeated twice (`10/10`) with finite state and zero inverted tetrahedra.
-- `SnippetDeformableVolumeAVBD` directly owns and steps soft-particle arrays. It reports `sceneSoftIntegration=0`: its `PxScene` contains no public deformable actor, so this is component correctness plus AVBD scene coexistence—not a public CPU `PxScene` deformable backend gate.
-- Interactive teardown now releases the performance-sample `PxArray` before `PxFoundation`, eliminating the close-window broadcast-allocator assertion. The checked `current-all` lifecycle gate runs 600 frames and exits with `cleanupComplete=1`.
-- `SnippetDeformableMesh` is not evidence for this path because all simulated bodies in that scene are rigid.
-- `avbd_standalone` passes its full `149/149` suite. A direct port of the PhysX positive-J displacement limiter regressed standalone material semantics and was reverted rather than forced into alignment.
-- The two existing PhysX CPU soft-body component Snippets are now part of the regression baseline; public scene integration remains outside that accepted slice.
-- Current implementation has **major performance problems** and should be treated as a research path, not a production-ready or even feature-complete baseline.
-- Soft-body optimization remains deferred until the post-inventory capability review closes any remaining functional correctness blockers.
+- Public `PxDeformableSurface` and `PxDeformableVolume` actors use explicit CPU AVBD
+  factories, Scene-owned lifecycle/storage, host-buffer synchronization, bounds,
+  sleep/wake, writeback, teardown and native mixed rigid-soft island integration.
+- Position-level AVBD owns elasticity, contact, pins and deformable attachments.
+  Static/kinematic targets remain prescribed one-way owners; dynamic rigid-soft and
+  soft-soft interactions are two-sided.
+- OGC coverage includes boundary-only volume queries, self and soft-soft discrete and
+  swept vertex-face/edge-edge ownership, plus static/kinematic/dynamic rigid geometry
+  coverage for planes, boxes, spheres, capsules, convexes, triangle meshes and
+  heightfields within their documented public support boundary.
+- Material coverage includes Surface bending/flattening/bending damping, Volume
+  co-rotational and Neo-Hookean models, per-body friction, motion controls,
+  self-collision neighborhood filtering and stress-tolerance filtering.
+- FEM feature parity includes public attachment, kinematic target and Surface/Volume
+  CPU skinning Snippets. CPU tetrahedral cooking no longer requires GPU payloads.
+- The frozen pre-performance matrix passes `SnippetSoftBodyAVBD` **202/202** twice,
+  Surface **94 cases × 2 repeats** in both parallel and sequential modes, Volume
+  **96 cases × 2 repeats** in both modes, **37/37** source gates, **14/14** shared-DLL
+  cross checks, **8/8** mixed-owner checks, **4/4** FEM feature demos and **6/6**
+  strict `/W4 /WX` rebuilds.
+- Remaining non-blocking boundaries are native-island mid-step Scene topology
+  recreation, stress-tensor public CPU readback, a future public Surface anisotropy
+  contract, serialization/PVD, concurrent-Scene and scale/long-soak hardening.
+- `SnippetDeformableMesh` is not soft-body evidence: all simulated bodies in that
+  scene are rigid.
+- CPU AVBD should not be compared directly with native GPU FEM until the AVBD GPU
+  backend exists. The current CPU implementation is correctness-first and still has
+  known hot paths in collision redetection, swept OGC and temporary data structures.
 
 ### Current Validation Snapshot
 
-- Checkpoint date: **2026-07-29**.
+- Checkpoint date: **2026-07-31**.
 - The breadth-first CPU inventory is complete: **61/61** executable Snippets are classified, **46/46** AVBD `PxScene` Snippets have reproducible headless gates, and 15 CPU tools/query/cooking Snippets are outside standard solver dynamics.
 - All render-built validation executables are launched through dedicated hidden Python runners with explicit `--headless` arguments, timeout handling, visible-window rejection, process-tree cleanup, and fail-closed authority parsing.
 - The final standalone suite passes **149/149**. The post-relink shared-DLL cross matrix passes **14/14**.
@@ -179,7 +202,9 @@ The PhysX AVBD soft-body path is still in an early prototype stage, but its exis
 - Articulation coverage retains the strengthened **31/31** suite, the 3600-frame RC cycle gate, and the 10000-frame RC extension without stall or non-finite state.
 - Contact and joint velocity objectives use compiled typed ownership programs. The fixed inventory has zero Legacy/Invalid entries, and source-level gates prevent runtime owner-flag dispatch from returning.
 - Rigid contact coverage includes stack/impact, CCD, contact report/modification, custom geometry/convex, moving mesh, tolerance scaling, gyroscopic response, split simulation/fetch, serialization, multithreading, triggers, MBP, and CPU Vehicle Snippets.
-- Existing CPU soft-body components retain `SnippetSoftBodyAVBD` **74/74** and `SnippetDeformableVolumeAVBD` **10/10**. They do not represent a public CPU `PxScene` deformable backend.
+- Public CPU AVBD soft bodies retain the complete pre-performance matrix summarized
+  above, including `PxScene` Surface/Volume lifecycle, mixed interaction and OGC
+  collision coverage.
 - Remaining correctness boundaries are explicit: wider native-joint topology, selected extreme/contact-combined variants, scalable/restituting material components, and mixed lock-flag constraint topologies. A unique compiled owner does not imply every objective is position-level; explicit finalize and unsupported paths remain part of the accepted boundary.
 - Local handoff, audit, probe history, and per-iteration reports are intentionally not part of this checkpoint.
 
@@ -215,8 +240,8 @@ Contact AL stability (DONE)         D6 Unified Joint System (DONE)
   Iteration-efficiency tuning        31/31 plus multi-cycle RC gate
             |                        Per-island adaptive iterations
             |                                    |
-Soft body / performance / GPU path (EARLY)
-	SOA refactoring, multiplayer determinism
+Soft body CPU correctness (ACCEPTED) -> Performance profile / GPU backend
+  Public Surface/Volume Scene path       Data-layout and hot-loop optimization
 ```
 
 ## Solver Architecture
@@ -251,7 +276,7 @@ For each body i:
 | **Post-solve motor** | Motor torque applied after ADMM iterations, decoupled from constraint Hessian for stability. |
 | **Stabilized AL dual for joints** | Bounded dual step + decay (`rhoDual`, `lambdaDecay`) reduces overshoot while retaining AL memory. |
 | **Prismatic force-6x6 on touch** | Prevents instability from 3x3 decoupling under strong position-rotation coupling. |
-| **Standalone/PhysX algorithm parity** | Rigid/joint paths share the same core constraint formulation and dual update logic; standalone soft body has advanced to a VBD+AVBD path that is not yet fully mirrored in PhysX. |
+| **Standalone/PhysX algorithm parity** | Rigid/joint paths share the same core constraint formulation and dual update logic; PhysX now also exposes an accepted public CPU VBD+AVBD Surface/Volume path. |
 
 ## AVBD Solver Overview
 
@@ -316,7 +341,7 @@ PVD Profile Zones available:
 2. **Joint coverage boundaries** - generic custom modes are gated only for the accepted row packs; mimic remains limited to fixed-parent centered single-DOF siblings (including two disjoint equations), and rack-and-pinion remains limited to centered principal-axis topology
 3. **CPU only** - No GPU acceleration
 4. **Articulation low-budget edge cases** - The April validation floor was 10 iterations; the loaded Scissor Lift case still fails at 8
-5. **Soft body architecture and performance** - Existing CPU component correctness is gated, but public CPU `PxScene` deformable actors are not integrated and the component remains slow
+5. **Soft body performance and hardening** - Public CPU `PxScene` correctness is accepted, but the implementation is not performance-optimized; native mid-step topology recreation, public stress-tensor readback, serialization/PVD, concurrent Scene and scale/long-soak coverage remain open
 6. **Joint reaction and break coverage** - Native unconstrained dynamic-dynamic fixed-pair reaction, shared external `eDISABLE_CONSTRAINT` ingestion, asymmetric spherical-cone response, and centered passive prismatic/revolute reaction/break are accepted; limited, driven, motorized, off-center, contact-combined and wider native topology remain incomplete
 7. **Moving-mesh stress policy** - The default `SnippetDeformableMesh` stack is recovered, but the separate stress acceptance criterion still needs tightening
 

@@ -164,22 +164,17 @@ namespace
 		case PxActorType::eARTICULATION_LINK:
 			op(*static_cast<const PxArticulationLink*>(actor));
 			break;
-#if PX_SUPPORT_GPU_PHYSX
 		case PxActorType::eDEFORMABLE_SURFACE:
 			op(*static_cast<const PxDeformableSurface*>(actor));
 			break;
 		case PxActorType::eDEFORMABLE_VOLUME:
 			op(*static_cast<const PxDeformableVolume*>(actor));
 			break;
-#else
-		case PxActorType::eDEFORMABLE_SURFACE:
-		case PxActorType::eDEFORMABLE_VOLUME:
-			PX_ASSERT(false);
-			break;
-#endif
+#if PX_SUPPORT_GPU_PHYSX
 		case PxActorType::ePBD_PARTICLESYSTEM:
 			op(*static_cast<const PxPBDParticleSystem*>(actor));
 			break;
+#endif
 		case PxActorType::eACTOR_COUNT:
 		case PxActorType::eACTOR_FORCE_DWORD:
 			PX_ASSERT(false);
@@ -950,7 +945,6 @@ void PvdSceneClient::releasePvdInstance(const NpAggregate* npAggregate)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#if PX_SUPPORT_GPU_PHYSX
 void PvdSceneClient::createPvdInstance(const NpDeformableVolume* deformableVolume)
 {
 	PX_UNUSED(deformableVolume);
@@ -1017,6 +1011,7 @@ void PvdSceneClient::releasePvdInstance(const NpDeformableSurface* femCloth)
 	//Todo
 }
 
+#if PX_SUPPORT_GPU_PHYSX
 ///////////////////////////////////////////////////////////////////////////////
 void PvdSceneClient::createPvdInstance(const NpPBDParticleSystem* particleSystem)
 {
@@ -1116,7 +1111,7 @@ void PvdSceneClient::releasePvdInstance(const NpDeformableElementFilter* element
 	//Todo
 }
 
-#endif
+#endif // PX_SUPPORT_GPU_PHYSX
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1234,4 +1229,4 @@ void PvdSceneClient::visualize(const PxRenderBuffer& debugRenderable)
 	}
 }
 
-#endif
+#endif // PX_SUPPORT_PVD

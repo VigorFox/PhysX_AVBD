@@ -98,13 +98,13 @@ class NpBatchQuery;
 class NpActor;
 class NpShape;
 class NpPhysics;
+class NpDeformableVolume;
+class NpDeformableVolumeMaterial;
+class NpDeformableSurface;
+class NpDeformableSurfaceMaterial;
 
 #if PX_SUPPORT_GPU_PHYSX
-class NpDeformableSurface;
-class NpDeformableVolume;
 class NpPBDParticleSystem;
-class NpDeformableSurfaceMaterial;
-class NpDeformableVolumeMaterial;
 class NpPBDMaterial;
 #endif
 
@@ -426,15 +426,15 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 					void							addMaterial(const NpMaterial& mat);
 					void							updateMaterial(const NpMaterial& mat);
 					void							removeMaterial(const NpMaterial& mat);
-#if PX_SUPPORT_GPU_PHYSX
-					void							addMaterial(const NpDeformableSurfaceMaterial& mat);
-					void							updateMaterial(const NpDeformableSurfaceMaterial& mat);
-					void							removeMaterial(const NpDeformableSurfaceMaterial& mat);
 
 					void							addMaterial(const NpDeformableVolumeMaterial& mat);
 					void							updateMaterial(const NpDeformableVolumeMaterial& mat);
 					void							removeMaterial(const NpDeformableVolumeMaterial& mat);
+					void							addMaterial(const NpDeformableSurfaceMaterial& mat);
+					void							updateMaterial(const NpDeformableSurfaceMaterial& mat);
+					void							removeMaterial(const NpDeformableSurfaceMaterial& mat);
 
+#if PX_SUPPORT_GPU_PHYSX
 					void							addMaterial(const NpPBDMaterial& mat);
 					void							updateMaterial(const NpPBDMaterial& mat);
 					void							removeMaterial(const NpPBDMaterial& mat);
@@ -557,21 +557,21 @@ class NpScene : public NpSceneAccessor, public PxUserAllocated
 					void 							scAddActor(NpArticulationLink&, bool noSim, PxBounds3* uninflatedBounds, const Gu::BVH* bvh);
 					void 							scRemoveActor(NpArticulationLink&, bool wakeOnLostTouch, bool noSim);
 
-#if PX_SUPPORT_GPU_PHYSX
-					void							scAddDeformableSurface(NpScene* npScene, NpDeformableSurface&);
-					void							scRemoveDeformableSurface(NpDeformableSurface&);
-
 					void							scAddDeformableVolume(NpDeformableVolume&);
 					void							scRemoveDeformableVolume(NpDeformableVolume&);
 
-					void							scAddParticleSystem(NpPBDParticleSystem&);
-					void							scRemoveParticleSystem(NpPBDParticleSystem&);
+					void							scAddDeformableSurface(NpScene* npScene, NpDeformableSurface&);
+					void							scRemoveDeformableSurface(NpDeformableSurface&);
 
 					void							addToAttachmentList(PxDeformableAttachment&);
 					void							removeFromAttachmentList(PxDeformableAttachment&);
-
 					void							addToElementFilterList(PxDeformableElementFilter&);
 					void							removeFromElementFilterList(PxDeformableElementFilter&);
+
+#if PX_SUPPORT_GPU_PHYSX
+					void							scAddParticleSystem(NpPBDParticleSystem&);
+					void							scRemoveParticleSystem(NpPBDParticleSystem&);
+
 #endif
 					void							scAddArticulation(NpArticulationReducedCoordinate&);
 					void							scRemoveArticulation(NpArticulationReducedCoordinate&);

@@ -30,7 +30,6 @@
 #include "NpPhysics.h"
 #include "CmUtils.h"
 
-#if PX_SUPPORT_GPU_PHYSX
 using namespace physx;
 using namespace Cm;
 
@@ -225,6 +224,3 @@ PxReal NpDeformableVolumeMaterial::getDeformHighLimitRatio() const
 {
 	return mMaterial.deformHighLimitRatio;
 }
-
-#endif // PX_SUPPORT_GPU_PHYSX
-

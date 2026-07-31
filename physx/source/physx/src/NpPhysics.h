@@ -37,11 +37,11 @@
 #include "NpMaterial.h"
 #include "NpPhysicsInsertionCallback.h"
 #include "NpMaterialManager.h"
+#include "NpDeformableVolumeMaterial.h"
+#include "NpDeformableSurfaceMaterial.h"
 #include "ScPhysics.h"
 #if PX_SUPPORT_GPU_PHYSX
 	#include "NpPBDMaterial.h"
-	#include "NpDeformableVolumeMaterial.h"
-	#include "NpDeformableSurfaceMaterial.h"
 #endif
 
 #ifdef LINUX
@@ -193,7 +193,9 @@ public:
 	virtual		PxDeformableAttachment*		createDeformableAttachment(const PxDeformableAttachmentData& data)	PX_OVERRIDE;
 	virtual		PxDeformableElementFilter*	createDeformableElementFilter(const PxDeformableElementFilterData& data)	PX_OVERRIDE;
 	virtual		PxDeformableSurface*		createDeformableSurface(PxCudaContextManager& cudaContextManager)	PX_OVERRIDE;
+	virtual		PxDeformableSurface*		createDeformableSurface(PxDeformableSurfaceBackend::Enum backend)	PX_OVERRIDE;
 	virtual		PxDeformableVolume*			createDeformableVolume(PxCudaContextManager& cudaContextManager)	PX_OVERRIDE;
+	virtual		PxDeformableVolume*			createDeformableVolume(PxDeformableVolumeBackend::Enum backend)	PX_OVERRIDE;
 	virtual		PxPBDParticleSystem*		createPBDParticleSystem(PxCudaContextManager& cudaContextManager, PxU32 maxNeighborhood, PxReal neighborhoodScale)	PX_OVERRIDE;
 	virtual		PxParticleBuffer*			createParticleBuffer(PxU32 maxParticles, PxCudaContextManager* cudaContextManager)	PX_OVERRIDE;
 	virtual		PxParticleAndDiffuseBuffer*	createParticleAndDiffuseBuffer(PxU32 maxParticles, PxU32 maxDiffuseParticles, PxCudaContextManager* cudaContextManager)	PX_OVERRIDE;
@@ -245,24 +247,24 @@ public:
 				bool		sendMaterialTable(NpScene&);
 
 				NpMaterialManager<NpMaterial>&				getMaterialManager()	{	return mMasterMaterialManager;	}
-#if PX_SUPPORT_GPU_PHYSX
-				NpMaterialManager<NpDeformableSurfaceMaterial>&	getDeformableSurfaceMaterialManager()	{ return mMasterDeformableSurfaceMaterialManager; }
 				NpMaterialManager<NpDeformableVolumeMaterial>&	getDeformableVolumeMaterialManager()	{ return mMasterDeformableVolumeMaterialManager; }
+				NpMaterialManager<NpDeformableSurfaceMaterial>&	getDeformableSurfaceMaterialManager()	{ return mMasterDeformableSurfaceMaterialManager; }
+#if PX_SUPPORT_GPU_PHYSX
 				NpMaterialManager<NpPBDMaterial>&				getPBDMaterialManager()					{ return mMasterPBDMaterialManager; }
 #endif
 				NpMaterial*						addMaterial(NpMaterial* np);
 				void							removeMaterialFromTable(NpMaterial&);
 				void							updateMaterial(NpMaterial&);
 
-#if PX_SUPPORT_GPU_PHYSX
-				NpDeformableSurfaceMaterial*	addMaterial(NpDeformableSurfaceMaterial* np);
-				void							removeMaterialFromTable(NpDeformableSurfaceMaterial&);
-				void							updateMaterial(NpDeformableSurfaceMaterial&);
-
 				NpDeformableVolumeMaterial*		addMaterial(NpDeformableVolumeMaterial* np);
 				void							removeMaterialFromTable(NpDeformableVolumeMaterial&);
 				void							updateMaterial(NpDeformableVolumeMaterial&);
 
+				NpDeformableSurfaceMaterial*	addMaterial(NpDeformableSurfaceMaterial* np);
+				void							removeMaterialFromTable(NpDeformableSurfaceMaterial&);
+				void							updateMaterial(NpDeformableSurfaceMaterial&);
+
+#if PX_SUPPORT_GPU_PHYSX
 				NpPBDMaterial*					addMaterial(NpPBDMaterial* np);
 				void							removeMaterialFromTable(NpPBDMaterial&);
 				void							updateMaterial(NpPBDMaterial&);
@@ -286,9 +288,9 @@ private:
 
 				Sc::Physics										mPhysics;
 				NpMaterialManager<NpMaterial>					mMasterMaterialManager;
-#if PX_SUPPORT_GPU_PHYSX
-				NpMaterialManager<NpDeformableSurfaceMaterial>	mMasterDeformableSurfaceMaterialManager;
 				NpMaterialManager<NpDeformableVolumeMaterial>	mMasterDeformableVolumeMaterialManager;
+				NpMaterialManager<NpDeformableSurfaceMaterial>	mMasterDeformableSurfaceMaterialManager;
+#if PX_SUPPORT_GPU_PHYSX
 				NpMaterialManager<NpPBDMaterial>				mMasterPBDMaterialManager;
 #endif
 				NpPhysicsInsertionCallback	mObjectInsertion;
@@ -361,16 +363,6 @@ public:
 	}
 };
 
-#if PX_SUPPORT_GPU_PHYSX
-template <> class NpMaterialAccessor<NpDeformableSurfaceMaterial>
-{
-public:
-	static NpMaterialManager<NpDeformableSurfaceMaterial>& getMaterialManager(NpPhysics& physics)
-	{
-		return physics.getDeformableSurfaceMaterialManager();
-	}
-};
-
 template <> class NpMaterialAccessor<NpDeformableVolumeMaterial>
 {
 public:
@@ -380,6 +372,16 @@ public:
 	}
 };
 
+template <> class NpMaterialAccessor<NpDeformableSurfaceMaterial>
+{
+public:
+	static NpMaterialManager<NpDeformableSurfaceMaterial>& getMaterialManager(NpPhysics& physics)
+	{
+		return physics.getDeformableSurfaceMaterialManager();
+	}
+};
+
+#if PX_SUPPORT_GPU_PHYSX
 template <> class NpMaterialAccessor<NpPBDMaterial>
 {
 public:

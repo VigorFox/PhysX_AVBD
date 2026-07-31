@@ -33,7 +33,6 @@
 #include "foundation/PxPreprocessor.h"
 #include "foundation/PxArray.h"
 
-#if PX_SUPPORT_GPU_PHYSX
 #include "PxDeformableAttachment.h"
 
 namespace physx
@@ -60,11 +59,39 @@ public:
 	NpScene*		getSceneFromActors();
 	void			addAttachment();
 	void			removeAttachment();
+	bool			isCpuAvbdWorldVertexAttachment() const;
+	bool			isCpuAvbdWorldElementAttachment() const;
+	bool			isCpuAvbdStaticVertexAttachment() const;
+	bool			isCpuAvbdStaticElementAttachment() const;
+	bool			isCpuAvbdRigidVertexAttachment() const;
+	bool			isCpuAvbdRigidElementAttachment() const;
+	bool			isCpuAvbdKinematicVertexAttachment() const;
+	bool			isCpuAvbdKinematicElementAttachment() const;
+	bool			isCpuAvbdArticulationVertexAttachment() const;
+	bool			isCpuAvbdArticulationElementAttachment() const;
+	bool			isCpuAvbdSoftPairAttachment() const;
 
 	static	bool	parseAttachment(const PxDeformableAttachmentData& data, AttachmentInfo& info);
 
 private:
+	enum class CpuAvbdRoute : PxU8
+	{
+		eNONE,
+		eWORLD_PIN,
+		eWORLD_ELEMENT,
+		eSTATIC_RIGID,
+		eSTATIC_RIGID_ELEMENT,
+		eDYNAMIC_RIGID,
+		eDYNAMIC_RIGID_ELEMENT,
+		eKINEMATIC_RIGID,
+		eKINEMATIC_RIGID_ELEMENT,
+		eARTICULATION_LINK,
+		eARTICULATION_LINK_ELEMENT,
+		eSOFT_PAIR
+	};
+
 	NpInternalAttachmentType::Enum mInternalAttachmentType{ NpInternalAttachmentType::eUNDEFINED };
+	CpuAvbdRoute mCpuAvbdRoute{ CpuAvbdRoute::eNONE };
 
 	PxActor* mActor[2];
 	PxDeformableAttachmentTargetType::Enum mType[2];
@@ -79,7 +106,5 @@ private:
 };
 
 }
-
-#endif
 
 #endif

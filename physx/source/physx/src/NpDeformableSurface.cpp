@@ -26,24 +26,25 @@
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
-#include "PxsHeapMemoryAllocator.h"
-#include "PxsMemoryManager.h"
 #include "foundation/PxAllocator.h"
 #include "foundation/PxPreprocessor.h"
-
-#if PX_SUPPORT_GPU_PHYSX
 #include "NpDeformableSurface.h"
 #include "NpCheck.h"
 #include "NpScene.h"
 #include "NpShape.h"
 #include "geometry/PxTriangleMesh.h"
 #include "geometry/PxTriangleMeshGeometry.h"
-#include "PxPhysXGpu.h"
-#include "PxvGlobals.h"
 #include "GuTriangleMesh.h"
-#include "ScDeformableSurfaceSim.h"
+#include "NpDeformableSurfaceMaterial.h"
 #include "omnipvd/NpOmniPvdSetData.h"
 
+#if PX_SUPPORT_GPU_PHYSX
+#include "PxsHeapMemoryAllocator.h"
+#include "PxsMemoryManager.h"
+#include "PxPhysXGpu.h"
+#include "PxvGlobals.h"
+#include "ScDeformableSurfaceSim.h"
+#endif
 
 using namespace physx;
 
@@ -52,13 +53,27 @@ class PxCudaContextManager;
 namespace physx
 {
 
+NpDeformableSurface::NpDeformableSurface()
+	:
+	NpActorTemplate(PxConcreteType::eDEFORMABLE_SURFACE,
+		PxBaseFlag::eOWNS_MEMORY | PxBaseFlag::eIS_RELEASABLE,
+		NpType::eDEFORMABLE_SURFACE),
+	mShape(NULL),
+	mCudaContextManager(NULL),
+	mMemoryManager(NULL),
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableSurfaceBackend::eCPU_AVBD)
+{
+}
+
 NpDeformableSurface::NpDeformableSurface(PxCudaContextManager& cudaContextManager)
 	:
 	NpActorTemplate(PxConcreteType::eDEFORMABLE_SURFACE, PxBaseFlag::eOWNS_MEMORY | PxBaseFlag::eIS_RELEASABLE, NpType::eDEFORMABLE_SURFACE),
 	mShape(NULL),
 	mCudaContextManager(&cudaContextManager),
 	mMemoryManager(NULL),
-	mDeviceMemoryAllocator(NULL)
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableSurfaceBackend::eGPU)
 {
 }
 
@@ -67,7 +82,8 @@ NpDeformableSurface::NpDeformableSurface(PxBaseFlags baseFlags, PxCudaContextMan
 	mShape(NULL),
 	mCudaContextManager(&cudaContextManager),
 	mMemoryManager(NULL),
-	mDeviceMemoryAllocator(NULL)
+	mDeviceMemoryAllocator(NULL),
+	mBackend(PxDeformableSurfaceBackend::eGPU)
 {
 }
 
@@ -100,6 +116,9 @@ PxBounds3 NpDeformableSurface::getWorldBounds(float inflation) const
 {
 	NP_READ_CHECK(getNpScene());
 
+#if PX_SUPPORT_GPU_PHYSX
+	if(mBackend == PxDeformableSurfaceBackend::eGPU)
+	{
 	if (!getNpScene())
 	{
 		PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "Querying bounds of a PxDeformableBody which is not part of a PxScene is not supported.");
@@ -119,6 +138,26 @@ PxBounds3 NpDeformableSurface::getWorldBounds(float inflation) const
 	PX_ASSERT(bounds.isValid());
 
 	// PT: unfortunately we can't just scale the min/max vectors, we need to go through center/extents.
+	const PxVec3 center = bounds.getCenter();
+	const PxVec3 inflatedExtents = bounds.getExtents() * inflation;
+	return PxBounds3::centerExtents(center, inflatedExtents);
+	}
+#endif
+
+	if(mPositionInvMassBufferH.empty())
+		return PxBounds3::empty();
+
+	PxBounds3 bounds = PxBounds3::empty();
+	for(PxU32 i = 0; i < mPositionInvMassBufferH.size(); ++i)
+	{
+		const PxVec3 position =
+			mPositionInvMassBufferH[i].getXYZ();
+		if(!position.isFinite())
+			return PxBounds3::empty();
+		bounds.include(position);
+	}
+	if(bounds.isEmpty())
+		return bounds;
 	const PxVec3 center = bounds.getCenter();
 	const PxVec3 inflatedExtents = bounds.getExtents() * inflation;
 	return PxBounds3::centerExtents(center, inflatedExtents);
@@ -343,11 +382,16 @@ bool NpDeformableSurface::isSleeping() const
 	if (npScene && (npScene->getFlags() & PxSceneFlag::eDISABLE_SLEEPING))
 		return false;
 
+	if(mBackend == PxDeformableSurfaceBackend::eCPU_AVBD)
+		return npScene ? mCore.getCore().cpuAvbdSleeping : true;
+
+#if PX_SUPPORT_GPU_PHYSX
 	Sc::DeformableSurfaceSim* sim = mCore.getSim();
 	if (sim)
 	{
 		return sim->isSleeping();
 	}
+#endif
 	return true;
 }
 
@@ -378,9 +422,13 @@ bool NpDeformableSurface::attachShape(PxShape& shape)
 		"PxDeformableSurface::attachShape: triangle mesh consists of too many vertices, see PX_MAX_NB_DEFORMABLE_SURFACE_VTX");
 
 #if PX_CHECKED
-	const PxU32 triangleReference = triMesh->getNbTriangleReferences();
-	PX_CHECK_AND_RETURN_NULL(triangleReference > 0,
-		"PxDeformableSurface::attachShape: deformable surface triangle mesh has been cooked with eENABLE_VERT_MAPPING");
+	if(mBackend == PxDeformableSurfaceBackend::eGPU)
+	{
+		const PxU32 triangleReference =
+			triMesh->getNbTriangleReferences();
+		PX_CHECK_AND_RETURN_NULL(triangleReference > 0,
+			"PxDeformableSurface::attachShape: deformable surface triangle mesh has not been cooked with eENABLE_VERT_MAPPING");
+	}
 #endif
 
 	PX_CHECK_AND_RETURN_NULL(npShape->getCore().mShapeCoreFlags & PxShapeCoreFlag::eDEFORMABLE_SURFACE_SHAPE,
@@ -399,12 +447,39 @@ bool NpDeformableSurface::attachShape(PxShape& shape)
 	PX_ASSERT(shape.getActor() == NULL);
 	npShape->onActorAttach(*this);
 
-	// AD: these allocations need to happen immediately. We cannot defer these to the PxgSimulationController.
-	createAllocator();
 	const PxU32 numVerts = triMesh->getNbVerticesFast();
-	core.positionInvMass = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVerts * sizeof(PxVec4), PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
-	core.velocity = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVerts * sizeof(PxVec4), PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
-	core.restPosition = reinterpret_cast<PxVec4*>(mDeviceMemoryAllocator->allocate(numVerts * sizeof(PxVec4), PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
+	if(mBackend == PxDeformableSurfaceBackend::eCPU_AVBD)
+	{
+		mPositionInvMassBufferH.resize(numVerts);
+		mVelocityBufferH.resize(numVerts);
+		mRestPositionBufferH.resize(numVerts);
+		core.positionInvMass = mPositionInvMassBufferH.begin();
+		core.velocity = mVelocityBufferH.begin();
+		core.restPosition = mRestPositionBufferH.begin();
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		// AD: these allocations need to happen immediately. We cannot defer
+		// these to the PxgSimulationController.
+		createAllocator();
+		core.positionInvMass = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVerts * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
+		core.velocity = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVerts * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
+		core.restPosition = reinterpret_cast<PxVec4*>(
+			mDeviceMemoryAllocator->allocate(
+				numVerts * sizeof(PxVec4),
+				PxsHeapStats::eSHARED_FEMCLOTH, PX_FL));
+#else
+		PX_ASSERT(0);
+		return false;
+#endif
+	}
 
 	updateMaterials();
 
@@ -416,29 +491,44 @@ bool NpDeformableSurface::attachShape(PxShape& shape)
 
 void NpDeformableSurface::detachShape()
 {
+	PX_CHECK_MSG(getNpSceneFromActor(*this) == NULL,
+		"Detaching a shape from a PxDeformableSurface is currently only "
+		"allowed while it is not part of a scene.");
+
 	if (!mShape)
 		return;
 
-	PX_ASSERT(mDeviceMemoryAllocator);
-
 	Dy::DeformableSurfaceCore& core = mCore.getCore();
 
-	if (core.positionInvMass)
+	if(mBackend == PxDeformableSurfaceBackend::eCPU_AVBD)
 	{
-		mDeviceMemoryAllocator->deallocate(core.positionInvMass);
+		mRestPositionBufferH.clear();
+		mVelocityBufferH.clear();
+		mPositionInvMassBufferH.clear();
 		core.positionInvMass = NULL;
-	}
-
-	if (core.velocity)
-	{
-		mDeviceMemoryAllocator->deallocate(core.velocity);
 		core.velocity = NULL;
-	}
-
-	if (core.restPosition)
-	{
-		mDeviceMemoryAllocator->deallocate(core.restPosition);
 		core.restPosition = NULL;
+	}
+	else
+	{
+#if PX_SUPPORT_GPU_PHYSX
+		PX_ASSERT(mDeviceMemoryAllocator);
+		if (core.positionInvMass)
+		{
+			mDeviceMemoryAllocator->deallocate(core.positionInvMass);
+			core.positionInvMass = NULL;
+		}
+		if (core.velocity)
+		{
+			mDeviceMemoryAllocator->deallocate(core.velocity);
+			core.velocity = NULL;
+		}
+		if (core.restPosition)
+		{
+			mDeviceMemoryAllocator->deallocate(core.restPosition);
+			core.restPosition = NULL;
+		}
+#endif
 	}
 
 	OMNI_PVD_REMOVE(OMNI_PVD_CONTEXT_HANDLE, PxDeformableBody, shapes, static_cast<PxDeformableBody&>(*this), *mShape);
@@ -512,26 +602,62 @@ PxU32 NpDeformableSurface::getNbCollisionSubsteps() const
 
 PxVec4* NpDeformableSurface::getPositionInvMassBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableSurfaceBackend::eGPU,
+		"PxDeformableSurface::getPositionInvMassBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mShape != NULL, " PxDeformableSurface::getPositionInvMassBufferD: Deformable surface does not have a shape, attach shape first.");
 	return mCore.getCore().positionInvMass;
 }
 
 PxVec4* NpDeformableSurface::getVelocityBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableSurfaceBackend::eGPU,
+		"PxDeformableSurface::getVelocityBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mShape != NULL, " PxDeformableSurface::getVelocityBufferD: Deformable surface does not have a shape, attach shape first.");
 	return mCore.getCore().velocity;
 }
 
 PxVec4* NpDeformableSurface::getRestPositionBufferD()
 {
+	PX_CHECK_AND_RETURN_NULL(
+		mBackend == PxDeformableSurfaceBackend::eGPU,
+		"PxDeformableSurface::getRestPositionBufferD: CPU AVBD actors expose BufferH, not device memory.");
 	PX_CHECK_AND_RETURN_NULL(mShape != NULL, " PxDeformableSurface::getRestPositionBufferD: Deformable surface does not have a shape, attach shape first.");
+	return mCore.getCore().restPosition;
+}
+
+PxVec4* NpDeformableSurface::getPositionInvMassBufferH()
+{
+	if(mBackend != PxDeformableSurfaceBackend::eCPU_AVBD || !mShape)
+		return NULL;
+	return mCore.getCore().positionInvMass;
+}
+
+PxVec4* NpDeformableSurface::getVelocityBufferH()
+{
+	if(mBackend != PxDeformableSurfaceBackend::eCPU_AVBD || !mShape)
+		return NULL;
+	return mCore.getCore().velocity;
+}
+
+PxVec4* NpDeformableSurface::getRestPositionBufferH()
+{
+	if(mBackend != PxDeformableSurfaceBackend::eCPU_AVBD || !mShape)
+		return NULL;
 	return mCore.getCore().restPosition;
 }
 
 void NpDeformableSurface::markDirty(PxDeformableSurfaceDataFlags flags)
 {
 	NP_WRITE_CHECK(getNpScene());
-	mCore.getCore().dirtyFlags |= flags;
+	Dy::DeformableSurfaceCore& core = mCore.getCore();
+	core.dirtyFlags |= flags;
+	if(mBackend == PxDeformableSurfaceBackend::eCPU_AVBD)
+	{
+		core.cpuAvbdSleeping = false;
+		core.cpuAvbdWakeRequested = true;
+	}
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -551,6 +677,7 @@ void NpDeformableSurface::updateMaterials()
 
 void NpDeformableSurface::createAllocator()
 {
+#if PX_SUPPORT_GPU_PHYSX
 	if (!mMemoryManager)
 	{
 		PxPhysXGpu* physXGpu = PxvGetPhysXGpu(true);
@@ -561,12 +688,27 @@ void NpDeformableSurface::createAllocator()
 	}
 	PX_ASSERT(mMemoryManager != NULL);
 	PX_ASSERT(mDeviceMemoryAllocator != NULL);
+#else
+	PX_ASSERT(0);
+#endif
 }
 
 void NpDeformableSurface::releaseAllocator()
 {
-	// deallocate device memory if not released already.
 	Dy::DeformableSurfaceCore& core = mCore.getCore();
+	if(mBackend == PxDeformableSurfaceBackend::eCPU_AVBD)
+	{
+		core.positionInvMass = NULL;
+		core.velocity = NULL;
+		core.restPosition = NULL;
+		mPositionInvMassBufferH.clear();
+		mVelocityBufferH.clear();
+		mRestPositionBufferH.clear();
+		return;
+	}
+
+#if PX_SUPPORT_GPU_PHYSX
+	// Deallocate device memory if the actor was not explicitly detached.
 	if (core.positionInvMass)
 	{
 		mDeviceMemoryAllocator->deallocate(core.positionInvMass);
@@ -587,7 +729,9 @@ void NpDeformableSurface::releaseAllocator()
 	{
 		mDeviceMemoryAllocator = NULL; // released by memory manager
 		PX_DELETE(mMemoryManager);
+		mMemoryManager = NULL;
 	}
+#endif
 }
 
 Sc::DeformableSurfaceCore* getDeformableSurfaceCore(PxActor* actor)
@@ -601,5 +745,3 @@ Sc::DeformableSurfaceCore* getDeformableSurfaceCore(PxActor* actor)
 }
 
 } // namespace physx
-
-#endif //PX_SUPPORT_GPU_PHYSX

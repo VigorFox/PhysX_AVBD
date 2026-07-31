@@ -50,6 +50,21 @@ class PxDeformableSurface;
 class PxParticleBuffer;
 
 /**
+\brief Identifies the storage and solver backend owned by a deformable volume.
+
+The backend is fixed when the actor is created. CPU AVBD actors expose host
+buffers and do not require or emulate a CUDA context.
+*/
+struct PxDeformableVolumeBackend
+{
+	enum Enum
+	{
+		eGPU,		//!< CUDA deformable-volume backend.
+		eCPU_AVBD	//!< CPU AVBD deformable-volume backend.
+	};
+};
+
+/**
 \brief The maximum number of tetrahedrons supported in a deformable volume tetrahedron mesh
 
 The current limit is 1'048'575.
@@ -64,15 +79,20 @@ The current limit is 4095.
 #define PX_MAX_NB_DEFORMABLE_VOLUME 0xfff
 
 /**
-\brief Represents a deformable volume
+\brief Represents a deformable volume.
 
-The deformable volume feature is exclusively supported on GPU. The full GPU pipeline needs to
-be enabled in order to make use of deformable bodies, see #PxSceneFlag::eENABLE_GPU_DYNAMICS,
-#PxBroadPhaseType::eGPU.
+GPU actors use the existing device-buffer contract. CPU AVBD actors use the
+host-buffer contract and do not require #PxSceneFlag::eENABLE_GPU_DYNAMICS.
 */
 class PxDeformableVolume : public PxDeformableBody
 {
 public:
+
+	/**
+	\brief Returns the immutable backend selected when this actor was created.
+	*/
+	virtual		PxDeformableVolumeBackend::Enum
+											getDeformableVolumeBackend() const = 0;
 
 	/**
 	\brief Raises or clears a particular deformable volume flag.
@@ -249,6 +269,38 @@ public:
 	virtual		PxVec4*						getSimVelocityBufferD() = 0;
 
 	/**
+	\brief Gets the host collision-mesh position/inverse-mass buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	collision shape is attached.
+	*/
+	virtual		PxVec4*						getPositionInvMassBufferH() = 0;
+
+	/**
+	\brief Gets the host collision-mesh rest-position buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	collision shape is attached.
+	*/
+	virtual		PxVec4*						getRestPositionBufferH() = 0;
+
+	/**
+	\brief Gets the host simulation-mesh position/inverse-mass buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	simulation mesh is attached.
+	*/
+	virtual		PxVec4*						getSimPositionInvMassBufferH() = 0;
+
+	/**
+	\brief Gets the host simulation-mesh velocity buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	simulation mesh is attached.
+	*/
+	virtual		PxVec4*						getSimVelocityBufferH() = 0;
+
+	/**
 	\brief Marks per-vertex simulation state and configuration buffers dirty to signal to the simulation
 	that changes have been made.
 
@@ -301,6 +353,17 @@ public:
 	\param positions A pointer to a device buffer containing the kinematic targets for this deformable volume.
 	 */
 	virtual		void						setKinematicTargetBufferD(const PxVec4* positions) = 0;
+
+	/**
+	\brief Sets the persistent host kinematic-target buffer for a CPU AVBD
+	deformable volume.
+
+	The caller retains ownership. The buffer must remain valid until it is
+	replaced, cleared, or the actor is released. GPU actors reject this API.
+
+	\param positions A pointer to host target positions, or NULL to clear.
+	*/
+	virtual		void						setKinematicTargetBufferH(const PxVec4* positions) = 0;
 
 	/**
 	\brief Attaches a simulation mesh

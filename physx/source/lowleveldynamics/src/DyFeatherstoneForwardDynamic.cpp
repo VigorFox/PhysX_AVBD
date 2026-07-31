@@ -930,6 +930,49 @@ namespace Dy
 		}
 	}
 
+	void FeatherstoneArticulation::
+		prepareAvbdGeneralizedPositionResponse()
+	{
+		initializeCommonData();
+		computeArticulatedSpatialInertia(mArticulationData);
+
+		const PxArticulationFlags& flags =
+			mArticulationData.getArticulationFlags();
+		const PxU32 linkCount =
+			mArticulationData.getLinkCount();
+		const ArticulationJointCoreData* jointData =
+			mArticulationData.getJointData();
+		const SpatialMatrix& baseInverse =
+			mArticulationData.
+				getBaseInvSpatialArticulatedInertiaW();
+		const PxVec3* linkOffsets =
+			mArticulationData.getRw();
+		const Cm::UnAlignedSpatialVector* worldMotionMatrix =
+			mArticulationData.getWorldMotionMatrix();
+		const Cm::SpatialVectorF* jointIs =
+			mArticulationData.getIsW();
+		const InvStIs* linkInverse =
+			mArticulationData.getInvStIS();
+		const Cm::SpatialVectorF* jointIsInverse =
+			mArticulationData.getISInvStIS();
+		ArticulationLink* links =
+			mArticulationData.getLinks();
+		TestImpulseResponse* responses =
+			mArticulationData.getImpulseResponseMatrixWorld();
+		PX_ALLOCA(savedCfms, PxReal, linkCount);
+		for(PxU32 linkIndex = 0;
+			linkIndex < linkCount; ++linkIndex)
+			savedCfms[linkIndex] = links[linkIndex].cfm;
+
+		computeArticulatedResponseMatrix(
+			flags, linkCount, jointData, baseInverse,
+			linkOffsets, worldMotionMatrix, jointIs,
+			linkInverse, jointIsInverse, links, responses);
+		for(PxU32 linkIndex = 0;
+			linkIndex < linkCount; ++linkIndex)
+			links[linkIndex].cfm = savedCfms[linkIndex];
+	}
+
 	void FeatherstoneArticulation::computeArticulatedSpatialZ(ArticulationData& data, ScratchData& scratchData)
 	{
 		const ArticulationLink* PX_RESTRICT links = data.getLinks();

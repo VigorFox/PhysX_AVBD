@@ -66,10 +66,10 @@ class NpArticulationFixedTendon;
 class NpArticulationMimicJoint;
 class NpActor;
 class NpScene;
+class NpDeformableVolume;
+class NpDeformableSurface;
 
 #if PX_SUPPORT_GPU_PHYSX
-class NpDeformableSurface;
-class NpDeformableVolume;
 class NpPBDParticleSystem;
 class NpDeformableAttachment;
 class NpDeformableElementFilter;
@@ -202,19 +202,19 @@ class PvdSceneClient : public PxPvdSceneClient, public PvdClient, public PvdVisu
 	void detachAggregateActor	(const NpAggregate* aggregate, NpActor* actor);
 	void releasePvdInstance		(const NpAggregate* aggregate);
 
-#if PX_SUPPORT_GPU_PHYSX
-	void createPvdInstance(const NpDeformableSurface* deformableSurface);
-	void updatePvdProperties(const NpDeformableSurface* deformableSurface);
-	void attachAggregateActor(const NpDeformableSurface* deformableSurface, NpActor* actor);
-	void detachAggregateActor(const NpDeformableSurface* deformableSurface, NpActor* actor);
-	void releasePvdInstance(const NpDeformableSurface* deformableSurface);
-
 	void createPvdInstance(const NpDeformableVolume* deformableVolume);
 	void updatePvdProperties(const NpDeformableVolume* deformableVolume);
 	void attachAggregateActor(const NpDeformableVolume* deformableVolume, NpActor* actor);
 	void detachAggregateActor(const NpDeformableVolume* deformableVolume, NpActor* actor);
 	void releasePvdInstance(const NpDeformableVolume* deformableVolume);
 
+	void createPvdInstance(const NpDeformableSurface* deformableSurface);
+	void updatePvdProperties(const NpDeformableSurface* deformableSurface);
+	void attachAggregateActor(const NpDeformableSurface* deformableSurface, NpActor* actor);
+	void detachAggregateActor(const NpDeformableSurface* deformableSurface, NpActor* actor);
+	void releasePvdInstance(const NpDeformableSurface* deformableSurface);
+
+#if PX_SUPPORT_GPU_PHYSX
 	void createPvdInstance(const NpPBDParticleSystem* particleSystem);
 	void updatePvdProperties(const NpPBDParticleSystem* particleSystem);
 	void attachAggregateActor(const NpPBDParticleSystem* particleSystem, NpActor* actor);

@@ -59,10 +59,10 @@ namespace physx
 		static bool	createGRBMidPhaseAndData(const PxU32 originalTriangleCount, Gu::TetrahedronMeshData& collisionMesh, Gu::DeformableVolumeCollisionData& collisionData, const PxCookingParams& params);
 		static void	computeSimData(const PxTetrahedronMeshDesc& desc, Gu::TetrahedronMeshData& simulationMesh, Gu::DeformableVolumeSimulationData& simulationData, const PxCookingParams& params);
 		static bool	computeModelsMapping(Gu::TetrahedronMeshData& simulationMesh, const Gu::TetrahedronMeshData& collisionMesh, const Gu::DeformableVolumeCollisionData& collisionData,
-																	Gu::CollisionMeshMappingData& mappingData, bool buildGPUData, const PxBoundedData* vertexToTet);
+																	Gu::CollisionMeshMappingData& mappingData, const PxBoundedData* vertexToTet);
 		static bool	createCollisionModelMapping(const Gu::TetrahedronMeshData& collisionMesh, const Gu::DeformableVolumeCollisionData& collisionData, Gu::CollisionMeshMappingData& mappingData);
 		
-		static void	recordTetrahedronIndices(const Gu::TetrahedronMeshData& collisionMesh, Gu::DeformableVolumeCollisionData& collisionData, bool buildGPUData);
+		static void	recordTetrahedronIndices(const Gu::TetrahedronMeshData& collisionMesh, Gu::DeformableVolumeCollisionData& collisionData);
 		static bool	importMesh(const PxTetrahedronMeshDesc& collisionMeshDesc, const PxCookingParams& params, 
 								Gu::TetrahedronMeshData& collisionMesh, Gu::DeformableVolumeCollisionData& collisionData, bool validate = false);
 		

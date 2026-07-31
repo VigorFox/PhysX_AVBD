@@ -30,7 +30,6 @@
 #define SC_DEFORMABLE_VOLUME_CORE_H
 
 #include "foundation/PxPreprocessor.h"
-#if PX_SUPPORT_GPU_PHYSX
 #include "PxDeformableVolume.h"
 #include "DyDeformableVolumeCore.h"
 #include "foundation/PxAssert.h"
@@ -149,6 +148,13 @@ public:
 	void						attachSimulationMesh(PxTetrahedronMesh* simulationMesh, PxDeformableVolumeAuxData* simulationState);
 	void						onShapeChange(ShapeCore& shape, ShapeChangeNotifyFlags notifyFlags);
 	PX_FORCE_INLINE	PxU64&		getGpuMemStat() { return mGpuMemStat; }
+	PX_FORCE_INLINE const PxArray<PxVec3>&
+								getCpuAvbdSimulationRestPositions() const
+								{ return mCpuAvbdSimulationRestPositions; }
+	void						initializeCpuAvbdSimulationRestPositions(
+									const PxVec4* positions,
+									PxU32 positionCount);
+	void						clearCpuAvbdSimulationRestPositions();
 
 	DeformableVolumeSim*								getSim() const;
 	PX_FORCE_INLINE	const Dy::DeformableVolumeCore&		getCore() const { return mCore; }
@@ -157,10 +163,13 @@ public:
 private:
 	Dy::DeformableVolumeCore	mCore;
 	PxU64						mGpuMemStat;
+	// A Volume has no public simulation-mesh rest-position buffer.  Preserve
+	// the first CPU AVBD scene insertion state on the actor core so removing
+	// and re-adding a deformed actor cannot silently redefine its elasticity.
+	PxArray<PxVec3>				mCpuAvbdSimulationRestPositions;
 };
 
 } // namespace Sc
 } // namespace physx
 
-#endif // PX_SUPPORT_GPU_PHYSX
 #endif // SC_DEFORMABLE_VOLUME_CORE_H

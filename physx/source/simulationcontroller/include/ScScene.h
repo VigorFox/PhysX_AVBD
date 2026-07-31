@@ -67,6 +67,9 @@ class IslandInsertionTask;
 namespace physx
 {
 	class NpShape;
+	class PxTriangleMesh;
+	class PxTetrahedronMesh;
+	class PxDeformableVolumeAuxData;
 
 struct PxTriggerPair;
 
@@ -124,6 +127,7 @@ namespace Sc
 {
 	class ActorSim;
 	class ElementSim;
+	class AvbdCpuSoftScene;
 
 	class ShapeCore;
 	class RigidCore;
@@ -138,6 +142,7 @@ namespace Sc
 	class LLParticleSystemPool;
 
 	class BodyCore;
+	class StaticCore;
 	class DeformableSurfaceCore;
 	class DeformableVolumeCore;
 	class ParticleSystemCore;
@@ -232,6 +237,267 @@ namespace Sc
 
 					void						preAllocate(PxU32 nbStatics, PxU32 nbBodies, PxU32 nbStaticShapes, PxU32 nbDynamicShapes);
 					void						release();
+
+					bool						addAvbdCpuDeformableVolume(
+													DeformableVolumeCore& core,
+													PxTetrahedronMesh& simulationMesh,
+													PxTetrahedronMesh& collisionMesh,
+													PxDeformableVolumeAuxData& auxData);
+					void						removeAvbdCpuDeformableVolume(
+													DeformableVolumeCore& core);
+					PxU32						addAvbdCpuDeformableVolumeWorldPin(
+													DeformableVolumeCore& core,
+													PxU32 localVertex,
+													const PxVec3& worldTarget);
+					PxU32						addAvbdCpuDeformableVolumeWorldElementAttachment(
+													DeformableVolumeCore& core,
+													PxU32 tetrahedronIndex,
+													const PxVec4& barycentric,
+													const PxVec3& worldTarget);
+					bool						updateAvbdCpuDeformableVolumeWorldPin(
+													DeformableVolumeCore& core,
+													PxU32 handle,
+													const PxVec3& worldTarget);
+					void						removeAvbdCpuDeformableVolumeWorldPin(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableVolumeRigidAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& rigidCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableVolumeRigidElementAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& rigidCore,
+													PxU32 tetrahedronIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableVolumeRigidAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableVolumeRigidAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableVolumeArticulationAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& linkCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableVolumeArticulationElementAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& linkCore,
+													PxU32 tetrahedronIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableVolumeArticulationAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableVolumeArticulationAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableVolumeKinematicAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& kinematicCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableVolumeKinematicElementAttachment(
+													DeformableVolumeCore& core,
+													BodyCore& kinematicCore,
+													PxU32 tetrahedronIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableVolumeKinematicAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableVolumeKinematicAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableVolumeStaticAttachment(
+													DeformableVolumeCore& core,
+													StaticCore& staticCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableVolumeStaticElementAttachment(
+													DeformableVolumeCore& core,
+													StaticCore& staticCore,
+													PxU32 tetrahedronIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableVolumeStaticAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableVolumeStaticAttachment(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableVolumeRigidActorFilter(
+													DeformableVolumeCore& core,
+													ActorCore& rigidCore,
+													const PxU32* elementIndices,
+													PxU32 elementCount,
+													bool filterAllElements);
+					void						removeAvbdCpuDeformableVolumeRigidActorFilter(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformablePairAttachment(
+													ActorCore& core0,
+													bool element0,
+													PxU32 index0,
+													const PxVec4& barycentric0,
+													ActorCore& core1,
+													bool element1,
+													PxU32 index1,
+													const PxVec4& barycentric1);
+					void						removeAvbdCpuDeformablePairAttachment(
+													ActorCore& core0,
+													PxU32 handle);
+					bool						addAvbdCpuDeformableSurface(
+													DeformableSurfaceCore& core,
+													PxTriangleMesh& triangleMesh);
+					void						removeAvbdCpuDeformableSurface(
+													DeformableSurfaceCore& core);
+					PxU32						addAvbdCpuDeformableSurfaceWorldPin(
+													DeformableSurfaceCore& core,
+													PxU32 localVertex,
+													const PxVec3& worldTarget);
+					PxU32						addAvbdCpuDeformableSurfaceWorldElementAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 triangleIndex,
+													const PxVec4& barycentric,
+													const PxVec3& worldTarget);
+					bool						updateAvbdCpuDeformableSurfaceWorldPin(
+													DeformableSurfaceCore& core,
+													PxU32 handle,
+													const PxVec3& worldTarget);
+					void						removeAvbdCpuDeformableSurfaceWorldPin(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceRigidAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& rigidCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableSurfaceRigidElementAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& rigidCore,
+													PxU32 triangleIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableSurfaceRigidAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableSurfaceRigidAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceArticulationAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& linkCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableSurfaceArticulationElementAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& linkCore,
+													PxU32 triangleIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableSurfaceArticulationAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableSurfaceArticulationAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceKinematicAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& kinematicCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableSurfaceKinematicElementAttachment(
+													DeformableSurfaceCore& core,
+													BodyCore& kinematicCore,
+													PxU32 triangleIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableSurfaceKinematicAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableSurfaceKinematicAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceStaticAttachment(
+													DeformableSurfaceCore& core,
+													StaticCore& staticCore,
+													PxU32 localVertex,
+													const PxVec3& actorLocalTarget);
+					PxU32						addAvbdCpuDeformableSurfaceStaticElementAttachment(
+													DeformableSurfaceCore& core,
+													StaticCore& staticCore,
+													PxU32 triangleIndex,
+													const PxVec4& barycentric,
+													const PxVec3& actorLocalTarget);
+					bool						updateAvbdCpuDeformableSurfaceStaticAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle,
+													const PxVec3& actorLocalTarget);
+					void						removeAvbdCpuDeformableSurfaceStaticAttachment(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceRigidActorFilter(
+													DeformableSurfaceCore& core,
+													ActorCore& rigidCore,
+													const PxU32* elementIndices,
+													PxU32 elementCount,
+													bool filterAllElements);
+					void						removeAvbdCpuDeformableSurfaceRigidActorFilter(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					PxU32						addAvbdCpuDeformableSurfaceSurfaceFilter(
+													DeformableSurfaceCore& core0,
+													DeformableSurfaceCore& core1,
+													const PxU32* elementIndices0,
+													const PxU32* elementIndices1,
+													PxU32 pairCount);
+					PxU32						addAvbdCpuDeformableVolumeSurfaceFilter(
+													DeformableVolumeCore& volumeCore,
+													DeformableSurfaceCore& surfaceCore,
+													const PxU32* volumeElementIndices,
+													const PxU32* surfaceElementIndices,
+													PxU32 pairCount);
+					PxU32						addAvbdCpuDeformableVolumeVolumeFilter(
+													DeformableVolumeCore& core0,
+													DeformableVolumeCore& core1,
+													const PxU32* elementIndices0,
+													const PxU32* elementIndices1,
+													PxU32 pairCount);
+					void						removeAvbdCpuDeformablePairFilter(
+													DeformableSurfaceCore& core,
+													PxU32 handle);
+					void						removeAvbdCpuDeformablePairFilter(
+													DeformableVolumeCore& core,
+													PxU32 handle);
+					void						addAvbdCpuStaticShape(
+													StaticCore& core,
+													ShapeCore& shape);
+					void						removeAvbdCpuStaticShape(
+													StaticCore& core,
+													const ShapeCore& shape);
+					void						removeAvbdCpuStatic(
+													StaticCore& core);
+					void						addAvbdCpuDynamicShape(
+													BodyCore& core,
+													ShapeCore& shape);
+					void						removeAvbdCpuDynamicShape(
+													BodyCore& core,
+													const ShapeCore& shape);
+					void						removeAvbdCpuDynamic(
+													BodyCore& core);
+					void						stepAvbdCpuDeformableVolumes();
+					void						prepareAvbdCpuSoftIslandGeneration();
 
 	PX_FORCE_INLINE	PxsSimulationController*	getSimulationController()						{ return mSimulationController;	}
 	PX_FORCE_INLINE	const PxsSimulationController*	getSimulationController()			const	{ return mSimulationController;	}
@@ -546,6 +812,18 @@ namespace Sc
 	public:
 		PX_FORCE_INLINE	const PxsMaterialManager&	getMaterialManager()				const	{ return mMaterialManager;			}
 		PX_FORCE_INLINE	PxsMaterialManager&			getMaterialManager()						{ return mMaterialManager;			}
+		PX_FORCE_INLINE	const PxsDeformableVolumeMaterialManager&
+													getDeformableVolumeMaterialManager() const
+													{ return mDeformableVolumeMaterialManager; }
+		PX_FORCE_INLINE	PxsDeformableVolumeMaterialManager&
+													getDeformableVolumeMaterialManager()
+													{ return mDeformableVolumeMaterialManager; }
+		PX_FORCE_INLINE	const PxsDeformableSurfaceMaterialManager&
+													getDeformableSurfaceMaterialManager() const
+													{ return mDeformableSurfaceMaterialManager; }
+		PX_FORCE_INLINE	PxsDeformableSurfaceMaterialManager&
+													getDeformableSurfaceMaterialManager()
+													{ return mDeformableSurfaceMaterialManager; }
 
 		PX_FORCE_INLINE	const BroadphaseManager&	getBroadphaseManager()				const	{ return mBroadphaseManager;			}
 		PX_FORCE_INLINE	BroadphaseManager&			getBroadphaseManager()						{ return mBroadphaseManager;			}
@@ -668,6 +946,10 @@ namespace Sc
 
 		// Material manager
 					PX_ALIGN(16, PxsMaterialManager	mMaterialManager);
+					PX_ALIGN(16, PxsDeformableVolumeMaterialManager
+												mDeformableVolumeMaterialManager);
+					PX_ALIGN(16, PxsDeformableSurfaceMaterialManager
+												mDeformableSurfaceMaterialManager);
 
 					BroadphaseManager			mBroadphaseManager;
 					PxU64						mContextId;
@@ -723,6 +1005,7 @@ namespace Sc
 					PxsSimulationController*	mSimulationController;
 
 					PxsSimulationControllerCallback*	mSimulationControllerCallback;
+					AvbdCpuSoftScene*			mAvbdCpuSoftScene;
 
 					PxSceneLimits				mLimits;
 
@@ -1044,12 +1327,6 @@ namespace Sc
 	PX_FORCE_INLINE	DeformableVolumeCore*const*			getActiveDeformableVolumesArray()	const { return mActiveDeformableVolumes.begin(); }
 	PX_FORCE_INLINE	PxU32								getNumActiveDeformableVolumes()		const { return mActiveDeformableVolumes.size(); }
 
-	PX_FORCE_INLINE	const PxsDeformableSurfaceMaterialManager&	getDeformableSurfaceMaterialManager()	const	{ return mDeformableSurfaceMaterialManager;	}
-	PX_FORCE_INLINE	PxsDeformableSurfaceMaterialManager&		getDeformableSurfaceMaterialManager()			{ return mDeformableSurfaceMaterialManager;	}
-
-	PX_FORCE_INLINE	const PxsDeformableVolumeMaterialManager&	getDeformableVolumeMaterialManager()	const	{ return mDeformableVolumeMaterialManager;	}
-	PX_FORCE_INLINE	PxsDeformableVolumeMaterialManager&			getDeformableVolumeMaterialManager()			{ return mDeformableVolumeMaterialManager;	}
-
 	PX_FORCE_INLINE	const PxsPBDMaterialManager&		getPBDMaterialManager()				const	{ return mPBDMaterialManager;		}
 	PX_FORCE_INLINE	PxsPBDMaterialManager&				getPBDMaterialManager()						{ return mPBDMaterialManager;		}
 
@@ -1119,8 +1396,6 @@ namespace Sc
 #if USE_SPLIT_SECOND_PASS_ISLAND_GEN
 					PxU64								mPadding;
 #endif
-					PX_ALIGN(16, PxsDeformableSurfaceMaterialManager	mDeformableSurfaceMaterialManager);
-					PX_ALIGN(16, PxsDeformableVolumeMaterialManager		mDeformableVolumeMaterialManager);
 					PX_ALIGN(16, PxsPBDMaterialManager		mPBDMaterialManager);
 
 					PxArray<DeformableSurfaceCore*>		mActiveDeformableSurfaces;

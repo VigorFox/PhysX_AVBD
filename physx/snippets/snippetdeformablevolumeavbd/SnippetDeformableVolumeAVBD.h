@@ -28,7 +28,7 @@
 #define PHYSX_SNIPPET_DEFORMABLE_VOLUME_AVBD_H
 
 #include "PxPhysicsAPI.h"
-#include "PxAvbdSoftBody.h"
+#include "DyAvbdSoftBodyComponent.h"
 
 struct SoftBodyRenderData
 {
@@ -36,10 +36,28 @@ struct SoftBodyRenderData
 	physx::PxU32 numSurfaceTris;
 };
 
+struct VolumeAvbdSkinningRenderData
+{
+	const physx::PxVec3* positions;
+	const physx::PxVec3* normals;
+	const physx::PxU32* triangles;
+	physx::PxU32 numVertices;
+	physx::PxU32 numTriangles;
+
+	VolumeAvbdSkinningRenderData()
+		: positions(NULL), normals(NULL), triangles(NULL),
+		  numVertices(0), numTriangles(0)
+	{
+	}
+};
+
 // Shared globals for render file
 extern physx::PxScene* gScene;
 extern physx::PxArray<physx::Dy::AvbdSoftParticle> gParticles;
 extern physx::PxArray<physx::Dy::AvbdSoftBody> gSoftBodies;
 extern physx::PxArray<SoftBodyRenderData> gSoftBodyRenderData;
+extern VolumeAvbdSkinningRenderData gVolumeAvbdSkinningRenderData;
+
+physx::PxDeformableVolume* getPrimaryCpuAvbdVolume();
 
 #endif // PHYSX_SNIPPET_DEFORMABLE_VOLUME_AVBD_H

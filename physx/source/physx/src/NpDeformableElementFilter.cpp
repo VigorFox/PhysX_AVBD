@@ -29,9 +29,9 @@
 #include "foundation/PxAllocator.h"
 #include "foundation/PxPreprocessor.h"
 
-#if PX_SUPPORT_GPU_PHYSX
 #include "NpCheck.h"
 #include "NpScene.h"
+#include "NpActor.h"
 #include "NpShape.h"
 #include "NpRigidDynamic.h"
 #include "NpRigidStatic.h"
@@ -46,6 +46,217 @@
 PX_COMPILE_TIME_ASSERT(PX_ELEMENT_FILTER_ALL == PX_MAX_NB_DEFORMABLE_VOLUME_TET && PX_ELEMENT_FILTER_ALL == PX_MAX_NB_DEFORMABLE_SURFACE_TRI);
 
 using namespace physx;
+
+namespace
+{
+
+bool isCpuAvbdDeformable(const PxActor* actor)
+{
+	const PxDeformableSurface* surface =
+		actor ? actor->is<PxDeformableSurface>() : NULL;
+	if(surface)
+		return surface->getDeformableSurfaceBackend() ==
+			PxDeformableSurfaceBackend::eCPU_AVBD;
+	const PxDeformableVolume* volume =
+		actor ? actor->is<PxDeformableVolume>() : NULL;
+	return volume &&
+		volume->getDeformableVolumeBackend() ==
+			PxDeformableVolumeBackend::eCPU_AVBD;
+}
+
+PxU32 getDeformableElementCount(PxActor& actor)
+{
+	PxDeformableSurface* surface =
+		actor.is<PxDeformableSurface>();
+	if(surface)
+	{
+		const PxShape* shape = surface->getShape();
+		if(!shape || shape->getGeometry().getType() !=
+			PxGeometryType::eTRIANGLEMESH)
+			return 0;
+		const PxTriangleMeshGeometry& geometry =
+			static_cast<const PxTriangleMeshGeometry&>(
+				shape->getGeometry());
+		return geometry.triangleMesh
+			? geometry.triangleMesh->getNbTriangles() : 0;
+	}
+	PxDeformableVolume* volume =
+		actor.is<PxDeformableVolume>();
+	return volume && volume->getCollisionMesh()
+		? volume->getCollisionMesh()->getNbTetrahedrons() : 0;
+}
+
+bool hasValidDeformableElementGroups(
+	const PxDeformableElementFilterData& data,
+	PxU32 deformableActorIndex,
+	PxU32 rigidActorIndex)
+{
+	if(data.groupElementCounts[rigidActorIndex].count != 0 ||
+		data.groupElementIndices[rigidActorIndex].count != 0 ||
+		data.groupElementCounts[deformableActorIndex].count == 0)
+		return false;
+	const PxU32 elementCount =
+		getDeformableElementCount(
+			*data.actor[deformableActorIndex]);
+	if(elementCount == 0)
+		return false;
+	PxU64 referencedElementCount = 0;
+	for(PxU32 groupIndex = 0;
+		groupIndex <
+			data.groupElementCounts[deformableActorIndex].count;
+		++groupIndex)
+	{
+		const PxU32 groupElementCount =
+			data.groupElementCounts[deformableActorIndex].
+				at(groupIndex);
+		if(groupElementCount == 0)
+			return false;
+		referencedElementCount += groupElementCount;
+	}
+	if(referencedElementCount !=
+		data.groupElementIndices[deformableActorIndex].count)
+		return false;
+	for(PxU32 i = 0;
+		i < data.groupElementIndices[deformableActorIndex].count;
+		++i)
+	{
+		const PxU32 element =
+			data.groupElementIndices[deformableActorIndex].at(i);
+		if(element >= elementCount)
+			return false;
+	}
+	return true;
+}
+
+bool hasValidDeformablePairGroups(
+	const PxDeformableElementFilterData& data,
+	PxU32 actorIndex0,
+	PxU32 actorIndex1)
+{
+	const PxU32 groupCount =
+		data.groupElementCounts[actorIndex0].count;
+	if(groupCount == 0 ||
+		data.groupElementCounts[actorIndex1].count != groupCount)
+		return false;
+
+	const PxU32 actorIndices[2] =
+		{actorIndex0, actorIndex1};
+	for(PxU32 side = 0; side < 2; ++side)
+	{
+		const PxU32 actorIndex = actorIndices[side];
+		if(!data.groupElementCounts[actorIndex].data ||
+			(data.groupElementIndices[actorIndex].count != 0 &&
+				!data.groupElementIndices[actorIndex].data))
+			return false;
+		const PxU32 elementCount =
+			getDeformableElementCount(*data.actor[actorIndex]);
+		if(elementCount == 0)
+			return false;
+		PxU64 referencedElementCount = 0;
+		for(PxU32 groupIndex = 0;
+			groupIndex < groupCount; ++groupIndex)
+		{
+			// A zero count is the public wildcard for all elements on
+			// this side of the paired group.
+			referencedElementCount +=
+				data.groupElementCounts[actorIndex].at(
+					groupIndex);
+		}
+		if(referencedElementCount !=
+			data.groupElementIndices[actorIndex].count)
+			return false;
+		for(PxU32 elementIndex = 0;
+			elementIndex <
+				data.groupElementIndices[actorIndex].count;
+			++elementIndex)
+		{
+			if(data.groupElementIndices[actorIndex].at(
+					elementIndex) >= elementCount)
+				return false;
+		}
+	}
+	return true;
+}
+
+bool coversEveryDeformableElement(
+	const PxDeformableElementFilterData& data,
+	PxU32 deformableActorIndex,
+	PxU32 rigidActorIndex)
+{
+	if(!hasValidDeformableElementGroups(
+		data, deformableActorIndex, rigidActorIndex))
+		return false;
+	const PxU32 elementCount =
+		getDeformableElementCount(
+			*data.actor[deformableActorIndex]);
+	PxArray<PxU8> seen;
+	seen.resize(elementCount);
+	for(PxU32 i = 0; i < elementCount; ++i)
+		seen[i] = 0;
+	for(PxU32 i = 0;
+		i < data.groupElementIndices[deformableActorIndex].count;
+		++i)
+	{
+		const PxU32 element =
+			data.groupElementIndices[deformableActorIndex].at(i);
+		seen[element] = 1;
+	}
+	for(PxU32 i = 0; i < elementCount; ++i)
+		if(!seen[i])
+			return false;
+	return true;
+}
+
+bool hasCpuAvbdVolumeCollisionOwnership(PxActor& actor)
+{
+	const PxDeformableVolume* volume =
+		actor.is<PxDeformableVolume>();
+	if(!volume || !volume->getCollisionMesh() ||
+		!volume->getSimulationMesh() ||
+		!volume->getDeformableVolumeAuxData())
+		return false;
+	const Gu::DeformableVolumeAuxData& auxData =
+		static_cast<const Gu::DeformableVolumeAuxData&>(
+			*volume->getDeformableVolumeAuxData());
+	const PxU32 collisionElementCount =
+		volume->getCollisionMesh()->getNbTetrahedrons();
+	const PxU32 simulationElementCount =
+		volume->getSimulationMesh()->getNbTetrahedrons();
+	if(collisionElementCount == 0 ||
+		simulationElementCount == 0 ||
+		!auxData.mTetsAccumulatedRemapColToSim ||
+		!auxData.mTetsRemapColToSim ||
+		auxData.mTetsRemapSize == 0)
+		return false;
+	PxU32 previousEnd = 0;
+	for(PxU32 collisionElement = 0;
+		collisionElement < collisionElementCount;
+		++collisionElement)
+	{
+		const PxU32 end =
+			auxData.mTetsAccumulatedRemapColToSim[
+				collisionElement];
+		if(end <= previousEnd ||
+			end > auxData.mTetsRemapSize)
+			return false;
+		for(PxU32 remapIndex = previousEnd;
+			remapIndex < end; ++remapIndex)
+			if(auxData.mTetsRemapColToSim[remapIndex] >=
+				simulationElementCount)
+				return false;
+		previousEnd = end;
+	}
+	return previousEnd == auxData.mTetsRemapSize;
+}
+
+Sc::ActorCore* getRigidActorCore(PxRigidActor& actor)
+{
+	if(actor.getConcreteType() == PxConcreteType::eRIGID_STATIC)
+		return &static_cast<NpRigidStatic&>(actor).getCore();
+	return getBodyCore(&actor);
+}
+
+} // namespace
 
 NpInternalAttachmentType::Enum getInternalAttachmentType(const PxDeformableElementFilterData& data, PxU32 actorIndex[2])
 {
@@ -114,6 +325,95 @@ bool NpDeformableElementFilter::parseElementFilter(const PxDeformableElementFilt
 
 	if (internalAttachmentType != NpInternalAttachmentType::eUNDEFINED)
 	{
+		const bool cpuAvbd =
+			isCpuAvbdDeformable(data.actor[actorIndex[0]]) ||
+			isCpuAvbdDeformable(data.actor[actorIndex[1]]);
+		if(cpuAvbd)
+		{
+			const bool rigidPair =
+				internalAttachmentType ==
+					NpInternalAttachmentType::
+						eSURFACE_TRI_RIGID_BODY ||
+				internalAttachmentType ==
+					NpInternalAttachmentType::
+						eVOLUME_TET_RIGID_BODY;
+			const bool deformablePair =
+				(internalAttachmentType ==
+					NpInternalAttachmentType::
+						eSURFACE_TRI_SURFACE_TRI ||
+				 internalAttachmentType ==
+					NpInternalAttachmentType::
+						eVOLUME_TET_SURFACE_TRI ||
+				 internalAttachmentType ==
+					NpInternalAttachmentType::
+						eVOLUME_TET_VOLUME_TET) &&
+				isCpuAvbdDeformable(
+					data.actor[actorIndex[0]]) &&
+				isCpuAvbdDeformable(
+					data.actor[actorIndex[1]]);
+			PX_CHECK_AND_RETURN_VAL(
+				rigidPair || deformablePair,
+				"PxDeformableElementFilter: CPU AVBD supports "
+				"only deformable-to-rigid and CPU-AVBD "
+				"deformable-pair element filters.",
+				false);
+			PX_UNUSED(rigidPair);
+			if(deformablePair)
+			{
+				PX_CHECK_AND_RETURN_VAL(
+					hasValidDeformablePairGroups(
+						data, actorIndex[0], actorIndex[1]),
+					"PxDeformableElementFilter: CPU AVBD "
+					"deformable-pair filters require "
+					"valid paired element groups.",
+					false);
+				for(PxU32 side = 0; side < 2; ++side)
+				{
+					const PxU32 index = actorIndex[side];
+					PX_CHECK_AND_RETURN_VAL(
+						!data.actor[index]->
+								is<PxDeformableVolume>() ||
+							data.groupElementIndices[index].
+								count == 0 ||
+							hasCpuAvbdVolumeCollisionOwnership(
+								*data.actor[index]),
+						"PxDeformableElementFilter: CPU "
+						"AVBD Volume pair filters require "
+						"valid cooked collision-to-"
+						"simulation element ownership.",
+						false);
+					PX_UNUSED(index);
+				}
+				info.cpuAvbdDeformablePairFilter = true;
+				return true;
+			}
+			PX_CHECK_AND_RETURN_VAL(
+				hasValidDeformableElementGroups(
+					data, actorIndex[0], actorIndex[1]),
+				"PxDeformableElementFilter: CPU AVBD requires "
+				"valid explicit deformable-element groups "
+				"against an entire rigid actor.",
+				false);
+			const bool filterAllElements =
+				coversEveryDeformableElement(
+					data, actorIndex[0], actorIndex[1]);
+			PX_CHECK_AND_RETURN_VAL(
+				internalAttachmentType ==
+					NpInternalAttachmentType::
+						eSURFACE_TRI_RIGID_BODY ||
+					filterAllElements ||
+					hasCpuAvbdVolumeCollisionOwnership(
+						*data.actor[actorIndex[0]]),
+				"PxDeformableElementFilter: CPU AVBD partial "
+				"volume filters require valid cooked "
+				"collision-to-simulation element ownership.",
+				false);
+			info.cpuAvbdRigidActorFilter = true;
+			info.cpuAvbdFilterAllElements =
+				filterAllElements;
+			return true;
+		}
+
 		// For filtering deformable vs rigid, we allow the group count array to be empty for rigids
 		PX_CHECK_AND_RETURN_VAL
 		(
@@ -163,6 +463,121 @@ void NpDeformableElementFilter::addElementFilter()
 	if (!getSceneFromActors() || mEnabled)
 		return;
 
+	if(mCpuAvbdRigidActorFilter)
+	{
+		NpScene* scene = getSceneFromActors();
+		PxActor* deformable = mActor[mActorIndex[0]];
+		PxRigidActor* rigid =
+			mActor[mActorIndex[1]]->is<PxRigidActor>();
+		Sc::ActorCore* rigidCore =
+			rigid ? getRigidActorCore(*rigid) : NULL;
+		if(!scene || !rigidCore)
+			return;
+		PxU32 handle = PX_MAX_U32;
+		if(PxDeformableSurface* surface =
+			deformable->is<PxDeformableSurface>())
+		{
+			handle = scene->getScScene().
+				addAvbdCpuDeformableSurfaceRigidActorFilter(
+					*getDeformableSurfaceCore(surface),
+					*rigidCore,
+					mPairwiseIndices[mActorIndex[0]].begin(),
+					mPairwiseIndices[mActorIndex[0]].size(),
+					mCpuAvbdFilterAllElements);
+		}
+		else if(PxDeformableVolume* volume =
+			deformable->is<PxDeformableVolume>())
+		{
+			handle = scene->getScScene().
+				addAvbdCpuDeformableVolumeRigidActorFilter(
+					*getDeformableVolumeCore(volume),
+					*rigidCore,
+					mPairwiseIndices[mActorIndex[0]].begin(),
+					mPairwiseIndices[mActorIndex[0]].size(),
+					mCpuAvbdFilterAllElements);
+		}
+		if(handle != PX_MAX_U32)
+		{
+			mCpuAvbdFilterHandle = handle;
+			mEnabled = true;
+		}
+		return;
+	}
+	if(mCpuAvbdDeformablePairFilter)
+	{
+		NpScene* scene = getSceneFromActors();
+		const PxU32 pairCount =
+			mPairwiseIndices[mActorIndex[0]].size();
+		if(!scene || pairCount == 0 ||
+			mPairwiseIndices[mActorIndex[1]].size() !=
+				pairCount)
+			return;
+		PxU32 handle = PX_MAX_U32;
+		PxActor* actor0 = mActor[mActorIndex[0]];
+		PxActor* actor1 = mActor[mActorIndex[1]];
+		if(mInternalAttachmentType ==
+			NpInternalAttachmentType::
+				eSURFACE_TRI_SURFACE_TRI)
+		{
+			PxDeformableSurface* surface0 =
+				actor0->is<PxDeformableSurface>();
+			PxDeformableSurface* surface1 =
+				actor1->is<PxDeformableSurface>();
+			if(!surface0 || !surface1)
+				return;
+			handle = scene->getScScene().
+				addAvbdCpuDeformableSurfaceSurfaceFilter(
+					*getDeformableSurfaceCore(surface0),
+					*getDeformableSurfaceCore(surface1),
+					mPairwiseIndices[mActorIndex[0]].begin(),
+					mPairwiseIndices[mActorIndex[1]].begin(),
+					pairCount);
+		}
+		else if(mInternalAttachmentType ==
+			NpInternalAttachmentType::
+				eVOLUME_TET_SURFACE_TRI)
+		{
+			PxDeformableVolume* volume =
+				actor0->is<PxDeformableVolume>();
+			PxDeformableSurface* surface =
+				actor1->is<PxDeformableSurface>();
+			if(!volume || !surface)
+				return;
+			handle = scene->getScScene().
+				addAvbdCpuDeformableVolumeSurfaceFilter(
+					*getDeformableVolumeCore(volume),
+					*getDeformableSurfaceCore(surface),
+					mPairwiseIndices[mActorIndex[0]].begin(),
+					mPairwiseIndices[mActorIndex[1]].begin(),
+					pairCount);
+		}
+		else if(mInternalAttachmentType ==
+			NpInternalAttachmentType::
+				eVOLUME_TET_VOLUME_TET)
+		{
+			PxDeformableVolume* volume0 =
+				actor0->is<PxDeformableVolume>();
+			PxDeformableVolume* volume1 =
+				actor1->is<PxDeformableVolume>();
+			if(!volume0 || !volume1)
+				return;
+			handle = scene->getScScene().
+				addAvbdCpuDeformableVolumeVolumeFilter(
+					*getDeformableVolumeCore(volume0),
+					*getDeformableVolumeCore(volume1),
+					mPairwiseIndices[mActorIndex[0]].begin(),
+					mPairwiseIndices[mActorIndex[1]].begin(),
+					pairCount);
+		}
+		if(handle != PX_MAX_U32)
+		{
+			mCpuAvbdFilterHandle = handle;
+			mEnabled = true;
+		}
+		return;
+	}
+
+#if PX_SUPPORT_GPU_PHYSX
 	switch (mInternalAttachmentType)
 	{
 		case NpInternalAttachmentType::eSURFACE_TRI_RIGID_BODY:
@@ -229,6 +644,9 @@ void NpDeformableElementFilter::addElementFilter()
 	}
 
 	mEnabled = true;
+#else
+	PX_ASSERT(0);
+#endif
 }
 
 void NpDeformableElementFilter::removeElementFilter()
@@ -236,6 +654,58 @@ void NpDeformableElementFilter::removeElementFilter()
 	if (!mEnabled)
 		return;
 
+	if(mCpuAvbdRigidActorFilter)
+	{
+		NpScene* scene = getNpScene();
+		PxActor* deformable = mActor[mActorIndex[0]];
+		if(scene)
+		{
+			if(PxDeformableSurface* surface =
+				deformable->is<PxDeformableSurface>())
+			{
+				scene->getScScene().
+					removeAvbdCpuDeformableSurfaceRigidActorFilter(
+						*getDeformableSurfaceCore(surface),
+						mCpuAvbdFilterHandle);
+			}
+			else if(PxDeformableVolume* volume =
+				deformable->is<PxDeformableVolume>())
+			{
+				scene->getScScene().
+					removeAvbdCpuDeformableVolumeRigidActorFilter(
+						*getDeformableVolumeCore(volume),
+						mCpuAvbdFilterHandle);
+			}
+		}
+		mCpuAvbdFilterHandle = PX_MAX_U32;
+		mEnabled = false;
+		return;
+	}
+	if(mCpuAvbdDeformablePairFilter)
+	{
+		NpScene* scene = getNpScene();
+		PxActor* actor0 = mActor[mActorIndex[0]];
+		if(scene)
+		{
+			if(PxDeformableSurface* surface =
+				actor0->is<PxDeformableSurface>())
+				scene->getScScene().
+					removeAvbdCpuDeformablePairFilter(
+						*getDeformableSurfaceCore(surface),
+						mCpuAvbdFilterHandle);
+			else if(PxDeformableVolume* volume =
+				actor0->is<PxDeformableVolume>())
+				scene->getScScene().
+					removeAvbdCpuDeformablePairFilter(
+						*getDeformableVolumeCore(volume),
+						mCpuAvbdFilterHandle);
+		}
+		mCpuAvbdFilterHandle = PX_MAX_U32;
+		mEnabled = false;
+		return;
+	}
+
+#if PX_SUPPORT_GPU_PHYSX
 	switch (mInternalAttachmentType)
 	{
 		case NpInternalAttachmentType::eSURFACE_TRI_RIGID_BODY:
@@ -301,6 +771,9 @@ void NpDeformableElementFilter::removeElementFilter()
 	}
 
 	mEnabled = false;
+#else
+	PX_ASSERT(0);
+#endif
 }
 
 NpScene* NpDeformableElementFilter::getSceneFromActors()
@@ -327,6 +800,13 @@ NpDeformableElementFilter::NpDeformableElementFilter(const PxDeformableElementFi
 {
 	mInternalAttachmentType = info.internalAttachmentType;
 	mEnabled = false;
+	mCpuAvbdRigidActorFilter =
+		info.cpuAvbdRigidActorFilter;
+	mCpuAvbdDeformablePairFilter =
+		info.cpuAvbdDeformablePairFilter;
+	mCpuAvbdFilterAllElements =
+		info.cpuAvbdFilterAllElements;
+	mCpuAvbdFilterHandle = PX_MAX_U32;
 
 	// Expand groups to pairwise elements
 	switch (info.internalAttachmentType)
@@ -457,5 +937,3 @@ void NpDeformableElementFilter::getActors(PxActor*& actor0, PxActor*& actor1) co
 	actor0 = mActor[0];
 	actor1 = mActor[1];
 }
-
-#endif

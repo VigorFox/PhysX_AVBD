@@ -40,9 +40,7 @@
 #include "PxvGeometry.h"
 #include "solver/PxSolverDefs.h"
 
-#if PX_SUPPORT_GPU_PHYSX
-	#include "NpDeformableSurface.h"  // to be deleted
-#endif
+#include "NpDeformableSurface.h"  // to be deleted
 
 namespace physx
 {
@@ -78,17 +76,17 @@ class PxDeformableVolume;
 class PxDeformableAttachment;
 class PxDeformableElementFilter;
 
-#if PX_SUPPORT_GPU_PHYSX
-class NpDeformableSurface;
 class NpDeformableVolume;
-class NpPBDParticleSystem;
-class NpParticleBuffer;
-class NpParticleAndDiffuseBuffer;
+class NpDeformableVolumeMaterial;
+class NpDeformableSurface;
+class NpDeformableSurfaceMaterial;
 class NpDeformableAttachment;
 class NpDeformableElementFilter;
 
-class NpDeformableSurfaceMaterial;
-class NpDeformableVolumeMaterial;
+#if PX_SUPPORT_GPU_PHYSX
+class NpPBDParticleSystem;
+class NpParticleBuffer;
+class NpParticleAndDiffuseBuffer;
 class NpPBDMaterial;
 #endif
 
@@ -192,26 +190,32 @@ public:
 															const PxReal naturalFrequency, const PxReal dampingRatio);
 				void									releaseArticulationMimicJointToPool(NpArticulationMimicJoint& articulationMimicJoint);
 
-#if PX_SUPPORT_GPU_PHYSX
-				// Deformable surfaces
-				PxDeformableSurface*					createDeformableSurface(PxCudaContextManager& cudaContextManager);
-				void									releaseDeformableSurfaceToPool(PxDeformableSurface& femCloth);
-
-				// Deformable volumes
-				PxDeformableVolume*						createDeformableVolume(PxCudaContextManager& cudaContextManager);
+				// CPU AVBD deformable volumes
+				PxDeformableVolume*						createDeformableVolume();
 				void									releaseDeformableVolumeToPool(PxDeformableVolume& softBody);
 
-				// Attachments
+				// Deformable surfaces
+				PxDeformableSurface*					createDeformableSurface();
+				void									releaseDeformableSurfaceToPool(PxDeformableSurface& femCloth);
+
+				// Deformable attachments
 				PxDeformableAttachment*					createDeformableAttachment(const PxDeformableAttachmentData& data);
 				void									addAttachment(PxDeformableAttachment*, bool lock = true);
 				void									releaseAttachmentToPool(PxDeformableAttachment& attachment);
 				void									onAttachmentRelease(PxDeformableAttachment*);
 
-				// Attachments
+				// Deformable element filters
 				PxDeformableElementFilter*				createDeformableElementFilter(const PxDeformableElementFilterData& data);
 				void									addElementFilter(PxDeformableElementFilter*, bool lock = true);
 				void									releaseElementFilterToPool(PxDeformableElementFilter& elementFilter);
 				void									onElementFilterRelease(PxDeformableElementFilter*);
+
+#if PX_SUPPORT_GPU_PHYSX
+				// GPU deformable surfaces
+				PxDeformableSurface*					createDeformableSurface(PxCudaContextManager& cudaContextManager);
+
+				// Deformable volumes
+				PxDeformableVolume*						createDeformableVolume(PxCudaContextManager& cudaContextManager);
 
 				//Particle systems
 				PxPBDParticleSystem*					createPBDParticleSystem(PxU32 maxNeighborhood, PxReal neighborhoodScale, PxCudaContextManager& cudaContextManager);
@@ -236,14 +240,13 @@ public:
 				PxMaterial*								createMaterial(PxReal staticFriction, PxReal dynamicFriction, PxReal restitution);
 				void									releaseMaterialToPool(NpMaterial& material);
 
-#if PX_SUPPORT_GPU_PHYSX
+				PxDeformableVolumeMaterial*				createDeformableVolumeMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal elasticityDamping);
+				void									releaseDeformableVolumeMaterialToPool(PxDeformableVolumeMaterial& material);
 
 				PxDeformableSurfaceMaterial*			createDeformableSurfaceMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal thickness, PxReal bendingStiffness, PxReal elasticityDamping, PxReal bendingDamping);
 				void									releaseDeformableSurfaceMaterialToPool(PxDeformableSurfaceMaterial& material);
 
-				PxDeformableVolumeMaterial*				createDeformableVolumeMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal elasticityDamping);
-				void									releaseDeformableVolumeMaterialToPool(PxDeformableVolumeMaterial& material);
-
+#if PX_SUPPORT_GPU_PHYSX
 				PxPBDMaterial*							createPBDMaterial(PxReal friction, PxReal damping, PxReal adhesion, PxReal viscosity, PxReal vorticityConfinement, PxReal surfaceTension, PxReal cohesion, PxReal lift, PxReal drag, PxReal cflCoefficient, PxReal gravityScale);
 				void									releasePBDMaterialToPool(PxPBDMaterial& material);
 #endif
@@ -277,9 +280,9 @@ private:
 				PxHashSet<PxConstraint*>						mConstraintTracking;
 				PxHashSet<PxActor*>								mActorTracking;				
 				PxCoalescedHashSet<PxShape*>					mShapeTracking;
-#if PX_SUPPORT_GPU_PHYSX
 				PxHashSet<PxDeformableAttachment*>		mAttachmentTracking;
 				PxHashSet<PxDeformableElementFilter*>	mElementFilterTracking;
+#if PX_SUPPORT_GPU_PHYSX
 				PxHashSet<PxParticleBuffer*>			mParticleBufferTracking;
 #endif
 				PxPool2<NpRigidDynamic, 4096>			mRigidDynamicPool;
@@ -312,12 +315,17 @@ private:
 				PxPool2<NpArticulationMimicJoint, 4096>	mArticulationMimicJointPool;
 				PxMutex									mArticulationMimicJointPoolLock;
 
-#if PX_SUPPORT_GPU_PHYSX
+				PxPool2<NpDeformableVolume, 1024>		mDeformableVolumePool;
+				PxMutex									mDeformableVolumePoolLock;
+
+				PxPool2<NpDeformableVolumeMaterial, 1024>	mDeformableVolumeMaterialPool;
+				PxMutex										mDeformableVolumeMaterialPoolLock;
+
 				PxPool2<NpDeformableSurface, 1024>		mDeformableSurfacePool;
 				PxMutex									mDeformableSurfacePoolLock;
 
-				PxPool2<NpDeformableVolume, 1024>		mDeformableVolumePool;
-				PxMutex									mDeformableVolumePoolLock;
+				PxPool2<NpDeformableSurfaceMaterial, 1024>	mDeformableSurfaceMaterialPool;
+				PxMutex										mDeformableSurfaceMaterialPoolLock;
 
 				PxPool2<NpDeformableAttachment, 1024>	mAttachmentPool;
 				PxMutex									mAttachmentPoolLock;
@@ -325,6 +333,7 @@ private:
 				PxPool2<NpDeformableElementFilter, 1024> mElementFilterPool;
 				PxMutex									mElementFilterPoolLock;
 
+#if PX_SUPPORT_GPU_PHYSX
 				PxPool2<NpPBDParticleSystem, 1024>		mPBDParticleSystemPool;
 				PxMutex									mPBDParticleSystemPoolLock;
 
@@ -333,12 +342,6 @@ private:
 
 				PxPool2<NpParticleAndDiffuseBuffer, 1024> mParticleAndDiffuseBufferPool;
 				PxMutex									mParticleAndDiffuseBufferPoolLock;
-
-				PxPool2<NpDeformableSurfaceMaterial, 1024>	mDeformableSurfaceMaterialPool;
-				PxMutex										mDeformableSurfaceMaterialPoolLock;
-
-				PxPool2<NpDeformableVolumeMaterial, 1024>	mDeformableVolumeMaterialPool;
-				PxMutex										mDeformableVolumeMaterialPoolLock;
 
 				PxPool2<NpPBDMaterial, 1024>			mPBDMaterialPool;
 				PxMutex									mPBDMaterialPoolLock;
@@ -360,12 +363,12 @@ private:
 	void	NpDestroyAggregate(NpAggregate* np);
 	void	NpDestroyShape(NpShape* np);
 	void	NpDestroyConstraint(NpConstraint* np);
-
-#if PX_SUPPORT_GPU_PHYSX
-	void	NpDestroyDeformableSurface(NpDeformableSurface* np);
 	void	NpDestroyDeformableVolume(NpDeformableVolume* np);
+	void	NpDestroyDeformableSurface(NpDeformableSurface* np);
 	void	NpDestroyAttachment(NpDeformableAttachment* np);
 	void	NpDestroyElementFilter(NpDeformableElementFilter* np);
+
+#if PX_SUPPORT_GPU_PHYSX
 	void	NpDestroyParticleSystem(NpPBDParticleSystem* particleSystem);
 	void	NpDestroyParticleBuffer(NpParticleBuffer* particleBuffer);
 	void	NpDestroyParticleBuffer(NpParticleAndDiffuseBuffer* particleBuffer);

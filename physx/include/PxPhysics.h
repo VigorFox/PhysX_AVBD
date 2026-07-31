@@ -36,6 +36,7 @@
 #include "PxAggregate.h"
 #include "PxParticleSystem.h"
 #include "PxDeformableSurface.h"
+#include "PxDeformableVolume.h"
 #include "PxDeformableAttachment.h"
 #include "PxDeformableElementFilter.h"
 #include "foundation/PxPreprocessor.h"
@@ -705,6 +706,17 @@ public:
 	virtual PxDeformableSurface* createDeformableSurface(PxCudaContextManager& cudaContextManager) = 0;
 
 	/**
+	\brief Creates a deformable surface using an explicit backend.
+
+	Use #PxDeformableSurfaceBackend::eCPU_AVBD to create a CPU AVBD actor.
+	#PxDeformableSurfaceBackend::eGPU requires the CUDA-context overload.
+
+	\param[in] backend The requested deformable-surface backend.
+	\return The new deformable surface, or NULL if the backend is unsupported.
+	*/
+	virtual PxDeformableSurface* createDeformableSurface(PxDeformableSurfaceBackend::Enum backend) = 0;
+
+	/**
 	\brief Creates a FEM-based deformable volume with all fields initialized to their default values.
 
 	\param[in] cudaContextManager The PxCudaContextManager this instance is tied to.
@@ -713,6 +725,17 @@ public:
 	\see PxDeformableVolume
 	*/
 	virtual PxDeformableVolume* createDeformableVolume(PxCudaContextManager& cudaContextManager) = 0;
+
+	/**
+	\brief Creates a deformable volume using an explicit backend.
+
+	Use #PxDeformableVolumeBackend::eCPU_AVBD to create a CPU AVBD actor.
+	#PxDeformableVolumeBackend::eGPU requires the CUDA-context overload.
+
+	\param[in] backend The requested deformable-volume backend.
+	\return The new deformable volume, or NULL if the backend is unsupported.
+	*/
+	virtual PxDeformableVolume* createDeformableVolume(PxDeformableVolumeBackend::Enum backend) = 0;
 
 	/**
 	\brief Creates a particle system with a position-based dynamics (PBD) solver.

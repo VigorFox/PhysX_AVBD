@@ -4598,6 +4598,7 @@ void AvbdSolver::solve(physx::PxReal dt, AvbdSolverBody *bodies,
                /*allowRigidDeepPoseRecoverySplit=*/true,
                /*allowRigidFiniteMaterialPoseSplit=*/true,
                nullptr, 0, nullptr, 0, touchesKinematicShell, nullptr,
+               nullptr,
                nullptr, 0, false, false, false, nullptr, 0, stats);
 
 }
@@ -4616,6 +4617,7 @@ void AvbdSolver::postAlStages(
     AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
     const physx::PxArray<bool> &touchesKinematicShell,
     const physx::PxArray<physx::PxVec3> *shellLinearVelAtSolveStart,
+    const physx::PxArray<bool> *positionOwnedAngularBodies,
     AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
     bool hasJointConstraints, bool skipBodyStaticFriction,
     bool applyVelocityDamping,
@@ -4792,10 +4794,13 @@ void AvbdSolver::postAlStages(
                    shellLinearVelAtSolveStart->size() == numBodies) {
           bool shellFast = false;
           for (physx::PxU32 sci = 0; sci < numShellContacts; ++sci) {
-            if (shellContacts[sci].rigidBodyIdx != i)
+            const AvbdSoftContactGeometry &geometry =
+                shellContacts[sci].geometry;
+            if (!geometry.hasRigidBodyTarget() ||
+                geometry.targetIndex != i)
               continue;
             const physx::PxReal approach =
-                -(*shellLinearVelAtSolveStart)[i].dot(shellContacts[sci].normal);
+                -(*shellLinearVelAtSolveStart)[i].dot(geometry.normal);
             if (approach > kShellFastImpactSpeed) {
               shellFast = true;
               break;
@@ -4816,7 +4821,10 @@ void AvbdSolver::postAlStages(
 
         const bool unconstrainedAngularMotion =
             numContacts == 0 && !hasKinematicShellContacts &&
-            (!d6Joints || numD6 == 0);
+            (!d6Joints || numD6 == 0) &&
+            !(positionOwnedAngularBodies &&
+              positionOwnedAngularBodies->size() == numBodies &&
+              (*positionOwnedAngularBodies)[i]);
         bool physicalSlerpPositionDrive = false;
         if (d6Joints) {
           for (physx::PxU32 j = 0; j < numD6; ++j) {
@@ -5036,6 +5044,8 @@ void AvbdSolver::solveIsland(
     AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
     AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
     AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    FeatherstoneArticulation *const *articulationForBody,
+    const physx::PxU32 *linkIndexForBody,
     AvbdSolverStats &stats) {
   PX_PROFILE_ZONE("AVBD.solveIsland", 0);
 
@@ -5045,7 +5055,8 @@ void AvbdSolver::solveIsland(
   const bool hasJoints = (numD6 > 0 || numGear > 0);
   const bool hasDeformableSoftVbd =
       softParticles && numSoftParticles > 0 && softBodies &&
-      numSoftBodies > 0 && softContacts && numSoftContacts > 0;
+      numSoftBodies > 0 &&
+      (numSoftContacts == 0 || softContacts);
   const bool contactOnlyTargetOwnership =
       !hasJoints && !hasDeformableSoftVbd;
   physx::PxArray<physx::PxU32> rigidStaticContactsPerBody(numBodies);
@@ -5569,7 +5580,8 @@ void AvbdSolver::solveIsland(
                     numD6, gearJoints, numGear, gravity, contactMap, d6Map,
                     gearMap, colorBatches, numColors, iterationOverride,
                     softParticles, numSoftParticles, softBodies, numSoftBodies,
-                    softContacts, numSoftContacts, stats);
+                    softContacts, numSoftContacts, articulationForBody,
+                    linkIndexForBody, stats);
   } else {
     solve(dt, bodies, numBodies, contacts, numContacts, gravity, contactMap,
           colorBatches, numColors, iterationOverride, stats);
@@ -6463,10 +6475,12 @@ void AvbdSolver::applyKinematicShellNormalDepenetrationSweeps(
   if (stats) {
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
       const AvbdSoftContact &sc = softContacts[sci];
-      if (sc.rigidBodyIdx < numBodies &&
-          sc.particleIdx < numSoftParticles &&
-          softParticles[sc.particleIdx].invMass <= 0.0f &&
-          bodies[sc.rigidBodyIdx].invMass > 0.0f)
+      const AvbdSoftContactGeometry &geometry = sc.geometry;
+      if (geometry.hasRigidBodyTarget() &&
+          geometry.targetIndex < numBodies &&
+          geometry.particleIdx < numSoftParticles &&
+          softParticles[geometry.particleIdx].invMass <= 0.0f &&
+          bodies[geometry.targetIndex].invMass > 0.0f)
         stats->surfaceShellContacts++;
     }
   }
@@ -6475,17 +6489,20 @@ void AvbdSolver::applyKinematicShellNormalDepenetrationSweeps(
     bool anyCorrection = false;
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
       AvbdSoftContact &sc = softContacts[sci];
-      if (sc.rigidBodyIdx >= numBodies)
+      const AvbdSoftContactGeometry &geometry = sc.geometry;
+      const AvbdSoftContactAugmentedState &state = sc.state;
+      if (!geometry.hasRigidBodyTarget() ||
+          geometry.targetIndex >= numBodies)
         continue;
-      if (sc.particleIdx >= numSoftParticles ||
-          softParticles[sc.particleIdx].invMass > 0.0f)
+      if (geometry.particleIdx >= numSoftParticles ||
+          softParticles[geometry.particleIdx].invMass > 0.0f)
         continue;
-      AvbdSolverBody &body = bodies[sc.rigidBodyIdx];
+      AvbdSolverBody &body = bodies[geometry.targetIndex];
       if (body.invMass <= 0.0f)
         continue;
 
       const physx::PxReal violation =
-          avbdKinematicShellContactViolation(sc, body);
+          avbdKinematicShellContactViolation(geometry, body);
       if (violation >= -1e-5f)
         continue;
 
@@ -6493,12 +6510,13 @@ void AvbdSolver::applyKinematicShellNormalDepenetrationSweeps(
           body.linearVelocity.magnitude() + gravity.magnitude() * dt;
       physx::PxReal sweepCap =
           physx::PxMax(approachSpeed * dt * 0.5f, 0.04f);
-      const physx::PxVec3 meshStep = sc.surfacePoint - sc.surfacePointPrev;
+      const physx::PxVec3 meshStep =
+          geometry.surfacePoint - state.surfacePointPrev;
       sweepCap = physx::PxMax(sweepCap, meshStep.magnitude() * 1.5f);
       if (violation < -0.05f)
         sweepCap = physx::PxMax(sweepCap, -violation * 0.6f);
       const physx::PxReal corr = physx::PxMin(-violation, sweepCap);
-      body.position += sc.normal * corr;
+      body.position += geometry.normal * corr;
       if (stats) {
         stats->surfaceShellDepenetrationCorrections++;
         stats->surfaceShellDepenetrationDistance += corr;
@@ -6533,16 +6551,20 @@ void AvbdSolver::applyKinematicShellFrictionSweeps(
   }
   for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
     const AvbdSoftContact &sc = softContacts[sci];
-    if (sc.rigidBodyIdx >= numBodies || sc.friction <= 0.0f)
+    const AvbdSoftContactGeometry &geometry = sc.geometry;
+    if (!geometry.hasRigidBodyTarget() ||
+        geometry.targetIndex >= numBodies ||
+        geometry.friction <= 0.0f)
       continue;
-    if (sc.particleIdx >= numSoftParticles ||
-        softParticles[sc.particleIdx].invMass > 0.0f)
+    if (geometry.particleIdx >= numSoftParticles ||
+        softParticles[geometry.particleIdx].invMass > 0.0f)
       continue;
     const physx::PxReal viol =
-        avbdKinematicShellContactViolation(sc, bodies[sc.rigidBodyIdx]);
+        avbdKinematicShellContactViolation(
+            geometry, bodies[geometry.targetIndex]);
     if (viol > 0.05f)
       continue;
-    const physx::PxU32 bi = sc.rigidBodyIdx;
+    const physx::PxU32 bi = geometry.targetIndex;
     if (viol < worstViol[bi]) {
       worstViol[bi] = viol;
       dominantContact[bi] = sci;
@@ -6585,18 +6607,22 @@ void AvbdSolver::applyKinematicShellFrictionSweeps(
   for (physx::PxU32 sweep = 0; sweep < sweeps; ++sweep) {
     for (physx::PxU32 fi = 0; fi < frContacts.size(); ++fi) {
       AvbdSoftContact &sc = softContacts[frContacts[fi]];
-      const physx::PxU32 bi = sc.rigidBodyIdx;
+      const AvbdSoftContactGeometry &geometry = sc.geometry;
+      const AvbdSoftContactAugmentedState &state = sc.state;
+      const physx::PxU32 bi = geometry.targetIndex;
       AvbdSolverBody &body = bodies[bi];
       touched[bi] = true;
 
-      const physx::PxVec3 r = body.rotation.rotate(sc.rigidLocalPoint);
+      const physx::PxVec3 r =
+          body.rotation.rotate(geometry.rigidLocalPoint);
       const physx::PxMat33 &invI = body.invInertiaWorld;
       // Shell path: one dominant contact per body. Always track tangential
       // mesh velocity (shot sphere mass can be >>5). Stack multi-corner
       // energy is limited by NP multi-corner gate + e=0 clamps.
-      physx::PxVec3 vMesh = (sc.surfacePoint - sc.surfacePointPrev) * invDt;
+      physx::PxVec3 vMesh =
+          (geometry.surfacePoint - state.surfacePointPrev) * invDt;
       {
-        const physx::PxVec3 &n = sc.normal;
+        const physx::PxVec3 &n = geometry.normal;
         vMesh = vMesh - n * vMesh.dot(n);
         const physx::PxReal vCap = 12.0f;
         const physx::PxReal vMag2 = vMesh.magnitudeSquared();
@@ -6604,14 +6630,16 @@ void AvbdSolver::applyKinematicShellFrictionSweeps(
           vMesh *= vCap / physx::PxSqrt(vMag2);
       }
 
-      const physx::PxReal viol = avbdKinematicShellContactViolation(sc, body);
+      const physx::PxReal viol =
+          avbdKinematicShellContactViolation(geometry, body);
       const physx::PxReal normalForce =
-          PxMax(PxAbs(sc.alLambda), sc.k * PxMax(0.0f, -viol));
-      const physx::PxReal jmax = normalForce * sc.friction * dt;
+          PxMax(PxAbs(state.alLambda), state.k * PxMax(0.0f, -viol));
+      const physx::PxReal jmax = normalForce * geometry.friction * dt;
       if (jmax <= 0.0f)
         continue;
 
-      const physx::PxVec3 tangents[2] = {sc.tangent1, sc.tangent2};
+      const physx::PxVec3 tangents[2] = {
+          geometry.tangent1, geometry.tangent2};
       physx::PxReal jUnc[2] = {0.0f, 0.0f};
       physx::PxReal kEff[2] = {0.0f, 0.0f};
       physx::PxVec3 rCrossT[2];
@@ -6675,13 +6703,15 @@ void AvbdSolver::clampKinematicShellInelasticNormalVelocities(
     physx::PxReal worstViolation = 0.0f;
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
       const AvbdSoftContact &sc = softContacts[sci];
-      if (sc.rigidBodyIdx != i)
+      const AvbdSoftContactGeometry &geometry = sc.geometry;
+      if (!geometry.hasRigidBodyTarget() ||
+          geometry.targetIndex != i)
         continue;
-      if (sc.particleIdx >= numSoftParticles ||
-          softParticles[sc.particleIdx].invMass > 0.0f)
+      if (geometry.particleIdx >= numSoftParticles ||
+          softParticles[geometry.particleIdx].invMass > 0.0f)
         continue;
       const physx::PxReal viol =
-          avbdKinematicShellContactViolation(sc, bodies[i]);
+          avbdKinematicShellContactViolation(geometry, bodies[i]);
       if (viol < worstViolation) {
         worstViolation = viol;
         dominant = sci;
@@ -6697,11 +6727,13 @@ void AvbdSolver::clampKinematicShellInelasticNormalVelocities(
     if (stats)
       stats->surfaceShellFinalizeBodies++;
     const AvbdSoftContact &sc = softContacts[dominant];
-    const physx::PxVec3 nd = sc.normal;
+    const AvbdSoftContactGeometry &geometry = sc.geometry;
+    const AvbdSoftContactAugmentedState &state = sc.state;
+    const physx::PxVec3 nd = geometry.normal;
     const physx::PxReal vn = bodies[i].linearVelocity.dot(nd);
     const physx::PxReal vMeshN =
         invDt > 0.0f
-            ? ((sc.surfacePoint - sc.surfacePointPrev) * invDt).dot(nd)
+            ? ((geometry.surfacePoint - state.surfacePointPrev) * invDt).dot(nd)
             : 0.0f;
     const physx::PxReal vRelN = vn - vMeshN;
     if (vRelN > 0.0f) {
@@ -6742,11 +6774,14 @@ void AvbdSolver::accumulateBodyContactRows(
     physx::PxVec3 &gLinear, physx::PxVec3 &gAngular,
     physx::PxU32 &numTouching) {
 
-  bool bodyUsesStaticParticleSoftNormals = false;
+  bool bodyUsesSoftContactNormals = false;
   if (softContacts && numSoftContacts > 0) {
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
-      if (softContacts[sci].rigidBodyIdx == bodyIndex) {
-        bodyUsesStaticParticleSoftNormals = true;
+      const AvbdSoftContactGeometry &geometry =
+          softContacts[sci].geometry;
+      if (geometry.hasRigidBodyTarget() &&
+          geometry.targetIndex == bodyIndex) {
+        bodyUsesSoftContactNormals = true;
         break;
       }
     }
@@ -6774,7 +6809,7 @@ void AvbdSolver::accumulateBodyContactRows(
 
     // A real rigid/soft contact owns the normal when both representations are
     // present. This is not reachable from the rigid NP-only solveIsland entry.
-    if (bodyUsesStaticParticleSoftNormals &&
+    if (bodyUsesSoftContactNormals &&
         hasDeformableStaticAnchor(contacts[c])) {
       continue;
     }
@@ -6937,23 +6972,32 @@ void AvbdSolver::accumulateBodyContactRows(
       numSoftParticles > 0) {
     const physx::PxReal shellBoostFloor =
         AvbdConstants::AVBD_PEN_SCALE_BODY_VS_STATIC * massInvDt2;
-    AvbdVec6 shellRhs;
-    shellRhs.linear = physx::PxVec3(0.0f);
-    shellRhs.angular = physx::PxVec3(0.0f);
+    AvbdVec6 softContactRhs;
+    softContactRhs.linear = physx::PxVec3(0.0f);
+    softContactRhs.angular = physx::PxVec3(0.0f);
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
       const AvbdSoftContact &sc = softContacts[sci];
-      if (sc.rigidBodyIdx != bodyIndex)
+      const AvbdSoftContactGeometry &geometry = sc.geometry;
+      const AvbdSoftContactAugmentedState &state = sc.state;
+      if (!geometry.hasRigidBodyTarget() ||
+          geometry.targetIndex != bodyIndex)
         continue;
-      if (sc.particleIdx >= numSoftParticles)
+      if (geometry.particleIdx >= numSoftParticles)
         continue;
-      if (softParticles[sc.particleIdx].invMass > 0.0f)
-        continue;
-      avbdAddKinematicShellContactContribution_rigid(
-          softContacts[sci], bodyIndex, body, shellBoostFloor, A, shellRhs);
-      numTouching++;
+      if (softParticles[geometry.particleIdx].invMass <= 0.0f) {
+        avbdAddKinematicShellContactContribution_rigid(
+            geometry, state, bodyIndex, body,
+            shellBoostFloor, A, softContactRhs);
+        numTouching++;
+      } else if (
+          avbdAddDynamicSoftRigidContactContribution_rigid(
+              geometry, state, bodyIndex, softParticles,
+              numSoftParticles, body, A, softContactRhs)) {
+        numTouching++;
+      }
     }
-    gLinear += shellRhs.linear;
-    gAngular += shellRhs.angular;
+    gLinear += softContactRhs.linear;
+    gAngular += softContactRhs.angular;
   }
 
 }

@@ -37,15 +37,15 @@
 #include "NpRigidStatic.h"
 #include "NpRigidDynamic.h"
 #include "NpArticulationLink.h"
+#include "NpDeformableVolume.h"
+#include "NpDeformableSurface.h"
+#include "NpDeformableAttachment.h"
+#include "NpDeformableElementFilter.h"
 #include "CmTransformUtils.h"
 #include "omnipvd/NpOmniPvdSetData.h"
 
 #if PX_SUPPORT_GPU_PHYSX
 #include "NpPBDParticleSystem.h"
-#include "NpDeformableAttachment.h"
-#include "NpDeformableElementFilter.h"
-#include "NpDeformableSurface.h"
-#include "NpDeformableVolume.h"
 #endif
 
 using namespace physx;
@@ -192,7 +192,6 @@ void NpActor::removeConstraints(PxRigidActor& owner)
 	}
 }
 
-#if PX_SUPPORT_GPU_PHYSX
 void NpActor::removeAttachments(PxActor& owner, bool removeConnectors)
 {
 	if (mConnectorArray)
@@ -290,7 +289,6 @@ void NpActor::addElementFilters(PxActor& owner)
 		}
 	}
 }
-#endif
 
 void NpActor::removeFromAggregate(PxActor& owner)
 {
@@ -536,13 +534,13 @@ const PxActor* NpActor::getPxActor() const
 		return static_cast<const NpRigidStatic*>(this);
 	case PxActorType::eARTICULATION_LINK:
 		return static_cast<const NpArticulationLink*>(this);
+	case PxActorType::eDEFORMABLE_VOLUME:
+		return static_cast<const NpDeformableVolume*>(this);
+	case PxActorType::eDEFORMABLE_SURFACE:
+		return static_cast<const NpDeformableSurface*>(this);
 #if PX_SUPPORT_GPU_PHYSX
 	case PxActorType::ePBD_PARTICLESYSTEM:
 		return static_cast<const NpPBDParticleSystem*>(this);
-	case PxActorType::eDEFORMABLE_SURFACE:
-		return static_cast<const NpDeformableSurface*>(this);
-	case PxActorType::eDEFORMABLE_VOLUME:
-		return static_cast<const NpDeformableVolume*>(this);
 #endif // PX_SUPPORT_GPU_PHYSX
 	default:
 		PX_ASSERT(0);
@@ -565,10 +563,10 @@ NpActor::Offsets::Offsets()
 	pxActorToNpActor[PxConcreteType::eRIGID_STATIC]			= size_t(pxToNpActor<NpRigidStatic>(n)) - addr;
 	pxActorToNpActor[PxConcreteType::eRIGID_DYNAMIC]		= size_t(pxToNpActor<NpRigidDynamic>(n)) - addr;
 	pxActorToNpActor[PxConcreteType::eARTICULATION_LINK]	= size_t(pxToNpActor<NpArticulationLink>(n)) - addr;
+	pxActorToNpActor[PxConcreteType::eDEFORMABLE_VOLUME]	= size_t(pxToNpActor<NpDeformableVolume>(n)) - addr;
+	pxActorToNpActor[PxConcreteType::eDEFORMABLE_SURFACE]	= size_t(pxToNpActor<NpDeformableSurface>(n)) - addr;
 
 #if PX_SUPPORT_GPU_PHYSX
-	pxActorToNpActor[PxConcreteType::eDEFORMABLE_SURFACE]	= size_t(pxToNpActor<NpDeformableSurface>(n)) - addr;
-	pxActorToNpActor[PxConcreteType::eDEFORMABLE_VOLUME]	= size_t(pxToNpActor<NpDeformableVolume>(n)) - addr;
 	pxActorToNpActor[PxConcreteType::ePBD_PARTICLESYSTEM]	= size_t(pxToNpActor<NpPBDParticleSystem>(n)) - addr;
 #endif
 }
@@ -599,14 +597,6 @@ NpActor::NpOffsets::NpOffsets()
 		const size_t bodyOffset	= NpArticulationLink::getCoreOffset() - npOffset;
 		npToSc[NpType::eBODY_FROM_ARTICULATION_LINK] = bodyOffset;
 	}
-#if PX_SUPPORT_GPU_PHYSX
-	{
-		size_t addr = 0x100;	// casting the null ptr takes a special-case code path, which we don't want
-		NpDeformableSurface* n = reinterpret_cast<NpDeformableSurface*>(addr);
-		const size_t npOffset = size_t(static_cast<NpActor*>(n)) - addr;
-		const size_t bodyOffset = NpDeformableSurface::getCoreOffset() - npOffset;
-		npToSc[NpType::eDEFORMABLE_SURFACE] = bodyOffset;
-	}
 	{
 		size_t addr = 0x100;	// casting the null ptr takes a special-case code path, which we don't want
 		NpDeformableVolume* n = reinterpret_cast<NpDeformableVolume*>(addr);
@@ -614,6 +604,14 @@ NpActor::NpOffsets::NpOffsets()
 		const size_t bodyOffset = NpDeformableVolume::getCoreOffset() - npOffset;
 		npToSc[NpType::eDEFORMABLE_VOLUME] = bodyOffset;
 	}
+	{
+		size_t addr = 0x100;	// casting the null ptr takes a special-case code path, which we don't want
+		NpDeformableSurface* n = reinterpret_cast<NpDeformableSurface*>(addr);
+		const size_t npOffset = size_t(static_cast<NpActor*>(n)) - addr;
+		const size_t bodyOffset = NpDeformableSurface::getCoreOffset() - npOffset;
+		npToSc[NpType::eDEFORMABLE_SURFACE] = bodyOffset;
+	}
+#if PX_SUPPORT_GPU_PHYSX
 	{
 		size_t addr = 0x100;	// casting the null ptr takes a special-case code path, which we don't want
 		NpPBDParticleSystem* n = reinterpret_cast<NpPBDParticleSystem*>(addr);
@@ -625,5 +623,3 @@ NpActor::NpOffsets::NpOffsets()
 }
 
 const NpActor::NpOffsets NpActor::sNpOffsets;
-
-

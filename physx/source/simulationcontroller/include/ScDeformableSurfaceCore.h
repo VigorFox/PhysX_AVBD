@@ -30,7 +30,6 @@
 #define SC_DEFORMABLE_SURFACE_CORE
 
 #include "foundation/PxPreprocessor.h"
-#if PX_SUPPORT_GPU_PHYSX
 
 #include "PxDeformableSurface.h"
 #include "../../lowleveldynamics/include/DyDeformableSurfaceCore.h"
@@ -119,6 +118,7 @@ public:
 	// Internal API
 	//---------------------------------------------------------------------------------
 
+#if PX_SUPPORT_GPU_PHYSX
 	PxU32						addRigidAttachment(Sc::BodyCore* core, PxU32 vertId, const PxVec3& actorSpacePose);
 	void						removeRigidAttachment(Sc::BodyCore* core, PxU32 handle);
 
@@ -135,15 +135,18 @@ public:
 	PxU32						addClothAttachment(Sc::DeformableSurfaceCore* otherCore, PxU32 otherTriIdx, const PxVec4& otherTriBarycentric, PxU32 triIdx, 
 									const PxVec4& triBarycentric);
 	void						removeClothAttachment(Sc::DeformableSurfaceCore* otherCore, PxU32 handle);
+#endif
 
 	void						addMaterial(const PxU16 handle);
 	void						clearMaterials();
 	PxActor*					getPxActor() const;
-	void						attachShapeCore(ShapeCore* shapeCore);
 	void						onShapeChange(ShapeCore& shape, ShapeChangeNotifyFlags notifyFlags);
+#if PX_SUPPORT_GPU_PHYSX
+	void						attachShapeCore(ShapeCore* shapeCore);
 	PX_FORCE_INLINE	PxU64&		getGpuMemStat() { return mGpuMemStat; }
 
 	DeformableSurfaceSim*								getSim() const;
+#endif
 	PX_FORCE_INLINE	const Dy::DeformableSurfaceCore&	getCore() const { return mCore; }
 	PX_FORCE_INLINE	Dy::DeformableSurfaceCore&			getCore() { return mCore; }
 
@@ -155,5 +158,4 @@ private:
 } // namespace Sc
 } // namespace physx
 
-#endif // PX_SUPPORT_GPU_PHYSX
 #endif // SC_DEFORMABLE_SURFACE_CORE

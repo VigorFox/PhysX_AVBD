@@ -44,10 +44,9 @@ static PX_FORCE_INLINE void removeRigidActorT(T& rigidActor)
 #if PX_SUPPORT_GPU_PHYSX
 	//Remove attachments (if any attachment is attached to the actor).
 	rigidActor.NpRigidActorTemplate<APIClass>::removeAttachments(rigidActor, true);
-
+#endif
 	//Remove element filters (if any element filter is attached to the actor).
 	rigidActor.NpRigidActorTemplate<APIClass>::removeElementFilters(rigidActor, true);
-#endif
 
 	//Remove from aggregate (if it is in an aggregate).
 	rigidActor.NpActorTemplate<APIClass>::removeFromAggregate(rigidActor);

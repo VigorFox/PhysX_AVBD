@@ -30,10 +30,10 @@
 #include "NpRigidStatic.h"
 #include "NpRigidDynamic.h"
 #include "NpArticulationLink.h"
-#if PX_SUPPORT_GPU_PHYSX
-	#include "NpDeformableSurface.h"
-	#include "NpDeformableVolume.h"
-#endif
+#include "NpDeformableVolume.h"
+#include "NpDeformableVolumeMaterial.h"
+#include "NpDeformableSurface.h"
+#include "NpDeformableSurfaceMaterial.h"
 
 #include "omnipvd/NpOmniPvdSetData.h"
 
@@ -86,25 +86,21 @@ NpShape::~NpShape()
 
 	if (flags & PxShapeCoreFlag::eDEFORMABLE_SURFACE_SHAPE)
 	{
-#if PX_SUPPORT_GPU_PHYSX
 		for (PxU32 i = 0; i < nbMaterials; i++)
 		{
 			NpDeformableSurfaceMaterial* material = scGetMaterial<NpDeformableSurfaceMaterial>(i);
 			if(material)
 				RefCountable_decRefCount(*material);
 		}
-#endif
 	}
 	else if(flags & PxShapeCoreFlag::eDEFORMABLE_VOLUME_SHAPE)
 	{ 
-#if PX_SUPPORT_GPU_PHYSX
 		for (PxU32 i = 0; i < nbMaterials; i++)
 		{
 			NpDeformableVolumeMaterial* material = scGetMaterial<NpDeformableVolumeMaterial>(i);
 			if(material)
 				RefCountable_decRefCount(*material);
 		}
-#endif
 	}
 	else
 	{
@@ -502,7 +498,6 @@ void NpShape::setMaterials(PxMaterial*const* materials, PxU16 materialCount)
 
 void NpShape::setDeformableSurfaceMaterials(PxDeformableSurfaceMaterial*const* materials, PxU16 materialCount)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	PX_CHECK_AND_RETURN((mCore.mShapeCoreFlags & PxShapeCoreFlag::eDEFORMABLE_SURFACE_SHAPE),
 		"NpShape::setMaterials: can only apply deformable surface materials to a deformable surface shape!");
 
@@ -512,15 +507,10 @@ void NpShape::setDeformableSurfaceMaterials(PxDeformableSurfaceMaterial*const* m
 
 	if (mExclusiveShapeActor)
 		static_cast<NpDeformableSurface*>(mExclusiveShapeActor)->updateMaterials();
-#else
-	PX_UNUSED(materials);
-	PX_UNUSED(materialCount);
-#endif
 }
 
 void NpShape::setDeformableVolumeMaterials(PxDeformableVolumeMaterial* const* materials, PxU16 materialCount)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	PX_CHECK_AND_RETURN((mCore.mShapeCoreFlags & PxShapeCoreFlag::eDEFORMABLE_VOLUME_SHAPE),
 		"NpShape::setMaterials: can only apply deformable volume materials to a deformable volume shape!");
 
@@ -530,10 +520,6 @@ void NpShape::setDeformableVolumeMaterials(PxDeformableVolumeMaterial* const* ma
 
 	if (mExclusiveShapeActor)
 		static_cast<NpDeformableVolume*>(mExclusiveShapeActor)->updateMaterials();
-#else
-	PX_UNUSED(materials);
-	PX_UNUSED(materialCount);
-#endif
 }
 
 PxU16 NpShape::getNbMaterials() const
@@ -548,31 +534,17 @@ PxU32 NpShape::getMaterials(PxMaterial** userBuffer, PxU32 bufferSize, PxU32 sta
 	return scGetMaterials<PxMaterial, NpMaterial>(mCore, userBuffer, bufferSize, startIndex);
 }
 
-#if PX_SUPPORT_GPU_PHYSX
 PxU32 NpShape::getDeformableSurfaceMaterials(PxDeformableSurfaceMaterial** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
 {
 	NP_READ_CHECK(getNpScene());
 	return scGetMaterials<PxDeformableSurfaceMaterial, NpDeformableSurfaceMaterial>(mCore, userBuffer, bufferSize, startIndex);
 }
-#else
-PxU32 NpShape::getDeformableSurfaceMaterials(PxDeformableSurfaceMaterial**, PxU32, PxU32) const
-{
-	return 0;
-}
-#endif
 
-#if PX_SUPPORT_GPU_PHYSX
 PxU32 NpShape::getDeformableVolumeMaterials(PxDeformableVolumeMaterial** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
 {
 	NP_READ_CHECK(getNpScene());
 	return scGetMaterials<PxDeformableVolumeMaterial, NpDeformableVolumeMaterial>(mCore, userBuffer, bufferSize, startIndex);
 }
-#else
-PxU32 NpShape::getDeformableVolumeMaterials(PxDeformableVolumeMaterial**, PxU32, PxU32) const
-{
-	return 0;
-}
-#endif
 
 PxBaseMaterial* NpShape::getMaterialFromInternalFaceIndex(PxU32 faceIndex) const
 {
@@ -1012,15 +984,12 @@ void NpShape::notifyActorAndUpdatePVD(Sc::ShapeChangeNotifyFlags notifyFlags)
 		if(rigidCore)
 			rigidCore->onShapeChange(mCore, notifyFlags);
 
-#if PX_SUPPORT_GPU_PHYSX
 		const PxType type = mExclusiveShapeActor->getConcreteType();
+		if(type==PxConcreteType::eDEFORMABLE_VOLUME)
+			static_cast<NpDeformableVolume*>(mExclusiveShapeActor)->getCore().onShapeChange(mCore, notifyFlags);
 
 		if(type==PxConcreteType::eDEFORMABLE_SURFACE)
 			static_cast<NpDeformableSurface*>(mExclusiveShapeActor)->getCore().onShapeChange(mCore, notifyFlags);
-
-		if(type==PxConcreteType::eDEFORMABLE_VOLUME)
-			static_cast<NpDeformableVolume*>(mExclusiveShapeActor)->getCore().onShapeChange(mCore, notifyFlags);
-#endif
 	}
 
 	UPDATE_PVD_PROPERTY

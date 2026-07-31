@@ -30,7 +30,7 @@
 #define NP_DEFORMABLE_VOLUME_H
 
 #include "foundation/PxPreprocessor.h"
-#if PX_SUPPORT_GPU_PHYSX
+#include "foundation/PxArray.h"
 #include "PxDeformableVolume.h"
 #include "ScDeformableVolumeCore.h"
 #include "GuTetrahedronMesh.h"
@@ -46,6 +46,7 @@ class PxsMemoryManager;
 class NpDeformableVolume : public NpActorTemplate<PxDeformableVolume>
 {
 public:
+	NpDeformableVolume();
 	NpDeformableVolume(PxCudaContextManager& cudaContextManager);
 	NpDeformableVolume(PxBaseFlags baseFlags, PxCudaContextManager& cudaContextManager);
 	virtual ~NpDeformableVolume() { releaseAllocator(); }
@@ -100,6 +101,9 @@ public:
 	virtual		PxCudaContextManager*		getCudaContextManager() const PX_OVERRIDE;
 
 	// PxDeformableVolume API
+
+	virtual PxDeformableVolumeBackend::Enum	getDeformableVolumeBackend() const PX_OVERRIDE
+											{ return mBackend; }
 	
 	virtual void							setDeformableVolumeFlag(PxDeformableVolumeFlag::Enum flag, bool val) PX_OVERRIDE;
 	virtual void							setDeformableVolumeFlags(PxDeformableVolumeFlags flags) PX_OVERRIDE;
@@ -113,10 +117,15 @@ public:
 
 	virtual PxVec4*							getSimPositionInvMassBufferD() PX_OVERRIDE;
 	virtual PxVec4*							getSimVelocityBufferD() PX_OVERRIDE;
+	virtual PxVec4*							getPositionInvMassBufferH() PX_OVERRIDE;
+	virtual PxVec4*							getRestPositionBufferH() PX_OVERRIDE;
+	virtual PxVec4*							getSimPositionInvMassBufferH() PX_OVERRIDE;
+	virtual PxVec4*							getSimVelocityBufferH() PX_OVERRIDE;
 
 	virtual void							markDirty(PxDeformableVolumeDataFlags flags) PX_OVERRIDE;
 
 	virtual	void							setKinematicTargetBufferD(const PxVec4* positions) PX_OVERRIDE;
+	virtual	void							setKinematicTargetBufferH(const PxVec4* positions) PX_OVERRIDE;
 
 	virtual bool							attachSimulationMesh(PxTetrahedronMesh& simulationMesh, PxDeformableVolumeAuxData& softBodyAuxData) PX_OVERRIDE;
 	virtual void							detachSimulationMesh() PX_OVERRIDE;
@@ -151,11 +160,15 @@ private:
 	PxCudaContextManager*					mCudaContextManager;
 	PxsMemoryManager*						mMemoryManager;
 	Cm::VirtualAllocatorCallback*				mDeviceMemoryAllocator;
+	PxDeformableVolumeBackend::Enum			mBackend;
+	PxArray<PxVec4>							mPositionInvMassBufferH;
+	PxArray<PxVec4>							mRestPositionBufferH;
+	PxArray<PxVec4>							mSimPositionInvMassBufferH;
+	PxArray<PxVec4>							mSimVelocityBufferH;
 };
 
 Sc::DeformableVolumeCore* getDeformableVolumeCore(PxActor* actor);
 
 } // namespace physx
 
-#endif //PX_SUPPORT_GPU_PHYSX
 #endif // NP_DEFORMABLE_VOLUME_H

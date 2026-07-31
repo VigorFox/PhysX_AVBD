@@ -90,16 +90,14 @@ namespace
 
 }*/
 
-void TetrahedronMeshBuilder::recordTetrahedronIndices(const TetrahedronMeshData& collisionMesh, DeformableVolumeCollisionData& collisionData, bool buildGPUData)
+void TetrahedronMeshBuilder::recordTetrahedronIndices(const TetrahedronMeshData& collisionMesh, DeformableVolumeCollisionData& collisionData)
 {
-	if (buildGPUData)
-	{
-		PX_ASSERT(!(collisionMesh.mFlags & PxTriangleMeshFlag::e16_BIT_INDICES));
-		PX_ASSERT(collisionData.mGRB_primIndices);
+	PX_ASSERT(!(collisionMesh.mFlags & PxTriangleMeshFlag::e16_BIT_INDICES));
+	PX_ASSERT(collisionData.mGRB_primIndices);
 
-		//copy the BV4 tetrahedron indices to mGRB_primIndices
-		PxMemCopy(collisionData.mGRB_primIndices, collisionMesh.mTetrahedrons, sizeof(IndTetrahedron32) * collisionMesh.mNbTetrahedrons);
-	}
+	// This topology is shared deformable-volume data. The legacy member name
+	// predates the CPU backend; only the BV32 tree and face remaps are GPU-only.
+	PxMemCopy(collisionData.mGRB_primIndices, collisionMesh.mTetrahedrons, sizeof(IndTetrahedron32) * collisionMesh.mNbTetrahedrons);
 }
 
 class SortedTriangleInds
@@ -211,8 +209,9 @@ bool TetrahedronMeshBuilder::importMesh(const PxTetrahedronMeshDesc& collisionMe
 	PxVec3* verts = collisionMesh.allocateVertices(collisionMeshDesc.points.count);
 
 	collisionMesh.allocateTetrahedrons(collisionMeshDesc.tetrahedrons.count, 1);
-	if (params.buildGPUData)
-		collisionData.allocateCollisionData(collisionMeshDesc.tetrahedrons.count);
+	// Rest poses, surface topology and collision-to-simulation embedding are
+	// shared deformable-volume data, not GRB-only data.
+	collisionData.allocateCollisionData(collisionMeshDesc.tetrahedrons.count);
 		
 	TetrahedronT<PxU32>* tets = reinterpret_cast<TetrahedronT<PxU32>*>(collisionMesh.mTetrahedrons);
 
@@ -301,100 +300,94 @@ bool TetrahedronMeshBuilder::createGRBMidPhaseAndData(const PxU32 originalTetrah
 
 		if(!BV32TetrahedronMeshBuilder::createMidPhaseStructure(params, collisionMesh, *bv32Tree, collisionData))
 			return false;
+	}
 
-		//create surface triangles, one tetrahedrons has 4 triangles
-		PxHashMap<SortedTriangleInds, PxU32, SortedTriangleIndsHash> triIndsMap;
+	// Surface topology is consumed by deformable mapping on both CPU and GPU.
+	// One tetrahedron has four candidate surface triangles.
+	PxHashMap<SortedTriangleInds, PxU32, SortedTriangleIndsHash> triIndsMap;
 
-		//for trigs index stride conversion and eventual reordering is also needed, I don't think flexicopy can do that for us.
+	// For GPU cooking the BV32 builder may have reordered this shared copy.
+	IndTetrahedron32* dest =
+		reinterpret_cast<IndTetrahedron32*>(
+			collisionData.mGRB_primIndices);
 
-		IndTetrahedron32* dest = reinterpret_cast<IndTetrahedron32*>(collisionData.mGRB_primIndices);
-			
-		for(PxU32 i = 0; i < collisionMesh.mNbTetrahedrons; ++i)
+	for(PxU32 i = 0; i < collisionMesh.mNbTetrahedrons; ++i)
+	{
+		IndTetrahedron32& tetInd = dest[i];
+
+		SortedTriangleInds t0(tetInd.mRef[0], tetInd.mRef[1], tetInd.mRef[2]);
+		t0.setTetIndex(i);
+		triIndsMap[t0] += 1;
+
+		SortedTriangleInds t1(tetInd.mRef[1], tetInd.mRef[3], tetInd.mRef[2]);
+		t1.setTetIndex(i);
+		triIndsMap[t1] += 1;
+
+		SortedTriangleInds t2(tetInd.mRef[0], tetInd.mRef[3], tetInd.mRef[1]);
+		t2.setTetIndex(i);
+		triIndsMap[t2] += 1;
+
+		SortedTriangleInds t3(tetInd.mRef[0], tetInd.mRef[2], tetInd.mRef[3]);
+		t3.setTetIndex(i);
+		triIndsMap[t3] += 1;
+	}
+
+	PxMemZero(collisionData.mGRB_tetraSurfaceHint, collisionMesh.mNbTetrahedrons * sizeof(PxU8));
+
+	PxU8* tetHint = reinterpret_cast<PxU8*>(collisionData.mGRB_tetraSurfaceHint);
+
+	// Compute the surface triangles for the tetrahedron mesh.
+	for (PxHashMap<SortedTriangleInds, PxU32, SortedTriangleIndsHash>::Iterator iter = triIndsMap.getIterator(); !iter.done(); ++iter)
+	{
+		SortedTriangleInds key = iter->first;
+
+		// Only output faces that are referenced by one tet (open faces).
+		if (iter->second == 1)
 		{
-			IndTetrahedron32& tetInd = dest[i];
-
-			SortedTriangleInds t0(tetInd.mRef[0], tetInd.mRef[1], tetInd.mRef[2]);
-			t0.setTetIndex(i);
-			triIndsMap[t0] += 1;
-
-			SortedTriangleInds t1(tetInd.mRef[1], tetInd.mRef[3], tetInd.mRef[2]);
-			t1.setTetIndex(i);
-			triIndsMap[t1] += 1;
-
-			SortedTriangleInds t2(tetInd.mRef[0], tetInd.mRef[3], tetInd.mRef[1]);
-			t2.setTetIndex(i);
-			triIndsMap[t2] += 1;
-
-			SortedTriangleInds t3(tetInd.mRef[0], tetInd.mRef[2], tetInd.mRef[3]);
-			t3.setTetIndex(i);
-			triIndsMap[t3] += 1;
-		}
-
-		PxMemZero(collisionData.mGRB_tetraSurfaceHint, collisionMesh.mNbTetrahedrons * sizeof(PxU8));
-
-		PxU8* tetHint = reinterpret_cast<PxU8*>(collisionData.mGRB_tetraSurfaceHint);
-
-		//compute the surface triangles for the tetrahedron mesh
-		for (PxHashMap<SortedTriangleInds, PxU32, SortedTriangleIndsHash>::Iterator iter = triIndsMap.getIterator(); !iter.done(); ++iter)
-		{
-			SortedTriangleInds key = iter->first;
-
-			// only output faces that are referenced by one tet (open faces)
-			if (iter->second == 1)
+			PxU8 triHint = 0;
+			IndTetrahedron32& localTetra = dest[key.mTetIndex];
+			for (PxU32 i = 0; i < 3; ++i)
 			{
-				PxU8 triHint = 0;
-				IndTetrahedron32& localTetra = dest[key.mTetIndex];
-				for (PxU32 i = 0; i < 3; ++i)
-				{
-					if (key.mOrigRef[i] == localTetra.mRef[0])
-						triHint |= 1;
-					else if (key.mOrigRef[i] == localTetra.mRef[1])
-						triHint |= (1 << 1);
-					else if (key.mOrigRef[i] == localTetra.mRef[2])
-						triHint |= (1 << 2);
-					else if (key.mOrigRef[i] == localTetra.mRef[3])
-						triHint |= (1 << 3);
-				}
-
-				//if this tetrahedron isn't surface tetrahedron, hint will be zero
-				//otherwise, the first 4 bits will indicate the indice of the
-				//surface triangle
-
-				PxU32 mask = 0;
-				if (triHint == 7) //0111
-				{
-					mask = 1 << 0;
-				}
-				else if (triHint == 11)//1011
-				{
-					mask = 1 << 1;
-				}
-				else if (triHint == 13)//1101
-				{
-					mask = 1 << 2;
-				}
-				else //1110
-				{
-					mask = 1 << 3;
-				}
-
-				tetHint[key.mTetIndex] |= mask;
+				if (key.mOrigRef[i] == localTetra.mRef[0])
+					triHint |= 1;
+				else if (key.mOrigRef[i] == localTetra.mRef[1])
+					triHint |= (1 << 1);
+				else if (key.mOrigRef[i] == localTetra.mRef[2])
+					triHint |= (1 << 2);
+				else if (key.mOrigRef[i] == localTetra.mRef[3])
+					triHint |= (1 << 3);
 			}
+
+			// The first four bits identify the surface face.
+			PxU32 mask = 0;
+			if (triHint == 7) //0111
+				mask = 1 << 0;
+			else if (triHint == 11)//1011
+				mask = 1 << 1;
+			else if (triHint == 13)//1101
+				mask = 1 << 2;
+			else //1110
+				mask = 1 << 3;
+
+			tetHint[key.mTetIndex] |= mask;
 		}
-			
+	}
+
 #if BV32_VALIDATE
+	if (params.buildGPUData)
+	{
 		IndTetrahedron32* grbTriIndices = reinterpret_cast<IndTetrahedron32*>(collisionData.mGRB_primIndices);
 		IndTetrahedron32* cpuTriIndices = reinterpret_cast<IndTetrahedron32*>(collisionMesh.mTetrahedrons);
 		//map CPU remap triangle index to GPU remap triangle index
-		for (PxU32 i = 0; i < nbTetrahedrons; ++i)
+		for (PxU32 i = 0; i < collisionMesh.mNbTetrahedrons; ++i)
 		{
 			PX_ASSERT(grbTriIndices[i].mRef[0] == cpuTriIndices[collisionData.mGRB_faceRemap[i]].mRef[0]);
 			PX_ASSERT(grbTriIndices[i].mRef[1] == cpuTriIndices[collisionData.mGRB_faceRemap[i]].mRef[1]);
 			PX_ASSERT(grbTriIndices[i].mRef[2] == cpuTriIndices[collisionData.mGRB_faceRemap[i]].mRef[2]);
 			PX_ASSERT(grbTriIndices[i].mRef[3] == cpuTriIndices[collisionData.mGRB_faceRemap[i]].mRef[3]);
 		}
-#endif
 	}
+#endif
 	return true;
 }
 
@@ -1971,13 +1964,11 @@ void writeTets(const char* path, const PxVec3* tetPoints, PxU32 numPoints, const
 
 bool TetrahedronMeshBuilder::computeModelsMapping(TetrahedronMeshData& simulationMesh,
 	const TetrahedronMeshData& collisionMesh, const DeformableVolumeCollisionData& collisionData,
-	CollisionMeshMappingData& mappingData, bool buildGPUData, const PxBoundedData* vertexToTet)
+	CollisionMeshMappingData& mappingData, const PxBoundedData* vertexToTet)
 {
 	if (!createCollisionModelMapping(collisionMesh, collisionData, mappingData))
 		return false;
 
-	if (buildGPUData)
-	{
 		const PxU32 gridModelNbVerts = simulationMesh.mNbVertices;
 		PxVec3* gridModelVertices = PX_ALLOCATE(PxVec3, gridModelNbVerts, "gridModelVertices");
 
@@ -2220,7 +2211,6 @@ bool TetrahedronMeshBuilder::computeModelsMapping(TetrahedronMeshData& simulatio
 #endif
 
 		PX_FREE(gridModelVertices);			
-	}
 
 	return true;
 }
@@ -2453,7 +2443,7 @@ bool TetrahedronMeshBuilder::computeCollisionData(const PxTetrahedronMeshDesc& c
 	if(!createMidPhaseStructure(collisionMesh, collisionData, params))
 		return false;
 
-	recordTetrahedronIndices(collisionMesh, collisionData, params.buildGPUData);
+	recordTetrahedronIndices(collisionMesh, collisionData);
 
 	// Compute local bounds
 	computeLocalBoundsAndGeomEpsilon(collisionMesh.mVertices, collisionMesh.mNbVertices, collisionMesh.mAABB, collisionMesh.mGeomEpsilon);
@@ -2483,7 +2473,7 @@ bool TetrahedronMeshBuilder::loadFromDesc(const PxTetrahedronMeshDesc& simulatio
 
 	computeSimData(simulationMeshDesc, simulationMesh, simulationData, params);
 
-	if (!computeModelsMapping(simulationMesh, collisionMesh, collisionData, mappingData, params.buildGPUData, &deformableVolumeDataDesc.vertexToTet))
+	if (!computeModelsMapping(simulationMesh, collisionMesh, collisionData, mappingData, &deformableVolumeDataDesc.vertexToTet))
 		return false;
 
 #if PX_DEBUG
@@ -2583,6 +2573,7 @@ bool TetrahedronMeshBuilder::saveDeformableVolumeMeshData(PxOutputStream& stream
 	if (collisionData.mFaceRemap)			serialFlags |= IMSF_FACE_REMAP;
 	//if (mTetraSurfaceHint) serialFlags |= IMSF_ADJACENCIES; // using IMSF_ADJACENCIES to represent surfaceHint for tetrahedron mesh
 	//if (mAdjacencies)		serialFlags |= IMSF_ADJACENCIES;
+	serialFlags |= IMSF_DEFORMABLE_DATA;
 	if (params.buildGPUData)	serialFlags |= IMSF_GRB_DATA;
 	// Compute serialization flags for indices
 	PxU32 maxIndex = 0;
@@ -2654,25 +2645,27 @@ bool TetrahedronMeshBuilder::saveDeformableVolumeMeshData(PxOutputStream& stream
 	writeFloat(collisionMesh.mAABB.maximum.y, platformMismatch, stream);
 	writeFloat(collisionMesh.mAABB.maximum.z, platformMismatch, stream);
 
-	// GRB write -----------------------------------------------------------------
-	if (params.buildGPUData)
+	// Shared deformable payload -------------------------------------------------
+	if (serialFlags & IMSF_DEFORMABLE_DATA)
 	{
 		const PxU32* tetIndices = reinterpret_cast<PxU32*>(collisionData.mGRB_primIndices);
 		writeIndice(serialFlags, tetIndices, nbTetIndices, platformMismatch, stream);
 
-		//writeIntBuffer(reinterpret_cast<PxU32*>(mMeshData.mGRB_triIndices), , mMeshData.mNbTriangles*3, platformMismatch, stream);
-
-		//writeIntBuffer(reinterpret_cast<PxU32 *>(mGRB_surfaceTriIndices), mNbTriangles*3, platformMismatch, stream);
 		stream.write(collisionData.mGRB_tetraSurfaceHint, collisionMesh.mNbTetrahedrons * sizeof(PxU8));
 
-		//writeIntBuffer(reinterpret_cast<PxU32 *>(mGRB_primAdjacencies), mNbTetrahedrons * 4, platformMismatch, stream);
-		writeIntBuffer(collisionData.mGRB_faceRemap, collisionMesh.mNbTetrahedrons, platformMismatch, stream);
-		writeIntBuffer(collisionData.mGRB_faceRemapInverse, collisionMesh.mNbTetrahedrons, platformMismatch, stream);
+		if (serialFlags & IMSF_GRB_DATA)
+		{
+			writeIntBuffer(collisionData.mGRB_faceRemap, collisionMesh.mNbTetrahedrons, platformMismatch, stream);
+			writeIntBuffer(collisionData.mGRB_faceRemapInverse, collisionMesh.mNbTetrahedrons, platformMismatch, stream);
+		}
 
 		stream.write(collisionData.mTetraRestPoses, collisionMesh.mNbTetrahedrons * sizeof(PxMat33));
 
-		//Export GPU midphase structure
-		BV32TriangleMeshBuilder::saveMidPhaseStructure(collisionData.mGRB_BV32Tree, stream, platformMismatch);
+		if (serialFlags & IMSF_GRB_DATA)
+		{
+			// Export the optional GPU midphase structure.
+			BV32TriangleMeshBuilder::saveMidPhaseStructure(collisionData.mGRB_BV32Tree, stream, platformMismatch);
+		}
 
 		writeDword(simulationMesh.mNbTetrahedrons, platformMismatch, stream);
 		writeDword(simulationMesh.mNbVertices, platformMismatch, stream);
@@ -2732,7 +2725,7 @@ bool TetrahedronMeshBuilder::saveDeformableVolumeMeshData(PxOutputStream& stream
 		writeIntBuffer(mappingData.mTetsAccumulatedRemapColToSim, collisionMesh.mNbTetrahedrons, platformMismatch, stream);
 	}
 
-	// End of GRB write ----------------------------------------------------------
+	// End of shared deformable payload -----------------------------------------
 
 	return true;
 }
@@ -2987,9 +2980,10 @@ PxDeformableVolumeMesh* immediateCooking::createDeformableVolumeMesh(const PxCoo
 PxCollisionMeshMappingData* immediateCooking::computeModelsMapping(const PxCookingParams& params, PxTetrahedronMeshData& simulationMesh, const PxTetrahedronMeshData& collisionMesh, 
 																				const PxDeformableVolumeCollisionData& collisionData, const PxBoundedData* vertexToTet)
 {
+	PX_UNUSED(params);
 	CollisionMeshMappingData* mappingData = PX_NEW(CollisionMeshMappingData);
 	TetrahedronMeshBuilder::computeModelsMapping(*static_cast<TetrahedronMeshData*>(&simulationMesh),
-		*static_cast<const TetrahedronMeshData*>(&collisionMesh), *static_cast<const DeformableVolumeCollisionData*>(&collisionData), *mappingData, params.buildGPUData, vertexToTet);
+		*static_cast<const TetrahedronMeshData*>(&collisionMesh), *static_cast<const DeformableVolumeCollisionData*>(&collisionData), *mappingData, vertexToTet);
 	return mappingData;
 }
 	
@@ -3037,4 +3031,3 @@ PxDeformableVolumeMesh*	immediateCooking::assembleDeformableVolumeMesh(PxTetrahe
 
 	return tetMesh;
 }
-

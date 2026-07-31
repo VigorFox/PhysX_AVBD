@@ -65,7 +65,7 @@ namespace Gu {
 
 #define PX_MESH_VERSION 16
 #define PX_TET_MESH_VERSION 1
-#define PX_DEFORMABLE_VOLUME_MESH_VERSION 3 // 3: parallel GS + new linear corotated model.
+#define PX_DEFORMABLE_VOLUME_MESH_VERSION 4 // 4: shared deformable payload is independent of GRB data.
 
 // these flags are used to indicate/validate the contents of a cooked mesh file
 enum InternalMeshSerialFlag
@@ -79,7 +79,8 @@ enum InternalMeshSerialFlag
 	IMSF_SDF			=	(1<<6),	//!< if set, the cooked mesh file contains SDF data structures
 	IMSF_VERT_MAPPING	=   (1<<7), //!< if set, the cooked mesh file contains vertex mapping information
 	IMSF_GRB_INV_REMAP	=	(1<<8),	//!< if set, the cooked mesh file contains vertex inv mapping information. Required for deformable surfaces
-	IMSF_INERTIA		=	(1<<9)	//!< if set, the cooked mesh file contains inertia tensor for the mesh
+	IMSF_INERTIA		=	(1<<9),	//!< if set, the cooked mesh file contains inertia tensor for the mesh
+	IMSF_DEFORMABLE_DATA	=	(1<<10)	//!< if set, the cooked mesh file contains backend-neutral deformable simulation and mapping data
 };
 
 #if PX_VC

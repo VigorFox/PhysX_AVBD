@@ -126,6 +126,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
   physx::PxReal angularDampingBody;  //!< Per-body angular damping (0 = none)
   physx::PxReal maxLinearVelocitySq; //!< Max linear velocity squared
   physx::PxReal maxAngularVelocitySq;//!< Max angular velocity squared
+  physx::PxReal gravityScale;         //!< 0 when eDISABLE_GRAVITY is set
 
   //-------------------------------------------------------------------------
   // Methods
@@ -161,6 +162,7 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
     angularDampingBody = 0.0f;
     maxLinearVelocitySq = PX_MAX_F32;
     maxAngularVelocitySq = PX_MAX_F32;
+    gravityScale = 1.0f;
   }
 
   PX_FORCE_INLINE void projectLockedLinearVector(physx::PxVec3 &value) const {
@@ -248,7 +250,8 @@ struct PX_ALIGN_PREFIX(16) AvbdSolverBody {
       // computes acceleration = (v_current - v_previous) / dt.
       // prevLinearVelocity is updated at end-of-solve, NOT here.
       projectLockedVelocities();
-      physx::PxVec3 stepLinearVelocity = linearVelocity + gravity * dt;
+      physx::PxVec3 stepLinearVelocity =
+          linearVelocity + gravity * (gravityScale * dt);
       projectLockedLinearVector(stepLinearVelocity);
       predictedPosition = position + stepLinearVelocity * dt;
 

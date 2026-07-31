@@ -39,8 +39,10 @@
 #include "CmUtils.h"
 #include "NpRigidStatic.h"
 #include "NpRigidDynamic.h"
-#if PX_SUPPORT_GPU_PHYSX
 #include "NpDeformableVolume.h"
+#include "NpDeformableSurface.h"
+#include "NpDeformableSurfaceMaterial.h"
+#if PX_SUPPORT_GPU_PHYSX
 #include "NpPBDParticleSystem.h"
 #endif
 #include "NpArticulationReducedCoordinate.h"
@@ -192,9 +194,9 @@ NpPhysics::~NpPhysics()
 	//mMasterMaterialTable.clear();
 
 	mMasterMaterialManager.releaseMaterials();
-#if PX_SUPPORT_GPU_PHYSX
-	mMasterDeformableSurfaceMaterialManager.releaseMaterials();
 	mMasterDeformableVolumeMaterialManager.releaseMaterials();
+	mMasterDeformableSurfaceMaterialManager.releaseMaterials();
+#if PX_SUPPORT_GPU_PHYSX
 	mMasterPBDMaterialManager.releaseMaterials();
 #endif
 
@@ -253,9 +255,9 @@ void NpPhysics::initOffsetTables(PxvOffsetTable& pxvOffsetTable)
 		offsetTable.scRigidStatic2PxActor			= -ptrdiff_t(NpRigidStatic::getCoreOffset());
 		offsetTable.scRigidDynamic2PxActor			= -ptrdiff_t(NpRigidDynamic::getCoreOffset());
 		offsetTable.scArticulationLink2PxActor		= -ptrdiff_t(NpArticulationLink::getCoreOffset());
-#if PX_SUPPORT_GPU_PHYSX
+		offsetTable.scDeformableVolume2PxActor		= -ptrdiff_t(NpDeformableVolume::getCoreOffset());
 		offsetTable.scDeformableSurface2PxActor	= -ptrdiff_t(NpDeformableSurface::getCoreOffset());
-		offsetTable.scDeformableVolume2PxActor	= -ptrdiff_t(NpDeformableVolume::getCoreOffset());
+#if PX_SUPPORT_GPU_PHYSX
 		offsetTable.scPBDParticleSystem2PxActor		= -ptrdiff_t(NpPBDParticleSystem::getCoreOffset());
 #endif
 		offsetTable.scArticulationRC2Px				= -ptrdiff_t(NpArticulationReducedCoordinate::getCoreOffset());
@@ -479,7 +481,6 @@ PxShape* NpPhysics::createShape(const PxGeometry& geometry, PxMaterial*const * m
 	return NpFactory::getInstance().createShape(geometry, shapeFlags, materials, materialCount, isExclusive);
 }
 
-#if PX_SUPPORT_GPU_PHYSX
 PxShape* NpPhysics::createShape(const PxGeometry& geometry, PxDeformableSurfaceMaterial* const* materials, PxU16 materialCount, bool isExclusive, PxShapeFlags shapeFlags)
 {
 	PX_CHECK_AND_RETURN_NULL(materials, "createShape: material pointer is NULL");
@@ -499,22 +500,6 @@ PxShape* NpPhysics::createShape(const PxGeometry& geometry, PxDeformableVolumeMa
 
 	return NpFactory::getInstance().createShape(geometry, shapeFlags, materials, materialCount, isExclusive);
 }
-#else
-PxShape* NpPhysics::createShape(const PxGeometry& geometry, PxDeformableSurfaceMaterial* const* materials, PxU16 materialCount, bool isExclusive, PxShapeFlags shapeFlags)
-{
-	PX_UNUSED(geometry);
-	PX_UNUSED(materials);
-	PX_UNUSED(materialCount);
-	PX_UNUSED(isExclusive);
-	PX_UNUSED(shapeFlags);
-	return NULL;
-}
-
-PxShape* NpPhysics::createShape(const PxGeometry&, PxDeformableVolumeMaterial*const *, PxU16, bool, PxShapeFlags)
-{
-	return NULL;
-}
-#endif
 
 PxU32 NpPhysics::getNbShapes()	const
 {
@@ -554,22 +539,12 @@ PxU32 NpPhysics::getNbArticulations() const
 
 PxDeformableAttachment* NpPhysics::createDeformableAttachment(const PxDeformableAttachmentData& data)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	return NpFactory::getInstance().createDeformableAttachment(data);
-#else
-	PX_UNUSED(data);
-	return NULL;
-#endif
 }
 
 PxDeformableElementFilter* NpPhysics::createDeformableElementFilter(const PxDeformableElementFilterData& data)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	return NpFactory::getInstance().createDeformableElementFilter(data);
-#else
-	PX_UNUSED(data);
-	return NULL;
-#endif
 }
 
 PxDeformableSurface* NpPhysics::createDeformableSurface(PxCudaContextManager& cudaContextManager)
@@ -582,6 +557,18 @@ PxDeformableSurface* NpPhysics::createDeformableSurface(PxCudaContextManager& cu
 #endif
 }
 
+PxDeformableSurface* NpPhysics::createDeformableSurface(PxDeformableSurfaceBackend::Enum backend)
+{
+	if(backend == PxDeformableSurfaceBackend::eCPU_AVBD)
+		return NpFactory::getInstance().createDeformableSurface();
+
+	PxGetFoundation().error(
+		PxErrorCode::eINVALID_OPERATION, PX_FL,
+		"PxPhysics::createDeformableSurface: eGPU requires the "
+		"PxCudaContextManager overload.");
+	return NULL;
+}
+
 PxDeformableVolume* NpPhysics::createDeformableVolume(PxCudaContextManager& cudaContextManager)
 {
 #if PX_SUPPORT_GPU_PHYSX
@@ -590,6 +577,17 @@ PxDeformableVolume* NpPhysics::createDeformableVolume(PxCudaContextManager& cuda
 	PX_UNUSED(cudaContextManager);
 	return NULL;
 #endif
+}
+
+PxDeformableVolume* NpPhysics::createDeformableVolume(PxDeformableVolumeBackend::Enum backend)
+{
+	if(backend == PxDeformableVolumeBackend::eCPU_AVBD)
+		return NpFactory::getInstance().createDeformableVolume();
+
+	PxGetFoundation().error(
+		PxErrorCode::eINVALID_OPERATION, PX_FL,
+		"PxPhysics::createDeformableVolume: eGPU requires the PxCudaContextManager overload.");
+	return NULL;
 }
 
 PxPBDParticleSystem* NpPhysics::createPBDParticleSystem(PxCudaContextManager& cudaContextManager, PxU32 maxNeighborhood, PxReal neighborhoodScale)
@@ -741,10 +739,10 @@ bool NpPhysics::sendMaterialTable(NpScene& scene)
 	// event list in NpScene::addMaterial()
 
 	::sendMaterialTable(scene, mMasterMaterialManager);
+	::sendMaterialTable(scene, mMasterDeformableVolumeMaterialManager);
+	::sendMaterialTable(scene, mMasterDeformableSurfaceMaterialManager);
 
 #if PX_SUPPORT_GPU_PHYSX
-	::sendMaterialTable(scene, mMasterDeformableSurfaceMaterialManager);
-	::sendMaterialTable(scene, mMasterDeformableVolumeMaterialManager);
 	::sendMaterialTable(scene, mMasterPBDMaterialManager);
 #endif
 
@@ -777,7 +775,6 @@ IMPLEMENT_INTERNAL_MATERIAL_FUNCTIONS(NpMaterial, mMasterMaterialManager, "PxPhy
 // PT: all the virtual functions that are unconditionally defined in the API / virtual interface cannot be compiled away entirely.
 // But the internal functions like addXXXX() can.
 
-#if PX_SUPPORT_GPU_PHYSX
 PxDeformableSurfaceMaterial* NpPhysics::createDeformableSurfaceMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal thickness, 
 	PxReal bendingStiffness, PxReal elasticityDamping, PxReal bendingDamping)
 {
@@ -797,38 +794,27 @@ PxU32 NpPhysics::getDeformableSurfaceMaterials(PxDeformableSurfaceMaterial** use
 }
 
 IMPLEMENT_INTERNAL_MATERIAL_FUNCTIONS(NpDeformableSurfaceMaterial, mMasterDeformableSurfaceMaterialManager, "PxPhysics::createDeformableSurfaceMaterial: limit of 64K materials reached.")
-#else
-PxDeformableSurfaceMaterial* NpPhysics::createDeformableSurfaceMaterial(PxReal, PxReal, PxReal, PxReal, PxReal, PxReal, PxReal) { return NULL; }
-PxU32 NpPhysics::getNbDeformableSurfaceMaterials() const { return 0; }
-PxU32 NpPhysics::getDeformableSurfaceMaterials(PxDeformableSurfaceMaterial**, PxU32, PxU32) const { return 0; }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#if PX_SUPPORT_GPU_PHYSX
-	PxDeformableVolumeMaterial* NpPhysics::createDeformableVolumeMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal elasticityDamping)
-	{
-		PxDeformableVolumeMaterial* m = NpFactory::getInstance().createDeformableVolumeMaterial(youngs, poissons, dynamicFriction, elasticityDamping);
-		return addMaterial(static_cast<NpDeformableVolumeMaterial*>(m));
-	}
+PxDeformableVolumeMaterial* NpPhysics::createDeformableVolumeMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal elasticityDamping)
+{
+	PxDeformableVolumeMaterial* m = NpFactory::getInstance().createDeformableVolumeMaterial(youngs, poissons, dynamicFriction, elasticityDamping);
+	return addMaterial(static_cast<NpDeformableVolumeMaterial*>(m));
+}
 
-	PxU32 NpPhysics::getNbDeformableVolumeMaterials() const
-	{
-		PxMutex::ScopedLock lock(const_cast<PxMutex&>(mSceneAndMaterialMutex));
-		return mMasterDeformableVolumeMaterialManager.getNumMaterials();
-	}
+PxU32 NpPhysics::getNbDeformableVolumeMaterials() const
+{
+	PxMutex::ScopedLock lock(const_cast<PxMutex&>(mSceneAndMaterialMutex));
+	return mMasterDeformableVolumeMaterialManager.getNumMaterials();
+}
 
-	PxU32 NpPhysics::getDeformableVolumeMaterials(PxDeformableVolumeMaterial** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
-	{
-		return ::getMaterials(mMasterDeformableVolumeMaterialManager, mSceneAndMaterialMutex, userBuffer, bufferSize, startIndex);
-	}
+PxU32 NpPhysics::getDeformableVolumeMaterials(PxDeformableVolumeMaterial** userBuffer, PxU32 bufferSize, PxU32 startIndex) const
+{
+	return ::getMaterials(mMasterDeformableVolumeMaterialManager, mSceneAndMaterialMutex, userBuffer, bufferSize, startIndex);
+}
 
-	IMPLEMENT_INTERNAL_MATERIAL_FUNCTIONS(NpDeformableVolumeMaterial, mMasterDeformableVolumeMaterialManager, "PxPhysics::createDeformableVolumeMaterial: limit of 64K materials reached.")
-#else
-	PxDeformableVolumeMaterial* NpPhysics::createDeformableVolumeMaterial(PxReal, PxReal, PxReal, PxReal)	{ return NULL;	}
-	PxU32 NpPhysics::getNbDeformableVolumeMaterials()												const	{ return 0;		}
-	PxU32 NpPhysics::getDeformableVolumeMaterials(PxDeformableVolumeMaterial**, PxU32, PxU32)		const	{ return 0;		}
-#endif
+IMPLEMENT_INTERNAL_MATERIAL_FUNCTIONS(NpDeformableVolumeMaterial, mMasterDeformableVolumeMaterialManager, "PxPhysics::createDeformableVolumeMaterial: limit of 64K materials reached.")
 
 ///////////////////////////////////////////////////////////////////////////////
 

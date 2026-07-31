@@ -43,14 +43,16 @@
 #include "NpRigidDynamic.h"
 #include "NpArticulationTendon.h"
 #include "NpAggregate.h"
+#include "NpDeformableVolume.h"
+#include "NpDeformableVolumeMaterial.h"
+#include "NpDeformableSurface.h"
+#include "NpDeformableSurfaceMaterial.h"
+#include "NpDeformableAttachment.h"
+#include "NpDeformableElementFilter.h"
 
 #if PX_SUPPORT_GPU_PHYSX
 #include "NpPBDParticleSystem.h"
 #include "NpParticleBuffer.h"
-#include "NpDeformableSurface.h"
-#include "NpDeformableVolume.h"
-#include "NpDeformableAttachment.h"
-#include "NpDeformableElementFilter.h"
 #include "PxPhysXGpu.h"
 #endif
 
@@ -110,9 +112,9 @@ void NpFactory::release()
 	while(mShapeTracking.size())
 		static_cast<NpShape*>(mShapeTracking.getEntries()[0])->releaseInternal();
 
-#if PX_SUPPORT_GPU_PHYSX
 	releaseAll(mAttachmentTracking);
 	releaseAll(mElementFilterTracking);
+#if PX_SUPPORT_GPU_PHYSX
 	releaseAll(mParticleBufferTracking);
 #endif
 
@@ -321,10 +323,20 @@ void NpFactory::releaseArticulationMimicJointToPool(NpArticulationMimicJoint& ar
 	mArticulationMimicJointPool.destroy(&articulationMimicJoint);
 }
 
-#if PX_SUPPORT_GPU_PHYSX
-
 /////////////////////////////////////////////////////////////////////////////// deformable surface
 
+PxDeformableSurface* NpFactory::createDeformableSurface()
+{
+	NpDeformableSurface* ds;
+	{
+		PxMutex::ScopedLock lock(mDeformableSurfacePoolLock);
+		ds = mDeformableSurfacePool.construct();
+	}
+	OMNI_PVD_NOTIFY_ADD(ds);
+	return ds;
+}
+
+#if PX_SUPPORT_GPU_PHYSX
 PxDeformableSurface* NpFactory::createDeformableSurface(PxCudaContextManager& cudaContextManager)
 {
 	NpDeformableSurface* ds;
@@ -333,6 +345,7 @@ PxDeformableSurface* NpFactory::createDeformableSurface(PxCudaContextManager& cu
 	OMNI_PVD_NOTIFY_ADD(ds);
 	return ds;
 }
+#endif
 
 void NpFactory::releaseDeformableSurfaceToPool(PxDeformableSurface& deformableSurface)
 {
@@ -344,6 +357,18 @@ void NpFactory::releaseDeformableSurfaceToPool(PxDeformableSurface& deformableSu
 
 /////////////////////////////////////////////////////////////////////////////// deformable volume
 
+PxDeformableVolume* NpFactory::createDeformableVolume()
+{
+	NpDeformableVolume* dv;
+	{
+		PxMutex::ScopedLock lock(mDeformableVolumePoolLock);
+		dv = mDeformableVolumePool.construct();
+	}
+	OMNI_PVD_NOTIFY_ADD(dv);
+	return dv;
+}
+
+#if PX_SUPPORT_GPU_PHYSX
 PxDeformableVolume* NpFactory::createDeformableVolume(PxCudaContextManager& cudaContextManager)
 {
 	NpDeformableVolume* dv;
@@ -352,6 +377,7 @@ PxDeformableVolume* NpFactory::createDeformableVolume(PxCudaContextManager& cuda
 	OMNI_PVD_NOTIFY_ADD(dv);
 	return dv;
 }
+#endif
 
 void NpFactory::releaseDeformableVolumeToPool(PxDeformableVolume& deformableVolume)
 {
@@ -362,6 +388,179 @@ void NpFactory::releaseDeformableVolumeToPool(PxDeformableVolume& deformableVolu
 }
 
 /////////////////////////////////////////////////////////////////////////////// attachment
+
+static bool isValidCpuAvbdElementBarycentric(
+	const PxVec4& barycentric, PxU32 componentCount)
+{
+	PX_ASSERT(componentCount == 3 || componentCount == 4);
+	if(!barycentric.isFinite())
+		return false;
+
+	PxReal sum = 0.0f;
+	for(PxU32 componentIndex = 0;
+		componentIndex < componentCount; ++componentIndex)
+	{
+		const PxReal weight = barycentric[componentIndex];
+		if(weight < 0.0f || weight > 1.0f)
+			return false;
+		sum += weight;
+	}
+	return PxAbs(sum - 1.0f) <= 1.0e-4f;
+}
+
+static PxU32 getCpuAvbdElementCount(
+	PxDeformableSurface* surface, PxDeformableVolume* volume)
+{
+	if(surface)
+	{
+		const PxShape* shape = surface->getShape();
+		if(!shape ||
+			shape->getGeometry().getType() !=
+				PxGeometryType::eTRIANGLEMESH)
+			return 0;
+		const PxTriangleMeshGeometry& geometry =
+			static_cast<const PxTriangleMeshGeometry&>(
+				shape->getGeometry());
+		return geometry.triangleMesh
+			? geometry.triangleMesh->getNbTriangles() : 0;
+	}
+
+	const PxTetrahedronMesh* simulationMesh =
+		volume ? volume->getSimulationMesh() : NULL;
+	return simulationMesh
+		? simulationMesh->getNbTetrahedrons() : 0;
+}
+
+static bool hasValidCpuAvbdElementAttachmentData(
+	const PxDeformableAttachmentData& data,
+	const AttachmentInfo& info,
+	PxDeformableSurface* surface,
+	PxDeformableVolume* volume)
+{
+	const PxU32 softActorIndex = info.actorIndex[0];
+	const PxTypedBoundedData<const PxU32>& indices =
+		data.indices[softActorIndex];
+	const PxTypedBoundedData<const PxVec4>& barycentrics =
+		data.coords[softActorIndex];
+	if(!indices.data || !barycentrics.data ||
+		indices.count == 0 || indices.count != barycentrics.count)
+		return false;
+
+	const PxU32 elementCount =
+		getCpuAvbdElementCount(surface, volume);
+	if(elementCount == 0)
+		return false;
+	const PxU32 componentCount = surface ? 3u : 4u;
+	for(PxU32 attachmentIndex = 0;
+		attachmentIndex < indices.count; ++attachmentIndex)
+	{
+		if(indices.at(attachmentIndex) >= elementCount ||
+			!isValidCpuAvbdElementBarycentric(
+				barycentrics.at(attachmentIndex),
+				componentCount))
+			return false;
+	}
+	return true;
+}
+
+static PxU32 getCpuAvbdVertexCount(
+	PxDeformableSurface* surface, PxDeformableVolume* volume)
+{
+	if(surface)
+	{
+		const PxShape* shape = surface->getShape();
+		if(!shape ||
+			shape->getGeometry().getType() !=
+				PxGeometryType::eTRIANGLEMESH)
+			return 0;
+		const PxTriangleMeshGeometry& geometry =
+			static_cast<const PxTriangleMeshGeometry&>(
+				shape->getGeometry());
+		return geometry.triangleMesh
+			? geometry.triangleMesh->getNbVertices() : 0;
+	}
+	const PxTetrahedronMesh* simulationMesh =
+		volume ? volume->getSimulationMesh() : NULL;
+	return simulationMesh ? simulationMesh->getNbVertices() : 0;
+}
+
+static bool hasValidCpuAvbdSoftPairEndpointData(
+	const PxDeformableAttachmentData& data,
+	PxU32 endpoint)
+{
+	PxActor* actor = data.actor[endpoint];
+	PxDeformableSurface* surface =
+		actor ? actor->is<PxDeformableSurface>() : NULL;
+	PxDeformableVolume* volume =
+		actor ? actor->is<PxDeformableVolume>() : NULL;
+	const bool cpuSurface =
+		surface &&
+		surface->getDeformableSurfaceBackend() ==
+			PxDeformableSurfaceBackend::eCPU_AVBD;
+	const bool cpuVolume =
+		volume &&
+		volume->getDeformableVolumeBackend() ==
+			PxDeformableVolumeBackend::eCPU_AVBD;
+	if(!cpuSurface && !cpuVolume)
+		return false;
+
+	const PxTypedBoundedData<const PxU32>& indices =
+		data.indices[endpoint];
+	if(!indices.data || indices.count == 0)
+		return false;
+	const PxDeformableAttachmentTargetType::Enum type =
+		data.type[endpoint];
+	if(type == PxDeformableAttachmentTargetType::eVERTEX)
+	{
+		const PxU32 vertexCount =
+			getCpuAvbdVertexCount(surface, volume);
+		if(vertexCount == 0)
+			return false;
+		for(PxU32 i = 0; i < indices.count; i++)
+			if(indices.at(i) >= vertexCount)
+				return false;
+		return true;
+	}
+
+	const bool validElementKind =
+		(cpuSurface &&
+		 type == PxDeformableAttachmentTargetType::eTRIANGLE) ||
+		(cpuVolume &&
+		 type == PxDeformableAttachmentTargetType::eTETRAHEDRON);
+	const PxTypedBoundedData<const PxVec4>& barycentrics =
+		data.coords[endpoint];
+	if(!validElementKind || !barycentrics.data ||
+		barycentrics.count != indices.count)
+		return false;
+	const PxU32 elementCount =
+		getCpuAvbdElementCount(surface, volume);
+	const PxU32 componentCount = cpuSurface ? 3u : 4u;
+	if(elementCount == 0)
+		return false;
+	for(PxU32 i = 0; i < indices.count; i++)
+	{
+		if(indices.at(i) >= elementCount ||
+			!isValidCpuAvbdElementBarycentric(
+				barycentrics.at(i), componentCount))
+			return false;
+	}
+	return true;
+}
+
+static bool hasValidCpuAvbdSoftPairAttachmentData(
+	const PxDeformableAttachmentData& data,
+	const AttachmentInfo& info)
+{
+	const PxU32 endpoint0 = info.actorIndex[0];
+	const PxU32 endpoint1 = info.actorIndex[1];
+	return data.actor[endpoint0] &&
+		data.actor[endpoint1] &&
+		data.actor[endpoint0] != data.actor[endpoint1] &&
+		data.indices[endpoint0].count ==
+			data.indices[endpoint1].count &&
+		hasValidCpuAvbdSoftPairEndpointData(data, endpoint0) &&
+		hasValidCpuAvbdSoftPairEndpointData(data, endpoint1);
+}
 
 void NpFactory::addAttachment(PxDeformableAttachment* npAttachment, bool lock)
 {
@@ -375,6 +574,225 @@ PxDeformableAttachment* NpFactory::createDeformableAttachment(const PxDeformable
 
 	if (NpDeformableAttachment::parseAttachment(data, info))
 	{
+		PxDeformableSurface* surface =
+			data.actor[info.actorIndex[0]]
+				? data.actor[info.actorIndex[0]]->
+					is<PxDeformableSurface>()
+				: NULL;
+		const bool cpuAvbdSurface =
+			surface &&
+			surface->getDeformableSurfaceBackend() ==
+				PxDeformableSurfaceBackend::eCPU_AVBD;
+		PxDeformableVolume* volume =
+			data.actor[info.actorIndex[0]]
+				? data.actor[info.actorIndex[0]]->
+					is<PxDeformableVolume>()
+				: NULL;
+		const bool cpuAvbdVolume =
+			volume &&
+			volume->getDeformableVolumeBackend() ==
+				PxDeformableVolumeBackend::eCPU_AVBD;
+		PxDeformableSurface* targetSurface =
+			data.actor[info.actorIndex[1]]
+				? data.actor[info.actorIndex[1]]->
+					is<PxDeformableSurface>()
+				: NULL;
+		PxDeformableVolume* targetVolume =
+			data.actor[info.actorIndex[1]]
+				? data.actor[info.actorIndex[1]]->
+					is<PxDeformableVolume>()
+				: NULL;
+		const bool targetCpuAvbdSoft =
+			(targetSurface &&
+			 targetSurface->getDeformableSurfaceBackend() ==
+				PxDeformableSurfaceBackend::eCPU_AVBD) ||
+			(targetVolume &&
+			 targetVolume->getDeformableVolumeBackend() ==
+				PxDeformableVolumeBackend::eCPU_AVBD);
+		bool softPairType = false;
+		switch(info.internalAttachmentType)
+		{
+		case NpInternalAttachmentType::eSURFACE_VTX_SURFACE_VTX:
+		case NpInternalAttachmentType::eSURFACE_TRI_SURFACE_VTX:
+		case NpInternalAttachmentType::eSURFACE_TRI_SURFACE_TRI:
+		case NpInternalAttachmentType::eVOLUME_VTX_SURFACE_VTX:
+		case NpInternalAttachmentType::eVOLUME_TET_SURFACE_VTX:
+		case NpInternalAttachmentType::eVOLUME_TET_SURFACE_TRI:
+		case NpInternalAttachmentType::eVOLUME_VTX_VOLUME_VTX:
+		case NpInternalAttachmentType::eVOLUME_TET_VOLUME_VTX:
+		case NpInternalAttachmentType::eVOLUME_TET_VOLUME_TET:
+			softPairType = true;
+			break;
+		default:
+			break;
+		}
+		const bool cpuSoftPair =
+			(cpuAvbdSurface || cpuAvbdVolume) &&
+			targetCpuAvbdSoft && softPairType;
+		PxRigidDynamic* rigidDynamic =
+			data.actor[info.actorIndex[1]]
+				? data.actor[info.actorIndex[1]]->
+					is<PxRigidDynamic>()
+				: NULL;
+		const bool nonKinematicDynamic =
+			rigidDynamic &&
+			!(rigidDynamic->getRigidBodyFlags() &
+				PxRigidBodyFlag::eKINEMATIC);
+		const bool kinematicDynamic =
+			rigidDynamic &&
+			(rigidDynamic->getRigidBodyFlags() &
+				PxRigidBodyFlag::eKINEMATIC);
+		PxRigidStatic* rigidStatic =
+			data.actor[info.actorIndex[1]]
+				? data.actor[info.actorIndex[1]]->
+					is<PxRigidStatic>()
+				: NULL;
+		PxArticulationLink* articulationLink =
+			data.actor[info.actorIndex[1]]
+				? data.actor[info.actorIndex[1]]->
+					is<PxArticulationLink>()
+				: NULL;
+		const bool cpuWorldVertex =
+			(cpuAvbdSurface &&
+			 info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_VTX_GLOBAL_POSE) ||
+			(cpuAvbdVolume &&
+			 info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_VTX_GLOBAL_POSE);
+		const bool cpuWorldElement =
+			(cpuAvbdSurface &&
+			 info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_TRI_GLOBAL_POSE) ||
+			(cpuAvbdVolume &&
+			 info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_TET_GLOBAL_POSE);
+		const bool cpuDynamicRigidVertex =
+			nonKinematicDynamic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_VTX_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_VTX_RIGID_BODY));
+		const bool cpuStaticRigidVertex =
+			rigidStatic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_VTX_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_VTX_RIGID_BODY));
+		const bool cpuStaticRigidElement =
+			rigidStatic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_TRI_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_TET_RIGID_BODY));
+		const bool cpuDynamicRigidElement =
+			nonKinematicDynamic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_TRI_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_TET_RIGID_BODY));
+		const bool cpuKinematicRigidVertex =
+			kinematicDynamic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_VTX_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_VTX_RIGID_BODY));
+		const bool cpuKinematicRigidElement =
+			kinematicDynamic &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_TRI_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_TET_RIGID_BODY));
+		const bool cpuArticulationRigidVertex =
+			articulationLink &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_VTX_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_VTX_RIGID_BODY));
+		const bool cpuArticulationRigidElement =
+			articulationLink &&
+			((cpuAvbdSurface &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eSURFACE_TRI_RIGID_BODY) ||
+			 (cpuAvbdVolume &&
+			  info.internalAttachmentType ==
+				NpInternalAttachmentType::
+					eVOLUME_TET_RIGID_BODY));
+		const bool cpuSupported =
+			(cpuWorldVertex || cpuWorldElement ||
+			 cpuStaticRigidVertex || cpuStaticRigidElement ||
+			 cpuDynamicRigidVertex || cpuDynamicRigidElement ||
+			 cpuKinematicRigidVertex ||
+			 cpuKinematicRigidElement ||
+			 cpuArticulationRigidVertex ||
+			 cpuArticulationRigidElement ||
+			 cpuSoftPair) &&
+			data.indices[info.actorIndex[0]].count != 0;
+		const bool cpuElementDataValid =
+			!(cpuWorldElement || cpuStaticRigidElement ||
+			  cpuDynamicRigidElement ||
+			  cpuKinematicRigidElement ||
+			  cpuArticulationRigidElement) ||
+			hasValidCpuAvbdElementAttachmentData(
+				data, info, surface, volume);
+		const bool cpuSoftPairDataValid =
+			!cpuSoftPair ||
+			hasValidCpuAvbdSoftPairAttachmentData(data, info);
+#if PX_SUPPORT_GPU_PHYSX
+		if((cpuAvbdSurface || cpuAvbdVolume) &&
+			(!cpuSupported || !cpuElementDataValid ||
+			 !cpuSoftPairDataValid))
+#else
+		if(!cpuSupported || !cpuElementDataValid ||
+			!cpuSoftPairDataValid)
+#endif
+		{
+			PxGetFoundation().error(
+				PxErrorCode::eINVALID_OPERATION, PX_FL,
+				"PxPhysics::createDeformableAttachment(): CPU "
+				"AVBD currently supports only non-empty deformable "
+				"surface/volume vertex or element attachments to "
+				"world, PxRigidStatic, PxRigidDynamic, or "
+				"PxArticulationLink, plus two-sided deformable-pair "
+				"attachments. "
+				"Element attachments additionally require an in-range "
+				"triangle/tetrahedron index and finite normalized "
+				"barycentric coordinates.");
+			return NULL;
+		}
+
 		NpDeformableAttachment* npAttachment;
 		{
 			PxMutex::ScopedLock lock(mAttachmentPoolLock);
@@ -443,6 +861,7 @@ void NpFactory::onElementFilterRelease(PxDeformableElementFilter* e)
 	mElementFilterTracking.erase(e);
 }
 
+#if PX_SUPPORT_GPU_PHYSX
 //////////////////////////////////////////////////////////////////////////////// particle system
 
 PxPBDParticleSystem* NpFactory::createPBDParticleSystem(PxU32 maxNeighborhood, PxReal neighborhoodScale, PxCudaContextManager& cudaContextManager)
@@ -616,8 +1035,6 @@ void NpFactory::releaseMaterialToPool(NpMaterial& material)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#if PX_SUPPORT_GPU_PHYSX
-
 ///////////////////////////////////////////////////////////////////////////////
 
 PxDeformableSurfaceMaterial* NpFactory::createDeformableSurfaceMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal thickness, 
@@ -647,9 +1064,7 @@ PxDeformableSurfaceMaterial* NpFactory::createDeformableSurfaceMaterial(PxReal y
 	}
 	return npMaterial;
 }
-#endif
 
-#if PX_SUPPORT_GPU_PHYSX
 void NpFactory::releaseDeformableSurfaceMaterialToPool(PxDeformableSurfaceMaterial& material_)
 {
     NpDeformableSurfaceMaterial& material = static_cast<NpDeformableSurfaceMaterial&>(material_);
@@ -657,13 +1072,10 @@ void NpFactory::releaseDeformableSurfaceMaterialToPool(PxDeformableSurfaceMateri
     PxMutex::ScopedLock lock(mDeformableSurfaceMaterialPoolLock);
     mDeformableSurfaceMaterialPool.destroy(&material);
 }
-#endif
 ///////////////////////////////////////////////////////////////////////////////
 
-#if PX_SUPPORT_GPU_PHYSX
 PxDeformableVolumeMaterial* NpFactory::createDeformableVolumeMaterial(PxReal youngs, PxReal poissons, PxReal dynamicFriction, PxReal elasticityDamping)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	PX_CHECK_AND_RETURN_NULL(youngs >= 0.0f, "createDeformableVolumeMaterial: youngs must be >= 0.");
 	PX_CHECK_AND_RETURN_NULL(poissons >= 0.0f && poissons < 0.5f, "createDeformableVolumeMaterial: poissons must be in range[0.f, 0.5f).");
 	PX_CHECK_AND_RETURN_NULL(dynamicFriction >= 0.0f, "createDeformableVolumeMaterial: dynamicFriction must be >= 0.");
@@ -684,33 +1096,19 @@ PxDeformableVolumeMaterial* NpFactory::createDeformableVolumeMaterial(PxReal you
 		npMaterial = mDeformableVolumeMaterialPool.construct(materialData);
 	}
 	return npMaterial;
-
-#else
-	PX_UNUSED(youngs);
-	PX_UNUSED(poissons);
-	PX_UNUSED(dynamicFriction);
-	PX_UNUSED(thickness);
-	PX_UNUSED(bendingStiffness);
-	PX_UNUSED(damping);
-	PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "PxDeformableVolumeMaterial is not supported on this platform.");
-	return NULL;
-#endif
 }
 
 void NpFactory::releaseDeformableVolumeMaterialToPool(PxDeformableVolumeMaterial& material_)
 {
-#if PX_SUPPORT_GPU_PHYSX
 	NpDeformableVolumeMaterial& material = static_cast<NpDeformableVolumeMaterial&>(material_);
 	PX_ASSERT(material.getBaseFlags() & PxBaseFlag::eOWNS_MEMORY);
-	PxMutex::ScopedLock lock(mDeformableVolumePoolLock);
+	PxMutex::ScopedLock lock(mDeformableVolumeMaterialPoolLock);
 	mDeformableVolumeMaterialPool.destroy(&material);
-#else
-	PX_UNUSED(material_);
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#if PX_SUPPORT_GPU_PHYSX
 PxPBDMaterial* NpFactory::createPBDMaterial(PxReal friction, PxReal damping, PxReal adhesion, PxReal viscosity, PxReal vorticityConfinement, 
 	PxReal surfaceTension, PxReal cohesion, PxReal lift, PxReal drag, PxReal cflCoefficient, PxReal gravityScale)
 {
@@ -849,7 +1247,6 @@ NpShape* NpFactory::createShape(const PxGeometry& geometry,
 	return createShapeInternal<PxMaterial, NpMaterial>(geometry, shapeFlags, materials, materialCount, isExclusive, PxShapeCoreFlag::Enum(0));
 }
 
-#if PX_SUPPORT_GPU_PHYSX
 NpShape* NpFactory::createShape(const PxGeometry& geometry,
     PxShapeFlags shapeFlags,
     PxDeformableSurfaceMaterial* const* materials,
@@ -865,40 +1262,10 @@ NpShape* NpFactory::createShape(const PxGeometry& geometry,
     PxU16 materialCount,
     bool isExclusive)
 {
-    return createShapeInternal<PxDeformableVolumeMaterial, NpDeformableVolumeMaterial>(geometry, shapeFlags, materials, materialCount, isExclusive, PxShapeCoreFlag::eDEFORMABLE_VOLUME_SHAPE);
+    return createShapeInternal<PxDeformableVolumeMaterial, NpDeformableVolumeMaterial>(
+		geometry, shapeFlags, materials, materialCount, isExclusive,
+		PxShapeCoreFlag::eDEFORMABLE_VOLUME_SHAPE);
 }
-
-#else
-
-NpShape* NpFactory::createShape(const PxGeometry& geometry,
-    PxShapeFlags shapeFlags,
-    PxDeformableSurfaceMaterial* const* materials,
-    PxU16 materialCount,
-    bool isExclusive)
-{
-    PX_UNUSED(geometry);
-    PX_UNUSED(shapeFlags);
-    PX_UNUSED(materials);
-    PX_UNUSED(materialCount);
-    PX_UNUSED(isExclusive);
-    return NULL;
-}
-
-NpShape* NpFactory::createShape(const PxGeometry& geometry,
-    PxShapeFlags shapeFlags,
-    PxDeformableVolumeMaterial* const* materials,
-    PxU16 materialCount,
-    bool isExclusive)
-{
-    PX_UNUSED(geometry);
-    PX_UNUSED(shapeFlags);
-    PX_UNUSED(materials);
-    PX_UNUSED(materialCount);
-    PX_UNUSED(isExclusive);
-    return NULL;
-}
-
-#endif
 
 void NpFactory::releaseShapeToPool(NpShape& shape)
 {
@@ -1124,15 +1491,14 @@ static PX_FORCE_INLINE void releaseToPool(NpConstraint* np)
 	NpFactory::getInstance().releaseConstraintToPool(*np);
 }
 
-#if PX_SUPPORT_GPU_PHYSX
-static PX_FORCE_INLINE void releaseToPool(NpDeformableSurface* np)
-{
-	NpFactory::getInstance().releaseDeformableSurfaceToPool(*np);
-}
-
 static PX_FORCE_INLINE void releaseToPool(NpDeformableVolume* np)
 {
 	NpFactory::getInstance().releaseDeformableVolumeToPool(*np);
+}
+
+static PX_FORCE_INLINE void releaseToPool(NpDeformableSurface* np)
+{
+	NpFactory::getInstance().releaseDeformableSurfaceToPool(*np);
 }
 
 static PX_FORCE_INLINE void releaseToPool(NpDeformableAttachment* np)
@@ -1145,6 +1511,7 @@ static PX_FORCE_INLINE void releaseToPool(NpDeformableElementFilter* np)
 	NpFactory::getInstance().releaseElementFilterToPool(*np);
 }
 
+#if PX_SUPPORT_GPU_PHYSX
 static PX_FORCE_INLINE void releaseToPool(NpPBDParticleSystem* np)
 {
 	NpFactory::getInstance().releasePBDParticleSystemToPool(*np);
@@ -1184,11 +1551,11 @@ void physx::NpDestroyArticulationLink(NpArticulationLink* np)						{ NpDestroy(n
 void physx::NpDestroyArticulationJoint(PxArticulationJointReducedCoordinate* np)	{ NpDestroy(np);	}
 void physx::NpDestroyArticulationMimicJoint(PxArticulationMimicJoint* np)			{ NpDestroy(np);	}
 void physx::NpDestroyArticulation(PxArticulationReducedCoordinate* np)				{ NpDestroy(np);	}
-#if PX_SUPPORT_GPU_PHYSX
-void physx::NpDestroyDeformableSurface(NpDeformableSurface* np)						{ NpDestroy(np);	}
 void physx::NpDestroyDeformableVolume(NpDeformableVolume* np)						{ NpDestroy(np);	}
+void physx::NpDestroyDeformableSurface(NpDeformableSurface* np)						{ NpDestroy(np);	}
 void physx::NpDestroyAttachment(NpDeformableAttachment* np)							{ NpDestroy(np);	}
 void physx::NpDestroyElementFilter(NpDeformableElementFilter* np)					{ NpDestroy(np);	}
+#if PX_SUPPORT_GPU_PHYSX
 void physx::NpDestroyParticleSystem(NpPBDParticleSystem* np)						{ NpDestroy(np);	}
 void physx::NpDestroyParticleBuffer(NpParticleBuffer* np)							{ NpDestroy(np);	}
 void physx::NpDestroyParticleBuffer(NpParticleAndDiffuseBuffer* np)					{ NpDestroy(np);	}

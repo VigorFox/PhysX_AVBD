@@ -56,6 +56,8 @@ public:
 	PxDeformableBodyFlags	bodyFlags;
 	PxActorFlags			actorFlags;
 	bool					dirty;
+	bool					cpuAvbdSleeping;
+	bool					cpuAvbdWakeRequested;
 
 	DeformableBodyCore()
 		: linearDamping(0.05f)
@@ -71,6 +73,8 @@ public:
 		, bodyFlags(0)
 		, actorFlags(0)
 		, dirty(false)
+		, cpuAvbdSleeping(false)
+		, cpuAvbdWakeRequested(false)
 	{
 	}
 };
@@ -79,4 +83,3 @@ public:
 } // namespace physx
 
 #endif // DY_DEFORMABLE_CORE_H
-

@@ -30,7 +30,6 @@
 #include "NpPhysics.h"
 #include "CmUtils.h"
 
-#if PX_SUPPORT_GPU_PHYSX
 using namespace physx;
 using namespace Cm;
 
@@ -207,5 +206,3 @@ PxReal NpDeformableSurfaceMaterial::getBendingDamping() const
 //////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
-#endif // PX_SUPPORT_GPU_PHYSX
-

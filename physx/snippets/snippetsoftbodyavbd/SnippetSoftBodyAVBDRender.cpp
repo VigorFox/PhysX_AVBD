@@ -27,7 +27,7 @@
 #ifdef RENDER_SNIPPET
 
 #include "PxPhysicsAPI.h"
-#include "PxAvbdSoftBody.h"
+#include "DyAvbdSoftBodyComponent.h"
 
 #include "../snippetrender/SnippetRender.h"
 #include "../snippetrender/SnippetCamera.h"

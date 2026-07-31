@@ -1178,7 +1178,10 @@ void Sc::Scene::islandInsertion(PxBaseTask* /*continuation*/)
 	//processLostTouchPairs();
 
 	if(mCCDPass == 0)
+	{
+		prepareAvbdCpuSoftIslandGeneration();
 		mSimpleIslandManager->firstPassIslandGen();
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2545,6 +2548,13 @@ void Sc::Scene::postSolver(PxBaseTask* /*continuation*/)
 	blockPool.releaseConstraintMemory();
 	//Swap friction!
 	blockPool.swapFrictionStreams();
+
+	// The AVBD dynamics path solves an eligible dynamic rigid-soft complete
+	// tuple in the selected rigid island before this hook.  This post-solver
+	// stage advances only tuples not owned by dynamics (including world-static
+	// contact) and writes the dynamics-owned result back to host buffers.  It
+	// does not provide native soft island ownership or wake propagation.
+	stepAvbdCpuDeformableVolumes();
 
 	mCcdBodies.clear();
 

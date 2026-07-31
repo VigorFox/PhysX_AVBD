@@ -37,8 +37,50 @@
 namespace physx {
 
 struct PxsBodyCore;
+class PxsRigidBody;
 
 namespace Dy {
+
+// Complete soft/VBD tuple selected for exactly one already-gathered rigid
+// island.  The provider must either return every pointer/count here or return
+// false; partial soft representations are never routed into the solver.
+struct AvbdSoftIslandSelection {
+  AvbdSoftParticle *particles;
+  PxU32 numParticles;
+  AvbdSoftBody *bodies;
+  PxU32 numBodies;
+  AvbdSoftContact *contacts;
+  PxU32 numContacts;
+  PxU32 islandIndex;
+  PxU32 iterationOverride;
+
+  AvbdSoftIslandSelection()
+      : particles(nullptr), numParticles(0), bodies(nullptr), numBodies(0),
+        contacts(nullptr), numContacts(0), islandIndex(PX_MAX_U32),
+        iterationOverride(0) {}
+
+  PX_FORCE_INLINE bool isComplete() const {
+    return particles && numParticles > 0 && bodies && numBodies > 0 &&
+           (numContacts == 0 || contacts) && islandIndex != PX_MAX_U32;
+  }
+};
+
+// Scene-owned bridge into the main AVBD island solve.  It is invoked during
+// serial gather, before any island task is submitted, so returned storage must
+// remain stable until the Scene post-solver phase.
+class AvbdSoftIslandProvider {
+public:
+  virtual ~AvbdSoftIslandProvider() {}
+
+  virtual bool prepareSoftIslandSelections(
+      AvbdSolverBody *solverBodies, PxsRigidBody *const *rigidBodies,
+      FeatherstoneArticulation *const *articulationForBody,
+      const PxU32 *linkIndexForBody,
+      const PxU32 *islandBodyStarts, const PxU32 *islandBodyCounts,
+      const PxU32 *activeIslandIds, PxU32 islandCount, PxReal dt,
+      const PxVec3 &gravity,
+      PxArray<AvbdSoftIslandSelection> &selections) = 0;
+};
 
 /**
  * @brief AVBD Dynamics Context
@@ -126,6 +168,11 @@ public:
   virtual void clearConstraintConcreteType(PxU32 id) override {
     if (id < mConstraintConcreteTypes.size())
       mConstraintConcreteTypes[id] = 0;
+  }
+
+  PX_FORCE_INLINE void setSoftIslandProvider(
+      AvbdSoftIslandProvider *provider) {
+    mSoftIslandProvider = provider;
   }
 
   //-------------------------------------------------------------------------
@@ -280,6 +327,8 @@ private:
   AvbdSolver mSolver;                       //!< AVBD solver instance
   AvbdParallelColoring mConstraintColoring; //!< Constraint graph coloring
   PxcScratchAllocator &mScratchAllocator;   //!< Scratch memory allocator
+  AvbdSoftIslandProvider
+      *mSoftIslandProvider; //!< Scene-owned complete soft tuple provider
 
   class ScratchAllocatorAdapter : public PxAllocatorCallback {
   public:

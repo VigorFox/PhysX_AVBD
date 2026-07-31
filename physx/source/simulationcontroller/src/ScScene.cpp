@@ -35,6 +35,12 @@
 #include "ScArticulationSim.h"
 #include "ScArticulationTendonSim.h"
 #include "ScArticulationMimicJointSim.h"
+#include "ScDeformableSurfaceCore.h"
+#include "ScDeformableVolumeCore.h"
+#include "ScBodyCore.h"
+#include "ScBodySim.h"
+#include "ScStaticCore.h"
+#include "ScShapeCore.h"
 #include "ScTriggerInteraction.h"
 #include "ScSimStats.h"
 #include "PxsCCD.h"
@@ -43,6 +49,18 @@
 #include "ScArticulationCore.h"
 #include "DyIslandManager.h"
 #include "DyAvbdDynamics.h"
+#include "DyAvbdSoftBodyComponent.h"
+#include "DyDeformableSurface.h"
+#include "DyDeformableVolume.h"
+#include "foundation/PxHashMap.h"
+#include "geometry/PxHeightField.h"
+#include "geometry/PxHeightFieldGeometry.h"
+#include "geometry/PxMeshQuery.h"
+#include "geometry/PxTriangle.h"
+#include "geometry/PxTriangleMesh.h"
+#include "GuTetrahedronMesh.h"
+#include "PxsDeformableSurfaceMaterialCore.h"
+#include "PxsMaterialCore.h"
 
 #if defined(__APPLE__) && defined(__POWERPC__)
 	#include <ppc_intrinsics.h>
@@ -63,10 +81,8 @@
 #if PX_SUPPORT_GPU_PHYSX
 	#include "PxDeformableSurface.h"
 	#include "ScDeformableSurfaceSim.h"
-	#include "DyDeformableSurface.h"
 	#include "PxDeformableVolume.h"
 	#include "ScDeformableVolumeSim.h"
-	#include "DyDeformableVolume.h"
 	#include "ScParticleSystemSim.h"
 	#include "DyParticleSystem.h"
 #endif
@@ -102,6 +118,7490 @@ namespace Sc {
 	};
 
 #endif // PX_SUPPORT_GPU_PHYSX
+
+	class AvbdCpuSoftScene :
+		public PxUserAllocated,
+		public Dy::AvbdSoftIslandProvider
+	{
+		enum EntryKind
+		{
+			eVOLUME,
+			eSURFACE
+		};
+		enum
+		{
+			eELEMENT_FILTER_ALL = 0x000fffff
+		};
+
+		struct Entry
+		{
+			EntryKind					kind;
+			DeformableVolumeCore*		volumeCore;
+			DeformableSurfaceCore*		surfaceCore;
+			PxTetrahedronMesh*			simulationMesh;
+			PxTetrahedronMesh*			collisionMesh;
+			PxDeformableVolumeAuxData*	auxData;
+			PxTriangleMesh*				triangleMesh;
+			PxU32						bodyIndex;
+			void*						islandObject;
+			PxNodeIndex					islandNode;
+			bool						sleeping;
+
+			Entry(
+				DeformableVolumeCore& c,
+				PxTetrahedronMesh& simMesh,
+				PxTetrahedronMesh& collMesh,
+				PxDeformableVolumeAuxData& aux,
+				PxU32 body,
+				Dy::DeformableVolume& object,
+				PxNodeIndex node,
+				bool startsSleeping)
+				: kind(eVOLUME), volumeCore(&c), surfaceCore(NULL),
+				  simulationMesh(&simMesh),
+				  collisionMesh(&collMesh), auxData(&aux),
+				  triangleMesh(NULL),
+				  bodyIndex(body), islandObject(
+					  static_cast<void*>(&object)),
+				  islandNode(node), sleeping(startsSleeping)
+			{
+			}
+
+			Entry(
+				DeformableSurfaceCore& c,
+				PxTriangleMesh& mesh,
+				PxU32 body,
+				Dy::DeformableSurface& object,
+				PxNodeIndex node,
+				bool startsSleeping)
+				: kind(eSURFACE), volumeCore(NULL), surfaceCore(&c),
+				  simulationMesh(NULL), collisionMesh(NULL),
+				  auxData(NULL), triangleMesh(&mesh),
+				  bodyIndex(body), islandObject(
+					  static_cast<void*>(&object)),
+				  islandNode(node), sleeping(startsSleeping)
+			{
+			}
+
+			PX_FORCE_INLINE ActorCore* getActorCore() const
+			{
+				return kind == eVOLUME
+					? static_cast<ActorCore*>(volumeCore)
+					: static_cast<ActorCore*>(surfaceCore);
+			}
+
+			PX_FORCE_INLINE Dy::DeformableBodyCore& getBodyCore()
+			{
+				return kind == eVOLUME
+					? static_cast<Dy::DeformableBodyCore&>(
+						volumeCore->getCore())
+					: static_cast<Dy::DeformableBodyCore&>(
+						surfaceCore->getCore());
+			}
+
+			PX_FORCE_INLINE const Dy::DeformableBodyCore&
+				getBodyCore() const
+			{
+				return kind == eVOLUME
+					? static_cast<const Dy::DeformableBodyCore&>(
+						volumeCore->getCore())
+					: static_cast<const Dy::DeformableBodyCore&>(
+						surfaceCore->getCore());
+			}
+
+			PX_FORCE_INLINE PxVec4* getPositionInvMass() const
+			{
+				return kind == eVOLUME
+					? volumeCore->getCore().simPositionInvMass
+					: surfaceCore->getCore().positionInvMass;
+			}
+
+			PX_FORCE_INLINE PxVec4* getVelocity() const
+			{
+				return kind == eVOLUME
+					? volumeCore->getCore().simVelocity
+					: surfaceCore->getCore().velocity;
+			}
+
+			PX_FORCE_INLINE PxActorFlags getActorFlags() const
+			{
+				return getBodyCore().actorFlags;
+			}
+
+			PX_FORCE_INLINE PxU16 getSolverIterationCounts() const
+			{
+				return getBodyCore().solverIterationCounts;
+			}
+
+			void destroyIslandObject()
+			{
+				if(!islandObject)
+					return;
+				if(kind == eVOLUME)
+					static_cast<Dy::DeformableVolume*>(
+						islandObject)->~DeformableVolume();
+				else
+					static_cast<Dy::DeformableSurface*>(
+						islandObject)->~DeformableSurface();
+				PX_FREE(islandObject);
+				islandObject = NULL;
+				islandNode = PxNodeIndex();
+			}
+		};
+
+		struct StaticShapeEntry
+		{
+			StaticCore*	core;
+			const ShapeCore*	shape;
+			PxU64		primitiveKey;
+
+			StaticShapeEntry(
+				StaticCore& staticCore,
+				ShapeCore& shapeCore,
+				PxU64 key)
+				: core(&staticCore), shape(&shapeCore),
+				  primitiveKey(key)
+			{
+			}
+		};
+
+		struct DynamicShapeEntry
+		{
+			BodyCore*	core;
+			const ShapeCore*	shape;
+			PxU64		primitiveKey;
+
+			DynamicShapeEntry(
+				BodyCore& bodyCore,
+				ShapeCore& shapeCore,
+				PxU64 key)
+				: core(&bodyCore), shape(&shapeCore),
+				  primitiveKey(key)
+			{
+			}
+		};
+
+		struct WorldPinEntry
+		{
+			ActorCore*				softCore;
+			Dy::AvbdSoftPoint		localPoint;
+			PxVec3					worldTarget;
+			PxU32					handle;
+
+			WorldPinEntry(
+				ActorCore& core,
+				const Dy::AvbdSoftPoint& point,
+				const PxVec3& target,
+				PxU32 stableHandle)
+				: softCore(&core), localPoint(point),
+				  worldTarget(target), handle(stableHandle)
+			{
+			}
+		};
+
+		struct RigidAttachmentEntry
+		{
+			ActorCore*				softCore;
+			BodyCore*				rigidCore;
+			Dy::AvbdSoftPoint		localPoint;
+			PxVec3					actorLocalTarget;
+			PxVec3					alLambda;
+			PxReal					k;
+			PxReal					kMax;
+			PxU32					handle;
+
+			RigidAttachmentEntry(
+				ActorCore& soft,
+				BodyCore& rigid,
+				const Dy::AvbdSoftPoint& point,
+				const PxVec3& target,
+				PxU32 stableHandle)
+				: softCore(&soft), rigidCore(&rigid),
+				  localPoint(point), actorLocalTarget(target),
+				  alLambda(0.0f), k(1.0e8f), kMax(1.0e10f),
+				  handle(stableHandle)
+			{
+			}
+		};
+
+		struct ArticulationAttachmentEntry
+		{
+			ActorCore*				softCore;
+			BodyCore*				linkCore;
+			Dy::AvbdSoftPoint		localPoint;
+			PxVec3					actorLocalTarget;
+			PxVec3					alLambda;
+			PxReal					k;
+			PxReal					kMax;
+			PxU32					handle;
+
+			ArticulationAttachmentEntry(
+				ActorCore& soft,
+				BodyCore& link,
+				const Dy::AvbdSoftPoint& point,
+				const PxVec3& target,
+				PxU32 stableHandle)
+				: softCore(&soft), linkCore(&link),
+				  localPoint(point), actorLocalTarget(target),
+				  alLambda(0.0f), k(1.0e8f), kMax(1.0e10f),
+				  handle(stableHandle)
+			{
+			}
+		};
+
+		struct SoftPairAttachmentEntry
+		{
+			ActorCore*				softCore[2];
+			Dy::AvbdSoftPoint		localPoint[2];
+			PxVec3					alLambda;
+			PxReal					k;
+			PxReal					kMax;
+			PxU32					handle;
+
+			SoftPairAttachmentEntry(
+				ActorCore& soft0,
+				const Dy::AvbdSoftPoint& point0,
+				ActorCore& soft1,
+				const Dy::AvbdSoftPoint& point1,
+				PxU32 stableHandle)
+				: alLambda(0.0f), k(1.0e8f), kMax(1.0e10f),
+				  handle(stableHandle)
+			{
+				softCore[0] = &soft0;
+				softCore[1] = &soft1;
+				localPoint[0] = point0;
+				localPoint[1] = point1;
+			}
+		};
+
+		struct PrescribedAttachmentEntry
+		{
+			ActorCore*				softCore;
+			RigidCore*				prescribedCore;
+			Dy::AvbdSoftPoint		localPoint;
+			PxVec3					actorLocalTarget;
+			PxVec3					worldTarget;
+			PxVec3					previousWorldTarget;
+			PxVec3					alLambda;
+			PxReal					k;
+			PxReal					kMax;
+			PxU32					handle;
+			bool					active;
+
+			PrescribedAttachmentEntry(
+				ActorCore& soft,
+				RigidCore& prescribed,
+				const Dy::AvbdSoftPoint& point,
+				const PxVec3& actorTarget,
+				const PxVec3& target,
+				PxU32 stableHandle)
+				: softCore(&soft), prescribedCore(&prescribed),
+				  localPoint(point),
+				  actorLocalTarget(actorTarget),
+				  worldTarget(target),
+				  previousWorldTarget(target),
+				  alLambda(0.0f), k(1.0e8f), kMax(1.0e10f),
+				  handle(stableHandle), active(true)
+			{
+			}
+		};
+
+		struct RigidActorFilterEntry
+		{
+			ActorCore*				softCore;
+			ActorCore*				rigidCore;
+			// Surface entries own public source triangles. Volume entries
+			// own simulation tetrahedra compiled from public collision tets.
+			PxArray<PxU32>			elementIndices;
+			PxU32					handle;
+			bool					filterAllElements;
+
+			RigidActorFilterEntry(
+				ActorCore& soft,
+				ActorCore& rigid,
+				const PxU32* elements,
+				PxU32 elementCount,
+				PxU32 stableHandle,
+				bool filterAll)
+				: softCore(&soft), rigidCore(&rigid),
+				  handle(stableHandle),
+				  filterAllElements(filterAll)
+			{
+				for(PxU32 i = 0; i < elementCount; ++i)
+				{
+					bool duplicate = false;
+					for(PxU32 j = 0;
+						j < elementIndices.size(); ++j)
+						if(elementIndices[j] == elements[i])
+						{
+							duplicate = true;
+							break;
+						}
+					if(!duplicate)
+						elementIndices.pushBack(elements[i]);
+				}
+			}
+
+			bool containsElement(PxU32 elementIndex) const
+			{
+				for(PxU32 i = 0; i < elementIndices.size(); ++i)
+					if(elementIndices[i] == elementIndex)
+						return true;
+				return false;
+			}
+		};
+
+		struct DeformablePairFilterEntry
+		{
+			struct ElementPair
+			{
+				PxU32 element0;
+				PxU32 element1;
+
+				ElementPair(PxU32 source0, PxU32 source1)
+					: element0(source0), element1(source1)
+				{
+				}
+			};
+
+			ActorCore*				core0;
+			ActorCore*				core1;
+			PxArray<ElementPair>	elementPairs;
+			PxU32					handle;
+
+			DeformablePairFilterEntry(
+				ActorCore& actor0,
+				ActorCore& actor1,
+				const PxU32* elements0,
+				const PxU32* elements1,
+				PxU32 pairCount,
+				PxU32 stableHandle)
+				: core0(&actor0), core1(&actor1),
+				  handle(stableHandle)
+			{
+				for(PxU32 i = 0; i < pairCount; ++i)
+				{
+					bool duplicate = false;
+					for(PxU32 j = 0;
+						j < elementPairs.size(); ++j)
+					{
+						if(elementPairs[j].element0 ==
+								elements0[i] &&
+							elementPairs[j].element1 ==
+								elements1[i])
+						{
+							duplicate = true;
+							break;
+						}
+					}
+					if(!duplicate)
+						elementPairs.pushBack(
+							ElementPair(
+								elements0[i], elements1[i]));
+				}
+			}
+
+			bool containsPair(
+				ActorCore& queryCore,
+				PxU32 queryElement,
+				ActorCore& targetCore,
+				PxU32 targetElement) const
+			{
+				const bool forward =
+					core0 == &queryCore && core1 == &targetCore;
+				const bool reverse =
+					core1 == &queryCore && core0 == &targetCore;
+				if(!forward && !reverse)
+					return false;
+				for(PxU32 i = 0; i < elementPairs.size(); ++i)
+				{
+					const PxU32 querySelection = forward
+						? elementPairs[i].element0
+						: elementPairs[i].element1;
+					const PxU32 targetSelection = forward
+						? elementPairs[i].element1
+						: elementPairs[i].element0;
+					if((querySelection == eELEMENT_FILTER_ALL ||
+							querySelection == queryElement) &&
+						(targetSelection == eELEMENT_FILTER_ALL ||
+							targetSelection == targetElement))
+						return true;
+				}
+				return false;
+			}
+		};
+
+		struct NativeIslandEdgeEntry
+		{
+			ActorCore*				softCore;
+			BodyCore*				rigidCore;
+			IG::EdgeIndex			edgeIndex;
+			bool					touched;
+
+			NativeIslandEdgeEntry(
+				ActorCore& soft,
+				BodyCore& rigid,
+				IG::EdgeIndex index)
+				: softCore(&soft), rigidCore(&rigid),
+				  edgeIndex(index), touched(true)
+			{
+			}
+		};
+
+		struct NativeSoftSoftIslandEdgeEntry
+		{
+			ActorCore*				softCore0;
+			ActorCore*				softCore1;
+			IG::EdgeIndex			edgeIndex;
+			bool					touched;
+
+			NativeSoftSoftIslandEdgeEntry(
+				ActorCore& soft0,
+				ActorCore& soft1,
+				IG::EdgeIndex index)
+				: softCore0(&soft0), softCore1(&soft1),
+				  edgeIndex(index), touched(true)
+			{
+			}
+		};
+
+		struct IslandSelectionStorage
+		{
+			IG::IslandId					nativeIslandId;
+			bool							touched;
+			PxU32							selectedIsland;
+			PxArray<PxU32>					entryIndices;
+			PxArray<ActorCore*>				softCores;
+			PxArray<PxU32>					globalParticleIndices;
+			PxArray<Dy::AvbdSoftParticle>	particles;
+			PxArray<Dy::AvbdSoftBody>		bodies;
+			PxArray<Dy::AvbdSelfCollisionAdjacency>
+												selfCollisionAdjacencies;
+			PxArray<PxU8>					selfCollisionEnabled;
+			PxArray<Dy::AvbdRigidBox>		rigidBoxes;
+			PxArray<Dy::AvbdRigidBox>		selectedDynamicBoxes;
+			PxArray<Dy::AvbdRigidSphere>	rigidSpheres;
+			PxArray<Dy::AvbdRigidSphere>	selectedDynamicSpheres;
+			PxArray<Dy::AvbdRigidCapsule>	rigidCapsules;
+			PxArray<Dy::AvbdRigidCapsule>	selectedDynamicCapsules;
+			PxArray<Dy::AvbdRigidConvex>	rigidConvexes;
+			PxArray<Dy::AvbdRigidConvex>	selectedDynamicConvexes;
+			PxArray<Dy::AvbdSoftContact>	contacts;
+			PxArray<Dy::AvbdSoftContact>	probeContacts;
+
+			IslandSelectionStorage()
+				: nativeIslandId(IG_INVALID_ISLAND), touched(false),
+				  selectedIsland(PX_MAX_U32)
+			{
+			}
+		};
+
+	public:
+		AvbdCpuSoftScene(
+			const PxsDeformableVolumeMaterialManager&
+				deformableMaterialManager,
+			const PxsDeformableSurfaceMaterialManager&
+				surfaceMaterialManager,
+			const PxsMaterialManager& rigidMaterialManager,
+			IG::SimpleIslandManager& islandManager)
+			: mDeformableMaterialManager(deformableMaterialManager),
+			  mSurfaceMaterialManager(surfaceMaterialManager),
+			  mRigidMaterialManager(rigidMaterialManager),
+			  mIslandManager(islandManager),
+			  mNextPrimitiveKey(1),
+			  mNextWorldPinHandle(1),
+			  mNextRigidAttachmentHandle(1),
+			  mNextArticulationAttachmentHandle(1),
+			  mNextSoftPairAttachmentHandle(1),
+			  mNextPrescribedAttachmentHandle(1),
+			  mNextRigidActorFilterHandle(1),
+			  mNextDeformablePairFilterHandle(1),
+			  mDynamicsOwnsStep(false),
+			  mDynamicsSelectedEntryCount(0)
+		{
+		}
+
+		~AvbdCpuSoftScene()
+		{
+			clearNativeIslandEdges();
+			clearIslandSelectionStorages();
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				Entry& entry = mEntries[i];
+				mIslandManager.removeNode(entry.islandNode);
+				entry.destroyIslandObject();
+			}
+		}
+
+		bool add(
+			DeformableVolumeCore& core,
+			PxTetrahedronMesh& simulationMesh,
+			PxTetrahedronMesh& collisionMesh,
+			PxDeformableVolumeAuxData& auxData,
+			const PxsDeformableVolumeMaterialManager& materialManager)
+		{
+			const PxU32 numVertices = simulationMesh.getNbVertices();
+			const PxU32 numTets = simulationMesh.getNbTetrahedrons();
+			Dy::DeformableVolumeCore& dyCore = core.getCore();
+			if(numVertices == 0 || numTets == 0 ||
+				!dyCore.simPositionInvMass || !dyCore.simVelocity ||
+				!dyCore.positionInvMass || !dyCore.restPosition)
+				return false;
+
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+				if(mEntries[i].volumeCore == &core)
+					return false;
+
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				const PxVec3 position =
+					dyCore.simPositionInvMass[i].getXYZ();
+				if(!position.isFinite() ||
+					!PxIsFinite(dyCore.simPositionInvMass[i].w) ||
+					!dyCore.simVelocity[i].getXYZ().isFinite())
+					return false;
+			}
+			core.initializeCpuAvbdSimulationRestPositions(
+				dyCore.simPositionInvMass, numVertices);
+			const PxArray<PxVec3>& restVertices =
+				core.getCpuAvbdSimulationRestPositions();
+			if(restVertices.size() != numVertices)
+				return false;
+			for(PxU32 i = 0; i < numVertices; i++)
+				if(!restVertices[i].isFinite())
+					return false;
+
+			PxArray<PxU32> tetrahedra;
+			tetrahedra.resize(4 * numTets);
+			const bool has16BitIndices =
+				simulationMesh.getTetrahedronMeshFlags() &
+				PxTetrahedronMeshFlag::e16_BIT_INDICES;
+			if(has16BitIndices)
+			{
+				const PxU16* source =
+					static_cast<const PxU16*>(
+						simulationMesh.getTetrahedrons());
+				for(PxU32 i = 0; i < tetrahedra.size(); i++)
+					tetrahedra[i] = source[i];
+			}
+			else
+			{
+				const PxU32* source =
+					static_cast<const PxU32*>(
+						simulationMesh.getTetrahedrons());
+				for(PxU32 i = 0; i < tetrahedra.size(); i++)
+					tetrahedra[i] = source[i];
+			}
+			for(PxU32 i = 0; i < tetrahedra.size(); i++)
+				if(tetrahedra[i] >= numVertices)
+					return false;
+
+			const PxsDeformableVolumeMaterialCore* material =
+				getMaterial(core, materialManager);
+			const PxReal youngs = material ? material->youngs : 1.0e5f;
+			const PxReal poissons =
+				material ? material->poissons : 0.3f;
+			const PxReal materialDamping =
+				material ? material->elasticityDamping : 0.0f;
+			const PxReal gravityScale =
+				(core.getActorFlags() & PxActorFlag::eDISABLE_GRAVITY)
+				? 0.0f : 1.0f;
+			const PxU32 bodyIndex = mBodies.size();
+			const PxU32 particleStart = Dy::avbdCreateSoftBody(
+				restVertices.begin(), numVertices,
+				tetrahedra.begin(), tetrahedra.size(),
+				NULL, 0,
+				youngs, poissons,
+				1.0f, core.getLinearDamping() + materialDamping,
+				0.0f, 0.01f,
+				mParticles, mBodies, false,
+				core.getSelfCollisionFilterDistance(),
+				material ? material->dynamicFriction : 0.5f);
+
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				const PxVec4& positionInvMass =
+					dyCore.simPositionInvMass[i];
+				particle.position = positionInvMass.getXYZ();
+				particle.initialPosition = particle.position;
+				particle.predictedPosition = particle.position;
+				particle.outerPosition = particle.position;
+				particle.velocity = dyCore.simVelocity[i].getXYZ();
+				particle.prevVelocity = particle.velocity;
+				particle.invMass =
+					PxMax(positionInvMass.w, 0.0f);
+				particle.mass = particle.invMass > 0.0f
+					? 1.0f / particle.invMass : 0.0f;
+				particle.damping =
+					core.getLinearDamping() + materialDamping;
+				particle.gravityScale = gravityScale;
+			}
+
+			void* islandObjectMemory = PX_ALLOC(
+				sizeof(Dy::DeformableVolume),
+				"AVBD CPU deformable island object");
+			Dy::DeformableVolume* islandObject =
+				islandObjectMemory
+				? PX_PLACEMENT_NEW(
+					islandObjectMemory,
+					Dy::DeformableVolume)(NULL, dyCore)
+				: NULL;
+			if(!islandObject)
+			{
+				mBodies.replaceWithLast(bodyIndex);
+				mParticles.resize(particleStart);
+				return false;
+			}
+			const PxNodeIndex islandNode =
+				mIslandManager.addNode(
+					false, false,
+					IG::Node::eDEFORMABLE_VOLUME_TYPE,
+					islandObject);
+			PxReal maxSpeedSquared = 0.0f;
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				if(dyCore.simPositionInvMass[i].w > 0.0f)
+					maxSpeedSquared = PxMax(
+						maxSpeedSquared,
+						dyCore.simVelocity[i].getXYZ().
+							magnitudeSquared());
+			}
+			const PxReal sleepThreshold =
+				PxMax(dyCore.sleepThreshold, 0.0f);
+			const bool startsSleeping =
+				dyCore.wakeCounter == 0.0f &&
+				maxSpeedSquared <=
+					sleepThreshold * sleepThreshold;
+			if(startsSleeping)
+				mIslandManager.deactivateNode(islandNode);
+			else
+				mIslandManager.activateNode(islandNode);
+			mEntries.pushBack(Entry(
+				core, simulationMesh, collisionMesh, auxData,
+				bodyIndex, *islandObject, islandNode,
+				startsSleeping));
+			PX_ASSERT(mSelfCollisionAdjacencies.size() == bodyIndex);
+			mSelfCollisionAdjacencies.resize(bodyIndex + 1);
+			Dy::avbdBuildSelfCollisionAdjacency(
+				mBodies[bodyIndex],
+				mSelfCollisionAdjacencies[bodyIndex]);
+			if(startsSleeping)
+				sleepEntry(mEntries.back());
+			else
+			{
+				dyCore.cpuAvbdSleeping = false;
+				dyCore.cpuAvbdWakeRequested = false;
+			}
+			dyCore.dirty = false;
+			dyCore.dirtyFlags = PxDeformableVolumeDataFlags(0);
+			return true;
+		}
+
+		bool addSurface(
+			DeformableSurfaceCore& core,
+			PxTriangleMesh& triangleMesh)
+		{
+			const PxU32 numVertices = triangleMesh.getNbVertices();
+			const PxU32 numTriangles = triangleMesh.getNbTriangles();
+			Dy::DeformableSurfaceCore& dyCore = core.getCore();
+			if(numVertices == 0 || numTriangles == 0 ||
+				!dyCore.positionInvMass || !dyCore.velocity ||
+				!dyCore.restPosition)
+				return false;
+
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+				if(mEntries[i].surfaceCore == &core)
+					return false;
+
+			PxArray<PxVec3> restVertices;
+			restVertices.resize(numVertices);
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				const PxVec4& restPosition = dyCore.restPosition[i];
+				const PxVec4& positionInvMass =
+					dyCore.positionInvMass[i];
+				if(!restPosition.getXYZ().isFinite() ||
+					!positionInvMass.getXYZ().isFinite() ||
+					!PxIsFinite(positionInvMass.w) ||
+					!dyCore.velocity[i].getXYZ().isFinite())
+					return false;
+				restVertices[i] = restPosition.getXYZ();
+			}
+
+			PxArray<PxU32> triangles;
+			triangles.resize(3 * numTriangles);
+			const bool has16BitIndices =
+				triangleMesh.getTriangleMeshFlags() &
+				PxTriangleMeshFlag::e16_BIT_INDICES;
+			if(has16BitIndices)
+			{
+				const PxU16* source =
+					static_cast<const PxU16*>(
+						triangleMesh.getTriangles());
+				for(PxU32 i = 0; i < triangles.size(); i++)
+					triangles[i] = source[i];
+			}
+			else
+			{
+				const PxU32* source =
+					static_cast<const PxU32*>(
+						triangleMesh.getTriangles());
+				for(PxU32 i = 0; i < triangles.size(); i++)
+					triangles[i] = source[i];
+			}
+			for(PxU32 i = 0; i < triangles.size(); i++)
+				if(triangles[i] >= numVertices)
+					return false;
+
+			const PxsDeformableSurfaceMaterialCore* material =
+				getSurfaceMaterial(core);
+			const PxReal youngs =
+				material ? material->youngs : 1.0e5f;
+			const PxReal poissons =
+				material ? material->poissons : 0.3f;
+			const PxReal materialDamping =
+				material ? material->elasticityDamping : 0.0f;
+			const PxReal bendingStiffness =
+				material ? material->bendingStiffness : 0.0f;
+			const PxReal thickness =
+				material ? PxMax(material->thickness, 1.0e-4f)
+						 : 0.01f;
+			const PxReal gravityScale =
+				(core.getActorFlags() & PxActorFlag::eDISABLE_GRAVITY)
+				? 0.0f : 1.0f;
+			const PxU32 bodyIndex = mBodies.size();
+			const PxU32 particleStart = Dy::avbdCreateSoftBody(
+				restVertices.begin(), numVertices,
+				NULL, 0,
+				triangles.begin(), triangles.size(),
+				youngs, poissons,
+				1.0f, core.getLinearDamping() + materialDamping,
+				bendingStiffness, thickness,
+				mParticles, mBodies,
+				(core.getSurfaceFlags() &
+					PxDeformableSurfaceFlag::eENABLE_FLATTENING)
+					? true : false,
+				core.getSelfCollisionFilterDistance(),
+				material ? material->dynamicFriction : 0.5f);
+
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				const PxVec4& positionInvMass =
+					dyCore.positionInvMass[i];
+				particle.position = positionInvMass.getXYZ();
+				particle.initialPosition = restVertices[i];
+				particle.predictedPosition = particle.position;
+				particle.outerPosition = particle.position;
+				particle.velocity = dyCore.velocity[i].getXYZ();
+				particle.prevVelocity = particle.velocity;
+				particle.invMass =
+					PxMax(positionInvMass.w, 0.0f);
+				particle.mass = particle.invMass > 0.0f
+					? 1.0f / particle.invMass : 0.0f;
+				particle.damping =
+					core.getLinearDamping() + materialDamping;
+				particle.gravityScale = gravityScale;
+			}
+
+			void* islandObjectMemory = PX_ALLOC(
+				sizeof(Dy::DeformableSurface),
+				"AVBD CPU deformable surface island object");
+			Dy::DeformableSurface* islandObject =
+				islandObjectMemory
+					? PX_PLACEMENT_NEW(
+						islandObjectMemory,
+						Dy::DeformableSurface)(NULL, dyCore)
+					: NULL;
+			if(!islandObject)
+			{
+				mBodies.replaceWithLast(bodyIndex);
+				mParticles.resize(particleStart);
+				return false;
+			}
+			const PxNodeIndex islandNode =
+				mIslandManager.addNode(
+					false, false,
+					IG::Node::eDEFORMABLE_SURFACE_TYPE,
+					islandObject);
+			PxReal maxSpeedSquared = 0.0f;
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				if(dyCore.positionInvMass[i].w > 0.0f)
+					maxSpeedSquared = PxMax(
+						maxSpeedSquared,
+						dyCore.velocity[i].getXYZ().
+							magnitudeSquared());
+			}
+			const PxReal sleepThreshold =
+				PxMax(dyCore.sleepThreshold, 0.0f);
+			const bool startsSleeping =
+				dyCore.wakeCounter == 0.0f &&
+				maxSpeedSquared <=
+					sleepThreshold * sleepThreshold;
+			if(startsSleeping)
+				mIslandManager.deactivateNode(islandNode);
+			else
+				mIslandManager.activateNode(islandNode);
+			mEntries.pushBack(Entry(
+				core, triangleMesh, bodyIndex,
+				*islandObject, islandNode, startsSleeping));
+			PX_ASSERT(mSelfCollisionAdjacencies.size() == bodyIndex);
+			mSelfCollisionAdjacencies.resize(bodyIndex + 1);
+			Dy::avbdBuildSelfCollisionAdjacency(
+				mBodies[bodyIndex],
+				mSelfCollisionAdjacencies[bodyIndex]);
+			if(startsSleeping)
+				sleepEntry(mEntries.back());
+			else
+			{
+				dyCore.cpuAvbdSleeping = false;
+				dyCore.cpuAvbdWakeRequested = false;
+			}
+			dyCore.dirty = false;
+			dyCore.dirtyFlags = PxDeformableSurfaceDataFlags(0);
+			return true;
+		}
+
+		void addStaticShape(StaticCore& core, ShapeCore& shape)
+		{
+			for(PxU32 i = 0; i < mStaticShapes.size(); i++)
+			{
+				if(mStaticShapes[i].core == &core &&
+					mStaticShapes[i].shape == &shape)
+					return;
+			}
+			mStaticShapes.pushBack(StaticShapeEntry(
+				core, shape, mNextPrimitiveKey++));
+		}
+
+		void removeStaticShape(
+			StaticCore& core, const ShapeCore& shape)
+		{
+			for(PxU32 i = mStaticShapes.size(); i > 0; i--)
+			{
+				const StaticShapeEntry& entry = mStaticShapes[i - 1];
+				if(entry.core == &core && entry.shape == &shape)
+				{
+					mStaticShapes.replaceWithLast(i - 1);
+					return;
+				}
+			}
+		}
+
+		void removeStatic(StaticCore& core)
+		{
+			for(PxU32 i = mStaticShapes.size(); i > 0; i--)
+			{
+				if(mStaticShapes[i - 1].core == &core)
+					mStaticShapes.replaceWithLast(i - 1);
+			}
+			removePrescribedAttachmentsForRigid(core);
+		}
+
+		void addDynamicShape(BodyCore& core, ShapeCore& shape)
+		{
+			for(PxU32 i = 0; i < mDynamicShapes.size(); i++)
+			{
+				if(mDynamicShapes[i].core == &core &&
+					mDynamicShapes[i].shape == &shape)
+					return;
+			}
+			mDynamicShapes.pushBack(DynamicShapeEntry(
+				core, shape, mNextPrimitiveKey++));
+		}
+
+		void removeDynamicShape(
+			BodyCore& core, const ShapeCore& shape)
+		{
+			for(PxU32 i = mDynamicShapes.size(); i > 0; i--)
+			{
+				const DynamicShapeEntry& entry =
+					mDynamicShapes[i - 1];
+				if(entry.core == &core && entry.shape == &shape)
+				{
+					mDynamicShapes.replaceWithLast(i - 1);
+					bool hasRemainingShape = false;
+					for(PxU32 j = 0; j < mDynamicShapes.size(); j++)
+					{
+						if(mDynamicShapes[j].core == &core)
+						{
+							hasRemainingShape = true;
+							break;
+						}
+					}
+					if(!hasRemainingShape)
+						removeNativeIslandEdgesForRigid(core);
+					return;
+				}
+			}
+		}
+
+		void removeDynamic(BodyCore& core)
+		{
+			for(PxU32 i = mDynamicShapes.size(); i > 0; i--)
+			{
+				if(mDynamicShapes[i - 1].core == &core)
+					mDynamicShapes.replaceWithLast(i - 1);
+			}
+			removePrescribedAttachmentsForRigid(core);
+			removeRigidAttachmentsForRigid(core);
+			removeArticulationAttachmentsForLink(core);
+			removeNativeIslandEdgesForRigid(core);
+		}
+
+		void remove(DeformableVolumeCore& core)
+		{
+			removeEntry(core);
+		}
+
+		void removeSurface(DeformableSurfaceCore& core)
+		{
+			removeEntry(core);
+		}
+
+		bool buildLocalElementPoint(
+			ActorCore& core,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			Dy::AvbdSoftPoint& point)
+		{
+			const Entry* entry = findEntry(core);
+			if(!entry || entry->bodyIndex >= mBodies.size() ||
+				!barycentric.isFinite())
+				return false;
+			const Dy::AvbdSoftBody& body =
+				mBodies[entry->bodyIndex];
+			const PxU32 endpointCount = surfaceElement ? 3u : 4u;
+			const PxU32* topology = surfaceElement
+				? body.compiled.triangles.begin()
+				: body.compiled.tetrahedra.begin();
+			const PxU32 topologyCount = surfaceElement
+				? body.compiled.triangles.size()
+				: body.compiled.tetrahedra.size();
+			if(elementIndex >= topologyCount / endpointCount)
+				return false;
+
+			const PxReal weights[4] = {
+				barycentric.x, barycentric.y,
+				barycentric.z, barycentric.w};
+			PxReal weightSum = 0.0f;
+			for(PxU32 endpoint = 0;
+				endpoint < endpointCount; endpoint++)
+			{
+				if(weights[endpoint] < 0.0f ||
+					weights[endpoint] > 1.0f)
+					return false;
+				weightSum += weights[endpoint];
+			}
+			if(PxAbs(weightSum - 1.0f) > 1.0e-4f)
+				return false;
+
+			point.particleCount = endpointCount;
+			for(PxU32 endpoint = 0; endpoint < endpointCount; endpoint++)
+			{
+				point.particleIndices[endpoint] =
+					topology[elementIndex * endpointCount + endpoint];
+				point.weights[endpoint] = weights[endpoint];
+			}
+			for(PxU32 endpoint = endpointCount; endpoint < 4; endpoint++)
+			{
+				point.particleIndices[endpoint] = PX_MAX_U32;
+				point.weights[endpoint] = 0.0f;
+			}
+			return Dy::avbdIsSoftPointValid(
+				point, 0, body.compiled.particleCount);
+		}
+
+		PxU32 addWorldPin(
+			ActorCore& core,
+			PxU32 localVertex,
+			const PxVec3& worldTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			point.setVertex(localVertex);
+			return addWorldPin(core, point, worldTarget);
+		}
+
+		PxU32 addWorldPin(
+			ActorCore& core,
+			const Dy::AvbdSoftPoint& localPoint,
+			const PxVec3& worldTarget)
+		{
+			Entry* entry = findEntry(core);
+			if(!entry || !Dy::avbdIsSoftPointValid(
+					localPoint, 0, getParticleCount(*entry)) ||
+				!worldTarget.isFinite())
+				return PX_MAX_U32;
+
+			PxU32 handle = mNextWorldPinHandle++;
+			if(handle == PX_MAX_U32)
+				handle = mNextWorldPinHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+
+			mWorldPins.pushBack(WorldPinEntry(
+				core, localPoint, worldTarget, handle));
+			if(!rebuildEntryPins(*entry))
+			{
+				mWorldPins.popBack();
+				return PX_MAX_U32;
+			}
+			wakeEntry(*entry, ScInternalWakeCounterResetValue);
+			return handle;
+		}
+
+		PxU32 addWorldElementPin(
+			ActorCore& core,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			const PxVec3& worldTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			if(!buildLocalElementPoint(
+				core, surfaceElement, elementIndex,
+				barycentric, point))
+				return PX_MAX_U32;
+			return addWorldPin(core, point, worldTarget);
+		}
+
+		bool updateWorldPin(
+			ActorCore& core,
+			PxU32 handle,
+			const PxVec3& worldTarget)
+		{
+			if(!worldTarget.isFinite())
+				return false;
+			for(PxU32 i = 0; i < mWorldPins.size(); i++)
+			{
+				WorldPinEntry& pin = mWorldPins[i];
+				if(pin.softCore != &core || pin.handle != handle)
+					continue;
+				Entry* entry = findEntry(core);
+				if(!entry)
+					return false;
+				const PxVec3 oldTarget = pin.worldTarget;
+				pin.worldTarget = worldTarget;
+				if(!rebuildEntryPins(*entry))
+				{
+					pin.worldTarget = oldTarget;
+					const bool restored = rebuildEntryPins(*entry);
+					PX_ASSERT(restored);
+					PX_UNUSED(restored);
+					return false;
+				}
+				wakeEntry(*entry, ScInternalWakeCounterResetValue);
+				return true;
+			}
+			return false;
+		}
+
+		void removeWorldPin(
+			ActorCore& core,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mWorldPins.size(); i++)
+			{
+				if(mWorldPins[i].softCore != &core ||
+					mWorldPins[i].handle != handle)
+					continue;
+				mWorldPins.replaceWithLast(i);
+				Entry* entry = findEntry(core);
+				if(entry)
+				{
+					const bool rebuilt = rebuildEntryPins(*entry);
+					PX_ASSERT(rebuilt);
+					PX_UNUSED(rebuilt);
+					wakeEntry(
+						*entry, ScInternalWakeCounterResetValue);
+				}
+				return;
+			}
+		}
+
+		bool computePrescribedAttachmentWorldTarget(
+			RigidCore& prescribedCore,
+			const PxVec3& actorLocalTarget,
+			PxVec3& worldTarget) const
+		{
+			if(!actorLocalTarget.isFinite())
+				return false;
+			const PxActorType::Enum actorType =
+				prescribedCore.getActorCoreType();
+			if(actorType == PxActorType::eRIGID_STATIC)
+			{
+				const StaticCore& staticCore =
+					static_cast<const StaticCore&>(
+						prescribedCore);
+				if(!staticCore.getSim())
+					return false;
+				const PxTransform& actorToWorld =
+					staticCore.getActor2World();
+				worldTarget =
+					actorToWorld.transform(actorLocalTarget);
+				return actorToWorld.isValid() &&
+					worldTarget.isFinite();
+			}
+			if(actorType != PxActorType::eRIGID_DYNAMIC)
+				return false;
+
+			BodyCore& kinematicCore =
+				static_cast<BodyCore&>(prescribedCore);
+			BodySim* bodySim = kinematicCore.getSim();
+			if(!bodySim || !bodySim->isKinematic() ||
+				bodySim->isArticulationLink())
+				return false;
+			const PxsBodyCore& bodyCore = kinematicCore.getCore();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			PxTransform commandedBodyToWorld;
+			if(kinematicCore.getKinematicTarget(
+				commandedBodyToWorld))
+				bodyToWorld = commandedBodyToWorld;
+			const PxVec3 bodyLocalTarget =
+				bodyCore.getBody2Actor().getInverse().
+					transform(actorLocalTarget);
+			worldTarget = bodyToWorld.transform(bodyLocalTarget);
+			return bodyToWorld.isValid() && worldTarget.isFinite();
+		}
+
+		PxU32 addKinematicAttachment(
+			ActorCore& softCore,
+			BodyCore& kinematicCore,
+			PxU32 localVertex,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			point.setVertex(localVertex);
+			return addPrescribedAttachment(
+				softCore, kinematicCore, point,
+				actorLocalTarget);
+		}
+
+		PxU32 addPrescribedAttachment(
+			ActorCore& softCore,
+			RigidCore& prescribedCore,
+			const Dy::AvbdSoftPoint& localPoint,
+			const PxVec3& actorLocalTarget)
+		{
+			Entry* entry = findEntry(softCore);
+			PxVec3 worldTarget;
+			if(!entry || !Dy::avbdIsSoftPointValid(
+					localPoint, 0, getParticleCount(*entry)) ||
+				!computePrescribedAttachmentWorldTarget(
+					prescribedCore, actorLocalTarget,
+					worldTarget))
+				return PX_MAX_U32;
+
+			PxU32 handle =
+				mNextPrescribedAttachmentHandle++;
+			if(handle == PX_MAX_U32)
+				handle =
+					mNextPrescribedAttachmentHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+
+			mPrescribedAttachments.pushBack(
+				PrescribedAttachmentEntry(
+					softCore, prescribedCore, localPoint,
+					actorLocalTarget, worldTarget, handle));
+			if(!rebuildEntryPins(*entry))
+			{
+				mPrescribedAttachments.popBack();
+				const bool restored = rebuildEntryPins(*entry);
+				PX_ASSERT(restored);
+				PX_UNUSED(restored);
+				return PX_MAX_U32;
+			}
+			wakeEntry(*entry, ScInternalWakeCounterResetValue);
+			return handle;
+		}
+
+		PxU32 addKinematicElementAttachment(
+			ActorCore& softCore,
+			BodyCore& kinematicCore,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			if(!buildLocalElementPoint(
+				softCore, surfaceElement, elementIndex,
+				barycentric, point))
+				return PX_MAX_U32;
+			return addPrescribedAttachment(
+				softCore, kinematicCore, point,
+				actorLocalTarget);
+		}
+
+		PxU32 addStaticAttachment(
+			ActorCore& softCore,
+			StaticCore& staticCore,
+			PxU32 localVertex,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			point.setVertex(localVertex);
+			return addPrescribedAttachment(
+				softCore, staticCore, point,
+				actorLocalTarget);
+		}
+
+		PxU32 addStaticElementAttachment(
+			ActorCore& softCore,
+			StaticCore& staticCore,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			if(!buildLocalElementPoint(
+				softCore, surfaceElement, elementIndex,
+				barycentric, point))
+				return PX_MAX_U32;
+			return addPrescribedAttachment(
+				softCore, staticCore, point,
+				actorLocalTarget);
+		}
+
+		bool updatePrescribedAttachment(
+			ActorCore& softCore,
+			PxU32 handle,
+			const PxVec3& actorLocalTarget)
+		{
+			for(PxU32 i = 0;
+				i < mPrescribedAttachments.size(); i++)
+			{
+				PrescribedAttachmentEntry& attachment =
+					mPrescribedAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				Entry* entry = findEntry(softCore);
+				PxVec3 worldTarget;
+				if(!entry ||
+					!computePrescribedAttachmentWorldTarget(
+						*attachment.prescribedCore,
+						actorLocalTarget, worldTarget))
+					return false;
+				const PxVec3 oldActorLocalTarget =
+					attachment.actorLocalTarget;
+				const PxVec3 oldWorldTarget =
+					attachment.worldTarget;
+				const PxVec3 oldPreviousWorldTarget =
+					attachment.previousWorldTarget;
+				const PxVec3 oldLambda =
+					attachment.alLambda;
+				attachment.actorLocalTarget =
+					actorLocalTarget;
+				attachment.previousWorldTarget =
+					worldTarget;
+				attachment.worldTarget = worldTarget;
+				attachment.alLambda = PxVec3(0.0f);
+				if(!rebuildEntryPins(*entry))
+				{
+					attachment.actorLocalTarget =
+						oldActorLocalTarget;
+					attachment.worldTarget = oldWorldTarget;
+					attachment.previousWorldTarget =
+						oldPreviousWorldTarget;
+					attachment.alLambda = oldLambda;
+					const bool restored =
+						rebuildEntryPins(*entry);
+					PX_ASSERT(restored);
+					PX_UNUSED(restored);
+					return false;
+				}
+				wakeEntry(
+					*entry, ScInternalWakeCounterResetValue);
+				return true;
+			}
+			return false;
+		}
+
+		void removePrescribedAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0;
+				i < mPrescribedAttachments.size(); i++)
+			{
+				const PrescribedAttachmentEntry& attachment =
+					mPrescribedAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				mPrescribedAttachments.replaceWithLast(i);
+				Entry* entry = findEntry(softCore);
+				if(entry)
+				{
+					const bool rebuilt =
+						rebuildEntryPins(*entry);
+					PX_ASSERT(rebuilt);
+					PX_UNUSED(rebuilt);
+					wakeEntry(
+						*entry,
+						ScInternalWakeCounterResetValue);
+				}
+				return;
+			}
+		}
+
+		PxU32 addRigidAttachment(
+			ActorCore& softCore,
+			BodyCore& rigidCore,
+			PxU32 localVertex,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			point.setVertex(localVertex);
+			return addRigidAttachment(
+				softCore, rigidCore, point, actorLocalTarget);
+		}
+
+		PxU32 addRigidAttachment(
+			ActorCore& softCore,
+			BodyCore& rigidCore,
+			const Dy::AvbdSoftPoint& localPoint,
+			const PxVec3& actorLocalTarget)
+		{
+			Entry* entry = findEntry(softCore);
+			BodySim* bodySim = rigidCore.getSim();
+			if(!entry || !Dy::avbdIsSoftPointValid(
+					localPoint, 0, getParticleCount(*entry)) ||
+				!actorLocalTarget.isFinite() || !bodySim ||
+				bodySim->isKinematic() ||
+				bodySim->isArticulationLink())
+				return PX_MAX_U32;
+
+			PxU32 handle = mNextRigidAttachmentHandle++;
+			if(handle == PX_MAX_U32)
+				handle = mNextRigidAttachmentHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+
+			mRigidAttachments.pushBack(
+				RigidAttachmentEntry(
+					softCore, rigidCore, localPoint,
+					actorLocalTarget, handle));
+			clearIslandSelectionStorages();
+			mDynamicsOwnsStep = false;
+			ensureNativeIslandEdge(*entry, rigidCore);
+			wakeEntry(*entry, ScInternalWakeCounterResetValue);
+			rigidCore.wakeUp(ScInternalWakeCounterResetValue);
+			return handle;
+		}
+
+		PxU32 addRigidElementAttachment(
+			ActorCore& softCore,
+			BodyCore& rigidCore,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			if(!buildLocalElementPoint(
+				softCore, surfaceElement, elementIndex,
+				barycentric, point))
+				return PX_MAX_U32;
+			return addRigidAttachment(
+				softCore, rigidCore, point, actorLocalTarget);
+		}
+
+		bool updateRigidAttachment(
+			ActorCore& softCore,
+			PxU32 handle,
+			const PxVec3& actorLocalTarget)
+		{
+			if(!actorLocalTarget.isFinite())
+				return false;
+			for(PxU32 i = 0; i < mRigidAttachments.size(); i++)
+			{
+				RigidAttachmentEntry& attachment =
+					mRigidAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				Entry* entry = findEntry(softCore);
+				BodySim* bodySim =
+					attachment.rigidCore->getSim();
+				if(!entry || !bodySim ||
+					bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					return false;
+				attachment.actorLocalTarget = actorLocalTarget;
+				attachment.alLambda = PxVec3(0.0f);
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				ensureNativeIslandEdge(
+					*entry, *attachment.rigidCore);
+				wakeEntry(
+					*entry, ScInternalWakeCounterResetValue);
+				attachment.rigidCore->wakeUp(
+					ScInternalWakeCounterResetValue);
+				return true;
+			}
+			return false;
+		}
+
+		void removeRigidAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mRigidAttachments.size(); i++)
+			{
+				const RigidAttachmentEntry& attachment =
+					mRigidAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				BodyCore* rigidCore = attachment.rigidCore;
+				mRigidAttachments.replaceWithLast(i);
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				Entry* entry = findEntry(softCore);
+				if(entry)
+					wakeEntry(
+						*entry, ScInternalWakeCounterResetValue);
+				if(rigidCore && rigidCore->getSim())
+					rigidCore->wakeUp(
+						ScInternalWakeCounterResetValue);
+				return;
+			}
+		}
+
+		PxU32 addArticulationAttachment(
+			ActorCore& softCore,
+			BodyCore& linkCore,
+			PxU32 localVertex,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			point.setVertex(localVertex);
+			return addArticulationAttachment(
+				softCore, linkCore, point, actorLocalTarget);
+		}
+
+		PxU32 addArticulationAttachment(
+			ActorCore& softCore,
+			BodyCore& linkCore,
+			const Dy::AvbdSoftPoint& localPoint,
+			const PxVec3& actorLocalTarget)
+		{
+			Entry* entry = findEntry(softCore);
+			BodySim* bodySim = linkCore.getSim();
+			if(!entry || !Dy::avbdIsSoftPointValid(
+					localPoint, 0, getParticleCount(*entry)) ||
+				!actorLocalTarget.isFinite() || !bodySim ||
+				!bodySim->isArticulationLink() ||
+				!bodySim->getArticulation())
+				return PX_MAX_U32;
+
+			PxU32 handle =
+				mNextArticulationAttachmentHandle++;
+			if(handle == PX_MAX_U32)
+				handle =
+					mNextArticulationAttachmentHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+
+			mArticulationAttachments.pushBack(
+				ArticulationAttachmentEntry(
+					softCore, linkCore, localPoint,
+					actorLocalTarget, handle));
+			clearIslandSelectionStorages();
+			mDynamicsOwnsStep = false;
+			ensureNativeIslandEdge(*entry, linkCore);
+			wakeEntry(*entry, ScInternalWakeCounterResetValue);
+			linkCore.wakeUp(ScInternalWakeCounterResetValue);
+			return handle;
+		}
+
+		PxU32 addArticulationElementAttachment(
+			ActorCore& softCore,
+			BodyCore& linkCore,
+			bool surfaceElement,
+			PxU32 elementIndex,
+			const PxVec4& barycentric,
+			const PxVec3& actorLocalTarget)
+		{
+			Dy::AvbdSoftPoint point;
+			if(!buildLocalElementPoint(
+				softCore, surfaceElement, elementIndex,
+				barycentric, point))
+				return PX_MAX_U32;
+			return addArticulationAttachment(
+				softCore, linkCore, point, actorLocalTarget);
+		}
+
+		bool updateArticulationAttachment(
+			ActorCore& softCore,
+			PxU32 handle,
+			const PxVec3& actorLocalTarget)
+		{
+			if(!actorLocalTarget.isFinite())
+				return false;
+			for(PxU32 i = 0;
+				i < mArticulationAttachments.size(); i++)
+			{
+				ArticulationAttachmentEntry& attachment =
+					mArticulationAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				Entry* entry = findEntry(softCore);
+				BodySim* bodySim =
+					attachment.linkCore->getSim();
+				if(!entry || !bodySim ||
+					!bodySim->isArticulationLink() ||
+					!bodySim->getArticulation())
+					return false;
+				attachment.actorLocalTarget = actorLocalTarget;
+				attachment.alLambda = PxVec3(0.0f);
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				ensureNativeIslandEdge(
+					*entry, *attachment.linkCore);
+				wakeEntry(
+					*entry, ScInternalWakeCounterResetValue);
+				attachment.linkCore->wakeUp(
+					ScInternalWakeCounterResetValue);
+				return true;
+			}
+			return false;
+		}
+
+		void removeArticulationAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0;
+				i < mArticulationAttachments.size(); i++)
+			{
+				const ArticulationAttachmentEntry& attachment =
+					mArticulationAttachments[i];
+				if(attachment.softCore != &softCore ||
+					attachment.handle != handle)
+					continue;
+				BodyCore* linkCore = attachment.linkCore;
+				mArticulationAttachments.replaceWithLast(i);
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				Entry* entry = findEntry(softCore);
+				if(entry)
+					wakeEntry(
+						*entry, ScInternalWakeCounterResetValue);
+				if(linkCore && linkCore->getSim())
+					linkCore->wakeUp(
+						ScInternalWakeCounterResetValue);
+				return;
+			}
+		}
+
+		PxU32 addSoftPairAttachment(
+			ActorCore& softCore0,
+			const Dy::AvbdSoftPoint& localPoint0,
+			ActorCore& softCore1,
+			const Dy::AvbdSoftPoint& localPoint1)
+		{
+			Entry* entry0 = findEntry(softCore0);
+			Entry* entry1 = findEntry(softCore1);
+			if(&softCore0 == &softCore1 || !entry0 || !entry1 ||
+				!Dy::avbdIsSoftPointValid(
+					localPoint0, 0, getParticleCount(*entry0)) ||
+				!Dy::avbdIsSoftPointValid(
+					localPoint1, 0, getParticleCount(*entry1)))
+				return PX_MAX_U32;
+
+			PxU32 handle = mNextSoftPairAttachmentHandle++;
+			if(handle == PX_MAX_U32)
+				handle = mNextSoftPairAttachmentHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+
+			mSoftPairAttachments.pushBack(
+				SoftPairAttachmentEntry(
+					softCore0, localPoint0,
+					softCore1, localPoint1, handle));
+			clearIslandSelectionStorages();
+			mDynamicsOwnsStep = false;
+			ensureNativeSoftSoftIslandEdge(*entry0, *entry1);
+			wakeEntry(*entry0, ScInternalWakeCounterResetValue);
+			wakeEntry(*entry1, ScInternalWakeCounterResetValue);
+			return handle;
+		}
+
+		PxU32 addSoftPairAttachment(
+			ActorCore& softCore0,
+			bool element0,
+			PxU32 index0,
+			const PxVec4& barycentric0,
+			ActorCore& softCore1,
+			bool element1,
+			PxU32 index1,
+			const PxVec4& barycentric1)
+		{
+			Entry* entry0 = findEntry(softCore0);
+			Entry* entry1 = findEntry(softCore1);
+			if(!entry0 || !entry1)
+				return PX_MAX_U32;
+
+			Dy::AvbdSoftPoint point0;
+			Dy::AvbdSoftPoint point1;
+			if(element0)
+			{
+				if(!buildLocalElementPoint(
+					softCore0, entry0->kind == eSURFACE,
+					index0, barycentric0, point0))
+					return PX_MAX_U32;
+			}
+			else
+				point0.setVertex(index0);
+			if(element1)
+			{
+				if(!buildLocalElementPoint(
+					softCore1, entry1->kind == eSURFACE,
+					index1, barycentric1, point1))
+					return PX_MAX_U32;
+			}
+			else
+				point1.setVertex(index1);
+			return addSoftPairAttachment(
+				softCore0, point0, softCore1, point1);
+		}
+
+		void removeSoftPairAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mSoftPairAttachments.size(); i++)
+			{
+				const SoftPairAttachmentEntry& attachment =
+					mSoftPairAttachments[i];
+				if(attachment.softCore[0] != &softCore ||
+					attachment.handle != handle)
+					continue;
+				ActorCore* softCore0 = attachment.softCore[0];
+				ActorCore* softCore1 = attachment.softCore[1];
+				mSoftPairAttachments.replaceWithLast(i);
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				Entry* entry0 =
+					softCore0 ? findEntry(*softCore0) : NULL;
+				Entry* entry1 =
+					softCore1 ? findEntry(*softCore1) : NULL;
+				if(entry0)
+					wakeEntry(
+						*entry0, ScInternalWakeCounterResetValue);
+				if(entry1)
+					wakeEntry(
+						*entry1, ScInternalWakeCounterResetValue);
+				return;
+			}
+		}
+
+		PxU32 addRigidActorFilter(
+			ActorCore& softCore,
+			ActorCore& rigidCore,
+			const PxU32* elementIndices = NULL,
+			PxU32 elementCount = 0,
+			bool filterAllElements = true)
+		{
+			if(!findEntry(softCore) ||
+				(!filterAllElements &&
+					(!elementIndices || elementCount == 0)))
+				return PX_MAX_U32;
+			PxU32 handle = mNextRigidActorFilterHandle++;
+			if(handle == PX_MAX_U32)
+				handle = mNextRigidActorFilterHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+			mRigidActorFilters.pushBack(
+				RigidActorFilterEntry(
+					softCore, rigidCore,
+					elementIndices, elementCount,
+					handle, filterAllElements));
+			return handle;
+		}
+
+		PxU32 addVolumeRigidActorFilter(
+			DeformableVolumeCore& softCore,
+			ActorCore& rigidCore,
+			const PxU32* collisionElementIndices,
+			PxU32 collisionElementCount,
+			bool filterAllElements)
+		{
+			if(filterAllElements)
+				return addRigidActorFilter(
+					softCore, rigidCore);
+			Entry* entry = findEntry(softCore);
+			if(!entry || entry->kind != eVOLUME ||
+				!collisionElementIndices ||
+				collisionElementCount == 0 ||
+				!entry->collisionMesh ||
+				!entry->simulationMesh ||
+				!entry->auxData)
+				return PX_MAX_U32;
+			const Gu::DeformableVolumeAuxData& auxData =
+				static_cast<
+					const Gu::DeformableVolumeAuxData&>(
+						*entry->auxData);
+			const PxU32 publicElementCount =
+				entry->collisionMesh->getNbTetrahedrons();
+			const PxU32 simulationElementCount =
+				entry->simulationMesh->getNbTetrahedrons();
+			if(!auxData.mTetsAccumulatedRemapColToSim ||
+				!auxData.mTetsRemapColToSim ||
+				auxData.mTetsRemapSize == 0)
+				return PX_MAX_U32;
+
+			PxArray<PxU32> simulationElements;
+			for(PxU32 selectedIndex = 0;
+				selectedIndex < collisionElementCount;
+				++selectedIndex)
+			{
+				const PxU32 collisionElement =
+					collisionElementIndices[selectedIndex];
+				if(collisionElement >= publicElementCount)
+					return PX_MAX_U32;
+				const PxU32 begin = collisionElement == 0
+					? 0
+					: auxData.
+						mTetsAccumulatedRemapColToSim[
+							collisionElement - 1];
+				const PxU32 end =
+					auxData.mTetsAccumulatedRemapColToSim[
+						collisionElement];
+				if(end <= begin || end > auxData.mTetsRemapSize)
+					return PX_MAX_U32;
+				for(PxU32 remapIndex = begin;
+					remapIndex < end; ++remapIndex)
+				{
+					const PxU32 simulationElement =
+						auxData.mTetsRemapColToSim[
+							remapIndex];
+					if(simulationElement >=
+						simulationElementCount)
+						return PX_MAX_U32;
+					simulationElements.pushBack(
+						simulationElement);
+				}
+			}
+			if(simulationElements.empty())
+				return PX_MAX_U32;
+			return addRigidActorFilter(
+				softCore, rigidCore,
+				simulationElements.begin(),
+				simulationElements.size(), false);
+		}
+
+		void removeRigidActorFilter(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mRigidActorFilters.size(); ++i)
+			{
+				const RigidActorFilterEntry& filter =
+					mRigidActorFilters[i];
+				if(filter.softCore == &softCore &&
+					filter.handle == handle)
+				{
+					mRigidActorFilters.replaceWithLast(i);
+					return;
+				}
+			}
+		}
+
+		PxU32 addCompiledDeformablePairFilter(
+			ActorCore& core0,
+			ActorCore& core1,
+			const PxU32* elementIndices0,
+			const PxU32* elementIndices1,
+			PxU32 pairCount)
+		{
+			if(&core0 == &core1 || !elementIndices0 ||
+				!elementIndices1 || pairCount == 0)
+				return PX_MAX_U32;
+			PxU32 handle = mNextDeformablePairFilterHandle++;
+			if(handle == PX_MAX_U32)
+				handle = mNextDeformablePairFilterHandle++;
+			if(handle == 0 || handle == PX_MAX_U32)
+				return PX_MAX_U32;
+			mDeformablePairFilters.pushBack(
+				DeformablePairFilterEntry(
+					core0, core1, elementIndices0,
+					elementIndices1, pairCount, handle));
+			return handle;
+		}
+
+		bool expandVolumeCollisionElement(
+			const Entry& entry,
+			PxU32 collisionElement,
+			PxArray<PxU32>& simulationElements) const
+		{
+			simulationElements.clear();
+			if(collisionElement == eELEMENT_FILTER_ALL)
+			{
+				simulationElements.pushBack(eELEMENT_FILTER_ALL);
+				return true;
+			}
+			if(entry.kind != eVOLUME ||
+				!entry.collisionMesh ||
+				!entry.simulationMesh ||
+				!entry.auxData)
+				return false;
+			const PxU32 collisionElementCount =
+				entry.collisionMesh->getNbTetrahedrons();
+			const PxU32 simulationElementCount =
+				entry.simulationMesh->getNbTetrahedrons();
+			if(collisionElement >= collisionElementCount)
+				return false;
+			const Gu::DeformableVolumeAuxData& auxData =
+				static_cast<
+					const Gu::DeformableVolumeAuxData&>(
+						*entry.auxData);
+			if(!auxData.mTetsAccumulatedRemapColToSim ||
+				!auxData.mTetsRemapColToSim ||
+				auxData.mTetsRemapSize == 0)
+				return false;
+			const PxU32 begin = collisionElement == 0
+				? 0
+				: auxData.mTetsAccumulatedRemapColToSim[
+					collisionElement - 1];
+			const PxU32 end =
+				auxData.mTetsAccumulatedRemapColToSim[
+					collisionElement];
+			if(end <= begin || end > auxData.mTetsRemapSize)
+				return false;
+			for(PxU32 remapIndex = begin;
+				remapIndex < end; ++remapIndex)
+			{
+				const PxU32 simulationElement =
+					auxData.mTetsRemapColToSim[remapIndex];
+				if(simulationElement >= simulationElementCount)
+					return false;
+				simulationElements.pushBack(simulationElement);
+			}
+			return !simulationElements.empty();
+		}
+
+		PxU32 addSurfaceSurfaceFilter(
+			DeformableSurfaceCore& core0,
+			DeformableSurfaceCore& core1,
+			const PxU32* elementIndices0,
+			const PxU32* elementIndices1,
+			PxU32 pairCount)
+		{
+			if(&core0 == &core1 || !elementIndices0 ||
+				!elementIndices1 || pairCount == 0)
+				return PX_MAX_U32;
+			Entry* entry0 = findEntry(core0);
+			Entry* entry1 = findEntry(core1);
+			if(!entry0 || !entry1 ||
+				entry0->kind != eSURFACE ||
+				entry1->kind != eSURFACE ||
+				!entry0->triangleMesh ||
+				!entry1->triangleMesh)
+				return PX_MAX_U32;
+			const PxU32 elementCount0 =
+				entry0->triangleMesh->getNbTriangles();
+			const PxU32 elementCount1 =
+				entry1->triangleMesh->getNbTriangles();
+			for(PxU32 i = 0; i < pairCount; ++i)
+			{
+				if((elementIndices0[i] != eELEMENT_FILTER_ALL &&
+						elementIndices0[i] >= elementCount0) ||
+					(elementIndices1[i] != eELEMENT_FILTER_ALL &&
+						elementIndices1[i] >= elementCount1))
+					return PX_MAX_U32;
+			}
+			return addCompiledDeformablePairFilter(
+				core0, core1, elementIndices0,
+				elementIndices1, pairCount);
+		}
+
+		PxU32 addVolumeSurfaceFilter(
+			DeformableVolumeCore& volumeCore,
+			DeformableSurfaceCore& surfaceCore,
+			const PxU32* volumeCollisionElements,
+			const PxU32* surfaceElements,
+			PxU32 pairCount)
+		{
+			if(!volumeCollisionElements || !surfaceElements ||
+				pairCount == 0)
+				return PX_MAX_U32;
+			Entry* volumeEntry = findEntry(volumeCore);
+			Entry* surfaceEntry = findEntry(surfaceCore);
+			if(!volumeEntry || !surfaceEntry ||
+				volumeEntry->kind != eVOLUME ||
+				surfaceEntry->kind != eSURFACE ||
+				!surfaceEntry->triangleMesh)
+				return PX_MAX_U32;
+			const PxU32 surfaceElementCount =
+				surfaceEntry->triangleMesh->getNbTriangles();
+			PxArray<PxU32> compiledVolumeElements;
+			PxArray<PxU32> compiledSurfaceElements;
+			PxArray<PxU32> expandedVolumeElements;
+			for(PxU32 pairIndex = 0;
+				pairIndex < pairCount; ++pairIndex)
+			{
+				const PxU32 surfaceElement =
+					surfaceElements[pairIndex];
+				if(surfaceElement != eELEMENT_FILTER_ALL &&
+					surfaceElement >= surfaceElementCount)
+					return PX_MAX_U32;
+				if(!expandVolumeCollisionElement(
+					*volumeEntry,
+					volumeCollisionElements[pairIndex],
+					expandedVolumeElements))
+					return PX_MAX_U32;
+				for(PxU32 i = 0;
+					i < expandedVolumeElements.size(); ++i)
+				{
+					compiledVolumeElements.pushBack(
+						expandedVolumeElements[i]);
+					compiledSurfaceElements.pushBack(
+						surfaceElement);
+				}
+			}
+			return addCompiledDeformablePairFilter(
+				volumeCore, surfaceCore,
+				compiledVolumeElements.begin(),
+				compiledSurfaceElements.begin(),
+				compiledVolumeElements.size());
+		}
+
+		PxU32 addVolumeVolumeFilter(
+			DeformableVolumeCore& core0,
+			DeformableVolumeCore& core1,
+			const PxU32* collisionElements0,
+			const PxU32* collisionElements1,
+			PxU32 pairCount)
+		{
+			if(&core0 == &core1 || !collisionElements0 ||
+				!collisionElements1 || pairCount == 0)
+				return PX_MAX_U32;
+			Entry* entry0 = findEntry(core0);
+			Entry* entry1 = findEntry(core1);
+			if(!entry0 || !entry1 ||
+				entry0->kind != eVOLUME ||
+				entry1->kind != eVOLUME)
+				return PX_MAX_U32;
+			PxArray<PxU32> compiledElements0;
+			PxArray<PxU32> compiledElements1;
+			PxArray<PxU32> expandedElements0;
+			PxArray<PxU32> expandedElements1;
+			for(PxU32 pairIndex = 0;
+				pairIndex < pairCount; ++pairIndex)
+			{
+				if(!expandVolumeCollisionElement(
+						*entry0,
+						collisionElements0[pairIndex],
+						expandedElements0) ||
+					!expandVolumeCollisionElement(
+						*entry1,
+						collisionElements1[pairIndex],
+						expandedElements1))
+					return PX_MAX_U32;
+				for(PxU32 i = 0;
+					i < expandedElements0.size(); ++i)
+				{
+					for(PxU32 j = 0;
+						j < expandedElements1.size(); ++j)
+					{
+						compiledElements0.pushBack(
+							expandedElements0[i]);
+						compiledElements1.pushBack(
+							expandedElements1[j]);
+					}
+				}
+			}
+			return addCompiledDeformablePairFilter(
+				core0, core1,
+				compiledElements0.begin(),
+				compiledElements1.begin(),
+				compiledElements0.size());
+		}
+
+		void removeDeformablePairFilter(
+			ActorCore& core,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0;
+				i < mDeformablePairFilters.size(); ++i)
+			{
+				const DeformablePairFilterEntry& filter =
+					mDeformablePairFilters[i];
+				if((filter.core0 == &core ||
+						filter.core1 == &core) &&
+					filter.handle == handle)
+				{
+					mDeformablePairFilters.replaceWithLast(i);
+					return;
+				}
+			}
+		}
+
+		void removeEntry(ActorCore& core)
+		{
+			for(PxU32 entryIndex = 0;
+				entryIndex < mEntries.size(); entryIndex++)
+			{
+				Entry& entry = mEntries[entryIndex];
+				if(entry.getActorCore() != &core)
+					continue;
+
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+				removeNativeIslandEdgesForSoft(core);
+				removePrescribedAttachmentsForSoft(core);
+				removeRigidAttachmentsForSoft(core);
+				removeArticulationAttachmentsForSoft(core);
+				removeSoftPairAttachmentsForSoft(core);
+				removeWorldPinsForCore(core);
+				mIslandManager.removeNode(entry.islandNode);
+				entry.destroyIslandObject();
+
+				const PxU32 removedParticleStart =
+					getParticleStart(entry);
+				const PxU32 removedParticleCount =
+					getParticleCount(entry);
+				for(PxU32 i = 0; i < mEntries.size(); i++)
+				{
+					if(i == entryIndex)
+						continue;
+					Entry& remainingEntry = mEntries[i];
+					const PxU32 remainingParticleStart =
+						getParticleStart(remainingEntry);
+					const PxU32 remainingParticleCount =
+						getParticleCount(remainingEntry);
+					if(remainingParticleStart <
+						removedParticleStart + removedParticleCount)
+						continue;
+					const PxU32 rebasedParticleStart =
+						remainingParticleStart -
+						removedParticleCount;
+					const bool rebased =
+						rebaseSoftBodyParticleRangeInPlace(
+							mBodies[remainingEntry.bodyIndex],
+							remainingParticleStart,
+							remainingParticleCount,
+							rebasedParticleStart);
+					PX_ASSERT(rebased);
+					PX_UNUSED(rebased);
+				}
+				mParticles.removeRange(
+					removedParticleStart, removedParticleCount);
+				mContacts.clear();
+				mWorkspace.reset();
+
+				const PxU32 removedBodyIndex = entry.bodyIndex;
+				const PxU32 lastBodyIndex = mBodies.size() - 1;
+				if(removedBodyIndex != lastBodyIndex)
+				{
+					for(PxU32 i = 0; i < mEntries.size(); i++)
+					{
+						if(mEntries[i].bodyIndex == lastBodyIndex)
+						{
+							mEntries[i].bodyIndex = removedBodyIndex;
+							break;
+						}
+					}
+				}
+				PX_ASSERT(
+					mSelfCollisionAdjacencies.size() == mBodies.size());
+				mSelfCollisionAdjacencies.replaceWithLast(
+					removedBodyIndex);
+				mSelfCollisionEnabled.clear();
+				mBodies.replaceWithLast(removedBodyIndex);
+				mEntries.replaceWithLast(entryIndex);
+				if(mEntries.empty())
+				{
+					clearNativeIslandEdges();
+					mParticles.clear();
+					mBodies.clear();
+					mSelfCollisionAdjacencies.clear();
+					mSelfCollisionEnabled.clear();
+					mContacts.clear();
+					mWorkspace.reset();
+				}
+				return;
+			}
+		}
+
+		void prepareIslandGeneration(
+			PxReal dt, const PxVec3& gravity, bool sleepingEnabled)
+		{
+			if(mEntries.empty() || mParticles.empty())
+				return;
+
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				Dy::DeformableBodyCore& core =
+					mEntries[i].getBodyCore();
+				if(!sleepingEnabled ||
+					core.cpuAvbdWakeRequested)
+				{
+					const PxReal wakeCounter =
+						core.wakeCounter > 0.0f
+							? core.wakeCounter
+							: ScInternalWakeCounterResetValue;
+					wakeEntry(
+						mEntries[i], wakeCounter);
+				}
+				syncHostInputs(
+					mEntries[i], mDeformableMaterialManager);
+			}
+			refreshVolumeKinematicTargets();
+			refreshPrescribedAttachmentTargets();
+
+			for(PxU32 i = 0; i < mNativeIslandEdges.size(); i++)
+				mNativeIslandEdges[i].touched = false;
+			for(PxU32 i = 0;
+				i < mNativeSoftSoftIslandEdges.size(); i++)
+				mNativeSoftSoftIslandEdges[i].touched = false;
+
+			// Public rigid attachments are persistent island topology, unlike
+			// proximity contacts. Keep their native edge alive even when the
+			// attached actors have no overlapping simulation shapes.
+			for(PxU32 i = 0; i < mRigidAttachments.size(); i++)
+			{
+				RigidAttachmentEntry& attachment =
+					mRigidAttachments[i];
+				Entry* softEntry =
+					findEntry(*attachment.softCore);
+				BodySim* bodySim =
+					attachment.rigidCore->getSim();
+				if(!softEntry || !bodySim ||
+					bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+				if(softEntry->sleeping && bodySim->isActive())
+					wakeEntry(
+						*softEntry,
+						ScInternalWakeCounterResetValue);
+				else if(!softEntry->sleeping &&
+					!bodySim->isActive())
+					attachment.rigidCore->wakeUp(
+						ScInternalWakeCounterResetValue);
+				ensureNativeIslandEdge(
+					*softEntry, *attachment.rigidCore);
+			}
+
+			// Articulation-link attachments are persistent topology too, but
+			// their solve owner is a generalized-coordinate position block.
+			for(PxU32 i = 0;
+				i < mArticulationAttachments.size(); i++)
+			{
+				ArticulationAttachmentEntry& attachment =
+					mArticulationAttachments[i];
+				Entry* softEntry =
+					findEntry(*attachment.softCore);
+				BodySim* bodySim =
+					attachment.linkCore->getSim();
+				if(!softEntry || !bodySim ||
+					!bodySim->isArticulationLink() ||
+					!bodySim->getArticulation())
+					continue;
+				if(softEntry->sleeping && bodySim->isActive())
+					wakeEntry(
+						*softEntry,
+						ScInternalWakeCounterResetValue);
+				else if(!softEntry->sleeping &&
+					!bodySim->isActive())
+					attachment.linkCore->wakeUp(
+						ScInternalWakeCounterResetValue);
+				ensureNativeIslandEdge(
+					*softEntry, *attachment.linkCore);
+			}
+
+			// A public deformable-pair attachment is persistent island
+			// topology. It must keep both soft actors in one selection even
+			// after their collision bounds separate.
+			for(PxU32 i = 0; i < mSoftPairAttachments.size(); i++)
+			{
+				SoftPairAttachmentEntry& attachment =
+					mSoftPairAttachments[i];
+				Entry* softEntry0 =
+					findEntry(*attachment.softCore[0]);
+				Entry* softEntry1 =
+					findEntry(*attachment.softCore[1]);
+				if(!softEntry0 || !softEntry1)
+					continue;
+				if(softEntry0->sleeping && !softEntry1->sleeping)
+					wakeEntry(
+						*softEntry0,
+						ScInternalWakeCounterResetValue);
+				else if(softEntry1->sleeping &&
+					!softEntry0->sleeping)
+					wakeEntry(
+						*softEntry1,
+						ScInternalWakeCounterResetValue);
+				ensureNativeSoftSoftIslandEdge(
+					*softEntry0, *softEntry1);
+			}
+
+			for(PxU32 softIndex = 0;
+				softIndex < mEntries.size(); softIndex++)
+			{
+				Entry& softEntry = mEntries[softIndex];
+				PxBounds3 softBounds;
+				if(!computeSoftBounds(softEntry, softBounds))
+					continue;
+				const bool speculativeCCDEnabled =
+					softEntry.bodyIndex < mBodies.size() &&
+					mBodies[softEntry.bodyIndex].compiled.
+						speculativeCCDEnabled;
+				if(speculativeCCDEnabled &&
+					!expandSoftBoundsForPrediction(
+						softEntry, dt, gravity, softBounds))
+					continue;
+
+				for(PxU32 shapeIndex = 0;
+					shapeIndex < mDynamicShapes.size(); shapeIndex++)
+				{
+					const DynamicShapeEntry& dynamicEntry =
+						mDynamicShapes[shapeIndex];
+					Dy::AvbdRigidBox box;
+					PxBounds3 rigidBounds;
+					if(compileDynamicBox(dynamicEntry, box))
+						rigidBounds = computeBoxBounds(box);
+					else
+					{
+						Dy::AvbdRigidSphere sphere;
+						if(compileDynamicSphere(
+								dynamicEntry, sphere))
+						{
+							rigidBounds = computeSphereBounds(sphere);
+							// A dynamic sphere that crosses a soft actor within
+							// one frame needs native island topology before the
+							// solver-body prediction is available. Bound the
+							// current/predicted body-center segment by the sphere
+							// radius plus its shape offset; this is conservative
+							// for arbitrary rotation and is public-flag gated.
+							BodySim* sphereBodySim =
+								dynamicEntry.core->getSim();
+							if(speculativeCCDEnabled &&
+								sphereBodySim &&
+								!sphereBodySim->isKinematic())
+							{
+								const PxsBodyCore& bodyCore =
+									dynamicEntry.core->getCore();
+								const PxVec3 bodyCenter =
+									bodyCore.body2World.p;
+								const PxReal shapeOffset =
+									(sphere.center - bodyCenter).
+										magnitude();
+								const PxReal envelopeRadius =
+									sphere.radius + shapeOffset;
+								const PxVec3 predictedBodyCenter =
+									bodyCenter +
+									bodyCore.linearVelocity * dt +
+									(bodyCore.disableGravity
+										? PxVec3(0.0f)
+										: gravity * (dt * dt));
+								if(!PxIsFinite(shapeOffset) ||
+									!PxIsFinite(envelopeRadius) ||
+									!predictedBodyCenter.isFinite())
+									continue;
+								const PxVec3 envelopeExtent(
+									envelopeRadius);
+								rigidBounds.include(
+									bodyCenter - envelopeExtent);
+								rigidBounds.include(
+									bodyCenter + envelopeExtent);
+								rigidBounds.include(
+									predictedBodyCenter -
+										envelopeExtent);
+								rigidBounds.include(
+									predictedBodyCenter +
+										envelopeExtent);
+							}
+						}
+						else
+						{
+							Dy::AvbdRigidCapsule capsule;
+							if(compileDynamicCapsule(
+									dynamicEntry, capsule))
+							{
+								rigidBounds =
+									computeCapsuleBounds(capsule);
+								BodySim* capsuleBodySim =
+									dynamicEntry.core->getSim();
+								if(speculativeCCDEnabled &&
+									capsuleBodySim)
+								{
+									if(capsuleBodySim->isKinematic())
+									{
+										Dy::AvbdRigidCapsule
+											previousCapsule = capsule;
+										previousCapsule.center =
+											capsule.previousCenter;
+										previousCapsule.rotation =
+											capsule.previousRotation;
+										const PxBounds3 previousBounds =
+											computeCapsuleBounds(
+												previousCapsule);
+										rigidBounds.include(
+											previousBounds.minimum);
+										rigidBounds.include(
+											previousBounds.maximum);
+										if(!Dy::
+											avbdAreSweepRotationsEquivalent(
+												capsule.
+													previousRotation,
+												capsule.rotation))
+										{
+											// Endpoint AABBs do not contain
+											// the arc swept by a rotating
+											// capsule. A center-segment
+											// sphere envelope is conservative
+											// for every intermediate
+											// orientation and is only enabled
+											// for a speculative source.
+											const PxVec3 rotationExtent(
+												capsule.radius +
+													capsule.halfHeight);
+											rigidBounds.include(
+												capsule.previousCenter -
+													rotationExtent);
+											rigidBounds.include(
+												capsule.previousCenter +
+													rotationExtent);
+											rigidBounds.include(
+												capsule.center -
+													rotationExtent);
+											rigidBounds.include(
+												capsule.center +
+													rotationExtent);
+										}
+									}
+									else
+									{
+										const PxsBodyCore& bodyCore =
+											dynamicEntry.core->getCore();
+										const PxVec3 bodyCenter =
+											bodyCore.body2World.p;
+										const PxReal shapeOffset =
+											(capsule.center -
+												bodyCenter).magnitude();
+										const PxReal envelopeRadius =
+											capsule.radius +
+											capsule.halfHeight +
+											shapeOffset;
+										const PxVec3 predictedBodyCenter =
+											bodyCenter +
+											bodyCore.linearVelocity * dt +
+											(bodyCore.disableGravity
+												? PxVec3(0.0f)
+												: gravity * (dt * dt));
+										if(!PxIsFinite(shapeOffset) ||
+											!PxIsFinite(
+												envelopeRadius) ||
+											!predictedBodyCenter.isFinite())
+											continue;
+										const PxVec3 envelopeExtent(
+											envelopeRadius);
+										rigidBounds.include(
+											bodyCenter - envelopeExtent);
+										rigidBounds.include(
+											bodyCenter + envelopeExtent);
+										rigidBounds.include(
+											predictedBodyCenter -
+												envelopeExtent);
+										rigidBounds.include(
+											predictedBodyCenter +
+												envelopeExtent);
+									}
+								}
+							}
+							else
+							{
+								Dy::AvbdRigidConvex convex;
+								if(compileDynamicConvex(
+										dynamicEntry, convex))
+								{
+									rigidBounds =
+										computeConvexBounds(convex);
+									BodySim* convexBodySim =
+										dynamicEntry.core->getSim();
+									if(speculativeCCDEnabled &&
+										convexBodySim)
+									{
+										if(convexBodySim->isKinematic())
+										{
+											Dy::AvbdRigidConvex
+												previousConvex = convex;
+											previousConvex.center =
+												convex.previousCenter;
+											previousConvex.rotation =
+												convex.previousRotation;
+											const PxBounds3 previousBounds =
+												computeConvexBounds(
+													previousConvex);
+											rigidBounds.include(
+												previousBounds.minimum);
+											rigidBounds.include(
+												previousBounds.maximum);
+											if(!Dy::
+												avbdAreSweepRotationsEquivalent(
+													convex.
+														previousRotation,
+													convex.rotation))
+											{
+												// The convex is contained by
+												// a shape-center sphere with
+												// localRadius for every
+												// intermediate orientation.
+												const PxVec3 rotationExtent(
+													convex.localRadius);
+												rigidBounds.include(
+													convex.previousCenter -
+														rotationExtent);
+												rigidBounds.include(
+													convex.previousCenter +
+														rotationExtent);
+												rigidBounds.include(
+													convex.center -
+														rotationExtent);
+												rigidBounds.include(
+													convex.center +
+														rotationExtent);
+											}
+										}
+										else
+										{
+											const PxsBodyCore& bodyCore =
+												dynamicEntry.core->getCore();
+											const PxVec3 bodyCenter =
+												bodyCore.body2World.p;
+											const PxReal shapeOffset =
+												(convex.center -
+													bodyCenter).magnitude();
+											const PxReal envelopeRadius =
+												convex.localRadius +
+												shapeOffset;
+											const PxVec3
+												predictedBodyCenter =
+													bodyCenter +
+													bodyCore.linearVelocity *
+														dt +
+													(bodyCore.disableGravity
+														? PxVec3(0.0f)
+														: gravity *
+															(dt * dt));
+											if(!PxIsFinite(shapeOffset) ||
+												!PxIsFinite(
+													envelopeRadius) ||
+												!predictedBodyCenter.
+													isFinite())
+												continue;
+											const PxVec3 envelopeExtent(
+												envelopeRadius);
+											rigidBounds.include(
+												bodyCenter -
+													envelopeExtent);
+											rigidBounds.include(
+												bodyCenter +
+													envelopeExtent);
+											rigidBounds.include(
+												predictedBodyCenter -
+													envelopeExtent);
+											rigidBounds.include(
+												predictedBodyCenter +
+													envelopeExtent);
+										}
+									}
+								}
+								else
+								{
+									Dy::AvbdRigidTriangleSurface
+										triangleSurface;
+									if(!compileDynamicTriangleSurface(
+											dynamicEntry,
+											triangleSurface))
+										continue;
+									rigidBounds =
+										computeTriangleSurfaceBounds(
+											triangleSurface);
+									BodySim* triangleSurfaceBodySim =
+										dynamicEntry.core->getSim();
+									if(speculativeCCDEnabled &&
+										triangleSurfaceBodySim &&
+										triangleSurfaceBodySim->
+											isKinematic())
+									{
+										Dy::AvbdRigidTriangleSurface
+											previousSurface =
+												triangleSurface;
+										previousSurface.center =
+											triangleSurface.
+												previousCenter;
+										previousSurface.rotation =
+											triangleSurface.
+												previousRotation;
+										const PxBounds3 previousBounds =
+											computeTriangleSurfaceBounds(
+												previousSurface);
+										rigidBounds.include(
+											previousBounds.minimum);
+										rigidBounds.include(
+											previousBounds.maximum);
+										if(!Dy::
+											avbdAreSweepRotationsEquivalent(
+												triangleSurface.
+													previousRotation,
+												triangleSurface.rotation))
+										{
+											// Endpoint AABBs do not contain
+											// the arc swept by a rotating
+											// triangle surface. Every baked
+											// vertex stays inside the
+											// shape-center localRadius sphere.
+											const PxVec3 rotationExtent(
+												triangleSurface.
+													localRadius);
+											rigidBounds.include(
+												triangleSurface.
+													previousCenter -
+													rotationExtent);
+											rigidBounds.include(
+												triangleSurface.
+													previousCenter +
+													rotationExtent);
+											rigidBounds.include(
+												triangleSurface.center -
+													rotationExtent);
+											rigidBounds.include(
+												triangleSurface.center +
+													rotationExtent);
+										}
+									}
+								}
+								if(rigidBounds.isEmpty())
+									continue;
+							}
+						}
+					}
+
+					PxBounds3 candidateBounds = softBounds;
+					const PxReal wakeMargin =
+						2.0f * mContactParams.contactRadius +
+						PxMax(
+							dynamicEntry.shape->getContactOffset(),
+							0.0f);
+					candidateBounds.fattenSafe(wakeMargin);
+					if(!candidateBounds.intersects(rigidBounds))
+						continue;
+
+					BodySim* bodySim = dynamicEntry.core->getSim();
+					bool rigidNodeActive = false;
+					if(bodySim)
+					{
+						const PxNodeIndex rigidNode =
+							bodySim->getNodeIndex();
+						const IG::IslandSim& accurateIslandSim =
+							mIslandManager.getAccurateIslandSim();
+						rigidNodeActive =
+							rigidNode.isValid() &&
+							rigidNode.index() <
+								accurateIslandSim.getNbNodes() &&
+							accurateIslandSim.getNode(
+								rigidNode).isActive();
+					}
+					if(softEntry.sleeping && bodySim &&
+						(bodySim->isActive() || rigidNodeActive))
+					{
+						wakeEntry(
+							softEntry,
+							ScInternalWakeCounterResetValue);
+					}
+					// Kinematics are prescribed one-way position targets.
+					// They wake overlapping soft actors but must not enter
+					// the two-sided rigid 6x6 AVBD island objective.
+					if(bodySim && !bodySim->isKinematic())
+						ensureNativeIslandEdge(
+							softEntry, *dynamicEntry.core);
+				}
+			}
+
+			for(PxU32 softIndex0 = 0;
+				softIndex0 < mEntries.size(); softIndex0++)
+			{
+				Entry& softEntry0 = mEntries[softIndex0];
+				PxBounds3 softBounds0;
+				if(!computeSoftBounds(softEntry0, softBounds0))
+					continue;
+				const PxReal wakeMargin =
+					PxMax(mContactParams.contactRadius, 0.0f);
+				softBounds0.fattenSafe(wakeMargin);
+
+				for(PxU32 softIndex1 = softIndex0 + 1;
+					softIndex1 < mEntries.size(); softIndex1++)
+				{
+					Entry& softEntry1 = mEntries[softIndex1];
+					PxBounds3 softBounds1;
+					if(!computeSoftBounds(softEntry1, softBounds1) ||
+						!softBounds0.intersects(softBounds1))
+						continue;
+
+					const bool soft0WasSleeping =
+						softEntry0.sleeping;
+					const bool soft1WasSleeping =
+						softEntry1.sleeping;
+					if(soft0WasSleeping && !soft1WasSleeping)
+					{
+						wakeEntry(
+							softEntry0,
+							ScInternalWakeCounterResetValue);
+					}
+					else if(soft1WasSleeping && !soft0WasSleeping)
+					{
+						wakeEntry(
+							softEntry1,
+							ScInternalWakeCounterResetValue);
+					}
+					ensureNativeSoftSoftIslandEdge(
+						softEntry0, softEntry1);
+				}
+			}
+
+			for(PxU32 i = mNativeIslandEdges.size();
+				i > 0; i--)
+			{
+				NativeIslandEdgeEntry& edge =
+					mNativeIslandEdges[i - 1];
+				if(!edge.touched)
+				{
+					mIslandManager.removeConnection(
+						edge.edgeIndex);
+					mNativeIslandEdges.replaceWithLast(
+						i - 1);
+				}
+			}
+			for(PxU32 i = mNativeSoftSoftIslandEdges.size();
+				i > 0; i--)
+			{
+				NativeSoftSoftIslandEdgeEntry& edge =
+					mNativeSoftSoftIslandEdges[i - 1];
+				if(!edge.touched)
+				{
+					mIslandManager.removeConnection(
+						edge.edgeIndex);
+					mNativeSoftSoftIslandEdges.replaceWithLast(
+						i - 1);
+				}
+			}
+		}
+
+		virtual bool prepareSoftIslandSelections(
+			Dy::AvbdSolverBody* solverBodies,
+			PxsRigidBody* const* rigidBodies,
+			Dy::FeatherstoneArticulation* const*
+				articulationForBody,
+			const PxU32* linkIndexForBody,
+			const PxU32* islandBodyStarts,
+			const PxU32* islandBodyCounts,
+			const PxU32* activeIslandIds,
+			PxU32 islandCount,
+			PxReal dt,
+			const PxVec3& gravity,
+			PxArray<Dy::AvbdSoftIslandSelection>& selections) PX_OVERRIDE
+		{
+			selections.clear();
+			mDynamicsOwnsStep = false;
+			mDynamicsSelectedEntryCount = 0;
+			if(dt <= 0.0f || mBodies.empty() || !solverBodies ||
+				!rigidBodies ||
+				(!mArticulationAttachments.empty() &&
+				 (!articulationForBody || !linkIndexForBody)) ||
+				!islandBodyStarts ||
+				!islandBodyCounts || !activeIslandIds ||
+				islandCount == 0 || mEntries.empty())
+				return false;
+
+			const IG::IslandSim& islandSim =
+				mIslandManager.getAccurateIslandSim();
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				Entry& entry = mEntries[i];
+				if(!entry.sleeping)
+					continue;
+				const PxNodeIndex node = entry.islandNode;
+				if(!node.isValid() ||
+					node.index() >= islandSim.getNbNodes())
+					return false;
+				const IG::IslandId entryIslandId =
+					islandSim.getIslandIds()[node.index()];
+				for(PxU32 islandIndex = 0;
+					islandIndex < islandCount; islandIndex++)
+				{
+					if(activeIslandIds[islandIndex] ==
+							entryIslandId &&
+						islandBodyCounts[islandIndex] > 0)
+					{
+						wakeEntry(
+							entry,
+							ScInternalWakeCounterResetValue);
+						break;
+					}
+				}
+			}
+
+			PxU32 awakeEntryCount = 0;
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				if(mEntries[i].sleeping)
+					continue;
+				syncHostInputs(
+					mEntries[i], mDeformableMaterialManager);
+				awakeEntryCount++;
+			}
+			if(awakeEntryCount == 0)
+				return false;
+
+			// AVBD consumes the articulation response strictly as a
+			// generalized inverse-mass operator for its position owner.
+			// Refresh it once per attached articulation at prep time; do not
+			// enter Featherstone's velocity-impulse solve.
+			for(PxU32 attachmentIndex = 0;
+				attachmentIndex <
+					mArticulationAttachments.size();
+				attachmentIndex++)
+			{
+				BodySim* linkSim =
+					mArticulationAttachments[attachmentIndex].
+						linkCore->getSim();
+				Dy::FeatherstoneArticulation* articulation =
+					linkSim ? linkSim->getArticulation() : NULL;
+				if(!articulation)
+					return false;
+				bool alreadyPrepared = false;
+				for(PxU32 priorIndex = 0;
+					priorIndex < attachmentIndex; priorIndex++)
+				{
+					BodySim* priorLinkSim =
+						mArticulationAttachments[priorIndex].
+							linkCore->getSim();
+					if(priorLinkSim &&
+						priorLinkSim->getArticulation() ==
+							articulation)
+					{
+						alreadyPrepared = true;
+						break;
+					}
+				}
+				if(!alreadyPrepared)
+					articulation->
+						prepareAvbdGeneralizedPositionResponse();
+			}
+
+			compileWorldStatics(mRigidMaterialManager);
+			for(PxU32 i = 0; i < mIslandSelectionStorages.size(); i++)
+			{
+				mIslandSelectionStorages[i]->touched = false;
+				mIslandSelectionStorages[i]->entryIndices.clear();
+				mIslandSelectionStorages[i]->selectedIsland = PX_MAX_U32;
+			}
+
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				if(mEntries[i].sleeping)
+					continue;
+				const PxNodeIndex node = mEntries[i].islandNode;
+				if(!node.isValid() ||
+					node.index() >= islandSim.getNbNodes())
+					return false;
+				const IG::IslandId entryIslandId =
+					islandSim.getIslandIds()[node.index()];
+				if(entryIslandId == IG_INVALID_ISLAND)
+					return false;
+
+				IslandSelectionStorage* storage =
+					acquireIslandSelectionStorage(entryIslandId);
+				if(!storage)
+					return false;
+				storage->entryIndices.pushBack(i);
+			}
+
+			PxU32 selectedEntryCount = 0;
+			for(PxU32 storageIndex = 0;
+				storageIndex < mIslandSelectionStorages.size();
+				storageIndex++)
+			{
+				IslandSelectionStorage& storage =
+					*mIslandSelectionStorages[storageIndex];
+				if(!storage.touched || storage.entryIndices.empty())
+					continue;
+
+				for(PxU32 islandIndex = 0;
+					islandIndex < islandCount; islandIndex++)
+				{
+					if(activeIslandIds[islandIndex] ==
+						storage.nativeIslandId)
+					{
+						storage.selectedIsland = islandIndex;
+						break;
+					}
+				}
+				// A soft-rigid edge created during this frame's predictive
+				// topology pass is visible to the speculative graph before
+				// the accurate graph has necessarily merged its islands.
+				// When the soft side still resolves to an empty native island,
+				// bridge selection to the one unambiguous active rigid island
+				// named by that same native edge. The edge remains authoritative
+				// topology and the normal accurate-island merge owns later
+				// frames; no out-of-island rigid index is ever fabricated.
+				if(storage.selectedIsland == PX_MAX_U32 ||
+					islandBodyCounts[storage.selectedIsland] == 0)
+				{
+					PxU32 bridgeIsland = PX_MAX_U32;
+					bool bridgeAmbiguous = false;
+					for(PxU32 entryOrder = 0;
+						entryOrder < storage.entryIndices.size();
+						entryOrder++)
+					{
+						const ActorCore* softCore =
+							mEntries[
+								storage.entryIndices[entryOrder]].
+								getActorCore();
+						for(PxU32 edgeIndex = 0;
+							edgeIndex < mNativeIslandEdges.size();
+							edgeIndex++)
+						{
+							const NativeIslandEdgeEntry& edge =
+								mNativeIslandEdges[edgeIndex];
+							if(!edge.touched ||
+								edge.softCore != softCore)
+								continue;
+							BodySim* rigidSim =
+								edge.rigidCore->getSim();
+							if(!rigidSim)
+								continue;
+							const PxNodeIndex rigidNode =
+								rigidSim->getNodeIndex();
+							if(!rigidNode.isValid() ||
+								rigidNode.index() >=
+									islandSim.getNbNodes())
+								continue;
+							const IG::IslandId rigidIslandId =
+								islandSim.getIslandIds()[
+									rigidNode.index()];
+							for(PxU32 islandIndex = 0;
+								islandIndex < islandCount;
+								islandIndex++)
+							{
+								if(activeIslandIds[islandIndex] !=
+										rigidIslandId ||
+									islandBodyCounts[islandIndex] == 0)
+									continue;
+								if(bridgeIsland == PX_MAX_U32)
+									bridgeIsland = islandIndex;
+								else if(bridgeIsland != islandIndex)
+									bridgeAmbiguous = true;
+								break;
+							}
+						}
+					}
+					if(!bridgeAmbiguous &&
+						bridgeIsland != PX_MAX_U32)
+						storage.selectedIsland = bridgeIsland;
+				}
+				if(storage.selectedIsland != PX_MAX_U32 &&
+					islandBodyCounts[storage.selectedIsland] > 0)
+				{
+					for(PxU32 entryIndex = 0;
+						entryIndex < storage.entryIndices.size();
+						entryIndex++)
+					{
+						Entry& entry =
+							mEntries[
+								storage.entryIndices[entryIndex]];
+						if(entry.sleeping)
+							wakeEntry(
+								entry,
+								ScInternalWakeCounterResetValue);
+					}
+				}
+				if(storage.selectedIsland == PX_MAX_U32 ||
+					!buildIslandSelectionStorage(
+						storage, solverBodies, rigidBodies,
+						articulationForBody, linkIndexForBody,
+						islandBodyStarts[storage.selectedIsland],
+						islandBodyCounts[storage.selectedIsland],
+						dt, gravity))
+				{
+					// This soft-only/native island has no unified rigid or
+					// generalized target. Leave it for the component fallback
+					// without discarding independent complete selections.
+					storage.touched = false;
+					storage.selectedIsland = PX_MAX_U32;
+					continue;
+				}
+
+				PxU32 innerIterations = 1;
+				for(PxU32 entryIndex = 0;
+					entryIndex < storage.entryIndices.size();
+					entryIndex++)
+				{
+					const Entry& entry =
+						mEntries[storage.entryIndices[entryIndex]];
+					innerIterations = PxMax<PxU32>(
+						innerIterations,
+						entry.getSolverIterationCounts() & 0xff);
+				}
+
+				Dy::AvbdSoftIslandSelection selection;
+				selection.particles = storage.particles.begin();
+				selection.numParticles = storage.particles.size();
+				selection.bodies = storage.bodies.begin();
+				selection.numBodies = storage.bodies.size();
+				selection.contacts = storage.contacts.begin();
+				selection.numContacts = storage.contacts.size();
+				selection.islandIndex = storage.selectedIsland;
+				selection.iterationOverride = innerIterations;
+				if(!selection.isComplete())
+				{
+					selections.clear();
+					return false;
+				}
+				selections.pushBack(selection);
+				selectedEntryCount += storage.entryIndices.size();
+			}
+
+			mDynamicsOwnsStep = !selections.empty();
+			mDynamicsSelectedEntryCount =
+				mDynamicsOwnsStep ? selectedEntryCount : 0;
+			return mDynamicsOwnsStep;
+		}
+
+		void step(
+			PxReal dt,
+			const PxVec3& gravity,
+			const PxsDeformableVolumeMaterialManager& materialManager,
+			const PxsMaterialManager& rigidMaterialManager,
+			bool sleepingEnabled)
+		{
+			if(dt <= 0.0f)
+				return;
+
+			if(mBodies.empty())
+				return;
+
+			PxU32 awakeEntryCount = 0;
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+				if(!mEntries[i].sleeping)
+					awakeEntryCount++;
+			if(awakeEntryCount == 0 && sleepingEnabled)
+			{
+				mDynamicsOwnsStep = false;
+				mDynamicsSelectedEntryCount = 0;
+				return;
+			}
+
+			if(mDynamicsOwnsStep)
+			{
+				// Complete native selections have already been solved by the
+				// unified rigid/soft AVBD path. Advance any unrelated awake
+				// soft-only actors through the established component path,
+				// then restore the selected particles and AL runtime state so
+				// no selected body is double-owned.
+				if(mDynamicsSelectedEntryCount < awakeEntryCount)
+					stepComponentFallback(
+						dt, gravity, materialManager,
+						rigidMaterialManager);
+				for(PxU32 storageIndex = 0;
+					storageIndex < mIslandSelectionStorages.size();
+					storageIndex++)
+				{
+					IslandSelectionStorage& storage =
+						*mIslandSelectionStorages[storageIndex];
+					if(storage.touched)
+						copyIslandSelectionResults(storage);
+				}
+				finalizeDeformableMotionControls(dt);
+				for(PxU32 i = 0; i < mEntries.size(); i++)
+					writeBack(mEntries[i]);
+				updateSleepStates(dt, sleepingEnabled);
+				mDynamicsOwnsStep = false;
+				mDynamicsSelectedEntryCount = 0;
+				return;
+			}
+
+			stepComponentFallback(
+				dt, gravity, materialManager,
+				rigidMaterialManager);
+
+			finalizeDeformableMotionControls(dt);
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+				writeBack(mEntries[i]);
+			updateSleepStates(dt, sleepingEnabled);
+			mDynamicsSelectedEntryCount = 0;
+		}
+
+	private:
+		void stepComponentFallback(
+			PxReal dt,
+			const PxVec3& gravity,
+			const PxsDeformableVolumeMaterialManager& materialManager,
+			const PxsMaterialManager& rigidMaterialManager)
+		{
+			PxU32 requestedPositionIterations = 1;
+			PxU32 requestedCollisionPairUpdates = 0;
+			PxU32 requestedCollisionSubsteps = 1;
+			bool hasExplicitCollisionPairUpdates = false;
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				syncHostInputs(mEntries[i], materialManager);
+				requestedPositionIterations = PxMax<PxU32>(
+					requestedPositionIterations,
+					mEntries[i].getSolverIterationCounts() & 0xff);
+				if(mEntries[i].kind == eSURFACE)
+				{
+					const PxU32 pairUpdates =
+						mEntries[i].surfaceCore->
+							getNbCollisionPairUpdatesPerTimestep();
+					if(pairUpdates > 0)
+					{
+						hasExplicitCollisionPairUpdates = true;
+						requestedCollisionPairUpdates =
+							PxMax(
+								requestedCollisionPairUpdates,
+								pairUpdates);
+					}
+					requestedCollisionSubsteps = PxMax(
+						requestedCollisionSubsteps,
+						PxMax<PxU32>(
+							mEntries[i].surfaceCore->
+								getNbCollisionSubsteps(),
+							1u));
+				}
+			}
+
+			compileWorldStatics(rigidMaterialManager);
+			detectContacts(
+				mParticles.begin(), mParticles.size(),
+				mBodies.begin(), mBodies.size(), mContacts);
+			const bool needsContactRedetection =
+				!mContacts.empty() || mBodies.size() > 1 ||
+				!mRigidBoxes.empty() || !mRigidSpheres.empty() ||
+				!mRigidCapsules.empty() ||
+				!mRigidConvexes.empty() ||
+				!mRigidTriangleSurfaces.empty() ||
+				!mWorldPlanes.empty();
+			// PxDeformableBody::setSolverIterationCounts() specifies the
+			// minimum position-iteration budget for the complete timestep.
+			// A non-zero Surface pair-update count explicitly selects the
+			// number of OGC redetection stages; zero retains adaptive
+			// redetection. Collision substeps set the minimum number of
+			// contact-bearing sweeps in each stage without changing dt or
+			// integrating elasticity more than the resulting solver budget.
+			const PxU32 requestedRedetectionStages =
+				needsContactRedetection
+					? (hasExplicitCollisionPairUpdates
+						? requestedCollisionPairUpdates
+						: 8u)
+					: 1u;
+			const PxU32 minimumContactIterations =
+				needsContactRedetection
+					? PxMax<PxU32>(
+						8u,
+						requestedRedetectionStages *
+							requestedCollisionSubsteps)
+					: 1u;
+			const PxU32 totalPositionIterations = PxMax<PxU32>(
+				requestedPositionIterations,
+				minimumContactIterations);
+			const PxU32 outerIterations =
+				needsContactRedetection
+					? PxMin<PxU32>(
+						requestedRedetectionStages,
+						totalPositionIterations)
+					: 1u;
+			const PxU32 innerIterations =
+				(totalPositionIterations + outerIterations - 1) /
+				outerIterations;
+
+			Dy::avbdStepSoftBodies(
+				mParticles.begin(), mParticles.size(),
+				mBodies.begin(), mBodies.size(),
+				mContacts.begin(), mContacts.size(),
+				dt, gravity,
+				outerIterations, innerIterations,
+				1000.0f,
+				redetectContacts, &mContacts, this,
+				0.92f, NULL, &mWorkspace,
+				totalPositionIterations,
+				mSelfCollisionAdjacencies.begin(),
+				mSelfCollisionAdjacencies.size(),
+				mSelfCollisionEnabled.begin(),
+				&mContactParams);
+		}
+
+		const PxsDeformableSurfaceMaterialCore*
+			getSurfaceMaterial(
+				const DeformableSurfaceCore& core) const
+		{
+			const PxArray<PxU16>& handles =
+				core.getCore().materialHandles;
+			if(handles.empty() ||
+				handles[0] == MATERIAL_INVALID_HANDLE ||
+				handles[0] >= mSurfaceMaterialManager.getMaxSize())
+				return NULL;
+			const PxsDeformableSurfaceMaterialCore* material =
+				mSurfaceMaterialManager.getMaterial(handles[0]);
+			return material->mMaterialIndex == handles[0]
+				? material : NULL;
+		}
+
+		bool rebuildSurfaceRestState(Entry& entry)
+		{
+			PX_ASSERT(entry.kind == eSURFACE && entry.surfaceCore);
+			Dy::DeformableSurfaceCore& core =
+				entry.surfaceCore->getCore();
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 numVertices = getParticleCount(entry);
+			const PxU32 numTriangles =
+				entry.triangleMesh->getNbTriangles();
+			PxArray<PxVec3> restVertices;
+			restVertices.resize(numVertices);
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				restVertices[i] = core.restPosition[i].getXYZ();
+				if(!restVertices[i].isFinite())
+					return false;
+			}
+			PxArray<PxU32> triangles;
+			triangles.resize(3 * numTriangles);
+			const bool has16BitIndices =
+				entry.triangleMesh->getTriangleMeshFlags() &
+				PxTriangleMeshFlag::e16_BIT_INDICES;
+			if(has16BitIndices)
+			{
+				const PxU16* source =
+					static_cast<const PxU16*>(
+						entry.triangleMesh->getTriangles());
+				for(PxU32 i = 0; i < triangles.size(); i++)
+					triangles[i] = source[i];
+			}
+			else
+			{
+				const PxU32* source =
+					static_cast<const PxU32*>(
+						entry.triangleMesh->getTriangles());
+				for(PxU32 i = 0; i < triangles.size(); i++)
+					triangles[i] = source[i];
+			}
+
+			const PxsDeformableSurfaceMaterialCore* material =
+				getSurfaceMaterial(*entry.surfaceCore);
+			PxArray<Dy::AvbdSoftParticle> rebuiltParticles;
+			PxArray<Dy::AvbdSoftBody> rebuiltBodies;
+			Dy::avbdCreateSoftBody(
+				restVertices.begin(), numVertices,
+				NULL, 0,
+				triangles.begin(), triangles.size(),
+				material ? material->youngs : 1.0e5f,
+				material ? material->poissons : 0.3f,
+				1.0f,
+				entry.surfaceCore->getLinearDamping() +
+					(material ? material->elasticityDamping : 0.0f),
+				material ? material->bendingStiffness : 0.0f,
+				material
+					? PxMax(material->thickness, 1.0e-4f)
+					: 0.01f,
+				rebuiltParticles, rebuiltBodies,
+				(entry.surfaceCore->getSurfaceFlags() &
+					PxDeformableSurfaceFlag::eENABLE_FLATTENING)
+					? true : false,
+				entry.surfaceCore->
+					getSelfCollisionFilterDistance(),
+				material ? material->dynamicFriction : 0.5f);
+			if(rebuiltBodies.size() != 1 ||
+				rebuiltParticles.size() != numVertices)
+				return false;
+			if(!rebaseSoftBodyParticleRangeInPlace(
+				rebuiltBodies[0], 0, numVertices,
+				particleStart))
+				return false;
+			mBodies[entry.bodyIndex] = rebuiltBodies[0];
+			PX_ASSERT(
+				entry.bodyIndex < mSelfCollisionAdjacencies.size());
+			Dy::avbdBuildSelfCollisionAdjacency(
+				mBodies[entry.bodyIndex],
+				mSelfCollisionAdjacencies[entry.bodyIndex]);
+			if(!rebuildEntryPins(entry))
+				return false;
+			for(PxU32 i = 0; i < numVertices; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				particle.initialPosition = restVertices[i];
+				particle.elasticK = 0.0f;
+			}
+			return true;
+		}
+
+		Entry* findEntry(ActorCore& core)
+		{
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				Entry& entry = mEntries[i];
+				if(entry.getActorCore() == &core)
+					return &entry;
+			}
+			return NULL;
+		}
+
+		PX_FORCE_INLINE PxU32 getParticleStart(
+			const Entry& entry) const
+		{
+			PX_ASSERT(entry.bodyIndex < mBodies.size());
+			return mBodies[entry.bodyIndex].compiled.particleStart;
+		}
+
+		PX_FORCE_INLINE PxU32 getParticleCount(
+			const Entry& entry) const
+		{
+			PX_ASSERT(entry.bodyIndex < mBodies.size());
+			return mBodies[entry.bodyIndex].compiled.particleCount;
+		}
+
+		bool isVolumeKinematicTargetActive(
+			const Dy::DeformableVolumeCore& core,
+			const PxVec4& target) const
+		{
+			if(!core.kinematicTarget ||
+				!target.getXYZ().isFinite())
+				return false;
+			if(core.bodyFlags & PxDeformableBodyFlag::eKINEMATIC)
+				return true;
+			return
+				(core.volumeFlags &
+					PxDeformableVolumeFlag::ePARTIALLY_KINEMATIC) &&
+				target.w == 0.0f;
+		}
+
+		bool appendVolumeKinematicTargetPins(
+			const Entry& entry,
+			const PxArray<Dy::AvbdKinematicPin>& previousPins,
+			PxArray<Dy::AvbdKinematicPin>& pins) const
+		{
+			if(entry.kind != eVOLUME || !entry.volumeCore)
+				return true;
+			const Dy::DeformableVolumeCore& core =
+				entry.volumeCore->getCore();
+			if(!core.kinematicTarget ||
+				!(core.bodyFlags &
+						PxDeformableBodyFlag::eKINEMATIC) &&
+				!(core.volumeFlags &
+						PxDeformableVolumeFlag::
+							ePARTIALLY_KINEMATIC))
+				return true;
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			for(PxU32 localIndex = 0;
+				localIndex < particleCount; localIndex++)
+			{
+				const PxVec4& target =
+					core.kinematicTarget[localIndex];
+				if(!isVolumeKinematicTargetActive(core, target))
+					continue;
+				Dy::AvbdKinematicPin pin;
+				pin.point.setVertex(particleStart + localIndex);
+				pin.sourceHandle = localIndex;
+				pin.targetKind =
+					Dy::AvbdSoftPinTargetKind::
+						eDEFORMABLE_KINEMATIC;
+				pin.worldTarget = target.getXYZ();
+				pin.previousWorldTarget = pin.worldTarget;
+				pin.k = 1.0e8f;
+				pin.kMax = 1.0e10f;
+				for(PxU32 previousIndex = 0;
+					previousIndex < previousPins.size();
+					previousIndex++)
+				{
+					const Dy::AvbdKinematicPin& previous =
+						previousPins[previousIndex];
+					if(previous.targetKind != pin.targetKind ||
+						previous.sourceHandle != localIndex)
+						continue;
+					pin.previousWorldTarget =
+						previous.worldTarget;
+					pin.alLambda = previous.alLambda;
+					pin.k = previous.k;
+					pin.kMax = previous.kMax;
+					break;
+				}
+				pins.pushBack(pin);
+			}
+			return true;
+		}
+
+		bool rebuildEntryPins(Entry& entry)
+		{
+			if(entry.bodyIndex >= mBodies.size())
+				return false;
+			Dy::AvbdSoftBody& body = mBodies[entry.bodyIndex];
+			const PxU32 particleStart =
+				body.compiled.particleStart;
+			const PxU32 particleCount =
+				body.compiled.particleCount;
+			const PxArray<Dy::AvbdKinematicPin> previousPins =
+				body.runtime.pins;
+			body.runtime.pins.clear();
+			if(!appendVolumeKinematicTargetPins(
+				entry, previousPins, body.runtime.pins))
+				return false;
+			for(PxU32 i = 0; i < mWorldPins.size(); i++)
+			{
+				const WorldPinEntry& source = mWorldPins[i];
+				if(source.softCore != entry.getActorCore())
+					continue;
+				if(!Dy::avbdIsSoftPointValid(
+					source.localPoint, 0, particleCount))
+					return false;
+				Dy::AvbdKinematicPin pin;
+				pin.point = source.localPoint;
+				for(PxU32 endpoint = 0;
+					endpoint < pin.point.particleCount; endpoint++)
+					pin.point.particleIndices[endpoint] +=
+						particleStart;
+				pin.sourceHandle = source.handle;
+				pin.targetKind =
+					Dy::AvbdSoftPinTargetKind::eWORLD_FIXED;
+				pin.worldTarget = source.worldTarget;
+				pin.previousWorldTarget =
+					source.worldTarget;
+				// Public vertex-to-world attachments are fixed positional
+				// objectives. Keep their compliance below the public gate
+				// tolerance while retaining the position-level AL owner.
+				pin.k = 1.0e8f;
+				pin.kMax = 1.0e10f;
+				body.runtime.pins.pushBack(pin);
+			}
+			for(PxU32 i = 0;
+				i < mPrescribedAttachments.size(); i++)
+			{
+				PrescribedAttachmentEntry& source =
+					mPrescribedAttachments[i];
+				if(source.softCore != entry.getActorCore() ||
+					!source.active)
+					continue;
+				if(!Dy::avbdIsSoftPointValid(
+					source.localPoint, 0, particleCount))
+					return false;
+				PxVec3 worldTarget;
+				if(!computePrescribedAttachmentWorldTarget(
+					*source.prescribedCore,
+					source.actorLocalTarget, worldTarget))
+					return false;
+				source.worldTarget = worldTarget;
+				Dy::AvbdKinematicPin pin;
+				pin.point = source.localPoint;
+				for(PxU32 endpoint = 0;
+					endpoint < pin.point.particleCount; endpoint++)
+					pin.point.particleIndices[endpoint] +=
+						particleStart;
+				pin.sourceHandle = source.handle;
+				pin.targetKind =
+					Dy::AvbdSoftPinTargetKind::
+						ePRESCRIBED_RIGID;
+				pin.worldTarget = source.worldTarget;
+				pin.previousWorldTarget =
+					source.previousWorldTarget;
+				pin.alLambda = source.alLambda;
+				pin.k = source.k;
+				pin.kMax = source.kMax;
+				body.runtime.pins.pushBack(pin);
+			}
+			body.runtime.compileObjectiveProgram(
+				particleStart, particleCount);
+			return body.runtime.isObjectiveProgramCurrent(
+				particleStart, particleCount);
+		}
+
+		void refreshVolumeKinematicTargets()
+		{
+			for(PxU32 entryIndex = 0;
+				entryIndex < mEntries.size(); entryIndex++)
+			{
+				Entry& entry = mEntries[entryIndex];
+				if(entry.kind != eVOLUME || !entry.volumeCore ||
+					entry.bodyIndex >= mBodies.size())
+					continue;
+				const Dy::DeformableVolumeCore& core =
+					entry.volumeCore->getCore();
+				Dy::AvbdSoftBodyRuntimeState& runtime =
+					mBodies[entry.bodyIndex].runtime;
+				const PxU32 particleCount =
+					getParticleCount(entry);
+				PxU32 expectedCount = 0;
+				if(core.kinematicTarget)
+				{
+					for(PxU32 localIndex = 0;
+						localIndex < particleCount; localIndex++)
+					{
+						if(isVolumeKinematicTargetActive(
+							core,
+							core.kinematicTarget[localIndex]))
+							expectedCount++;
+					}
+				}
+
+				PxU32 existingCount = 0;
+				bool needsRebuild = false;
+				for(PxU32 pinIndex = 0;
+					pinIndex < runtime.pins.size(); pinIndex++)
+				{
+					const Dy::AvbdKinematicPin& pin =
+						runtime.pins[pinIndex];
+					if(pin.targetKind !=
+						Dy::AvbdSoftPinTargetKind::
+							eDEFORMABLE_KINEMATIC)
+						continue;
+					existingCount++;
+					if(pin.sourceHandle >= particleCount ||
+						!core.kinematicTarget ||
+						!isVolumeKinematicTargetActive(
+							core,
+							core.kinematicTarget[
+								pin.sourceHandle]))
+						needsRebuild = true;
+				}
+				needsRebuild =
+					needsRebuild || existingCount != expectedCount;
+				if(needsRebuild)
+				{
+					const bool rebuilt = rebuildEntryPins(entry);
+					PX_ASSERT(rebuilt);
+					if(rebuilt && expectedCount > 0)
+						wakeEntry(
+							entry,
+							ScInternalWakeCounterResetValue);
+					continue;
+				}
+
+				bool targetMoved = false;
+				for(PxU32 pinIndex = 0;
+					pinIndex < runtime.pins.size(); pinIndex++)
+				{
+					Dy::AvbdKinematicPin& pin =
+						runtime.pins[pinIndex];
+					if(pin.targetKind !=
+						Dy::AvbdSoftPinTargetKind::
+							eDEFORMABLE_KINEMATIC)
+						continue;
+					PX_ASSERT(core.kinematicTarget &&
+						pin.sourceHandle < particleCount);
+					if(!core.kinematicTarget ||
+						pin.sourceHandle >= particleCount)
+						continue;
+					const PxVec3 previousTarget =
+						pin.worldTarget;
+					const PxVec3 worldTarget =
+						core.kinematicTarget[
+							pin.sourceHandle].getXYZ();
+					pin.previousWorldTarget = previousTarget;
+					pin.worldTarget = worldTarget;
+					targetMoved = targetMoved ||
+						(worldTarget - previousTarget).
+							magnitudeSquared() > 1.0e-12f;
+				}
+				if(targetMoved)
+					wakeEntry(
+						entry,
+						ScInternalWakeCounterResetValue);
+			}
+		}
+
+		void refreshPrescribedAttachmentTargets()
+		{
+			for(PxU32 i = 0;
+				i < mPrescribedAttachments.size(); i++)
+			{
+				PrescribedAttachmentEntry& attachment =
+					mPrescribedAttachments[i];
+				Entry* entry =
+					findEntry(*attachment.softCore);
+				if(!entry)
+					continue;
+				PxVec3 worldTarget;
+				const bool active =
+					computePrescribedAttachmentWorldTarget(
+						*attachment.prescribedCore,
+						attachment.actorLocalTarget,
+						worldTarget);
+				if(active != attachment.active)
+				{
+					attachment.active = active;
+					if(active)
+					{
+						attachment.worldTarget =
+							worldTarget;
+						attachment.previousWorldTarget =
+							worldTarget;
+					}
+					const bool rebuilt =
+						rebuildEntryPins(*entry);
+					PX_ASSERT(rebuilt);
+					PX_UNUSED(rebuilt);
+					if(active)
+						wakeEntry(
+							*entry,
+							ScInternalWakeCounterResetValue);
+					continue;
+				}
+				if(!active)
+					continue;
+
+				Dy::AvbdSoftBodyRuntimeState& runtime =
+					mBodies[entry->bodyIndex].runtime;
+				Dy::AvbdKinematicPin* pin = NULL;
+				for(PxU32 pinIndex = 0;
+					pinIndex < runtime.pins.size(); pinIndex++)
+				{
+					Dy::AvbdKinematicPin& candidate =
+						runtime.pins[pinIndex];
+					if(candidate.targetKind ==
+							Dy::AvbdSoftPinTargetKind::
+								ePRESCRIBED_RIGID &&
+						candidate.sourceHandle ==
+							attachment.handle)
+					{
+						pin = &candidate;
+						break;
+					}
+				}
+				PX_ASSERT(pin);
+				if(!pin)
+					continue;
+				const PxVec3 previousTarget =
+					attachment.worldTarget;
+				attachment.previousWorldTarget =
+					previousTarget;
+				attachment.worldTarget = worldTarget;
+				pin->previousWorldTarget = previousTarget;
+				pin->worldTarget = worldTarget;
+				if((worldTarget - previousTarget).
+					magnitudeSquared() > 1.0e-12f)
+					wakeEntry(
+						*entry,
+						ScInternalWakeCounterResetValue);
+			}
+		}
+
+		void removeWorldPinsForCore(ActorCore& core)
+		{
+			for(PxU32 i = mWorldPins.size(); i > 0; i--)
+			{
+				const WorldPinEntry& pin = mWorldPins[i - 1];
+				if(pin.softCore == &core)
+					mWorldPins.replaceWithLast(i - 1);
+			}
+		}
+
+		void removeRigidAttachmentsForSoft(ActorCore& core)
+		{
+			bool removed = false;
+			for(PxU32 i = mRigidAttachments.size(); i > 0; i--)
+			{
+				if(mRigidAttachments[i - 1].softCore == &core)
+				{
+					mRigidAttachments.replaceWithLast(i - 1);
+					removed = true;
+				}
+			}
+			if(removed)
+			{
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+			}
+		}
+
+		void removeArticulationAttachmentsForSoft(
+			ActorCore& core)
+		{
+			bool removed = false;
+			for(PxU32 i = mArticulationAttachments.size();
+				i > 0; i--)
+			{
+				if(mArticulationAttachments[i - 1].softCore ==
+					&core)
+				{
+					mArticulationAttachments.replaceWithLast(
+						i - 1);
+					removed = true;
+				}
+			}
+			if(removed)
+			{
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+			}
+		}
+
+		void removeSoftPairAttachmentsForSoft(
+			ActorCore& core)
+		{
+			bool removed = false;
+			for(PxU32 i = mSoftPairAttachments.size(); i > 0; i--)
+			{
+				const SoftPairAttachmentEntry& attachment =
+					mSoftPairAttachments[i - 1];
+				if(attachment.softCore[0] != &core &&
+					attachment.softCore[1] != &core)
+					continue;
+				ActorCore* otherCore =
+					attachment.softCore[0] == &core
+						? attachment.softCore[1]
+						: attachment.softCore[0];
+				mSoftPairAttachments.replaceWithLast(i - 1);
+				Entry* otherEntry =
+					otherCore ? findEntry(*otherCore) : NULL;
+				if(otherEntry)
+					wakeEntry(
+						*otherEntry,
+						ScInternalWakeCounterResetValue);
+				removed = true;
+			}
+			if(removed)
+			{
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+			}
+		}
+
+		void removePrescribedAttachmentsForSoft(
+			ActorCore& core)
+		{
+			for(PxU32 i = mPrescribedAttachments.size();
+				i > 0; i--)
+			{
+				if(mPrescribedAttachments[i - 1].softCore ==
+					&core)
+					mPrescribedAttachments.replaceWithLast(
+						i - 1);
+			}
+		}
+
+		void removePrescribedAttachmentsForRigid(
+			RigidCore& core)
+		{
+			for(PxU32 i = mPrescribedAttachments.size();
+				i > 0; i--)
+			{
+				if(mPrescribedAttachments[i - 1].
+					prescribedCore != &core)
+					continue;
+				ActorCore* softCore =
+					mPrescribedAttachments[i - 1].softCore;
+				mPrescribedAttachments.replaceWithLast(i - 1);
+				Entry* entry =
+					softCore ? findEntry(*softCore) : NULL;
+				if(entry)
+				{
+					const bool rebuilt =
+						rebuildEntryPins(*entry);
+					PX_ASSERT(rebuilt);
+					PX_UNUSED(rebuilt);
+					wakeEntry(
+						*entry,
+						ScInternalWakeCounterResetValue);
+				}
+			}
+		}
+
+		void removeRigidAttachmentsForRigid(BodyCore& core)
+		{
+			bool removed = false;
+			for(PxU32 i = mRigidAttachments.size(); i > 0; i--)
+			{
+				if(mRigidAttachments[i - 1].rigidCore == &core)
+				{
+					ActorCore* softCore =
+						mRigidAttachments[i - 1].softCore;
+					mRigidAttachments.replaceWithLast(i - 1);
+					Entry* entry =
+						softCore ? findEntry(*softCore) : NULL;
+					if(entry)
+						wakeEntry(
+							*entry,
+							ScInternalWakeCounterResetValue);
+					removed = true;
+				}
+			}
+			if(removed)
+			{
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+			}
+		}
+
+		void removeArticulationAttachmentsForLink(
+			BodyCore& core)
+		{
+			bool removed = false;
+			for(PxU32 i = mArticulationAttachments.size();
+				i > 0; i--)
+			{
+				if(mArticulationAttachments[i - 1].linkCore !=
+					&core)
+					continue;
+				ActorCore* softCore =
+					mArticulationAttachments[i - 1].softCore;
+				mArticulationAttachments.replaceWithLast(i - 1);
+				Entry* entry =
+					softCore ? findEntry(*softCore) : NULL;
+				if(entry)
+					wakeEntry(
+						*entry,
+						ScInternalWakeCounterResetValue);
+				removed = true;
+			}
+			if(removed)
+			{
+				clearIslandSelectionStorages();
+				mDynamicsOwnsStep = false;
+			}
+		}
+
+		void sleepEntry(Entry& entry)
+		{
+			Dy::DeformableBodyCore& core =
+				entry.getBodyCore();
+			PxVec4* velocities = entry.getVelocity();
+			PX_ASSERT(velocities);
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				particle.velocity = PxVec3(0.0f);
+				particle.prevVelocity = PxVec3(0.0f);
+				particle.predictedPosition = particle.position;
+				particle.outerPosition = particle.position;
+				particle.invMass = 0.0f;
+				particle.mass = 0.0f;
+				particle.gravityScale = 0.0f;
+				const PxReal velocityW =
+					velocities[i].w;
+				velocities[i] =
+					PxVec4(PxVec3(0.0f), velocityW);
+			}
+			core.wakeCounter = 0.0f;
+			core.cpuAvbdSleeping = true;
+			core.cpuAvbdWakeRequested = false;
+			entry.sleeping = true;
+			mIslandManager.deactivateNode(entry.islandNode);
+		}
+
+		void wakeEntry(Entry& entry, PxReal wakeCounter)
+		{
+			Dy::DeformableBodyCore& core =
+				entry.getBodyCore();
+			PxVec4* positions = entry.getPositionInvMass();
+			PxVec4* velocities = entry.getVelocity();
+			PX_ASSERT(positions && velocities);
+			const PxReal gravityScale =
+				(entry.getActorFlags() &
+					PxActorFlag::eDISABLE_GRAVITY)
+				? 0.0f : 1.0f;
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				const PxReal invMass = PxMax(
+					positions[i].w, 0.0f);
+				particle.invMass = invMass;
+				particle.mass =
+					invMass > 0.0f ? 1.0f / invMass : 0.0f;
+				particle.velocity =
+					velocities[i].getXYZ();
+				particle.prevVelocity = particle.velocity;
+				particle.gravityScale = gravityScale;
+			}
+			core.wakeCounter = PxMax(wakeCounter, 0.0f);
+			core.cpuAvbdSleeping = false;
+			core.cpuAvbdWakeRequested = false;
+			entry.sleeping = false;
+			mIslandManager.activateNode(entry.islandNode);
+		}
+
+		void finalizeDeformableMotionControls(PxReal dt)
+		{
+			for(PxU32 entryIndex = 0;
+				entryIndex < mEntries.size(); entryIndex++)
+			{
+				Entry& entry = mEntries[entryIndex];
+				if(entry.sleeping)
+					continue;
+
+				const PxU32 particleStart =
+					getParticleStart(entry);
+				const PxU32 particleCount =
+					getParticleCount(entry);
+				PxReal maxSpeedSquared = 0.0f;
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					const Dy::AvbdSoftParticle& particle =
+						mParticles[particleStart + i];
+					if(particle.invMass <= 0.0f)
+						continue;
+					maxSpeedSquared = PxMax(
+						maxSpeedSquared,
+						particle.velocity.magnitudeSquared());
+				}
+
+				const Dy::DeformableBodyCore& core =
+					entry.getBodyCore();
+				const PxReal settlingThreshold =
+					PxMax(core.settlingThreshold, 0.0f);
+				if(maxSpeedSquared >
+					settlingThreshold * settlingThreshold)
+					continue;
+				const PxReal settlingScale = PxMax(
+					1.0f -
+						PxMax(core.settlingDamping, 0.0f) * dt,
+					0.0f);
+				if(settlingScale >= 1.0f)
+					continue;
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					Dy::AvbdSoftParticle& particle =
+						mParticles[particleStart + i];
+					if(particle.invMass <= 0.0f)
+						continue;
+					particle.velocity *= settlingScale;
+					particle.prevVelocity = particle.velocity;
+				}
+			}
+		}
+
+		void updateSleepStates(
+			PxReal dt, bool sleepingEnabled)
+		{
+			for(PxU32 entryIndex = 0;
+				entryIndex < mEntries.size(); entryIndex++)
+			{
+				Entry& entry = mEntries[entryIndex];
+				if(!sleepingEnabled)
+				{
+					if(entry.sleeping)
+						wakeEntry(
+							entry,
+							ScInternalWakeCounterResetValue);
+					continue;
+				}
+				if(entry.sleeping)
+					continue;
+
+				PxReal maxSpeedSquared = 0.0f;
+				const PxU32 particleStart =
+					getParticleStart(entry);
+				const PxU32 particleCount =
+					getParticleCount(entry);
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					const Dy::AvbdSoftParticle& particle =
+						mParticles[particleStart + i];
+					if(particle.invMass <= 0.0f)
+						continue;
+					maxSpeedSquared = PxMax(
+						maxSpeedSquared,
+						particle.velocity.magnitudeSquared());
+				}
+				Dy::DeformableBodyCore& core =
+					entry.getBodyCore();
+				bool kinematicTargetResidualPending = false;
+				if(entry.bodyIndex < mBodies.size())
+				{
+					const Dy::AvbdSoftBodyRuntimeState& runtime =
+						mBodies[entry.bodyIndex].runtime;
+					for(PxU32 pinIndex = 0;
+						pinIndex < runtime.pins.size(); pinIndex++)
+					{
+						const Dy::AvbdKinematicPin& pin =
+							runtime.pins[pinIndex];
+						if(pin.targetKind !=
+							Dy::AvbdSoftPinTargetKind::
+								eDEFORMABLE_KINEMATIC)
+							continue;
+						const PxReal
+							kinematicTargetResidualSquared =
+								(Dy::avbdGetSoftPointPosition(
+									pin.point,
+									mParticles.begin()) -
+								 pin.worldTarget).
+									magnitudeSquared();
+						if(kinematicTargetResidualSquared >
+							1.0e-8f)
+						{
+							kinematicTargetResidualPending = true;
+							break;
+						}
+					}
+				}
+				if(kinematicTargetResidualPending)
+				{
+					core.wakeCounter = PxMax(
+						core.wakeCounter,
+						ScInternalWakeCounterResetValue);
+					continue;
+				}
+				const PxReal sleepThreshold =
+					PxMax(core.sleepThreshold, 0.0f);
+				if(maxSpeedSquared >
+					sleepThreshold * sleepThreshold)
+				{
+					core.wakeCounter = PxMax(
+						core.wakeCounter,
+						ScInternalWakeCounterResetValue);
+					continue;
+				}
+
+				core.wakeCounter = PxMax(
+					core.wakeCounter - dt, 0.0f);
+				if(core.wakeCounter == 0.0f)
+					sleepEntry(entry);
+			}
+		}
+
+		void clearIslandSelectionStorages()
+		{
+			for(PxU32 i = 0; i < mIslandSelectionStorages.size(); i++)
+			{
+				IslandSelectionStorage* storage =
+					mIslandSelectionStorages[i];
+				if(storage)
+				{
+					storage->~IslandSelectionStorage();
+					PX_FREE(storage);
+				}
+			}
+			mIslandSelectionStorages.clear();
+		}
+
+		IslandSelectionStorage* acquireIslandSelectionStorage(
+			IG::IslandId nativeIslandId)
+		{
+			for(PxU32 i = 0; i < mIslandSelectionStorages.size(); i++)
+			{
+				IslandSelectionStorage* storage =
+					mIslandSelectionStorages[i];
+				if(storage->touched &&
+					storage->nativeIslandId == nativeIslandId)
+					return storage;
+			}
+			for(PxU32 i = 0; i < mIslandSelectionStorages.size(); i++)
+			{
+				IslandSelectionStorage* storage =
+					mIslandSelectionStorages[i];
+				if(!storage->touched)
+				{
+					if(storage->nativeIslandId != nativeIslandId)
+					{
+						storage->contacts.clear();
+						storage->softCores.clear();
+					}
+					storage->nativeIslandId = nativeIslandId;
+					storage->touched = true;
+					return storage;
+				}
+			}
+
+			void* memory = PX_ALLOC(
+				sizeof(IslandSelectionStorage),
+				"AVBD CPU soft island selection storage");
+			IslandSelectionStorage* storage = memory
+				? PX_PLACEMENT_NEW(
+					memory, IslandSelectionStorage)()
+				: NULL;
+			if(!storage)
+				return NULL;
+			storage->nativeIslandId = nativeIslandId;
+			storage->touched = true;
+			mIslandSelectionStorages.pushBack(storage);
+			return storage;
+		}
+
+		static bool rebaseParticleIndex(
+			PxU32& index, PxU32 globalStart,
+			PxU32 particleCount, PxU32 localStart)
+		{
+			if(index == PX_MAX_U32)
+				return true;
+			if(index < globalStart ||
+				index - globalStart >= particleCount)
+				return false;
+			index = localStart + (index - globalStart);
+			return true;
+		}
+
+		static bool copyAndRebaseSoftBody(
+			const Dy::AvbdSoftBody& source,
+			PxU32 globalStart, PxU32 particleCount,
+			PxU32 localStart,
+			Dy::AvbdSoftBody& destination)
+		{
+			if(source.compiled.particleStart != globalStart ||
+				source.compiled.particleCount != particleCount ||
+				!source.runtime.attachments.empty())
+				return false;
+			destination = source;
+			return rebaseSoftBodyParticleRangeInPlace(
+				destination, globalStart, particleCount, localStart);
+		}
+
+		static bool rebaseSoftBodyParticleRangeInPlace(
+			Dy::AvbdSoftBody& body,
+			PxU32 oldStart, PxU32 particleCount,
+			PxU32 newStart)
+		{
+			if(body.compiled.particleStart != oldStart ||
+				body.compiled.particleCount != particleCount)
+				return false;
+			body.compiled.particleStart = newStart;
+			for(PxU32 i = 0;
+				i < body.compiled.triElements.size(); i++)
+			{
+				Dy::AvbdTriElement& element =
+					body.compiled.triElements[i];
+				if(!rebaseParticleIndex(
+					element.p0, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.p1, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.p2, oldStart, particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.compiled.tetElements.size(); i++)
+			{
+				Dy::AvbdTetElement& element =
+					body.compiled.tetElements[i];
+				if(!rebaseParticleIndex(
+					element.p0, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.p1, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.p2, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.p3, oldStart, particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.compiled.bendElements.size(); i++)
+			{
+				Dy::AvbdBendingElement& element =
+					body.compiled.bendElements[i];
+				if(!rebaseParticleIndex(
+					element.opp0, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.opp1, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.edgeStart, oldStart,
+						particleCount, newStart) ||
+					!rebaseParticleIndex(
+						element.edgeEnd, oldStart,
+						particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0; i < body.compiled.edges.size(); i++)
+			{
+				Dy::AvbdEdgeInfo& edge = body.compiled.edges[i];
+				if(!rebaseParticleIndex(
+					edge.p0, oldStart, particleCount, newStart) ||
+					!rebaseParticleIndex(
+						edge.p1, oldStart, particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.compiled.surfaceTriangles.size(); i++)
+			{
+				if(!rebaseParticleIndex(
+					body.compiled.surfaceTriangles[i],
+					oldStart, particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.compiled.surfaceVertices.size(); i++)
+			{
+				if(!rebaseParticleIndex(
+					body.compiled.surfaceVertices[i],
+					oldStart, particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.compiled.surfaceEdges.size(); i++)
+			{
+				Dy::AvbdEdgeInfo& edge =
+					body.compiled.surfaceEdges[i];
+				if(!rebaseParticleIndex(
+						edge.p0, oldStart,
+						particleCount, newStart) ||
+					!rebaseParticleIndex(
+						edge.p1, oldStart,
+						particleCount, newStart))
+					return false;
+			}
+			for(PxU32 i = 0;
+				i < body.runtime.attachments.size(); i++)
+			{
+				Dy::AvbdSoftPoint& point =
+					body.runtime.attachments[i].point;
+				for(PxU32 endpoint = 0;
+					endpoint < point.particleCount; endpoint++)
+				{
+					if(!rebaseParticleIndex(
+						point.particleIndices[endpoint],
+						oldStart, particleCount, newStart))
+						return false;
+				}
+			}
+			for(PxU32 i = 0; i < body.runtime.pins.size(); i++)
+			{
+				Dy::AvbdSoftPoint& point =
+					body.runtime.pins[i].point;
+				for(PxU32 endpoint = 0;
+					endpoint < point.particleCount; endpoint++)
+				{
+					if(!rebaseParticleIndex(
+						point.particleIndices[endpoint],
+						oldStart, particleCount, newStart))
+						return false;
+				}
+			}
+			body.runtime.compileObjectiveProgram(
+				newStart, particleCount);
+			return body.runtime.isObjectiveProgramCurrent(
+				newStart, particleCount);
+		}
+
+		bool findRigidBodyIndexInIsland(
+			BodyCore& rigidCore,
+			PxsRigidBody* const* rigidBodies,
+			const Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxU32& localBodyIndex) const
+		{
+			BodySim* bodySim = rigidCore.getSim();
+			if(!bodySim || bodySim->isKinematic() ||
+				bodySim->isArticulationLink())
+				return false;
+			const PxsRigidBody* lowLevelBody =
+				&bodySim->getLowLevelBody();
+			for(PxU32 i = 0; i < bodyCount; i++)
+			{
+				const PxU32 globalBodyIndex = bodyStart + i;
+				if(rigidBodies[globalBodyIndex] != lowLevelBody)
+					continue;
+				if(solverBodies[globalBodyIndex].isStatic())
+					return false;
+				localBodyIndex = i;
+				return true;
+			}
+			return false;
+		}
+
+		bool findArticulationBodyIndexInIsland(
+			BodyCore& linkCore,
+			Dy::FeatherstoneArticulation* const*
+				articulationForBody,
+			const PxU32* linkIndexForBody,
+			const Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxU32& localBodyIndex) const
+		{
+			BodySim* bodySim = linkCore.getSim();
+			if(!bodySim || !bodySim->isArticulationLink() ||
+				!bodySim->getArticulation())
+				return false;
+			for(PxU32 i = 0; i < bodyCount; i++)
+			{
+				const PxU32 globalBodyIndex = bodyStart + i;
+				Dy::FeatherstoneArticulation* articulation =
+					articulationForBody[globalBodyIndex];
+				if(!articulation ||
+					articulation != bodySim->getArticulation())
+					continue;
+				const PxU32 linkIndex =
+					linkIndexForBody[globalBodyIndex];
+				const Dy::ArticulationData& data =
+					articulation->getArticulationData();
+				if(linkIndex >= data.getLinkCount() ||
+					data.getLink(linkIndex).bodyCore !=
+						&linkCore.getCore())
+					continue;
+				if(solverBodies[globalBodyIndex].isStatic())
+					return false;
+				localBodyIndex = i;
+				return true;
+			}
+			return false;
+		}
+
+		RigidAttachmentEntry* findRigidAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mRigidAttachments.size(); i++)
+			{
+				RigidAttachmentEntry& attachment =
+					mRigidAttachments[i];
+				if(attachment.softCore == &softCore &&
+					attachment.handle == handle)
+					return &attachment;
+			}
+			return NULL;
+		}
+
+		ArticulationAttachmentEntry*
+			findArticulationAttachment(
+				ActorCore& softCore,
+				PxU32 handle)
+		{
+			for(PxU32 i = 0;
+				i < mArticulationAttachments.size(); i++)
+			{
+				ArticulationAttachmentEntry& attachment =
+					mArticulationAttachments[i];
+				if(attachment.softCore == &softCore &&
+					attachment.handle == handle)
+					return &attachment;
+			}
+			return NULL;
+		}
+
+		SoftPairAttachmentEntry* findSoftPairAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0; i < mSoftPairAttachments.size(); i++)
+			{
+				SoftPairAttachmentEntry& attachment =
+					mSoftPairAttachments[i];
+				if(attachment.softCore[0] == &softCore &&
+					attachment.handle == handle)
+					return &attachment;
+			}
+			return NULL;
+		}
+
+		PrescribedAttachmentEntry* findPrescribedAttachment(
+			ActorCore& softCore,
+			PxU32 handle)
+		{
+			for(PxU32 i = 0;
+				i < mPrescribedAttachments.size(); i++)
+			{
+				PrescribedAttachmentEntry& attachment =
+					mPrescribedAttachments[i];
+				if(attachment.softCore == &softCore &&
+					attachment.handle == handle)
+					return &attachment;
+			}
+			return NULL;
+		}
+
+		bool buildIslandSelectionStorage(
+			IslandSelectionStorage& storage,
+			Dy::AvbdSolverBody* solverBodies,
+			PxsRigidBody* const* rigidBodies,
+			Dy::FeatherstoneArticulation* const*
+				articulationForBody,
+			const PxU32* linkIndexForBody,
+			PxU32 bodyStart, PxU32 bodyCount,
+			PxReal dt, const PxVec3& gravity)
+		{
+			bool membershipMatches =
+				storage.softCores.size() == storage.entryIndices.size();
+			for(PxU32 i = 0;
+				membershipMatches && i < storage.entryIndices.size(); i++)
+			{
+				membershipMatches =
+					storage.softCores[i] ==
+					mEntries[storage.entryIndices[i]].
+						getActorCore();
+			}
+			if(!membershipMatches)
+				storage.contacts.clear();
+			storage.softCores.clear();
+			storage.globalParticleIndices.clear();
+			storage.particles.clear();
+			storage.bodies.clear();
+			storage.selfCollisionAdjacencies.clear();
+			storage.selfCollisionEnabled.clear();
+			storage.rigidBoxes.clear();
+			storage.selectedDynamicBoxes.clear();
+			storage.rigidSpheres.clear();
+			storage.selectedDynamicSpheres.clear();
+			storage.rigidCapsules.clear();
+			storage.selectedDynamicCapsules.clear();
+			storage.rigidConvexes.clear();
+			storage.selectedDynamicConvexes.clear();
+			storage.probeContacts.clear();
+
+			for(PxU32 entryOrder = 0;
+				entryOrder < storage.entryIndices.size(); entryOrder++)
+			{
+				const Entry& entry =
+					mEntries[storage.entryIndices[entryOrder]];
+				storage.softCores.pushBack(entry.getActorCore());
+				const PxU32 localStart = storage.particles.size();
+				const PxU32 particleStart =
+					getParticleStart(entry);
+				const PxU32 particleCount =
+					getParticleCount(entry);
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					const PxU32 globalIndex = particleStart + i;
+					if(globalIndex >= mParticles.size())
+						return false;
+					storage.globalParticleIndices.pushBack(globalIndex);
+					storage.particles.pushBack(mParticles[globalIndex]);
+				}
+				if(entry.bodyIndex >= mBodies.size())
+					return false;
+				if(entry.bodyIndex >=
+					mSelfCollisionAdjacencies.size())
+					return false;
+				Dy::AvbdSoftBody localBody;
+				if(!copyAndRebaseSoftBody(
+					mBodies[entry.bodyIndex],
+					particleStart, particleCount,
+					localStart, localBody))
+					return false;
+				storage.bodies.pushBack(localBody);
+				storage.selfCollisionAdjacencies.pushBack(
+					mSelfCollisionAdjacencies[entry.bodyIndex]);
+				storage.selfCollisionEnabled.pushBack(
+					(entry.getBodyCore().bodyFlags &
+						PxDeformableBodyFlag::
+							eDISABLE_SELF_COLLISION)
+					? 0u : 1u);
+			}
+			// Contact selection happens before the unified AVBD solve's
+			// prediction stage. Publish the same current-frame soft prediction
+			// now so swept contact prep can select a first-impact objective;
+			// the solver recomputes this idempotently before iteration.
+			for(PxU32 particleIndex = 0;
+				particleIndex < storage.particles.size(); particleIndex++)
+				storage.particles[particleIndex].
+					computePrediction(dt, gravity);
+
+			bool hasRigidAttachment = false;
+			bool hasArticulationAttachment = false;
+			bool hasSoftPairAttachment = false;
+			for(PxU32 entryOrder = 0;
+				entryOrder < storage.entryIndices.size(); entryOrder++)
+			{
+				const Entry& entry =
+					mEntries[storage.entryIndices[entryOrder]];
+				Dy::AvbdSoftBody& localBody =
+					storage.bodies[entryOrder];
+				for(PxU32 attachmentIndex = 0;
+					attachmentIndex < mRigidAttachments.size();
+					attachmentIndex++)
+				{
+					const RigidAttachmentEntry& source =
+						mRigidAttachments[attachmentIndex];
+					if(source.softCore != entry.getActorCore() ||
+						!Dy::avbdIsSoftPointValid(
+							source.localPoint, 0,
+							localBody.compiled.particleCount))
+						continue;
+					PxU32 localRigidBodyIndex = PX_MAX_U32;
+					if(!findRigidBodyIndexInIsland(
+						*source.rigidCore, rigidBodies,
+						solverBodies, bodyStart, bodyCount,
+						localRigidBodyIndex))
+						return false;
+
+					Dy::AvbdSoftAttachment attachment;
+					attachment.point = source.localPoint;
+					for(PxU32 endpoint = 0;
+						endpoint < attachment.point.particleCount;
+						endpoint++)
+					{
+						attachment.point.
+							particleIndices[endpoint] +=
+								localBody.compiled.particleStart;
+					}
+					attachment.rigidBodyIdx =
+						localRigidBodyIndex;
+					attachment.sourceHandle = source.handle;
+					attachment.targetKind =
+						Dy::AvbdSoftAttachmentTargetKind::
+							eDYNAMIC_RIGID;
+					attachment.localOffset =
+						source.rigidCore->getBody2Actor().
+							getInverse().transform(
+								source.actorLocalTarget);
+					attachment.alLambda = source.alLambda;
+					attachment.k = source.k;
+					attachment.kMax = source.kMax;
+					localBody.runtime.attachments.pushBack(
+						attachment);
+					hasRigidAttachment = true;
+				}
+				for(PxU32 attachmentIndex = 0;
+					attachmentIndex <
+						mArticulationAttachments.size();
+					attachmentIndex++)
+				{
+					const ArticulationAttachmentEntry& source =
+						mArticulationAttachments[
+							attachmentIndex];
+					if(source.softCore != entry.getActorCore() ||
+						!Dy::avbdIsSoftPointValid(
+							source.localPoint, 0,
+							localBody.compiled.particleCount))
+						continue;
+					PxU32 localLinkBodyIndex = PX_MAX_U32;
+					if(!findArticulationBodyIndexInIsland(
+						*source.linkCore, articulationForBody,
+						linkIndexForBody, solverBodies,
+						bodyStart, bodyCount,
+						localLinkBodyIndex))
+						return false;
+
+					Dy::AvbdSoftAttachment attachment;
+					attachment.point = source.localPoint;
+					for(PxU32 endpoint = 0;
+						endpoint <
+							attachment.point.particleCount;
+						endpoint++)
+						attachment.point.
+							particleIndices[endpoint] +=
+							localBody.compiled.particleStart;
+					attachment.rigidBodyIdx =
+						localLinkBodyIndex;
+					attachment.sourceHandle = source.handle;
+					attachment.targetKind =
+						Dy::AvbdSoftAttachmentTargetKind::
+							eARTICULATION_LINK;
+					attachment.localOffset =
+						source.linkCore->getBody2Actor().
+							getInverse().transform(
+								source.actorLocalTarget);
+					attachment.alLambda = source.alLambda;
+					attachment.k = source.k;
+					attachment.kMax = source.kMax;
+					localBody.runtime.attachments.pushBack(
+						attachment);
+					hasArticulationAttachment = true;
+				}
+				for(PxU32 attachmentIndex = 0;
+					attachmentIndex < mSoftPairAttachments.size();
+					attachmentIndex++)
+				{
+					const SoftPairAttachmentEntry& source =
+						mSoftPairAttachments[attachmentIndex];
+					if(source.softCore[0] != entry.getActorCore())
+						continue;
+					PxU32 targetEntryOrder = PX_MAX_U32;
+					for(PxU32 candidate = 0;
+						candidate < storage.softCores.size();
+						candidate++)
+					{
+						if(storage.softCores[candidate] ==
+							source.softCore[1])
+						{
+							targetEntryOrder = candidate;
+							break;
+						}
+					}
+					if(targetEntryOrder == PX_MAX_U32 ||
+						targetEntryOrder >= storage.bodies.size())
+						return false;
+					const Dy::AvbdSoftBody& targetBody =
+						storage.bodies[targetEntryOrder];
+					if(!Dy::avbdIsSoftPointValid(
+							source.localPoint[0], 0,
+							localBody.compiled.particleCount) ||
+						!Dy::avbdIsSoftPointValid(
+							source.localPoint[1], 0,
+							targetBody.compiled.particleCount))
+						return false;
+
+					Dy::AvbdSoftAttachment attachment;
+					attachment.point = source.localPoint[0];
+					for(PxU32 endpoint = 0;
+						endpoint < attachment.point.particleCount;
+						endpoint++)
+						attachment.point.
+							particleIndices[endpoint] +=
+							localBody.compiled.particleStart;
+					attachment.targetPoint = source.localPoint[1];
+					for(PxU32 endpoint = 0;
+						endpoint <
+							attachment.targetPoint.particleCount;
+						endpoint++)
+						attachment.targetPoint.
+							particleIndices[endpoint] +=
+							targetBody.compiled.particleStart;
+					attachment.rigidBodyIdx = PX_MAX_U32;
+					attachment.sourceHandle = source.handle;
+					attachment.targetKind =
+						Dy::AvbdSoftAttachmentTargetKind::
+							eDYNAMIC_SOFT;
+					attachment.alLambda = source.alLambda;
+					attachment.k = source.k;
+					attachment.kMax = source.kMax;
+					localBody.runtime.attachments.pushBack(
+						attachment);
+					hasSoftPairAttachment = true;
+				}
+				localBody.runtime.compileObjectiveProgram(
+					localBody.compiled.particleStart,
+					localBody.compiled.particleCount);
+				if(!localBody.runtime.isObjectiveProgramCurrent(
+					localBody.compiled.particleStart,
+					localBody.compiled.particleCount))
+					return false;
+			}
+
+			compileDynamicBoxesForIsland(
+				rigidBodies, solverBodies, bodyStart, bodyCount,
+				storage.selectedDynamicBoxes);
+			compileDynamicSpheresForIsland(
+				rigidBodies, solverBodies, bodyStart, bodyCount,
+				dt, gravity, storage.selectedDynamicSpheres);
+			compileDynamicCapsulesForIsland(
+				rigidBodies, solverBodies, bodyStart, bodyCount,
+				dt, gravity, storage.selectedDynamicCapsules);
+			compileDynamicConvexesForIsland(
+				rigidBodies, solverBodies, bodyStart, bodyCount,
+				dt, gravity,
+				storage.selectedDynamicConvexes);
+			if(!storage.selectedDynamicBoxes.empty())
+			{
+				Dy::avbdDetectSoftRigidSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicBoxes.begin(),
+					storage.selectedDynamicBoxes.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					NULL, 0,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidSweptSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicBoxes.begin(),
+					storage.selectedDynamicBoxes.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicBoxes.begin(),
+					storage.selectedDynamicBoxes.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+			}
+			if(!storage.selectedDynamicSpheres.empty())
+			{
+				Dy::avbdDetectSoftRigidSphereSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicSpheres.begin(),
+					storage.selectedDynamicSpheres.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidSphereSweptSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicSpheres.begin(),
+					storage.selectedDynamicSpheres.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidSphereSweptOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicSpheres.begin(),
+					storage.selectedDynamicSpheres.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+				Dy::avbdDetectSoftRigidSphereOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicSpheres.begin(),
+					storage.selectedDynamicSpheres.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+			}
+			if(!storage.selectedDynamicCapsules.empty())
+			{
+				Dy::avbdDetectSoftRigidCapsuleSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicCapsules.begin(),
+					storage.selectedDynamicCapsules.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidCapsuleSweptSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicCapsules.begin(),
+					storage.selectedDynamicCapsules.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidCapsuleSweptOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicCapsules.begin(),
+					storage.selectedDynamicCapsules.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+				Dy::avbdDetectSoftRigidCapsuleOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicCapsules.begin(),
+					storage.selectedDynamicCapsules.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+			}
+			if(!storage.selectedDynamicConvexes.empty())
+			{
+				Dy::avbdDetectSoftRigidConvexSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicConvexes.begin(),
+					storage.selectedDynamicConvexes.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidConvexSweptSDF(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicConvexes.begin(),
+					storage.selectedDynamicConvexes.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius,
+					storage.bodies.begin(),
+					storage.bodies.size());
+				Dy::avbdDetectSoftRigidConvexSweptOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicConvexes.begin(),
+					storage.selectedDynamicConvexes.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+				Dy::avbdDetectSoftRigidConvexOGCFeatures(
+					storage.particles.begin(),
+					storage.particles.size(),
+					storage.selectedDynamicConvexes.begin(),
+					storage.selectedDynamicConvexes.size(),
+					storage.bodies.begin(),
+					storage.bodies.size(),
+					storage.probeContacts,
+					mContactParams.contactRadius);
+			}
+			if(storage.probeContacts.empty() &&
+				!hasRigidAttachment &&
+				!hasArticulationAttachment &&
+				!hasSoftPairAttachment)
+				return false;
+
+			for(PxU32 i = 0; i < mRigidBoxes.size(); i++)
+				storage.rigidBoxes.pushBack(mRigidBoxes[i]);
+			for(PxU32 i = 0;
+				i < storage.selectedDynamicBoxes.size(); i++)
+				storage.rigidBoxes.pushBack(
+					storage.selectedDynamicBoxes[i]);
+			for(PxU32 i = 0; i < mRigidSpheres.size(); i++)
+				storage.rigidSpheres.pushBack(mRigidSpheres[i]);
+			for(PxU32 i = 0;
+				i < storage.selectedDynamicSpheres.size(); i++)
+				storage.rigidSpheres.pushBack(
+					storage.selectedDynamicSpheres[i]);
+			for(PxU32 i = 0; i < mRigidCapsules.size(); i++)
+				storage.rigidCapsules.pushBack(mRigidCapsules[i]);
+			for(PxU32 i = 0;
+				i < storage.selectedDynamicCapsules.size(); i++)
+				storage.rigidCapsules.pushBack(
+					storage.selectedDynamicCapsules[i]);
+			for(PxU32 i = 0; i < mRigidConvexes.size(); i++)
+				storage.rigidConvexes.pushBack(
+					mRigidConvexes[i]);
+			for(PxU32 i = 0;
+				i < storage.selectedDynamicConvexes.size(); i++)
+				storage.rigidConvexes.pushBack(
+					storage.selectedDynamicConvexes[i]);
+			detectContacts(
+				storage.particles.begin(), storage.particles.size(),
+				storage.bodies.begin(), storage.bodies.size(),
+				storage.contacts, storage.rigidBoxes.begin(),
+				storage.rigidBoxes.size(),
+				storage.selfCollisionAdjacencies.begin(),
+				storage.selfCollisionAdjacencies.size(),
+				storage.selfCollisionEnabled.begin(),
+				storage.softCores.begin(),
+				storage.rigidSpheres.begin(),
+				storage.rigidSpheres.size(),
+				storage.rigidCapsules.begin(),
+				storage.rigidCapsules.size(),
+				storage.rigidConvexes.begin(),
+				storage.rigidConvexes.size());
+
+			for(PxU32 i = 0; i < storage.contacts.size(); i++)
+				if(storage.contacts[i].geometry.hasRigidBodyTarget())
+					return true;
+			return hasRigidAttachment ||
+				hasArticulationAttachment ||
+				hasSoftPairAttachment;
+		}
+
+		void copyIslandSelectionResults(
+			IslandSelectionStorage& storage)
+		{
+			PX_ASSERT(
+				storage.particles.size() ==
+				storage.globalParticleIndices.size());
+			const PxU32 particleCount = PxMin(
+				storage.particles.size(),
+				storage.globalParticleIndices.size());
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				const PxU32 globalIndex =
+					storage.globalParticleIndices[i];
+				if(globalIndex < mParticles.size())
+					mParticles[globalIndex] = storage.particles[i];
+			}
+			PX_ASSERT(
+				storage.bodies.size() == storage.entryIndices.size());
+			const PxU32 bodyCount = PxMin(
+				storage.bodies.size(), storage.entryIndices.size());
+			for(PxU32 i = 0; i < bodyCount; i++)
+			{
+				const Entry& entry =
+					mEntries[storage.entryIndices[i]];
+				if(entry.bodyIndex < mBodies.size())
+				{
+					Dy::AvbdSoftBodyRuntimeState& destination =
+						mBodies[entry.bodyIndex].runtime;
+					const Dy::AvbdSoftBodyRuntimeState& source =
+						storage.bodies[i].runtime;
+					PX_ASSERT(
+						destination.pins.size() ==
+							source.pins.size());
+					const PxU32 pinCount = PxMin(
+						destination.pins.size(),
+						source.pins.size());
+					for(PxU32 pinIndex = 0;
+						pinIndex < pinCount; pinIndex++)
+					{
+						const Dy::AvbdKinematicPin& sourcePin =
+							source.pins[pinIndex];
+						destination.pins[pinIndex].alLambda =
+							sourcePin.alLambda;
+						destination.pins[pinIndex].k =
+							sourcePin.k;
+						destination.pins[pinIndex].kMax =
+							sourcePin.kMax;
+						if(sourcePin.targetKind ==
+							Dy::AvbdSoftPinTargetKind::
+								ePRESCRIBED_RIGID)
+						{
+							PrescribedAttachmentEntry*
+								destinationAttachment =
+									findPrescribedAttachment(
+										*entry.getActorCore(),
+										sourcePin.sourceHandle);
+							if(destinationAttachment)
+							{
+								destinationAttachment->alLambda =
+									sourcePin.alLambda;
+								destinationAttachment->k =
+									sourcePin.k;
+								destinationAttachment->kMax =
+									sourcePin.kMax;
+							}
+						}
+					}
+					for(PxU32 attachmentIndex = 0;
+						attachmentIndex <
+							source.attachments.size();
+						attachmentIndex++)
+					{
+						const Dy::AvbdSoftAttachment&
+							sourceAttachment =
+								source.attachments[
+									attachmentIndex];
+						switch(sourceAttachment.targetKind)
+						{
+						case Dy::AvbdSoftAttachmentTargetKind::
+							eDYNAMIC_RIGID:
+						{
+							const PxU32 handle =
+								sourceAttachment.sourceHandle;
+							RigidAttachmentEntry*
+								destinationAttachment =
+									findRigidAttachment(
+										*entry.getActorCore(),
+										handle);
+							if(!destinationAttachment)
+								continue;
+							destinationAttachment->alLambda =
+								sourceAttachment.alLambda;
+							destinationAttachment->k =
+								sourceAttachment.k;
+							destinationAttachment->kMax =
+								sourceAttachment.kMax;
+							break;
+						}
+						case Dy::AvbdSoftAttachmentTargetKind::
+							eARTICULATION_LINK:
+						{
+							const PxU32 handle =
+								sourceAttachment.sourceHandle;
+							ArticulationAttachmentEntry*
+								destinationAttachment =
+									findArticulationAttachment(
+										*entry.getActorCore(),
+										handle);
+							if(!destinationAttachment)
+								continue;
+							destinationAttachment->alLambda =
+								sourceAttachment.alLambda;
+							destinationAttachment->k =
+								sourceAttachment.k;
+							destinationAttachment->kMax =
+								sourceAttachment.kMax;
+							break;
+						}
+						case Dy::AvbdSoftAttachmentTargetKind::
+							eDYNAMIC_SOFT:
+						{
+							const PxU32 handle =
+								sourceAttachment.sourceHandle;
+							SoftPairAttachmentEntry*
+								destinationAttachment =
+									findSoftPairAttachment(
+										*entry.getActorCore(),
+										handle);
+							if(!destinationAttachment)
+								continue;
+							destinationAttachment->alLambda =
+								sourceAttachment.alLambda;
+							destinationAttachment->k =
+								sourceAttachment.k;
+							destinationAttachment->kMax =
+								sourceAttachment.kMax;
+							break;
+						}
+						case Dy::AvbdSoftAttachmentTargetKind::
+							eUNSUPPORTED:
+						default:
+							PX_ASSERT(false);
+							break;
+						}
+					}
+					PX_ASSERT(destination.attachments.empty());
+					destination.compileObjectiveProgram(
+						getParticleStart(entry),
+						getParticleCount(entry));
+				}
+			}
+		}
+
+		PxU32 findNativeIslandEdge(
+			const ActorCore* softCore,
+			const BodyCore* rigidCore) const
+		{
+			for(PxU32 i = 0;
+				i < mNativeIslandEdges.size(); i++)
+			{
+				const NativeIslandEdgeEntry& entry =
+					mNativeIslandEdges[i];
+				if(entry.softCore == softCore &&
+					entry.rigidCore == rigidCore)
+					return i;
+			}
+			return PX_MAX_U32;
+		}
+
+		void ensureNativeIslandEdge(
+			Entry& softEntry, BodyCore& rigidCore)
+		{
+			const PxU32 existingIndex =
+				findNativeIslandEdge(
+					softEntry.getActorCore(), &rigidCore);
+			if(existingIndex != PX_MAX_U32)
+			{
+				mNativeIslandEdges[existingIndex].touched = true;
+				return;
+			}
+
+			BodySim* bodySim = rigidCore.getSim();
+			if(!bodySim || !bodySim->getNodeIndex().isValid())
+				return;
+			const IG::EdgeIndex edgeIndex =
+				mIslandManager.addContactManager(
+					NULL, softEntry.islandNode,
+					bodySim->getNodeIndex(), NULL,
+					IG::Edge::eSOFT_BODY_CONTACT);
+			mIslandManager.setEdgeConnected(
+				edgeIndex, IG::Edge::eSOFT_BODY_CONTACT);
+			mNativeIslandEdges.pushBack(
+				NativeIslandEdgeEntry(
+					*softEntry.getActorCore(),
+					rigidCore, edgeIndex));
+		}
+
+		PxU32 findNativeSoftSoftIslandEdge(
+			const ActorCore* softCore0,
+			const ActorCore* softCore1) const
+		{
+			for(PxU32 i = 0;
+				i < mNativeSoftSoftIslandEdges.size(); i++)
+			{
+				const NativeSoftSoftIslandEdgeEntry& entry =
+					mNativeSoftSoftIslandEdges[i];
+				if((entry.softCore0 == softCore0 &&
+						entry.softCore1 == softCore1) ||
+					(entry.softCore0 == softCore1 &&
+						entry.softCore1 == softCore0))
+					return i;
+			}
+			return PX_MAX_U32;
+		}
+
+		void ensureNativeSoftSoftIslandEdge(
+			Entry& softEntry0, Entry& softEntry1)
+		{
+			const PxU32 existingIndex =
+				findNativeSoftSoftIslandEdge(
+					softEntry0.getActorCore(),
+					softEntry1.getActorCore());
+			if(existingIndex != PX_MAX_U32)
+			{
+				mNativeSoftSoftIslandEdges[existingIndex].touched = true;
+				return;
+			}
+			if(!softEntry0.islandNode.isValid() ||
+				!softEntry1.islandNode.isValid())
+				return;
+
+			const IG::EdgeIndex edgeIndex =
+				mIslandManager.addContactManager(
+					NULL, softEntry0.islandNode,
+					softEntry1.islandNode, NULL,
+					IG::Edge::eSOFT_BODY_CONTACT);
+			mIslandManager.setEdgeConnected(
+				edgeIndex, IG::Edge::eSOFT_BODY_CONTACT);
+			mNativeSoftSoftIslandEdges.pushBack(
+				NativeSoftSoftIslandEdgeEntry(
+					*softEntry0.getActorCore(),
+					*softEntry1.getActorCore(), edgeIndex));
+		}
+
+		void removeNativeIslandEdgesForRigid(BodyCore& core)
+		{
+			for(PxU32 i = mNativeIslandEdges.size();
+				i > 0; i--)
+			{
+				if(mNativeIslandEdges[i - 1].rigidCore == &core)
+				{
+					mIslandManager.removeConnection(
+						mNativeIslandEdges[i - 1].edgeIndex);
+					mNativeIslandEdges.replaceWithLast(i - 1);
+				}
+			}
+		}
+
+		void removeNativeIslandEdgesForSoft(
+			ActorCore& core)
+		{
+			for(PxU32 i = mNativeIslandEdges.size();
+				i > 0; i--)
+			{
+				if(mNativeIslandEdges[i - 1].softCore == &core)
+				{
+					mIslandManager.removeConnection(
+						mNativeIslandEdges[i - 1].edgeIndex);
+					mNativeIslandEdges.replaceWithLast(i - 1);
+				}
+			}
+			for(PxU32 i = mNativeSoftSoftIslandEdges.size();
+				i > 0; i--)
+			{
+				const NativeSoftSoftIslandEdgeEntry& edge =
+					mNativeSoftSoftIslandEdges[i - 1];
+				if(edge.softCore0 == &core ||
+					edge.softCore1 == &core)
+				{
+					mIslandManager.removeConnection(edge.edgeIndex);
+					mNativeSoftSoftIslandEdges.replaceWithLast(i - 1);
+				}
+			}
+		}
+
+		void clearNativeIslandEdges()
+		{
+			for(PxU32 i = 0;
+				i < mNativeIslandEdges.size(); i++)
+				mIslandManager.removeConnection(
+					mNativeIslandEdges[i].edgeIndex);
+			mNativeIslandEdges.clear();
+			for(PxU32 i = 0;
+				i < mNativeSoftSoftIslandEdges.size(); i++)
+				mIslandManager.removeConnection(
+					mNativeSoftSoftIslandEdges[i].edgeIndex);
+			mNativeSoftSoftIslandEdges.clear();
+		}
+
+		bool computeSoftBounds(
+			const Entry& entry, PxBounds3& bounds) const
+		{
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			if(particleCount == 0 ||
+				particleStart > mParticles.size() ||
+				particleCount >
+					mParticles.size() - particleStart)
+				return false;
+
+			bounds = PxBounds3::empty();
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				const PxVec3& position =
+					mParticles[particleStart + i].position;
+				if(!position.isFinite())
+					return false;
+				bounds.include(position);
+			}
+			return !bounds.isEmpty();
+		}
+
+		bool expandSoftBoundsForPrediction(
+			const Entry& entry, PxReal dt, const PxVec3& gravity,
+			PxBounds3& bounds) const
+		{
+			if(dt <= 0.0f || !PxIsFinite(dt) ||
+				!gravity.isFinite() || bounds.isEmpty())
+				return false;
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			if(particleCount == 0 ||
+				particleStart > mParticles.size() ||
+				particleCount > mParticles.size() - particleStart)
+				return false;
+			const PxReal dtSq = dt * dt;
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				const Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				if(particle.invMass <= 0.0f)
+					continue;
+				const PxVec3 predictedPosition =
+					particle.position + particle.velocity * dt +
+					gravity * (particle.gravityScale * dtSq);
+				if(!predictedPosition.isFinite())
+					return false;
+				bounds.include(predictedPosition);
+			}
+			return true;
+		}
+
+		static PxBounds3 computeBoxBounds(
+			const Dy::AvbdRigidBox& box)
+		{
+			const PxMat33 basis(box.rotation);
+			const PxVec3& h = box.halfExtent;
+			const PxVec3 extent(
+				PxAbs(basis.column0.x) * h.x +
+					PxAbs(basis.column1.x) * h.y +
+					PxAbs(basis.column2.x) * h.z,
+				PxAbs(basis.column0.y) * h.x +
+					PxAbs(basis.column1.y) * h.y +
+					PxAbs(basis.column2.y) * h.z,
+				PxAbs(basis.column0.z) * h.x +
+					PxAbs(basis.column1.z) * h.y +
+					PxAbs(basis.column2.z) * h.z);
+			return PxBounds3(
+				box.center - extent, box.center + extent);
+		}
+
+		static PxBounds3 computeSphereBounds(
+			const Dy::AvbdRigidSphere& sphere)
+		{
+			const PxVec3 extent(PxMax(sphere.radius, 0.0f));
+			return PxBounds3(
+				sphere.center - extent,
+				sphere.center + extent);
+		}
+
+		static PxBounds3 computeCapsuleBounds(
+			const Dy::AvbdRigidCapsule& capsule)
+		{
+			const PxVec3 axisOffset =
+				capsule.rotation.getBasisVector0() *
+					PxMax(capsule.halfHeight, 0.0f);
+			const PxVec3 extent(PxMax(capsule.radius, 0.0f));
+			const PxVec3 endpoint0 =
+				capsule.center - axisOffset;
+			const PxVec3 endpoint1 =
+				capsule.center + axisOffset;
+			return PxBounds3(
+				endpoint0.minimum(endpoint1) - extent,
+				endpoint0.maximum(endpoint1) + extent);
+		}
+
+		static PxBounds3 computeConvexBounds(
+			const Dy::AvbdRigidConvex& convex)
+		{
+			PxBounds3 bounds = PxBounds3::empty();
+			for(PxU32 vertexIndex = 0;
+				vertexIndex < convex.vertices.size(); ++vertexIndex)
+			{
+				const PxVec3 worldVertex =
+					convex.center +
+					convex.rotation.rotate(
+						convex.vertices[vertexIndex]);
+				if(!worldVertex.isFinite())
+					return PxBounds3::empty();
+				bounds.include(worldVertex);
+			}
+			return bounds;
+		}
+
+		static PxBounds3 computeTriangleSurfaceBounds(
+			const Dy::AvbdRigidTriangleSurface& surface)
+		{
+			PxBounds3 bounds = PxBounds3::empty();
+			for(PxU32 vertexIndex = 0;
+				vertexIndex < surface.vertices.size();
+				++vertexIndex)
+			{
+				const PxVec3 worldVertex =
+					surface.center +
+					surface.rotation.rotate(
+						surface.vertices[vertexIndex].point);
+				if(!worldVertex.isFinite())
+					return PxBounds3::empty();
+				bounds.include(worldVertex);
+			}
+			return bounds;
+		}
+
+		static void getRigidMaterialValues(
+			const ShapeCore& shape,
+			const PxsMaterialManager& materialManager,
+			PxMaterialTableIndex tableIndex,
+			PxReal& friction, PxU8& combineMode)
+		{
+			const PxU16* materialIndices =
+				shape.getMaterialIndices();
+			const PxU32 materialCount =
+				shape.getNbMaterialIndices();
+			const PxU32 resolvedTableIndex =
+				tableIndex == PxMaterialTableIndex(0xffff)
+					? 0u : PxU32(tableIndex);
+			friction = 0.5f;
+			combineMode =
+				PxU8(PxCombineMode::eAVERAGE);
+			if(!materialIndices ||
+				resolvedTableIndex >= materialCount)
+				return;
+			const PxU16 materialIndex =
+				materialIndices[resolvedTableIndex];
+			if(materialIndex == MATERIAL_INVALID_HANDLE ||
+				materialIndex >= materialManager.getMaxSize())
+				return;
+			const PxsMaterialCore* material =
+				materialManager.getMaterial(materialIndex);
+			if(material->mMaterialIndex != materialIndex)
+				return;
+			friction =
+				PxMax(material->dynamicFriction, 0.0f);
+			combineMode =
+				PxU8(material->getFrictionCombineMode());
+		}
+
+		static bool appendTriangleSurfaceTriangle(
+			const PxTriangle& sourceTriangle,
+			const PxU32 sourceVertexIndices[3],
+			PxU32 sourceTriangleIndex,
+			PxReal friction, PxU8 frictionCombineMode,
+			PxHashMap<PxU32, PxU32>& vertexMap,
+			PxHashMap<PxU64, PxU32>& edgeMap,
+			Dy::AvbdRigidTriangleSurface& surface)
+		{
+			PxU32 vertices[3] =
+				{PX_MAX_U32, PX_MAX_U32, PX_MAX_U32};
+			for(PxU32 endpoint = 0;
+				endpoint < 3; ++endpoint)
+			{
+				const PxHashMap<PxU32, PxU32>::Entry* entry =
+					vertexMap.find(
+						sourceVertexIndices[endpoint]);
+				if(entry)
+					vertices[endpoint] = entry->second;
+				else
+				{
+					const PxVec3& point =
+						sourceTriangle.verts[endpoint];
+					if(!point.isFinite())
+						return false;
+					Dy::AvbdRigidTriangleSurfaceVertex vertex;
+					vertex.point = point;
+					vertex.friction = friction;
+					vertex.frictionCombineMode =
+						frictionCombineMode;
+					vertex.outward = PxVec3(0.0f);
+					vertices[endpoint] =
+						surface.vertices.size();
+					surface.vertices.pushBack(vertex);
+					vertexMap.insert(
+						sourceVertexIndices[endpoint],
+						vertices[endpoint]);
+				}
+			}
+			if(vertices[0] == vertices[1] ||
+				vertices[0] == vertices[2] ||
+				vertices[1] == vertices[2])
+				return true;
+			PxVec3 normal =
+				(sourceTriangle.verts[1] -
+					sourceTriangle.verts[0]).cross(
+						sourceTriangle.verts[2] -
+							sourceTriangle.verts[0]);
+			const PxReal normalMagnitudeSq =
+				normal.magnitudeSquared();
+			if(normalMagnitudeSq <= 1.0e-12f ||
+				!PxIsFinite(normalMagnitudeSq))
+				return true;
+			normal *= PxRecipSqrt(normalMagnitudeSq);
+
+			Dy::AvbdRigidTriangleSurfaceTriangle triangle;
+			triangle.p0 = vertices[0];
+			triangle.p1 = vertices[1];
+			triangle.p2 = vertices[2];
+			triangle.sourceTriangleIndex =
+				sourceTriangleIndex;
+			triangle.normal = normal;
+			triangle.friction = friction;
+			triangle.frictionCombineMode =
+				frictionCombineMode;
+			const PxU32 triangleIndex =
+				surface.triangles.size();
+
+			const PxU32 edgeEndpoints[3][2] =
+			{
+				{vertices[0], vertices[1]},
+				{vertices[0], vertices[2]},
+				{vertices[1], vertices[2]}
+			};
+			PxU32* triangleEdges[3] =
+				{&triangle.edge0, &triangle.edge1,
+				 &triangle.edge2};
+			for(PxU32 localEdge = 0;
+				localEdge < 3; ++localEdge)
+			{
+				const PxU32 edge0 = PxMin(
+					edgeEndpoints[localEdge][0],
+					edgeEndpoints[localEdge][1]);
+				const PxU32 edge1 = PxMax(
+					edgeEndpoints[localEdge][0],
+					edgeEndpoints[localEdge][1]);
+				const PxU64 edgeKey =
+					(PxU64(edge0) << 32) | PxU64(edge1);
+				const PxHashMap<PxU64, PxU32>::Entry* entry =
+					edgeMap.find(edgeKey);
+				PxU32 edgeIndex = PX_MAX_U32;
+				if(entry)
+					edgeIndex = entry->second;
+				else
+				{
+					Dy::AvbdRigidTriangleSurfaceEdge edge;
+					edge.p0 = edge0;
+					edge.p1 = edge1;
+					edge.outward = PxVec3(0.0f);
+					edge.friction = friction;
+					edge.frictionCombineMode =
+						frictionCombineMode;
+					edgeIndex = surface.edges.size();
+					surface.edges.pushBack(edge);
+					edgeMap.insert(edgeKey, edgeIndex);
+				}
+				if(edgeIndex >= surface.edges.size())
+					return false;
+				Dy::AvbdRigidTriangleSurfaceEdge& edge =
+					surface.edges[edgeIndex];
+				if(edge.adjacentCount == 0)
+					edge.triangle0 = triangleIndex;
+				else if(edge.adjacentCount == 1)
+					edge.triangle1 = triangleIndex;
+				++edge.adjacentCount;
+				edge.outward += normal;
+				*triangleEdges[localEdge] = edgeIndex;
+			}
+
+			for(PxU32 endpoint = 0;
+				endpoint < 3; ++endpoint)
+				surface.vertices[vertices[endpoint]].
+					outward += normal;
+			surface.triangles.pushBack(triangle);
+			return true;
+		}
+
+		static bool finalizeTriangleSurfaceTopology(
+			Dy::AvbdRigidTriangleSurface& surface,
+			bool suppressBoundaryEdges)
+		{
+			if(surface.vertices.size() < 3 ||
+				surface.triangles.empty())
+				return false;
+			surface.localBounds = PxBounds3::empty();
+			surface.localRadius = 0.0f;
+			for(PxU32 vertexIndex = 0;
+				vertexIndex < surface.vertices.size();
+				++vertexIndex)
+			{
+				Dy::AvbdRigidTriangleSurfaceVertex& vertex =
+					surface.vertices[vertexIndex];
+				if(!vertex.point.isFinite())
+					return false;
+				surface.localBounds.include(vertex.point);
+				surface.localRadius = PxMax(
+					surface.localRadius,
+					vertex.point.magnitude());
+				const PxReal normalMagnitudeSq =
+					vertex.outward.magnitudeSquared();
+				if(normalMagnitudeSq > 1.0e-12f &&
+					PxIsFinite(normalMagnitudeSq))
+					vertex.outward *=
+						PxRecipSqrt(normalMagnitudeSq);
+				else
+					vertex.outward =
+						PxVec3(0.0f, 1.0f, 0.0f);
+			}
+
+			for(PxU32 edgeIndex = 0;
+				edgeIndex < surface.edges.size();
+				++edgeIndex)
+			{
+				Dy::AvbdRigidTriangleSurfaceEdge& edge =
+					surface.edges[edgeIndex];
+				edge.active = false;
+				if(edge.adjacentCount == 1)
+					edge.active = !suppressBoundaryEdges;
+				else if(edge.adjacentCount == 2 &&
+					edge.triangle0 < surface.triangles.size() &&
+					edge.triangle1 < surface.triangles.size())
+				{
+					const Dy::AvbdRigidTriangleSurfaceTriangle&
+						triangle0 =
+							surface.triangles[edge.triangle0];
+					const Dy::AvbdRigidTriangleSurfaceTriangle&
+						triangle1 =
+							surface.triangles[edge.triangle1];
+					PxU32 opposite0 = triangle0.p0;
+					if(opposite0 == edge.p0 ||
+						opposite0 == edge.p1)
+						opposite0 = triangle0.p1;
+					if(opposite0 == edge.p0 ||
+						opposite0 == edge.p1)
+						opposite0 = triangle0.p2;
+					if(opposite0 >= surface.vertices.size() ||
+						triangle1.p0 >=
+							surface.vertices.size())
+						return false;
+					const PxReal oppositePlaneDistance =
+						triangle1.normal.dot(
+							surface.vertices[opposite0].point -
+							surface.vertices[
+								triangle1.p0].point);
+					const PxReal normalDot =
+						triangle0.normal.dot(
+							triangle1.normal);
+					edge.active =
+						(oppositePlaneDistance < 0.0f &&
+						 normalDot < 0.999999f) ||
+						normalDot < -0.999f;
+				}
+				const PxReal normalMagnitudeSq =
+					edge.outward.magnitudeSquared();
+				if(normalMagnitudeSq > 1.0e-12f &&
+					PxIsFinite(normalMagnitudeSq))
+					edge.outward *=
+						PxRecipSqrt(normalMagnitudeSq);
+				else if(edge.triangle0 <
+					surface.triangles.size())
+					edge.outward =
+						surface.triangles[
+							edge.triangle0].normal;
+				if(edge.active)
+				{
+					if(edge.p0 < surface.vertices.size())
+						surface.vertices[edge.p0].active = true;
+					if(edge.p1 < surface.vertices.size())
+						surface.vertices[edge.p1].active = true;
+				}
+			}
+			return !surface.localBounds.isEmpty() &&
+				PxIsFinite(surface.localRadius) &&
+				surface.localRadius > 0.0f;
+		}
+
+		static bool compileTriangleMeshTopology(
+			const ShapeCore& shape,
+			const PxsMaterialManager& materialManager,
+			const PxTriangleMeshGeometry& geometry,
+			Dy::AvbdRigidTriangleSurface& surface)
+		{
+			PxTriangleMesh* mesh = geometry.triangleMesh;
+			if(!mesh || !geometry.isValid())
+				return false;
+			surface.vertices.clear();
+			surface.edges.clear();
+			surface.triangles.clear();
+			PxHashMap<PxU32, PxU32> vertexMap;
+			PxHashMap<PxU64, PxU32> edgeMap;
+			for(PxU32 triangleIndex = 0;
+				triangleIndex < mesh->getNbTriangles();
+				++triangleIndex)
+			{
+				PxTriangle triangle;
+				PxU32 vertexIndices[3] =
+					{PX_MAX_U32, PX_MAX_U32, PX_MAX_U32};
+				PxMeshQuery::getTriangle(
+					geometry, PxTransform(PxIdentity),
+					triangleIndex, triangle, vertexIndices);
+				PxReal friction = 0.5f;
+				PxU8 frictionCombineMode =
+					PxU8(PxCombineMode::eAVERAGE);
+				getRigidMaterialValues(
+					shape, materialManager,
+					mesh->getTriangleMaterialIndex(
+						triangleIndex),
+					friction, frictionCombineMode);
+				if(!appendTriangleSurfaceTriangle(
+						triangle, vertexIndices,
+						triangleIndex, friction,
+						frictionCombineMode,
+						vertexMap, edgeMap, surface))
+					return false;
+			}
+			return finalizeTriangleSurfaceTopology(
+				surface, false);
+		}
+
+		static bool compileHeightFieldTopology(
+			const ShapeCore& shape,
+			const PxsMaterialManager& materialManager,
+			const PxHeightFieldGeometry& geometry,
+			Dy::AvbdRigidTriangleSurface& surface)
+		{
+			PxHeightField* heightField =
+				geometry.heightField;
+			if(!heightField || !geometry.isValid())
+				return false;
+			const PxU32 rows = heightField->getNbRows();
+			const PxU32 columns =
+				heightField->getNbColumns();
+			if(rows < 2 || columns < 2)
+				return false;
+			surface.vertices.clear();
+			surface.edges.clear();
+			surface.triangles.clear();
+			PxHashMap<PxU32, PxU32> vertexMap;
+			PxHashMap<PxU64, PxU32> edgeMap;
+			for(PxU32 row = 0; row + 1 < rows; ++row)
+			{
+				for(PxU32 column = 0;
+					column + 1 < columns; ++column)
+				{
+					for(PxU32 localTriangle = 0;
+						localTriangle < 2;
+						++localTriangle)
+					{
+						const PxU32 triangleIndex =
+							2 * (row * columns + column) +
+							localTriangle;
+						const PxMaterialTableIndex materialIndex =
+							heightField->
+								getTriangleMaterialIndex(
+									triangleIndex);
+						if(materialIndex ==
+							PxHeightFieldMaterial::eHOLE)
+							continue;
+						PxTriangle triangle;
+						PxU32 vertexIndices[3] =
+							{PX_MAX_U32, PX_MAX_U32,
+							 PX_MAX_U32};
+						PxMeshQuery::getTriangle(
+							geometry,
+							PxTransform(PxIdentity),
+							triangleIndex, triangle,
+							vertexIndices);
+						PxReal friction = 0.5f;
+						PxU8 frictionCombineMode =
+							PxU8(PxCombineMode::eAVERAGE);
+						getRigidMaterialValues(
+							shape, materialManager,
+							materialIndex, friction,
+							frictionCombineMode);
+						if(!appendTriangleSurfaceTriangle(
+								triangle, vertexIndices,
+								triangleIndex, friction,
+								frictionCombineMode,
+								vertexMap, edgeMap, surface))
+							return false;
+					}
+				}
+			}
+			const bool suppressBoundaryEdges =
+				(heightField->getFlags() &
+					PxHeightFieldFlag::eNO_BOUNDARY_EDGES)
+				? true : false;
+			return finalizeTriangleSurfaceTopology(
+				surface, suppressBoundaryEdges);
+		}
+
+		static bool compileConvexTopology(
+			const PxConvexMeshGeometry& geometry,
+			Dy::AvbdRigidConvex& convex)
+		{
+			PxConvexMesh* mesh = geometry.convexMesh;
+			if(!mesh ||
+				!geometry.scale.isValidForConvexMesh() ||
+				!geometry.scale.rotation.isFinite())
+				return false;
+			const PxU32 vertexCount = mesh->getNbVertices();
+			const PxU32 polygonCount = mesh->getNbPolygons();
+			const PxVec3* sourceVertices = mesh->getVertices();
+			const PxU8* polygonIndices = mesh->getIndexBuffer();
+			if(vertexCount < 4 || polygonCount < 4 ||
+				!sourceVertices || !polygonIndices)
+				return false;
+
+			convex.vertices.resize(vertexCount);
+			convex.vertexNormals.resize(vertexCount);
+			convex.faces.clear();
+			convex.edges.clear();
+			convex.triangles.clear();
+			PxVec3 centroid(0.0f);
+			for(PxU32 vertexIndex = 0;
+				vertexIndex < vertexCount; ++vertexIndex)
+			{
+				const PxVec3 vertex =
+					geometry.scale.transform(
+						sourceVertices[vertexIndex]);
+				if(!vertex.isFinite())
+					return false;
+				convex.vertices[vertexIndex] = vertex;
+				convex.vertexNormals[vertexIndex] =
+					PxVec3(0.0f);
+				centroid += vertex;
+			}
+			centroid *= 1.0f / PxReal(vertexCount);
+
+			for(PxU32 polygonIndex = 0;
+				polygonIndex < polygonCount; ++polygonIndex)
+			{
+				PxHullPolygon polygon;
+				if(!mesh->getPolygonData(
+						polygonIndex, polygon) ||
+					polygon.mNbVerts < 3)
+					return false;
+				const PxU32 firstVertex =
+					polygonIndices[polygon.mIndexBase];
+				if(firstVertex >= vertexCount)
+					return false;
+				PxVec3 faceNormal(0.0f);
+				PxU32 normalVertex1 = PX_MAX_U32;
+				PxU32 normalVertex2 = PX_MAX_U32;
+				for(PxU32 localVertex = 1;
+					localVertex + 1 < polygon.mNbVerts;
+					++localVertex)
+				{
+					const PxU32 vertex1 =
+						polygonIndices[
+							polygon.mIndexBase +
+							localVertex];
+					const PxU32 vertex2 =
+						polygonIndices[
+							polygon.mIndexBase +
+							localVertex + 1];
+					if(vertex1 >= vertexCount ||
+						vertex2 >= vertexCount)
+						return false;
+					const PxVec3 candidate =
+						(convex.vertices[vertex1] -
+							convex.vertices[firstVertex]).
+							cross(
+								convex.vertices[vertex2] -
+								convex.vertices[
+									firstVertex]);
+					if(candidate.magnitudeSquared() >
+						1.0e-12f)
+					{
+						faceNormal = candidate.getNormalized();
+						normalVertex1 = vertex1;
+						normalVertex2 = vertex2;
+						break;
+					}
+				}
+				if(normalVertex1 == PX_MAX_U32 ||
+					normalVertex2 == PX_MAX_U32 ||
+					!faceNormal.isFinite())
+					return false;
+				const bool reverseWinding =
+					faceNormal.dot(
+						convex.vertices[firstVertex] -
+							centroid) < 0.0f;
+				if(reverseWinding)
+					faceNormal = -faceNormal;
+
+				Dy::AvbdRigidConvexFace face;
+				face.normal = faceNormal;
+				face.offset =
+					faceNormal.dot(
+						convex.vertices[firstVertex]);
+				const PxU32 faceIndex = convex.faces.size();
+				convex.faces.pushBack(face);
+
+				for(PxU32 localVertex = 0;
+					localVertex < polygon.mNbVerts;
+					++localVertex)
+				{
+					const PxU32 vertex =
+						polygonIndices[
+							polygon.mIndexBase +
+							localVertex];
+					const PxU32 nextVertex =
+						polygonIndices[
+							polygon.mIndexBase +
+							((localVertex + 1) %
+								polygon.mNbVerts)];
+					if(vertex >= vertexCount ||
+						nextVertex >= vertexCount)
+						return false;
+					convex.vertexNormals[vertex] +=
+						faceNormal;
+					const PxU32 edge0 =
+						PxMin(vertex, nextVertex);
+					const PxU32 edge1 =
+						PxMax(vertex, nextVertex);
+					PxU32 edgeIndex = PX_MAX_U32;
+					for(PxU32 candidateIndex = 0;
+						candidateIndex < convex.edges.size();
+						++candidateIndex)
+					{
+						if(convex.edges[candidateIndex].p0 ==
+								edge0 &&
+							convex.edges[candidateIndex].p1 ==
+								edge1)
+						{
+							edgeIndex = candidateIndex;
+							break;
+						}
+					}
+					if(edgeIndex == PX_MAX_U32)
+					{
+						Dy::AvbdRigidConvexEdge edge;
+						edge.p0 = edge0;
+						edge.p1 = edge1;
+						edge.outward = faceNormal;
+						convex.edges.pushBack(edge);
+					}
+					else
+						convex.edges[edgeIndex].outward +=
+							faceNormal;
+				}
+
+				for(PxU32 localTriangle = 0;
+					localTriangle + 2 <
+						polygon.mNbVerts;
+					++localTriangle)
+				{
+					const PxU32 fan1 =
+						polygonIndices[
+							polygon.mIndexBase +
+							localTriangle + 1];
+					const PxU32 fan2 =
+						polygonIndices[
+							polygon.mIndexBase +
+							localTriangle + 2];
+					if(fan1 >= vertexCount ||
+						fan2 >= vertexCount)
+						return false;
+					Dy::AvbdRigidConvexTriangle triangle;
+					triangle.p0 = firstVertex;
+					triangle.p1 = reverseWinding
+						? fan2 : fan1;
+					triangle.p2 = reverseWinding
+						? fan1 : fan2;
+					triangle.faceIndex = faceIndex;
+					convex.triangles.pushBack(triangle);
+				}
+			}
+
+			convex.localRadius = 0.0f;
+			for(PxU32 vertexIndex = 0;
+				vertexIndex < vertexCount; ++vertexIndex)
+			{
+				const PxReal normalMagnitudeSq =
+					convex.vertexNormals[vertexIndex].
+						magnitudeSquared();
+				if(normalMagnitudeSq <= 1.0e-12f ||
+					!PxIsFinite(normalMagnitudeSq))
+					return false;
+				convex.vertexNormals[vertexIndex] *=
+					PxRecipSqrt(normalMagnitudeSq);
+				convex.localRadius = PxMax(
+					convex.localRadius,
+					convex.vertices[vertexIndex].magnitude());
+			}
+			for(PxU32 edgeIndex = 0;
+				edgeIndex < convex.edges.size(); ++edgeIndex)
+			{
+				const PxReal normalMagnitudeSq =
+					convex.edges[edgeIndex].outward.
+						magnitudeSquared();
+				if(normalMagnitudeSq <= 1.0e-12f ||
+					!PxIsFinite(normalMagnitudeSq))
+					return false;
+				convex.edges[edgeIndex].outward *=
+					PxRecipSqrt(normalMagnitudeSq);
+			}
+			return PxIsFinite(convex.localRadius) &&
+				convex.localRadius > 0.0f &&
+				!convex.triangles.empty();
+		}
+
+		bool compileDynamicConvex(
+			const DynamicShapeEntry& entry,
+			Dy::AvbdRigidConvex& convex) const
+		{
+			BodySim* bodySim = entry.core->getSim();
+			if(!bodySim || bodySim->isArticulationLink())
+				return false;
+			const ShapeCore& shape = *entry.shape;
+			if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE) ||
+				shape.getGeometryType() !=
+					PxGeometryType::eCONVEXMESH)
+				return false;
+			const PxConvexMeshGeometry& geometry =
+				static_cast<const PxConvexMeshGeometry&>(
+					shape.getGeometry());
+			if(!compileConvexTopology(geometry, convex))
+				return false;
+
+			const PxsBodyCore& bodyCore =
+				entry.core->getCore();
+			const PxTransform previousActorToWorld =
+				bodyCore.body2World *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform previousShapeToWorld =
+				previousActorToWorld * shape.getShape2Actor();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			if(bodySim->isKinematic())
+			{
+				PxTransform targetPose;
+				if(entry.core->getKinematicTarget(targetPose))
+					bodyToWorld = targetPose;
+			}
+			const PxTransform actorToWorld =
+				bodyToWorld *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform shapeToWorld =
+				actorToWorld * shape.getShape2Actor();
+			if(!shapeToWorld.isValid() ||
+				!previousShapeToWorld.isValid())
+				return false;
+			convex.center = shapeToWorld.p;
+			convex.rotation = shapeToWorld.q;
+			convex.previousCenter = previousShapeToWorld.p;
+			convex.previousRotation = previousShapeToWorld.q;
+			convex.friction = getStaticFriction(
+				shape, mRigidMaterialManager);
+			convex.frictionCombineMode =
+				getStaticFrictionCombineMode(
+					shape, mRigidMaterialManager);
+			convex.primitiveKey = entry.primitiveKey;
+			return true;
+		}
+
+		bool compileDynamicTriangleSurface(
+			const DynamicShapeEntry& entry,
+			Dy::AvbdRigidTriangleSurface& surface) const
+		{
+			BodySim* bodySim = entry.core->getSim();
+			if(!bodySim || bodySim->isArticulationLink())
+				return false;
+			const ShapeCore& shape = *entry.shape;
+			if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE))
+				return false;
+			bool topologyCompiled = false;
+			if(shape.getGeometryType() ==
+				PxGeometryType::eTRIANGLEMESH)
+			{
+				const PxTriangleMeshGeometry& geometry =
+					static_cast<
+						const PxTriangleMeshGeometry&>(
+							shape.getGeometry());
+				topologyCompiled = compileTriangleMeshTopology(
+					shape, mRigidMaterialManager,
+					geometry, surface);
+			}
+			else if(shape.getGeometryType() ==
+				PxGeometryType::eHEIGHTFIELD)
+			{
+				const PxHeightFieldGeometry& geometry =
+					static_cast<
+						const PxHeightFieldGeometry&>(
+							shape.getGeometry());
+				topologyCompiled = compileHeightFieldTopology(
+					shape, mRigidMaterialManager,
+					geometry, surface);
+			}
+			if(!topologyCompiled)
+				return false;
+
+			const PxsBodyCore& bodyCore =
+				entry.core->getCore();
+			const PxTransform previousActorToWorld =
+				bodyCore.body2World *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform previousShapeToWorld =
+				previousActorToWorld * shape.getShape2Actor();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			if(bodySim->isKinematic())
+			{
+				PxTransform targetPose;
+				if(entry.core->getKinematicTarget(targetPose))
+					bodyToWorld = targetPose;
+			}
+			const PxTransform actorToWorld =
+				bodyToWorld *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform shapeToWorld =
+				actorToWorld * shape.getShape2Actor();
+			if(!shapeToWorld.isValid() ||
+				!previousShapeToWorld.isValid())
+				return false;
+			surface.center = shapeToWorld.p;
+			surface.rotation = shapeToWorld.q;
+			surface.previousCenter = previousShapeToWorld.p;
+			surface.previousRotation =
+				previousShapeToWorld.q;
+			surface.primitiveKey = entry.primitiveKey;
+			return true;
+		}
+
+		bool compileDynamicBox(
+			const DynamicShapeEntry& entry,
+			Dy::AvbdRigidBox& box) const
+		{
+			BodySim* bodySim = entry.core->getSim();
+			if(!bodySim || bodySim->isArticulationLink())
+				return false;
+			const ShapeCore& shape = *entry.shape;
+			if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE) ||
+				shape.getGeometryType() !=
+					PxGeometryType::eBOX)
+				return false;
+
+			const PxsBodyCore& bodyCore =
+				entry.core->getCore();
+			const PxTransform previousActorToWorld =
+				bodyCore.body2World *
+				bodyCore.getBody2Actor().getInverse();
+			const PxTransform previousShapeToWorld =
+				previousActorToWorld * shape.getShape2Actor();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			if(bodySim->isKinematic())
+			{
+				PxTransform targetPose;
+				if(entry.core->getKinematicTarget(targetPose))
+					bodyToWorld = targetPose;
+			}
+			const PxTransform actorToWorld =
+				bodyToWorld *
+				bodyCore.getBody2Actor().getInverse();
+			const PxTransform shapeToWorld =
+				actorToWorld * shape.getShape2Actor();
+			if(!shapeToWorld.isValid())
+				return false;
+
+			const PxBoxGeometry& geometry =
+				static_cast<const PxBoxGeometry&>(
+					shape.getGeometry());
+			box.center = shapeToWorld.p;
+			box.rotation = shapeToWorld.q;
+			box.previousCenter = previousShapeToWorld.p;
+			box.previousRotation = previousShapeToWorld.q;
+			box.halfExtent = geometry.halfExtents;
+			box.friction = getStaticFriction(
+				shape, mRigidMaterialManager);
+			box.frictionCombineMode =
+				getStaticFrictionCombineMode(
+					shape, mRigidMaterialManager);
+			box.primitiveKey = entry.primitiveKey;
+			return true;
+		}
+
+		bool compileDynamicSphere(
+			const DynamicShapeEntry& entry,
+			Dy::AvbdRigidSphere& sphere) const
+		{
+			BodySim* bodySim = entry.core->getSim();
+			if(!bodySim || bodySim->isArticulationLink())
+				return false;
+			const ShapeCore& shape = *entry.shape;
+			if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE) ||
+				shape.getGeometryType() !=
+					PxGeometryType::eSPHERE)
+				return false;
+
+			const PxSphereGeometry& geometry =
+				static_cast<const PxSphereGeometry&>(
+					shape.getGeometry());
+			if(geometry.radius <= 0.0f ||
+				!PxIsFinite(geometry.radius))
+				return false;
+			const PxsBodyCore& bodyCore =
+				entry.core->getCore();
+			const PxTransform previousActorToWorld =
+				bodyCore.body2World *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform previousShapeToWorld =
+				previousActorToWorld * shape.getShape2Actor();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			if(bodySim->isKinematic())
+			{
+				PxTransform targetPose;
+				if(entry.core->getKinematicTarget(targetPose))
+					bodyToWorld = targetPose;
+			}
+			const PxTransform actorToWorld =
+				bodyToWorld *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform shapeToWorld =
+				actorToWorld * shape.getShape2Actor();
+			if(!shapeToWorld.isValid() ||
+				!previousShapeToWorld.isValid())
+				return false;
+
+			sphere.center = shapeToWorld.p;
+			sphere.rotation = shapeToWorld.q;
+			sphere.previousCenter = previousShapeToWorld.p;
+			sphere.previousRotation = previousShapeToWorld.q;
+			sphere.radius = geometry.radius;
+			sphere.friction = getStaticFriction(
+				shape, mRigidMaterialManager);
+			sphere.frictionCombineMode =
+				getStaticFrictionCombineMode(
+					shape, mRigidMaterialManager);
+			sphere.primitiveKey = entry.primitiveKey;
+			return true;
+		}
+
+		bool compileDynamicCapsule(
+			const DynamicShapeEntry& entry,
+			Dy::AvbdRigidCapsule& capsule) const
+		{
+			BodySim* bodySim = entry.core->getSim();
+			if(!bodySim || bodySim->isArticulationLink())
+				return false;
+			const ShapeCore& shape = *entry.shape;
+			if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE) ||
+				shape.getGeometryType() !=
+					PxGeometryType::eCAPSULE)
+				return false;
+
+			const PxCapsuleGeometry& geometry =
+				static_cast<const PxCapsuleGeometry&>(
+					shape.getGeometry());
+			if(geometry.radius <= 0.0f ||
+				geometry.halfHeight < 0.0f ||
+				!PxIsFinite(geometry.radius) ||
+				!PxIsFinite(geometry.halfHeight))
+				return false;
+			const PxsBodyCore& bodyCore =
+				entry.core->getCore();
+			const PxTransform previousActorToWorld =
+				bodyCore.body2World *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform previousShapeToWorld =
+				previousActorToWorld * shape.getShape2Actor();
+			PxTransform bodyToWorld = bodyCore.body2World;
+			if(bodySim->isKinematic())
+			{
+				PxTransform targetPose;
+				if(entry.core->getKinematicTarget(targetPose))
+					bodyToWorld = targetPose;
+			}
+			const PxTransform actorToWorld =
+				bodyToWorld *
+					bodyCore.getBody2Actor().getInverse();
+			const PxTransform shapeToWorld =
+				actorToWorld * shape.getShape2Actor();
+			if(!shapeToWorld.isValid() ||
+				!previousShapeToWorld.isValid())
+				return false;
+
+			capsule.center = shapeToWorld.p;
+			capsule.rotation = shapeToWorld.q;
+			capsule.previousCenter = previousShapeToWorld.p;
+			capsule.previousRotation = previousShapeToWorld.q;
+			capsule.radius = geometry.radius;
+			capsule.halfHeight = geometry.halfHeight;
+			capsule.friction = getStaticFriction(
+				shape, mRigidMaterialManager);
+			capsule.frictionCombineMode =
+				getStaticFrictionCombineMode(
+					shape, mRigidMaterialManager);
+			capsule.primitiveKey = entry.primitiveKey;
+			return true;
+		}
+
+		static const PxsDeformableVolumeMaterialCore* getMaterial(
+			const DeformableVolumeCore& core,
+			const PxsDeformableVolumeMaterialManager& materialManager)
+		{
+			const PxArray<PxU16>& handles =
+				core.getCore().materialHandles;
+			if(handles.empty() ||
+				handles[0] == MATERIAL_INVALID_HANDLE ||
+				handles[0] >= materialManager.getMaxSize())
+				return NULL;
+			const PxsDeformableVolumeMaterialCore* material =
+				materialManager.getMaterial(handles[0]);
+			return material->mMaterialIndex == handles[0]
+				? material : NULL;
+		}
+
+		static PxReal getStaticFriction(
+			const ShapeCore& shape,
+			const PxsMaterialManager& materialManager)
+		{
+			const PxU16* materialIndices =
+				shape.getMaterialIndices();
+			if(!materialIndices ||
+				shape.getNbMaterialIndices() == 0 ||
+				materialIndices[0] == MATERIAL_INVALID_HANDLE ||
+				materialIndices[0] >= materialManager.getMaxSize())
+				return 0.5f;
+			const PxsMaterialCore* material =
+				materialManager.getMaterial(materialIndices[0]);
+			return material->mMaterialIndex == materialIndices[0]
+				? PxMax(material->dynamicFriction, 0.0f) : 0.5f;
+		}
+
+		static PxU8 getStaticFrictionCombineMode(
+			const ShapeCore& shape,
+			const PxsMaterialManager& materialManager)
+		{
+			const PxU16* materialIndices =
+				shape.getMaterialIndices();
+			if(!materialIndices ||
+				shape.getNbMaterialIndices() == 0 ||
+				materialIndices[0] == MATERIAL_INVALID_HANDLE ||
+				materialIndices[0] >= materialManager.getMaxSize())
+				return PxU8(PxCombineMode::eAVERAGE);
+			const PxsMaterialCore* material =
+				materialManager.getMaterial(materialIndices[0]);
+			return material->mMaterialIndex == materialIndices[0]
+				? PxU8(material->getFrictionCombineMode())
+				: PxU8(PxCombineMode::eAVERAGE);
+		}
+
+		void compileWorldStatics(
+			const PxsMaterialManager& materialManager)
+		{
+			mWorldPlanes.clear();
+			mRigidBoxes.clear();
+			mRigidSpheres.clear();
+			mRigidCapsules.clear();
+			mRigidConvexes.clear();
+			mRigidTriangleSurfaces.clear();
+			for(PxU32 i = 0; i < mStaticShapes.size(); i++)
+			{
+				const StaticShapeEntry& entry = mStaticShapes[i];
+				const ShapeCore& shape = *entry.shape;
+				if(!(shape.getFlags() &
+					PxShapeFlag::eSIMULATION_SHAPE))
+					continue;
+				const PxTransform shapeToWorld =
+					entry.core->getActor2World() *
+					shape.getShape2Actor();
+				if(!shapeToWorld.isValid())
+					continue;
+				const PxReal friction =
+					getStaticFriction(shape, materialManager);
+				const PxU8 frictionCombineMode =
+					getStaticFrictionCombineMode(
+						shape, materialManager);
+				if(shape.getGeometryType() ==
+					PxGeometryType::ePLANE)
+				{
+					Dy::AvbdWorldPlane plane;
+					plane.normal =
+						shapeToWorld.q.rotate(
+							PxVec3(1.0f, 0.0f, 0.0f)).
+							getNormalized();
+					plane.offset =
+						plane.normal.dot(shapeToWorld.p);
+					plane.friction = friction;
+					plane.frictionCombineMode =
+						frictionCombineMode;
+					plane.primitiveKey = entry.primitiveKey;
+					mWorldPlanes.pushBack(plane);
+				}
+				else if(shape.getGeometryType() ==
+					PxGeometryType::eBOX)
+				{
+					const PxBoxGeometry& geometry =
+						static_cast<const PxBoxGeometry&>(
+							shape.getGeometry());
+					Dy::AvbdRigidBox box;
+					box.center = shapeToWorld.p;
+					box.rotation = shapeToWorld.q;
+					box.halfExtent = geometry.halfExtents;
+					box.friction = friction;
+					box.frictionCombineMode =
+						frictionCombineMode;
+					box.primitiveKey = entry.primitiveKey;
+					mRigidBoxes.pushBack(box);
+				}
+				else if(shape.getGeometryType() ==
+					PxGeometryType::eSPHERE)
+				{
+					const PxSphereGeometry& geometry =
+						static_cast<const PxSphereGeometry&>(
+							shape.getGeometry());
+					if(geometry.radius <= 0.0f ||
+						!PxIsFinite(geometry.radius))
+						continue;
+					Dy::AvbdRigidSphere sphere;
+					sphere.center = shapeToWorld.p;
+					sphere.rotation = shapeToWorld.q;
+					sphere.radius = geometry.radius;
+					sphere.friction = friction;
+					sphere.frictionCombineMode =
+						frictionCombineMode;
+					sphere.primitiveKey = entry.primitiveKey;
+					mRigidSpheres.pushBack(sphere);
+				}
+				else if(shape.getGeometryType() ==
+					PxGeometryType::eCAPSULE)
+				{
+					const PxCapsuleGeometry& geometry =
+						static_cast<const PxCapsuleGeometry&>(
+							shape.getGeometry());
+					if(geometry.radius <= 0.0f ||
+						geometry.halfHeight < 0.0f ||
+						!PxIsFinite(geometry.radius) ||
+						!PxIsFinite(geometry.halfHeight))
+						continue;
+					Dy::AvbdRigidCapsule capsule;
+					capsule.center = shapeToWorld.p;
+					capsule.rotation = shapeToWorld.q;
+					capsule.radius = geometry.radius;
+					capsule.halfHeight = geometry.halfHeight;
+					capsule.friction = friction;
+					capsule.frictionCombineMode =
+						frictionCombineMode;
+					capsule.primitiveKey = entry.primitiveKey;
+					mRigidCapsules.pushBack(capsule);
+				}
+				else if(shape.getGeometryType() ==
+					PxGeometryType::eCONVEXMESH)
+				{
+					const PxConvexMeshGeometry& geometry =
+						static_cast<
+							const PxConvexMeshGeometry&>(
+								shape.getGeometry());
+					Dy::AvbdRigidConvex convex;
+					if(!compileConvexTopology(
+							geometry, convex))
+						continue;
+					convex.center = shapeToWorld.p;
+					convex.rotation = shapeToWorld.q;
+					convex.previousCenter = shapeToWorld.p;
+					convex.previousRotation = shapeToWorld.q;
+					convex.friction = friction;
+					convex.frictionCombineMode =
+						frictionCombineMode;
+					convex.primitiveKey =
+						entry.primitiveKey;
+					mRigidConvexes.pushBack(convex);
+				}
+				else if(shape.getGeometryType() ==
+						PxGeometryType::eTRIANGLEMESH ||
+					shape.getGeometryType() ==
+						PxGeometryType::eHEIGHTFIELD)
+				{
+					Dy::AvbdRigidTriangleSurface surface;
+					const bool compiled =
+						shape.getGeometryType() ==
+							PxGeometryType::eTRIANGLEMESH
+						? compileTriangleMeshTopology(
+							shape, materialManager,
+							static_cast<
+								const PxTriangleMeshGeometry&>(
+									shape.getGeometry()),
+							surface)
+						: compileHeightFieldTopology(
+							shape, materialManager,
+							static_cast<
+								const PxHeightFieldGeometry&>(
+									shape.getGeometry()),
+							surface);
+					if(!compiled)
+						continue;
+					surface.center = shapeToWorld.p;
+					surface.rotation = shapeToWorld.q;
+					surface.previousCenter = shapeToWorld.p;
+					surface.previousRotation =
+						shapeToWorld.q;
+					surface.primitiveKey =
+						entry.primitiveKey;
+					mRigidTriangleSurfaces.pushBack(
+						surface);
+				}
+			}
+			for(PxU32 i = 0; i < mDynamicShapes.size(); i++)
+			{
+				const DynamicShapeEntry& entry = mDynamicShapes[i];
+				BodySim* bodySim = entry.core->getSim();
+				if(!bodySim || !bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+				Dy::AvbdRigidBox box;
+				if(compileDynamicBox(entry, box))
+				{
+					// A prescribed kinematic is a one-way moving position
+					// objective.  Its explicit prep owner keeps it out of
+					// both world-static warmstart and the rigid 6x6 block.
+					box.targetKind =
+						Dy::AvbdSoftContactTargetKind::
+							eKINEMATIC_RIGID;
+					mRigidBoxes.pushBack(box);
+					continue;
+				}
+				Dy::AvbdRigidSphere sphere;
+				if(compileDynamicSphere(entry, sphere))
+				{
+					sphere.targetKind =
+						Dy::AvbdSoftContactTargetKind::
+							eKINEMATIC_RIGID;
+					mRigidSpheres.pushBack(sphere);
+					continue;
+				}
+				Dy::AvbdRigidCapsule capsule;
+				if(compileDynamicCapsule(entry, capsule))
+				{
+					capsule.targetKind =
+						Dy::AvbdSoftContactTargetKind::
+							eKINEMATIC_RIGID;
+					mRigidCapsules.pushBack(capsule);
+					continue;
+				}
+				Dy::AvbdRigidConvex convex;
+				if(compileDynamicConvex(entry, convex))
+				{
+					convex.targetKind =
+						Dy::AvbdSoftContactTargetKind::
+							eKINEMATIC_RIGID;
+					mRigidConvexes.pushBack(convex);
+					continue;
+				}
+				Dy::AvbdRigidTriangleSurface surface;
+				if(compileDynamicTriangleSurface(
+						entry, surface))
+				{
+					surface.targetKind =
+						Dy::AvbdSoftContactTargetKind::
+							eKINEMATIC_RIGID;
+					mRigidTriangleSurfaces.pushBack(
+						surface);
+				}
+			}
+		}
+
+		void compileDynamicBoxesForIsland(
+			PxsRigidBody* const* rigidBodies,
+			const Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxArray<Dy::AvbdRigidBox>& boxes)
+		{
+			boxes.clear();
+			for(PxU32 shapeIndex = 0;
+				shapeIndex < mDynamicShapes.size(); shapeIndex++)
+			{
+				const DynamicShapeEntry& entry =
+					mDynamicShapes[shapeIndex];
+				BodySim* bodySim = entry.core->getSim();
+				if(!bodySim || bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+				const ShapeCore& shape = *entry.shape;
+				if(!(shape.getFlags() &
+						PxShapeFlag::eSIMULATION_SHAPE) ||
+					shape.getGeometryType() !=
+						PxGeometryType::eBOX)
+					continue;
+
+				const PxsRigidBody* lowLevelBody =
+					&bodySim->getLowLevelBody();
+				PxU32 globalBodyIndex = PX_MAX_U32;
+				for(PxU32 localBodyIndex = 0;
+					localBodyIndex < bodyCount; localBodyIndex++)
+				{
+					const PxU32 candidateIndex =
+						bodyStart + localBodyIndex;
+					if(rigidBodies[candidateIndex] ==
+						lowLevelBody)
+					{
+						globalBodyIndex = candidateIndex;
+						break;
+					}
+				}
+				if(globalBodyIndex == PX_MAX_U32 ||
+					solverBodies[globalBodyIndex].isStatic())
+					continue;
+
+				const PxsBodyCore& bodyCore =
+					entry.core->getCore();
+				const PxTransform actorToWorld =
+					bodyCore.body2World *
+					bodyCore.getBody2Actor().getInverse();
+				const PxTransform shapeToWorld =
+					actorToWorld * shape.getShape2Actor();
+				if(!shapeToWorld.isValid())
+					continue;
+
+				const PxBoxGeometry& geometry =
+					static_cast<const PxBoxGeometry&>(
+						shape.getGeometry());
+				Dy::AvbdRigidBox box;
+				box.center = shapeToWorld.p;
+				box.rotation = shapeToWorld.q;
+				box.halfExtent = geometry.halfExtents;
+				box.friction = getStaticFriction(
+					shape, mRigidMaterialManager);
+				box.frictionCombineMode =
+					getStaticFrictionCombineMode(
+						shape, mRigidMaterialManager);
+				box.primitiveKey = entry.primitiveKey;
+				box.targetKind =
+					Dy::AvbdSoftContactTargetKind::eRIGID_BODY;
+				box.targetIndex =
+					globalBodyIndex - bodyStart;
+				box.shapeToRigidBody =
+					bodyCore.body2World.getInverse() *
+					shapeToWorld;
+				boxes.pushBack(box);
+			}
+		}
+
+		void compileDynamicSpheresForIsland(
+			PxsRigidBody* const* rigidBodies,
+			Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxReal dt,
+			const PxVec3& gravity,
+			PxArray<Dy::AvbdRigidSphere>& spheres)
+		{
+			spheres.clear();
+			for(PxU32 shapeIndex = 0;
+				shapeIndex < mDynamicShapes.size(); shapeIndex++)
+			{
+				const DynamicShapeEntry& entry =
+					mDynamicShapes[shapeIndex];
+				BodySim* bodySim = entry.core->getSim();
+				if(!bodySim || bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+
+				Dy::AvbdRigidSphere sphere;
+				if(!compileDynamicSphere(entry, sphere))
+					continue;
+
+				const PxsRigidBody* lowLevelBody =
+					&bodySim->getLowLevelBody();
+				PxU32 globalBodyIndex = PX_MAX_U32;
+				for(PxU32 localBodyIndex = 0;
+					localBodyIndex < bodyCount; localBodyIndex++)
+				{
+					const PxU32 candidateIndex =
+						bodyStart + localBodyIndex;
+					if(rigidBodies[candidateIndex] ==
+						lowLevelBody)
+					{
+						globalBodyIndex = candidateIndex;
+						break;
+					}
+				}
+				if(globalBodyIndex == PX_MAX_U32 ||
+					solverBodies[globalBodyIndex].isStatic())
+					continue;
+
+				const PxsBodyCore& bodyCore =
+					entry.core->getCore();
+				const PxTransform shapeToWorld(
+					sphere.center, sphere.rotation);
+				sphere.targetKind =
+					Dy::AvbdSoftContactTargetKind::eRIGID_BODY;
+				sphere.targetIndex =
+					globalBodyIndex - bodyStart;
+				sphere.shapeToRigidBody =
+					bodyCore.body2World.getInverse() *
+						shapeToWorld;
+				Dy::AvbdSolverBody& solverBody =
+					solverBodies[globalBodyIndex];
+				solverBody.computePrediction(dt, gravity);
+				const PxTransform predictedBodyToWorld(
+					solverBody.predictedPosition,
+					solverBody.predictedRotation);
+				const PxTransform predictedShapeToWorld =
+					predictedBodyToWorld * sphere.shapeToRigidBody;
+				if(predictedShapeToWorld.isValid())
+				{
+					sphere.predictedCenter =
+						predictedShapeToWorld.p;
+					sphere.predictedRotation =
+						predictedShapeToWorld.q;
+					sphere.predictedPoseValid = true;
+				}
+				spheres.pushBack(sphere);
+			}
+		}
+
+		void compileDynamicCapsulesForIsland(
+			PxsRigidBody* const* rigidBodies,
+			Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxReal dt,
+			const PxVec3& gravity,
+			PxArray<Dy::AvbdRigidCapsule>& capsules)
+		{
+			capsules.clear();
+			for(PxU32 shapeIndex = 0;
+				shapeIndex < mDynamicShapes.size(); shapeIndex++)
+			{
+				const DynamicShapeEntry& entry =
+					mDynamicShapes[shapeIndex];
+				BodySim* bodySim = entry.core->getSim();
+				if(!bodySim || bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+
+				Dy::AvbdRigidCapsule capsule;
+				if(!compileDynamicCapsule(entry, capsule))
+					continue;
+
+				const PxsRigidBody* lowLevelBody =
+					&bodySim->getLowLevelBody();
+				PxU32 globalBodyIndex = PX_MAX_U32;
+				for(PxU32 localBodyIndex = 0;
+					localBodyIndex < bodyCount; localBodyIndex++)
+				{
+					const PxU32 candidateIndex =
+						bodyStart + localBodyIndex;
+					if(rigidBodies[candidateIndex] ==
+						lowLevelBody)
+					{
+						globalBodyIndex = candidateIndex;
+						break;
+					}
+				}
+				if(globalBodyIndex == PX_MAX_U32 ||
+					solverBodies[globalBodyIndex].isStatic())
+					continue;
+
+				const PxsBodyCore& bodyCore =
+					entry.core->getCore();
+				const PxTransform shapeToWorld(
+					capsule.center, capsule.rotation);
+				capsule.targetKind =
+					Dy::AvbdSoftContactTargetKind::eRIGID_BODY;
+				capsule.targetIndex =
+					globalBodyIndex - bodyStart;
+				capsule.shapeToRigidBody =
+					bodyCore.body2World.getInverse() *
+						shapeToWorld;
+				Dy::AvbdSolverBody& solverBody =
+					solverBodies[globalBodyIndex];
+				solverBody.computePrediction(dt, gravity);
+				const PxTransform predictedBodyToWorld(
+					solverBody.predictedPosition,
+					solverBody.predictedRotation);
+				const PxTransform predictedShapeToWorld =
+					predictedBodyToWorld *
+						capsule.shapeToRigidBody;
+				if(predictedShapeToWorld.isValid())
+				{
+					capsule.predictedCenter =
+						predictedShapeToWorld.p;
+					capsule.predictedRotation =
+						predictedShapeToWorld.q;
+					capsule.predictedPoseValid = true;
+				}
+				capsules.pushBack(capsule);
+			}
+		}
+
+		void compileDynamicConvexesForIsland(
+			PxsRigidBody* const* rigidBodies,
+			Dy::AvbdSolverBody* solverBodies,
+			PxU32 bodyStart,
+			PxU32 bodyCount,
+			PxReal dt,
+			const PxVec3& gravity,
+			PxArray<Dy::AvbdRigidConvex>& convexes)
+		{
+			convexes.clear();
+			for(PxU32 shapeIndex = 0;
+				shapeIndex < mDynamicShapes.size(); ++shapeIndex)
+			{
+				const DynamicShapeEntry& entry =
+					mDynamicShapes[shapeIndex];
+				BodySim* bodySim = entry.core->getSim();
+				if(!bodySim || bodySim->isKinematic() ||
+					bodySim->isArticulationLink())
+					continue;
+				Dy::AvbdRigidConvex convex;
+				if(!compileDynamicConvex(entry, convex))
+					continue;
+				const PxsRigidBody* lowLevelBody =
+					&bodySim->getLowLevelBody();
+				PxU32 globalBodyIndex = PX_MAX_U32;
+				for(PxU32 localBodyIndex = 0;
+					localBodyIndex < bodyCount;
+					++localBodyIndex)
+				{
+					const PxU32 candidateIndex =
+						bodyStart + localBodyIndex;
+					if(rigidBodies[candidateIndex] ==
+						lowLevelBody)
+					{
+						globalBodyIndex = candidateIndex;
+						break;
+					}
+				}
+				if(globalBodyIndex == PX_MAX_U32 ||
+					solverBodies[globalBodyIndex].isStatic())
+					continue;
+				const PxsBodyCore& bodyCore =
+					entry.core->getCore();
+				const PxTransform shapeToWorld(
+					convex.center, convex.rotation);
+				convex.targetKind =
+					Dy::AvbdSoftContactTargetKind::
+						eRIGID_BODY;
+				convex.targetIndex =
+					globalBodyIndex - bodyStart;
+				convex.shapeToRigidBody =
+					bodyCore.body2World.getInverse() *
+						shapeToWorld;
+				Dy::AvbdSolverBody& solverBody =
+					solverBodies[globalBodyIndex];
+				solverBody.computePrediction(dt, gravity);
+				const PxTransform predictedBodyToWorld(
+					solverBody.predictedPosition,
+					solverBody.predictedRotation);
+				const PxTransform predictedShapeToWorld =
+					predictedBodyToWorld *
+						convex.shapeToRigidBody;
+				if(predictedShapeToWorld.isValid())
+				{
+					convex.predictedCenter =
+						predictedShapeToWorld.p;
+					convex.predictedRotation =
+						predictedShapeToWorld.q;
+					convex.predictedPoseValid = true;
+				}
+				convexes.pushBack(convex);
+			}
+		}
+
+		void refreshSelfCollisionEnabled()
+		{
+			mSelfCollisionEnabled.resize(mBodies.size());
+			for(PxU32 i = 0; i < mSelfCollisionEnabled.size(); i++)
+				mSelfCollisionEnabled[i] = 0;
+			for(PxU32 i = 0; i < mEntries.size(); i++)
+			{
+				const Entry& entry = mEntries[i];
+				if(entry.bodyIndex < mSelfCollisionEnabled.size())
+				{
+					mSelfCollisionEnabled[entry.bodyIndex] =
+						(entry.getBodyCore().bodyFlags &
+							PxDeformableBodyFlag::
+								eDISABLE_SELF_COLLISION)
+						? 0u : 1u;
+				}
+			}
+		}
+
+		ActorCore* findRigidCoreForPrimitive(
+			PxU64 primitiveKey) const
+		{
+			for(PxU32 i = 0; i < mStaticShapes.size(); ++i)
+				if(mStaticShapes[i].primitiveKey == primitiveKey)
+					return static_cast<ActorCore*>(
+						mStaticShapes[i].core);
+			for(PxU32 i = 0; i < mDynamicShapes.size(); ++i)
+				if(mDynamicShapes[i].primitiveKey == primitiveKey)
+					return static_cast<ActorCore*>(
+						mDynamicShapes[i].core);
+			return NULL;
+		}
+
+		ActorCore* findSoftCoreForContactBody(
+			const Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			ActorCore* const* softCores,
+			PxU32 particleIndex) const
+		{
+			for(PxU32 bodyIndex = 0;
+				bodyIndex < numBodies; ++bodyIndex)
+			{
+				const Dy::AvbdSoftBodyCompiledData& compiled =
+					bodies[bodyIndex].compiled;
+				if(particleIndex < compiled.particleStart ||
+					particleIndex >=
+						compiled.particleStart +
+						compiled.particleCount)
+					continue;
+				if(softCores)
+					return softCores[bodyIndex];
+				if(bodies == mBodies.begin())
+				{
+					for(PxU32 entryIndex = 0;
+						entryIndex < mEntries.size(); ++entryIndex)
+					{
+						const Entry& entry = mEntries[entryIndex];
+						if(entry.bodyIndex == bodyIndex)
+							return entry.getActorCore();
+					}
+				}
+				return NULL;
+			}
+			return NULL;
+		}
+
+		ActorCore* findSoftCoreForContactBodyIndex(
+			const Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			ActorCore* const* softCores,
+			PxU32 bodyIndex) const
+		{
+			if(bodyIndex >= numBodies)
+				return NULL;
+			if(softCores)
+				return softCores[bodyIndex];
+			if(bodies == mBodies.begin())
+			{
+				for(PxU32 entryIndex = 0;
+					entryIndex < mEntries.size(); ++entryIndex)
+				{
+					const Entry& entry = mEntries[entryIndex];
+					if(entry.bodyIndex == bodyIndex)
+						return entry.getActorCore();
+				}
+			}
+			return NULL;
+		}
+
+		const Dy::AvbdSoftBody* findSoftBodyForContactParticle(
+			const Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			PxU32 particleIndex) const
+		{
+			for(PxU32 bodyIndex = 0;
+				bodyIndex < numBodies; ++bodyIndex)
+			{
+				const Dy::AvbdSoftBodyCompiledData& compiled =
+					bodies[bodyIndex].compiled;
+				if(particleIndex >= compiled.particleStart &&
+					particleIndex <
+						compiled.particleStart +
+							compiled.particleCount)
+					return &bodies[bodyIndex];
+			}
+			return NULL;
+		}
+
+		bool isRigidActorContactFiltered(
+			const Dy::AvbdSoftBody& body,
+			ActorCore& softCore,
+			ActorCore& rigidCore,
+			PxU32 particleIndex) const
+		{
+			bool hasMatchingFilter = false;
+			for(PxU32 filterIndex = 0;
+				filterIndex < mRigidActorFilters.size();
+				++filterIndex)
+			{
+				const RigidActorFilterEntry& filter =
+					mRigidActorFilters[filterIndex];
+				if(filter.softCore != &softCore ||
+					filter.rigidCore != &rigidCore)
+					continue;
+				hasMatchingFilter = true;
+				if(filter.filterAllElements)
+					return true;
+			}
+			if(!hasMatchingFilter ||
+				particleIndex < body.compiled.particleStart)
+				return false;
+			const PxU32 localParticle =
+				particleIndex - body.compiled.particleStart;
+			if(localParticle >=
+				body.compiled.elementAdjacency.size())
+				return false;
+
+			// Rigid contact generation is particle-sampled. Surface filters
+			// own source triangles directly. Volume filters are compiled
+			// from public collision tetrahedra through the cooked overlap
+			// mapping and therefore own source simulation tetrahedra here.
+			// In both domains, remove the objective only when every incident
+			// element is covered by the union of active filter objects.
+			const PxArray<Dy::AvbdParticleElementRef>& incident =
+				body.compiled.triElements.empty()
+					? body.compiled.elementAdjacency[
+						localParticle].tetRefs
+					: body.compiled.elementAdjacency[
+						localParticle].triRefs;
+			if(incident.empty())
+				return false;
+			const bool volumeOwnership =
+				body.compiled.triElements.empty();
+			for(PxU32 refIndex = 0;
+				refIndex < incident.size(); ++refIndex)
+			{
+				const PxU32 compiledElementIndex =
+					incident[refIndex].index;
+				PxU32 sourceElementIndex = PX_MAX_U32;
+				if(volumeOwnership)
+				{
+					if(compiledElementIndex >=
+						body.compiled.tetElements.size())
+						return false;
+					sourceElementIndex =
+						body.compiled.tetElements[
+							compiledElementIndex].
+								sourceElementIndex;
+				}
+				else
+				{
+					if(compiledElementIndex >=
+						body.compiled.triElements.size())
+						return false;
+					sourceElementIndex =
+						body.compiled.triElements[
+							compiledElementIndex].
+								sourceElementIndex;
+				}
+				bool elementFiltered = false;
+				for(PxU32 filterIndex = 0;
+					filterIndex < mRigidActorFilters.size();
+					++filterIndex)
+				{
+					const RigidActorFilterEntry& filter =
+						mRigidActorFilters[filterIndex];
+					if(filter.softCore == &softCore &&
+						filter.rigidCore == &rigidCore &&
+						filter.containsElement(
+							sourceElementIndex))
+					{
+						elementFiltered = true;
+						break;
+					}
+				}
+				if(!elementFiltered)
+					return false;
+			}
+			return true;
+		}
+
+		bool isDeformablePairContactFiltered(
+			const Dy::AvbdSoftBody& queryBody,
+			ActorCore& queryCore,
+			ActorCore& targetCore,
+			PxU32 queryParticleIndex,
+			PxU32 targetSourceElementIndex) const
+		{
+			if(targetSourceElementIndex == PX_MAX_U32 ||
+				queryParticleIndex <
+					queryBody.compiled.particleStart)
+				return false;
+			const PxU32 localParticle =
+				queryParticleIndex -
+					queryBody.compiled.particleStart;
+			if(localParticle >=
+				queryBody.compiled.elementAdjacency.size())
+				return false;
+			const bool volumeOwnership =
+				queryBody.compiled.triElements.empty();
+			const PxArray<Dy::AvbdParticleElementRef>& incident =
+				volumeOwnership
+					? queryBody.compiled.elementAdjacency[
+						localParticle].tetRefs
+					: queryBody.compiled.elementAdjacency[
+						localParticle].triRefs;
+			if(incident.empty())
+				return false;
+
+			// Contact detection samples a query particle against one
+			// explicit target boundary face. A shared query particle
+			// belongs to every incident source element, so the prepared
+			// objective is removed only when the union of active filter
+			// objects covers every query/target source-element pair.
+			for(PxU32 refIndex = 0;
+				refIndex < incident.size(); ++refIndex)
+			{
+				const PxU32 compiledElementIndex =
+					incident[refIndex].index;
+				PxU32 querySourceElementIndex = PX_MAX_U32;
+				if(volumeOwnership)
+				{
+					if(compiledElementIndex >=
+						queryBody.compiled.tetElements.size())
+						return false;
+					querySourceElementIndex =
+						queryBody.compiled.tetElements[
+							compiledElementIndex].
+								sourceElementIndex;
+				}
+				else
+				{
+					if(compiledElementIndex >=
+						queryBody.compiled.triElements.size())
+						return false;
+					querySourceElementIndex =
+						queryBody.compiled.triElements[
+							compiledElementIndex].
+								sourceElementIndex;
+				}
+				bool pairFiltered = false;
+				for(PxU32 filterIndex = 0;
+					filterIndex < mDeformablePairFilters.size();
+					++filterIndex)
+				{
+					if(mDeformablePairFilters[filterIndex].
+						containsPair(
+							queryCore,
+							querySourceElementIndex,
+							targetCore,
+							targetSourceElementIndex))
+					{
+						pairFiltered = true;
+						break;
+					}
+				}
+				if(!pairFiltered)
+					return false;
+			}
+			return true;
+		}
+
+		void removeRigidActorFilteredContacts(
+			const Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			ActorCore* const* softCores,
+			PxArray<Dy::AvbdSoftContact>& contacts) const
+		{
+			if(mRigidActorFilters.empty())
+				return;
+			PxU32 writeIndex = 0;
+			for(PxU32 contactIndex = 0;
+				contactIndex < contacts.size(); ++contactIndex)
+			{
+				const Dy::AvbdSoftContact& contact =
+					contacts[contactIndex];
+				const Dy::AvbdSoftContactGeometry& geometry =
+					contact.geometry;
+				const bool rigidSource =
+					geometry.source.type ==
+						Dy::AvbdSoftContactSource::eGROUND ||
+					geometry.source.type ==
+						Dy::AvbdSoftContactSource::eRIGID_SDF;
+				bool filtered = false;
+				if(rigidSource)
+				{
+					ActorCore* softCore =
+						findSoftCoreForContactBody(
+							bodies, numBodies, softCores,
+							geometry.particleIdx);
+					ActorCore* rigidCore =
+						findRigidCoreForPrimitive(
+							geometry.source.primitiveKey);
+					const Dy::AvbdSoftBody* softBody =
+						findSoftBodyForContactParticle(
+							bodies, numBodies,
+							geometry.particleIdx);
+					if(softCore && rigidCore && softBody)
+						filtered =
+							isRigidActorContactFiltered(
+								*softBody, *softCore,
+								*rigidCore,
+								geometry.particleIdx);
+				}
+				if(!filtered)
+				{
+					if(writeIndex != contactIndex)
+						contacts[writeIndex] =
+							contacts[contactIndex];
+					++writeIndex;
+				}
+			}
+			contacts.resize(writeIndex);
+		}
+
+		void removeDeformablePairFilteredContacts(
+			const Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			ActorCore* const* softCores,
+			PxArray<Dy::AvbdSoftContact>& contacts) const
+		{
+			if(mDeformablePairFilters.empty())
+				return;
+			PxU32 writeIndex = 0;
+			for(PxU32 contactIndex = 0;
+				contactIndex < contacts.size(); ++contactIndex)
+			{
+				const Dy::AvbdSoftContact& contact =
+					contacts[contactIndex];
+				const Dy::AvbdSoftContactGeometry& geometry =
+					contact.geometry;
+				bool filtered = false;
+				if(geometry.source.type ==
+					Dy::AvbdSoftContactSource::eSOFT_SURFACE)
+				{
+					ActorCore* queryCore =
+						findSoftCoreForContactBody(
+							bodies, numBodies, softCores,
+							geometry.particleIdx);
+					ActorCore* targetCore =
+						findSoftCoreForContactBodyIndex(
+							bodies, numBodies, softCores,
+							geometry.source.targetBodyIndex);
+					const Dy::AvbdSoftBody* queryBody =
+						findSoftBodyForContactParticle(
+							bodies, numBodies,
+							geometry.particleIdx);
+					if(queryCore && targetCore && queryBody)
+						filtered =
+							isDeformablePairContactFiltered(
+								*queryBody, *queryCore,
+								*targetCore,
+								geometry.particleIdx,
+								geometry.
+									targetSourceElementIndex);
+				}
+				if(!filtered)
+				{
+					if(writeIndex != contactIndex)
+						contacts[writeIndex] =
+							contacts[contactIndex];
+					++writeIndex;
+				}
+			}
+			contacts.resize(writeIndex);
+		}
+
+		void detectContacts(
+			Dy::AvbdSoftParticle* particles,
+			PxU32 numParticles,
+			Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			PxArray<Dy::AvbdSoftContact>& contacts,
+			const Dy::AvbdRigidBox* rigidBoxes = NULL,
+			PxU32 numRigidBoxes = 0,
+			const Dy::AvbdSelfCollisionAdjacency*
+				selfCollisionAdjacencies = NULL,
+			PxU32 numSelfCollisionAdjacencies = 0,
+			const PxU8* selfCollisionEnabled = NULL,
+			ActorCore* const* softCores = NULL,
+			const Dy::AvbdRigidSphere* rigidSpheres = NULL,
+			PxU32 numRigidSpheres = 0,
+			const Dy::AvbdRigidCapsule* rigidCapsules = NULL,
+			PxU32 numRigidCapsules = 0,
+			const Dy::AvbdRigidConvex* rigidConvexes = NULL,
+			PxU32 numRigidConvexes = 0,
+			const Dy::AvbdRigidTriangleSurface*
+				rigidTriangleSurfaces = NULL,
+			PxU32 numRigidTriangleSurfaces = 0)
+		{
+			if(!rigidBoxes)
+			{
+				rigidBoxes = mRigidBoxes.begin();
+				numRigidBoxes = mRigidBoxes.size();
+			}
+			if(!rigidSpheres)
+			{
+				rigidSpheres = mRigidSpheres.begin();
+				numRigidSpheres = mRigidSpheres.size();
+			}
+			if(!rigidCapsules)
+			{
+				rigidCapsules = mRigidCapsules.begin();
+				numRigidCapsules = mRigidCapsules.size();
+			}
+			if(!rigidConvexes)
+			{
+				rigidConvexes = mRigidConvexes.begin();
+				numRigidConvexes = mRigidConvexes.size();
+			}
+			if(!rigidTriangleSurfaces)
+			{
+				rigidTriangleSurfaces =
+					mRigidTriangleSurfaces.begin();
+				numRigidTriangleSurfaces =
+					mRigidTriangleSurfaces.size();
+			}
+			if(!selfCollisionAdjacencies &&
+				bodies == mBodies.begin() &&
+				numBodies == mBodies.size())
+			{
+				PX_ASSERT(
+					mSelfCollisionAdjacencies.size() == mBodies.size());
+				refreshSelfCollisionEnabled();
+				selfCollisionAdjacencies =
+					mSelfCollisionAdjacencies.begin();
+				numSelfCollisionAdjacencies =
+					mSelfCollisionAdjacencies.size();
+				selfCollisionEnabled = mSelfCollisionEnabled.begin();
+			}
+			Dy::avbdDetectAllOGCContacts(
+				particles, numParticles,
+				bodies, numBodies,
+				rigidBoxes, numRigidBoxes,
+				selfCollisionAdjacencies,
+				numSelfCollisionAdjacencies,
+				contacts, mContactParams, 0.0f,
+				NULL, &mWorkspace.contact,
+				mWorldPlanes.begin(), mWorldPlanes.size(),
+				false, selfCollisionEnabled,
+				rigidSpheres, numRigidSpheres,
+				rigidCapsules, numRigidCapsules,
+				rigidConvexes, numRigidConvexes,
+				rigidTriangleSurfaces,
+				numRigidTriangleSurfaces);
+			removeRigidActorFilteredContacts(
+				bodies, numBodies, softCores, contacts);
+			removeDeformablePairFilteredContacts(
+				bodies, numBodies, softCores, contacts);
+		}
+
+		static void redetectContacts(
+			Dy::AvbdSoftParticle* particles,
+			PxU32 numParticles,
+			Dy::AvbdSoftBody* bodies,
+			PxU32 numBodies,
+			PxArray<Dy::AvbdSoftContact>& contacts,
+			void* userData)
+		{
+			static_cast<AvbdCpuSoftScene*>(userData)->
+				detectContacts(
+					particles, numParticles,
+					bodies, numBodies, contacts);
+		}
+
+		void refreshSurfaceFlattening(Entry& entry)
+		{
+			if(entry.kind != eSURFACE || !entry.surfaceCore ||
+				entry.bodyIndex >= mBodies.size())
+				return;
+			const bool flatteningEnabled =
+				(entry.surfaceCore->getSurfaceFlags() &
+					PxDeformableSurfaceFlag::eENABLE_FLATTENING)
+				? true : false;
+			mBodies[entry.bodyIndex].compiled.
+				compileBendingRestAngles(flatteningEnabled);
+		}
+
+		void applyDeformablePreintegrationControls(Entry& entry)
+		{
+			const PxReal maxLinearVelocity =
+				PxMax(entry.getBodyCore().maxLinearVelocity, 0.0f);
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				if(particle.invMass <= 0.0f ||
+					!particle.velocity.isFinite())
+					continue;
+				const PxReal maxComponent = PxMax(
+					PxAbs(particle.velocity.x),
+					PxMax(
+						PxAbs(particle.velocity.y),
+						PxAbs(particle.velocity.z)));
+				if(maxComponent == 0.0f)
+					continue;
+				const PxVec3 scaledVelocity =
+					particle.velocity / maxComponent;
+				const PxReal scaledMagnitude =
+					scaledVelocity.magnitude();
+				const PxReal limitedMaxComponent =
+					maxLinearVelocity / scaledMagnitude;
+				if(maxComponent <= limitedMaxComponent)
+					continue;
+				particle.velocity =
+					scaledVelocity * limitedMaxComponent;
+				particle.prevVelocity = particle.velocity;
+			}
+		}
+
+		void syncHostInputs(
+			Entry& entry,
+			const PxsDeformableVolumeMaterialManager& materialManager)
+		{
+			Dy::DeformableBodyCore& bodyCore =
+				entry.getBodyCore();
+			bool syncPositions = false;
+			bool syncVelocities = false;
+			bool syncRestPositions = false;
+			if(entry.kind == eVOLUME)
+			{
+				const Dy::DeformableVolumeCore& core =
+					entry.volumeCore->getCore();
+				syncPositions = core.dirtyFlags &
+					PxDeformableVolumeDataFlag::
+						eSIM_POSITION_INVMASS;
+				syncVelocities = core.dirtyFlags &
+					PxDeformableVolumeDataFlag::eSIM_VELOCITY;
+			}
+			else
+			{
+				const Dy::DeformableSurfaceCore& core =
+					entry.surfaceCore->getCore();
+				syncPositions = core.dirtyFlags &
+					PxDeformableSurfaceDataFlag::ePOSITION_INVMASS;
+				syncVelocities = core.dirtyFlags &
+					PxDeformableSurfaceDataFlag::eVELOCITY;
+				syncRestPositions = core.dirtyFlags &
+					PxDeformableSurfaceDataFlag::eREST_POSITION;
+				if(syncRestPositions)
+				{
+					const bool rebuilt =
+						rebuildSurfaceRestState(entry);
+					PX_ASSERT(rebuilt);
+					PX_UNUSED(rebuilt);
+				}
+			}
+
+			Dy::AvbdSoftBody& body = mBodies[entry.bodyIndex];
+			body.compiled.selfCollisionFilterDistance =
+				PxMax(bodyCore.selfCollisionFilterDistance, 0.0f);
+			body.compiled.maxDepenetrationVelocity =
+				PxMax(-bodyCore.maxPenetrationBias, 0.0f);
+			body.compiled.selfCollisionStressTolerance =
+				bodyCore.selfCollisionStressTolerance;
+			body.compiled.speculativeCCDEnabled =
+				bodyCore.bodyFlags.isSet(
+					PxDeformableBodyFlag::
+						eENABLE_SPECULATIVE_CCD);
+			refreshSurfaceFlattening(entry);
+			if(entry.kind == eVOLUME)
+			{
+				const PxsDeformableVolumeMaterialCore* material =
+					getMaterial(*entry.volumeCore, materialManager);
+				body.material.youngsModulus =
+					material ? material->youngs : 1.0e5f;
+				body.material.poissonsRatio =
+					material ? material->poissons : 0.3f;
+				body.material.damping =
+					bodyCore.linearDamping +
+					(material ? material->elasticityDamping : 0.0f);
+				body.material.bendingStiffness = 0.0f;
+				body.material.bendingDamping = 0.0f;
+				body.material.thickness = 0.01f;
+				body.material.dynamicFriction = material
+					? PxMax(material->dynamicFriction, 0.0f)
+					: 0.5f;
+				body.material.coRotationalVolumeModel =
+					!material ||
+					material->materialModel ==
+						PxDeformableVolumeMaterialModel::
+							eCO_ROTATIONAL;
+			}
+			else
+			{
+				const PxsDeformableSurfaceMaterialCore* material =
+					getSurfaceMaterial(*entry.surfaceCore);
+				body.material.youngsModulus =
+					material ? material->youngs : 1.0e5f;
+				body.material.poissonsRatio =
+					material ? material->poissons : 0.3f;
+				body.material.damping =
+					bodyCore.linearDamping +
+					(material ? material->elasticityDamping : 0.0f);
+				body.material.bendingStiffness =
+					material ? material->bendingStiffness : 0.0f;
+				body.material.bendingDamping =
+					material ? material->bendingDamping : 0.0f;
+				body.material.thickness = material
+					? PxMax(material->thickness, 1.0e-4f)
+					: 0.01f;
+				body.material.dynamicFriction = material
+					? PxMax(material->dynamicFriction, 0.0f)
+					: 0.5f;
+				body.material.coRotationalVolumeModel = true;
+			}
+			body.material.computeLameParameters();
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			const PxReal gravityScale =
+				(entry.getActorFlags() &
+					PxActorFlag::eDISABLE_GRAVITY)
+				? 0.0f : 1.0f;
+			for(PxU32 i = 0; i < particleCount; i++)
+				mParticles[particleStart + i].gravityScale =
+					gravityScale;
+
+			PxVec4* positions = entry.getPositionInvMass();
+			PxVec4* velocities = entry.getVelocity();
+			PX_ASSERT(positions && velocities);
+			if(syncPositions || syncVelocities || bodyCore.dirty)
+			{
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					Dy::AvbdSoftParticle& particle =
+						mParticles[particleStart + i];
+					if(syncPositions)
+					{
+						const PxVec4& positionInvMass =
+							positions[i];
+						particle.position =
+							positionInvMass.getXYZ();
+						if(entry.kind == eVOLUME)
+							particle.initialPosition =
+								particle.position;
+						particle.predictedPosition = particle.position;
+						particle.outerPosition = particle.position;
+						particle.invMass =
+							PxMax(positionInvMass.w, 0.0f);
+						particle.mass = particle.invMass > 0.0f
+							? 1.0f / particle.invMass : 0.0f;
+						particle.elasticK = 0.0f;
+					}
+					if(syncVelocities)
+					{
+						particle.velocity =
+							velocities[i].getXYZ();
+						particle.prevVelocity = particle.velocity;
+					}
+					particle.damping = body.material.damping;
+				}
+			}
+			applyDeformablePreintegrationControls(entry);
+			bodyCore.dirty = false;
+			if(entry.kind == eVOLUME)
+				entry.volumeCore->getCore().dirtyFlags =
+					PxDeformableVolumeDataFlags(0);
+			else
+				entry.surfaceCore->getCore().dirtyFlags =
+					PxDeformableSurfaceDataFlags(0);
+		}
+
+		void writeBack(Entry& entry)
+		{
+			if(entry.sleeping)
+				return;
+			const PxU32 particleStart = getParticleStart(entry);
+			const PxU32 particleCount = getParticleCount(entry);
+			if(entry.kind == eSURFACE)
+			{
+				Dy::DeformableSurfaceCore& core =
+					entry.surfaceCore->getCore();
+				for(PxU32 i = 0; i < particleCount; i++)
+				{
+					const Dy::AvbdSoftParticle& particle =
+						mParticles[particleStart + i];
+					core.positionInvMass[i] =
+						PxVec4(particle.position, particle.invMass);
+					const PxReal velocityW = core.velocity[i].w;
+					core.velocity[i] =
+						PxVec4(particle.velocity, velocityW);
+				}
+				return;
+			}
+
+			Dy::DeformableVolumeCore& core =
+				entry.volumeCore->getCore();
+			for(PxU32 i = 0; i < particleCount; i++)
+			{
+				const Dy::AvbdSoftParticle& particle =
+					mParticles[particleStart + i];
+				core.simPositionInvMass[i] =
+					PxVec4(particle.position, particle.invMass);
+				core.simVelocity[i] =
+					PxVec4(particle.velocity, particle.invMass);
+			}
+
+			const PxU32 collisionVertexCount =
+				entry.collisionMesh->getNbVertices();
+			if(entry.collisionMesh == entry.simulationMesh &&
+				collisionVertexCount == particleCount)
+			{
+				for(PxU32 i = 0; i < collisionVertexCount; i++)
+				{
+					const PxReal invMass =
+						core.positionInvMass[i].w;
+					core.positionInvMass[i] = PxVec4(
+						mParticles[particleStart + i].position,
+						invMass);
+				}
+				return;
+			}
+
+			Gu::DeformableVolumeAuxData& auxData =
+				static_cast<Gu::DeformableVolumeAuxData&>(
+					*entry.auxData);
+			const PxU32* remap =
+				auxData.mVertsRemapInGridModel;
+			const PxReal* barycentrics =
+				auxData.mVertsBarycentricInGridModel;
+			if(!remap || !barycentrics)
+			{
+				const PxU32 count =
+					PxMin(collisionVertexCount, particleCount);
+				for(PxU32 i = 0; i < count; i++)
+				{
+					const PxReal invMass =
+						core.positionInvMass[i].w;
+					core.positionInvMass[i] = PxVec4(
+						mParticles[particleStart + i].position,
+						invMass);
+				}
+				return;
+			}
+
+			const bool has16BitIndices =
+				entry.simulationMesh->getTetrahedronMeshFlags() &
+				PxTetrahedronMeshFlag::e16_BIT_INDICES;
+			const PxU16* tets16 = has16BitIndices
+				? static_cast<const PxU16*>(
+					entry.simulationMesh->getTetrahedrons()) : NULL;
+			const PxU32* tets32 = has16BitIndices ? NULL
+				: static_cast<const PxU32*>(
+					entry.simulationMesh->getTetrahedrons());
+			for(PxU32 i = 0; i < collisionVertexCount; i++)
+			{
+				const PxU32 tetIndex = remap[i];
+				PxVec3 position(0.0f);
+				for(PxU32 j = 0; j < 4; j++)
+				{
+					const PxU32 localParticle = has16BitIndices
+						? tets16[4 * tetIndex + j]
+						: tets32[4 * tetIndex + j];
+					position +=
+						mParticles[
+							particleStart + localParticle].position *
+						barycentrics[4 * i + j];
+				}
+				const PxReal invMass = core.positionInvMass[i].w;
+				core.positionInvMass[i] =
+					PxVec4(position, invMass);
+			}
+		}
+
+		PxArray<Entry>					mEntries;
+		PxArray<StaticShapeEntry>		mStaticShapes;
+		PxArray<DynamicShapeEntry>		mDynamicShapes;
+		PxArray<WorldPinEntry>			mWorldPins;
+		PxArray<RigidAttachmentEntry>	mRigidAttachments;
+		PxArray<ArticulationAttachmentEntry>
+										mArticulationAttachments;
+		PxArray<SoftPairAttachmentEntry>
+										mSoftPairAttachments;
+		PxArray<PrescribedAttachmentEntry>
+										mPrescribedAttachments;
+		PxArray<RigidActorFilterEntry>	mRigidActorFilters;
+		PxArray<DeformablePairFilterEntry>
+										mDeformablePairFilters;
+		PxArray<NativeIslandEdgeEntry>	mNativeIslandEdges;
+		PxArray<NativeSoftSoftIslandEdgeEntry>
+										mNativeSoftSoftIslandEdges;
+		PxArray<IslandSelectionStorage*>	mIslandSelectionStorages;
+		PxArray<Dy::AvbdSoftParticle>	mParticles;
+		PxArray<Dy::AvbdSoftBody>		mBodies;
+		PxArray<Dy::AvbdSelfCollisionAdjacency>
+										mSelfCollisionAdjacencies;
+		PxArray<PxU8>					mSelfCollisionEnabled;
+		PxArray<Dy::AvbdWorldPlane>		mWorldPlanes;
+		PxArray<Dy::AvbdRigidBox>		mRigidBoxes;
+		PxArray<Dy::AvbdRigidSphere>		mRigidSpheres;
+		PxArray<Dy::AvbdRigidCapsule>	mRigidCapsules;
+		PxArray<Dy::AvbdRigidConvex>		mRigidConvexes;
+		PxArray<Dy::AvbdRigidTriangleSurface>
+										mRigidTriangleSurfaces;
+		PxArray<Dy::AvbdSoftContact>		mContacts;
+		Dy::AvbdOGCParams				mContactParams;
+		Dy::AvbdSoftBodyWorkspace		mWorkspace;
+		const PxsDeformableVolumeMaterialManager&
+										mDeformableMaterialManager;
+		const PxsDeformableSurfaceMaterialManager&
+										mSurfaceMaterialManager;
+		const PxsMaterialManager&		mRigidMaterialManager;
+		IG::SimpleIslandManager&		mIslandManager;
+		PxU64							mNextPrimitiveKey;
+		PxU32							mNextWorldPinHandle;
+		PxU32							mNextRigidAttachmentHandle;
+		PxU32							mNextArticulationAttachmentHandle;
+		PxU32							mNextSoftPairAttachmentHandle;
+		PxU32							mNextPrescribedAttachmentHandle;
+		PxU32							mNextRigidActorFilterHandle;
+		PxU32							mNextDeformablePairFilterHandle;
+		bool							mDynamicsOwnsStep;
+		PxU32							mDynamicsSelectedEntryCount;
+	};
 
 static const char* sFilterShaderDataMemAllocId = "SceneDesc filterShaderData";
 
@@ -609,6 +8109,7 @@ Sc::Scene::Scene(const PxSceneDesc& desc, PxU64 contextID) :
 #endif
 	mSimulationController			(NULL),
 	mSimulationControllerCallback	(NULL),
+	mAvbdCpuSoftScene				(NULL),
 	mGravity						(PxVec3(0.0f)),
 	mDt								(0),
 	mOneOverDt						(0),
@@ -954,6 +8455,19 @@ Sc::Scene::Scene(const PxSceneDesc& desc, PxU64 contextID) :
 #endif
 	}
 
+	if(!useGpuDynamics &&
+		desc.solverType == PxSolverType::eAVBD)
+	{
+		mAvbdCpuSoftScene = PX_NEW(AvbdCpuSoftScene)(
+			mDeformableVolumeMaterialManager,
+			mDeformableSurfaceMaterialManager,
+			mMaterialManager,
+			*mSimpleIslandManager);
+		static_cast<Dy::AvbdDynamicsContext*>(
+			mDynamicsContext)->setSoftIslandProvider(
+				mAvbdCpuSoftScene);
+	}
+
 	//Construct the bitmap of updated actors required as input to the broadphase update
 	if(desc.limits.maxNbBodies)
 	{
@@ -1057,11 +8571,712 @@ Sc::Scene::Scene(const PxSceneDesc& desc, PxU64 contextID) :
 	mFilterCallback = desc.filterCallback;
 }
 
+bool Sc::Scene::addAvbdCpuDeformableVolume(
+	DeformableVolumeCore& core,
+	PxTetrahedronMesh& simulationMesh,
+	PxTetrahedronMesh& collisionMesh,
+	PxDeformableVolumeAuxData& auxData)
+{
+	if(getSolverType() != PxSolverType::eAVBD || isUsingGpuDynamics())
+		return false;
+	if(!mAvbdCpuSoftScene)
+	{
+		mAvbdCpuSoftScene = PX_NEW(AvbdCpuSoftScene)(
+			mDeformableVolumeMaterialManager,
+			mDeformableSurfaceMaterialManager,
+			mMaterialManager,
+			*mSimpleIslandManager);
+		static_cast<Dy::AvbdDynamicsContext*>(
+			mDynamicsContext)->setSoftIslandProvider(
+				mAvbdCpuSoftScene);
+	}
+	return mAvbdCpuSoftScene->add(
+		core, simulationMesh, collisionMesh, auxData,
+		mDeformableVolumeMaterialManager);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolume(
+	DeformableVolumeCore& core)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->remove(core);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeWorldPin(
+	DeformableVolumeCore& core,
+	PxU32 localVertex,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addWorldPin(
+			core, localVertex, worldTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeWorldElementAttachment(
+	DeformableVolumeCore& core,
+	PxU32 tetrahedronIndex,
+	const PxVec4& barycentric,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addWorldElementPin(
+			core, false, tetrahedronIndex, barycentric, worldTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableVolumeWorldPin(
+	DeformableVolumeCore& core,
+	PxU32 handle,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateWorldPin(
+			core, handle, worldTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeWorldPin(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeWorldPin(core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeRigidAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& rigidCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addRigidAttachment(
+			core, rigidCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeRigidElementAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& rigidCore,
+	PxU32 tetrahedronIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addRigidElementAttachment(
+			core, rigidCore, false, tetrahedronIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableVolumeRigidAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateRigidAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeRigidAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeRigidAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeArticulationAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& linkCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addArticulationAttachment(
+			core, linkCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeArticulationElementAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& linkCore,
+	PxU32 tetrahedronIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addArticulationElementAttachment(
+			core, linkCore, false, tetrahedronIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableVolumeArticulationAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateArticulationAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeArticulationAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeArticulationAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeKinematicAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& kinematicCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addKinematicAttachment(
+			core, kinematicCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeKinematicElementAttachment(
+	DeformableVolumeCore& core,
+	BodyCore& kinematicCore,
+	PxU32 tetrahedronIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addKinematicElementAttachment(
+			core, kinematicCore, false, tetrahedronIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableVolumeKinematicAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updatePrescribedAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeKinematicAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removePrescribedAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeStaticAttachment(
+	DeformableVolumeCore& core,
+	StaticCore& staticCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addStaticAttachment(
+			core, staticCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeStaticElementAttachment(
+	DeformableVolumeCore& core,
+	StaticCore& staticCore,
+	PxU32 tetrahedronIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addStaticElementAttachment(
+			core, staticCore, false, tetrahedronIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableVolumeStaticAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updatePrescribedAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeStaticAttachment(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removePrescribedAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeRigidActorFilter(
+	DeformableVolumeCore& core,
+	ActorCore& rigidCore,
+	const PxU32* elementIndices,
+	PxU32 elementCount,
+	bool filterAllElements)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addVolumeRigidActorFilter(
+			core, rigidCore, elementIndices, elementCount,
+			filterAllElements)
+		: PX_MAX_U32;
+}
+
+void Sc::Scene::removeAvbdCpuDeformableVolumeRigidActorFilter(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeRigidActorFilter(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformablePairAttachment(
+	ActorCore& core0,
+	bool element0,
+	PxU32 index0,
+	const PxVec4& barycentric0,
+	ActorCore& core1,
+	bool element1,
+	PxU32 index1,
+	const PxVec4& barycentric1)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addSoftPairAttachment(
+			core0, element0, index0, barycentric0,
+			core1, element1, index1, barycentric1)
+		: PX_MAX_U32;
+}
+
+void Sc::Scene::removeAvbdCpuDeformablePairAttachment(
+	ActorCore& core0,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeSoftPairAttachment(
+			core0, handle);
+}
+
+bool Sc::Scene::addAvbdCpuDeformableSurface(
+	DeformableSurfaceCore& core,
+	PxTriangleMesh& triangleMesh)
+{
+	if(getSolverType() != PxSolverType::eAVBD ||
+		isUsingGpuDynamics())
+		return false;
+	if(!mAvbdCpuSoftScene)
+	{
+		mAvbdCpuSoftScene = PX_NEW(AvbdCpuSoftScene)(
+			mDeformableVolumeMaterialManager,
+			mDeformableSurfaceMaterialManager,
+			mMaterialManager,
+			*mSimpleIslandManager);
+		static_cast<Dy::AvbdDynamicsContext*>(
+			mDynamicsContext)->setSoftIslandProvider(
+				mAvbdCpuSoftScene);
+	}
+	return mAvbdCpuSoftScene->addSurface(
+		core, triangleMesh);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurface(
+	DeformableSurfaceCore& core)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeSurface(core);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceWorldPin(
+	DeformableSurfaceCore& core,
+	PxU32 localVertex,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addWorldPin(
+			core, localVertex, worldTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceWorldElementAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 triangleIndex,
+	const PxVec4& barycentric,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addWorldElementPin(
+			core, true, triangleIndex, barycentric, worldTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableSurfaceWorldPin(
+	DeformableSurfaceCore& core,
+	PxU32 handle,
+	const PxVec3& worldTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateWorldPin(
+			core, handle, worldTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceWorldPin(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeWorldPin(core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceRigidAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& rigidCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addRigidAttachment(
+			core, rigidCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceRigidElementAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& rigidCore,
+	PxU32 triangleIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addRigidElementAttachment(
+			core, rigidCore, true, triangleIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableSurfaceRigidAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateRigidAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceRigidAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeRigidAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceArticulationAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& linkCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addArticulationAttachment(
+			core, linkCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceArticulationElementAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& linkCore,
+	PxU32 triangleIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addArticulationElementAttachment(
+			core, linkCore, true, triangleIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableSurfaceArticulationAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updateArticulationAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceArticulationAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeArticulationAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceKinematicAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& kinematicCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addKinematicAttachment(
+			core, kinematicCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceKinematicElementAttachment(
+	DeformableSurfaceCore& core,
+	BodyCore& kinematicCore,
+	PxU32 triangleIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addKinematicElementAttachment(
+			core, kinematicCore, true, triangleIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableSurfaceKinematicAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updatePrescribedAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceKinematicAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removePrescribedAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceStaticAttachment(
+	DeformableSurfaceCore& core,
+	StaticCore& staticCore,
+	PxU32 localVertex,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addStaticAttachment(
+			core, staticCore, localVertex, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceStaticElementAttachment(
+	DeformableSurfaceCore& core,
+	StaticCore& staticCore,
+	PxU32 triangleIndex,
+	const PxVec4& barycentric,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addStaticElementAttachment(
+			core, staticCore, true, triangleIndex,
+			barycentric, actorLocalTarget)
+		: PX_MAX_U32;
+}
+
+bool Sc::Scene::updateAvbdCpuDeformableSurfaceStaticAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle,
+	const PxVec3& actorLocalTarget)
+{
+	return mAvbdCpuSoftScene &&
+		mAvbdCpuSoftScene->updatePrescribedAttachment(
+			core, handle, actorLocalTarget);
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceStaticAttachment(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removePrescribedAttachment(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceRigidActorFilter(
+	DeformableSurfaceCore& core,
+	ActorCore& rigidCore,
+	const PxU32* elementIndices,
+	PxU32 elementCount,
+	bool filterAllElements)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addRigidActorFilter(
+			core, rigidCore, elementIndices, elementCount,
+			filterAllElements)
+		: PX_MAX_U32;
+}
+
+void Sc::Scene::removeAvbdCpuDeformableSurfaceRigidActorFilter(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeRigidActorFilter(
+			core, handle);
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableSurfaceSurfaceFilter(
+	DeformableSurfaceCore& core0,
+	DeformableSurfaceCore& core1,
+	const PxU32* elementIndices0,
+	const PxU32* elementIndices1,
+	PxU32 pairCount)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addSurfaceSurfaceFilter(
+			core0, core1, elementIndices0, elementIndices1,
+			pairCount)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeSurfaceFilter(
+	DeformableVolumeCore& volumeCore,
+	DeformableSurfaceCore& surfaceCore,
+	const PxU32* volumeElementIndices,
+	const PxU32* surfaceElementIndices,
+	PxU32 pairCount)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addVolumeSurfaceFilter(
+			volumeCore, surfaceCore, volumeElementIndices,
+			surfaceElementIndices, pairCount)
+		: PX_MAX_U32;
+}
+
+PxU32 Sc::Scene::addAvbdCpuDeformableVolumeVolumeFilter(
+	DeformableVolumeCore& core0,
+	DeformableVolumeCore& core1,
+	const PxU32* elementIndices0,
+	const PxU32* elementIndices1,
+	PxU32 pairCount)
+{
+	return mAvbdCpuSoftScene
+		? mAvbdCpuSoftScene->addVolumeVolumeFilter(
+			core0, core1, elementIndices0,
+			elementIndices1, pairCount)
+		: PX_MAX_U32;
+}
+
+void Sc::Scene::removeAvbdCpuDeformablePairFilter(
+	DeformableSurfaceCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeDeformablePairFilter(
+			core, handle);
+}
+
+void Sc::Scene::removeAvbdCpuDeformablePairFilter(
+	DeformableVolumeCore& core,
+	PxU32 handle)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeDeformablePairFilter(
+			core, handle);
+}
+
+void Sc::Scene::addAvbdCpuStaticShape(
+	StaticCore& core, ShapeCore& shape)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->addStaticShape(core, shape);
+}
+
+void Sc::Scene::removeAvbdCpuStaticShape(
+	StaticCore& core, const ShapeCore& shape)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeStaticShape(core, shape);
+}
+
+void Sc::Scene::removeAvbdCpuStatic(StaticCore& core)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeStatic(core);
+}
+
+void Sc::Scene::addAvbdCpuDynamicShape(
+	BodyCore& core, ShapeCore& shape)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->addDynamicShape(core, shape);
+}
+
+void Sc::Scene::removeAvbdCpuDynamicShape(
+	BodyCore& core, const ShapeCore& shape)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeDynamicShape(core, shape);
+}
+
+void Sc::Scene::removeAvbdCpuDynamic(BodyCore& core)
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->removeDynamic(core);
+}
+
+void Sc::Scene::stepAvbdCpuDeformableVolumes()
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->step(
+			mDt, mGravity, mDeformableVolumeMaterialManager,
+			mMaterialManager,
+			!(mPublicFlags & PxSceneFlag::eDISABLE_SLEEPING));
+}
+
+void Sc::Scene::prepareAvbdCpuSoftIslandGeneration()
+{
+	if(mAvbdCpuSoftScene)
+		mAvbdCpuSoftScene->prepareIslandGeneration(
+			mDt, mGravity,
+			!(mPublicFlags & PxSceneFlag::eDISABLE_SLEEPING));
+}
+
 void Sc::Scene::release()
 {
 	// TODO: PT: check virtual stuff
 
 	mTimeStamp++;
+
+	if(mAvbdCpuSoftScene &&
+		getSolverType() == PxSolverType::eAVBD &&
+		!isUsingGpuDynamics())
+	{
+		static_cast<Dy::AvbdDynamicsContext*>(
+			mDynamicsContext)->setSoftIslandProvider(NULL);
+	}
+	PX_DELETE(mAvbdCpuSoftScene);
+	mAvbdCpuSoftScene = NULL;
 
 	//collisionSpace.purgeAllPairs();
 
@@ -2266,6 +10481,13 @@ void Sc::Scene::addShapes(NpShape *const* shapes, PxU32 nbShapes, size_t ptrOffs
 		//assigned. On insertion, the articulation will not have this nodeIndex correctly assigned at this stage
 		if (bodySim.getActorType() != PxActorType::eARTICULATION_LINK || !nodeIndex.isStaticBody())
 			context->registerShape(nodeIndex, sc, shapeSim->getElementID(), bodySim.getPxActor());
+		if(bodySim.getActorType() == PxActorType::eRIGID_STATIC)
+			addAvbdCpuStaticShape(
+				static_cast<StaticCore&>(bodySim.getRigidCore()), sc);
+		else if(bodySim.getActorType() ==
+			PxActorType::eRIGID_DYNAMIC)
+			addAvbdCpuDynamicShape(
+				static_cast<BodyCore&>(bodySim.getRigidCore()), sc);
 	}
 }
 
@@ -2356,6 +10578,7 @@ void Sc::Scene::removeBody(BodyCore& body, PxInlineArray<const Sc::ShapeCore*,64
 	BodySim *sim = body.getSim();	
 	if(sim)
 	{
+		removeAvbdCpuDynamic(body);
 		if(mBatchRemoveState)
 		{
 			removeShapes(*sim, mBatchRemoveState->bufferedShapes, removedShapes, wakeOnLostTouch);
@@ -2403,6 +10626,12 @@ void Sc::Scene::addShape_(RigidSim& owner, ShapeCore& shapeCore)
 	mSimulationController->addPxgShape(sim, sim->getPxsShapeCore(), sim->getActorNodeIndex(), sim->getElementID());
 
 	registerShapeInNphase(&owner.getRigidCore(), shapeCore, sim->getElementID());
+	if(owner.getActorType() == PxActorType::eRIGID_STATIC)
+		addAvbdCpuStaticShape(
+			static_cast<StaticCore&>(owner.getRigidCore()), shapeCore);
+	else if(owner.getActorType() == PxActorType::eRIGID_DYNAMIC)
+		addAvbdCpuDynamicShape(
+			static_cast<BodyCore&>(owner.getRigidCore()), shapeCore);
 }
 
 // PT: TODO: refactor with removeShapes
@@ -2411,6 +10640,16 @@ void Sc::Scene::removeShape_(ShapeSim& shape, bool wakeOnLostTouch)
 	//BodySim* body = shape.getBodySim();
 	//if(body)
 	//	body->postShapeDetach();
+
+	RigidSim& owner = shape.getRbSim();
+	if(owner.getActorType() == PxActorType::eRIGID_STATIC)
+		removeAvbdCpuStaticShape(
+			static_cast<StaticCore&>(owner.getRigidCore()),
+			shape.getCore());
+	else if(owner.getActorType() == PxActorType::eRIGID_DYNAMIC)
+		removeAvbdCpuDynamicShape(
+			static_cast<BodyCore&>(owner.getRigidCore()),
+			shape.getCore());
 	
 	unregisterShapeFromNphase(shape.getCore(), shape.getElementID());
 
@@ -2465,6 +10704,13 @@ void Sc::Scene::addShapes(NpShape*const* shapes, PxU32 nbShapes, size_t ptrOffse
 		// PT: TODO: revisit getActorNodeIndex() vs rigidSim.getNodeIndex()
 		mSimulationController->addPxgShape(prefetchedShapeSim, prefetchedShapeSim->getPxsShapeCore(), prefetchedShapeSim->getActorNodeIndex(), elementID);
 		mLLContext->getNphaseImplementationContext()->registerShape(rigidSim.getNodeIndex(), sc, elementID, rigidSim.getPxActor());
+		if(rigidSim.getActorType() == PxActorType::eRIGID_STATIC)
+			addAvbdCpuStaticShape(
+				static_cast<StaticCore&>(rigidSim.getRigidCore()), sc);
+		else if(rigidSim.getActorType() ==
+			PxActorType::eRIGID_DYNAMIC)
+			addAvbdCpuDynamicShape(
+				static_cast<BodyCore&>(rigidSim.getRigidCore()), sc);
 
 		prefetchedShapeSim = nextShapeSim;
 		mNbGeometries[sc.getGeometryType()]++;

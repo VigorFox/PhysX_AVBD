@@ -49,6 +49,21 @@ namespace physx
 class PxCudaContextManager;
 
 /**
+\brief Identifies the storage and solver backend owned by a deformable surface.
+
+The backend is fixed when the actor is created. CPU AVBD actors expose host
+buffers and do not require or emulate a CUDA context.
+*/
+struct PxDeformableSurfaceBackend
+{
+	enum Enum
+	{
+		eGPU,		//!< CUDA deformable-surface backend.
+		eCPU_AVBD	//!< CPU AVBD deformable-surface backend.
+	};
+};
+
+/**
 \brief The maximum number of triangles supported in a surface deformable mesh
 
 The current limit is 1'048'575.
@@ -70,15 +85,20 @@ The current limit is 4095.
 #define PX_MAX_NB_DEFORMABLE_SURFACE 0xfff
 
 /**
-\brief Represents a deformable surface
+\brief Represents a deformable surface.
 
-The deformable surface feature is exclusively supported on GPU. The full GPU pipeline needs to 
-be enabled in order to make use of deformable bodies, see #PxSceneFlag::eENABLE_GPU_DYNAMICS,
-#PxBroadPhaseType::eGPU.
+GPU actors use the existing device-buffer contract. CPU AVBD actors use the
+host-buffer contract and do not require #PxSceneFlag::eENABLE_GPU_DYNAMICS.
 */
 class PxDeformableSurface : public PxDeformableBody
 {
 public:
+
+	/**
+	\brief Returns the immutable backend selected when this actor was created.
+	*/
+	virtual	PxDeformableSurfaceBackend::Enum
+											getDeformableSurfaceBackend() const = 0;
 
 	/**
 	\brief Raises or clears a particular deformable surface flag.
@@ -246,6 +266,30 @@ public:
 	virtual	PxVec4* 						getRestPositionBufferD() = 0;
 
 	/**
+	\brief Gets the host position/inverse-mass buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	triangle-mesh shape is attached.
+	*/
+	virtual	PxVec4*						getPositionInvMassBufferH() = 0;
+
+	/**
+	\brief Gets the host velocity buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	triangle-mesh shape is attached.
+	*/
+	virtual	PxVec4*						getVelocityBufferH() = 0;
+
+	/**
+	\brief Gets the host rest-position buffer.
+
+	\return The CPU AVBD host buffer, or NULL for a GPU actor or before a
+	triangle-mesh shape is attached.
+	*/
+	virtual	PxVec4*						getRestPositionBufferH() = 0;
+
+	/**
 	\brief Marks per-vertex simulation state and configuration buffers dirty to signal to the simulation
 	that changes have been made.
 
@@ -284,4 +328,3 @@ protected:
 #endif
 
 #endif // PX_PHYSICS_DEFORMABLE_SURFACE_H
-

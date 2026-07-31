@@ -596,6 +596,9 @@ static bool loadDeformableVolumeMeshData(PxInputStream& stream, DeformableVolume
 
 	// Import serialization flags
 	const PxU32 serialFlags = readDword(mismatch, stream);
+	const bool hasGRBData = (serialFlags & IMSF_GRB_DATA) != 0;
+	const bool hasDeformableData =
+		(serialFlags & IMSF_DEFORMABLE_DATA) != 0 || hasGRBData;
 
 	// Import mesh
 	const PxU32 nbVerts = readDword(mismatch, stream);
@@ -605,10 +608,8 @@ static bool loadDeformableVolumeMeshData(PxInputStream& stream, DeformableVolume
 
 	const PxU32 nbTetrahedrons = readDword(mismatch, stream);
 	
-	//ML: this will allocate CPU tetrahedron indices and GPU tetrahedron indices and other GPU data if we have GRB data built
-	//void* tets = data.allocateTetrahedrons(nbTetrahedrons, serialFlags & IMSF_GRB_DATA);
 	data.mCollisionMesh.allocateTetrahedrons(nbTetrahedrons, 1);
-	if (serialFlags & IMSF_GRB_DATA)
+	if (hasDeformableData)
 		data.mCollisionData.allocateCollisionData(nbTetrahedrons);
 	void* tets = data.mCollisionMesh.mTetrahedrons;
 	//void* surfaceTriangles = data.mCollisionData.allocateSurfaceTriangles(nbSurfaceTriangles);
@@ -699,32 +700,21 @@ static bool loadDeformableVolumeMeshData(PxInputStream& stream, DeformableVolume
 	data.mCollisionMesh.mGeomEpsilon = readFloat(mismatch, stream);
 	readFloatBuffer(&data.mCollisionMesh.mAABB.minimum.x, 6, mismatch, stream);
 
-	if (serialFlags & IMSF_GRB_DATA)
+	if (hasDeformableData)
 	{
-		/*PxU32 GRB_meshAdjVerticiesTotal = 0;
-		if (version < 15)
-			GRB_meshAdjVerticiesTotal = readDword(mismatch, stream);*/
-
-		//read grb tetrahedron indices
+		// Read the shared collision topology used by deformable mapping.
 		PX_ASSERT(data.mCollisionData.mGRB_primIndices);
-
-		//read tetrahedron indices
 		readIndices(serialFlags, data.mCollisionData.mGRB_primIndices, nbTetIndices, data.mCollisionMesh.has16BitIndices(), mismatch, stream);
 		
-		//data.mGRB_primAdjacencies = static_cast<void *>(PX_NEW(PxU32)[data.mNbTetrahedrons * 4]);
-		
-		//data.mGRB_surfaceTriIndices = static_cast<void *>(PX_NEW(PxU32)[data.mNbTriangles * 3]);
-		data.mCollisionData.mGRB_faceRemap = PX_ALLOCATE(PxU32, data.mCollisionMesh.mNbTetrahedrons, "mGRB_faceRemap");
-
-		data.mCollisionData.mGRB_faceRemapInverse = PX_ALLOCATE(PxU32, data.mCollisionMesh.mNbTetrahedrons, "mGRB_faceRemapInverse");
-
-		//data.mGRB_surfaceTriangleIndice = PX_NEW(PxU32)[data.mNbSurfaceTriangles * 3];
-
-		//stream.read(data.mGRB_primAdjacencies, sizeof(PxU32)*data.mNbTetrahedrons * 4);		
 		stream.read(data.mCollisionData.mGRB_tetraSurfaceHint, sizeof(PxU8) * data.mCollisionMesh.mNbTetrahedrons);
-		stream.read(data.mCollisionData.mGRB_faceRemap, sizeof(PxU32) * data.mCollisionMesh.mNbTetrahedrons);
-		stream.read(data.mCollisionData.mGRB_faceRemapInverse, sizeof(PxU32) * data.mCollisionMesh.mNbTetrahedrons);
-		//stream.read(data.mGRB_surfaceTriangleIndice, sizeof(PxU32) * data.mNbSurfaceTriangles * 3);
+
+		if (hasGRBData)
+		{
+			data.mCollisionData.mGRB_faceRemap = PX_ALLOCATE(PxU32, data.mCollisionMesh.mNbTetrahedrons, "mGRB_faceRemap");
+			data.mCollisionData.mGRB_faceRemapInverse = PX_ALLOCATE(PxU32, data.mCollisionMesh.mNbTetrahedrons, "mGRB_faceRemapInverse");
+			stream.read(data.mCollisionData.mGRB_faceRemap, sizeof(PxU32) * data.mCollisionMesh.mNbTetrahedrons);
+			stream.read(data.mCollisionData.mGRB_faceRemapInverse, sizeof(PxU32) * data.mCollisionMesh.mNbTetrahedrons);
+		}
 		
 		stream.read(data.mCollisionData.mTetraRestPoses, sizeof(PxMat33) * nbTetrahedrons);
 
@@ -734,13 +724,15 @@ static bool loadDeformableVolumeMeshData(PxInputStream& stream, DeformableVolume
 				flip(reinterpret_cast<PxU32 *>(data.mCollisionData.mGRB_primIndices)[i]);
 		}
 
-		//read BV32
-		data.mCollisionData.mGRB_BV32Tree = PX_NEW(BV32Tree);
-		if (!data.mCollisionData.mGRB_BV32Tree->load(stream, mismatch))
+		if (hasGRBData)
 		{
-			outputError<PxErrorCode::eINTERNAL_ERROR>(__LINE__, "BV32 binary image load error.");
-			//PX_DELETE(data);
-			return false;
+			// Read the optional GPU midphase structure.
+			data.mCollisionData.mGRB_BV32Tree = PX_NEW(BV32Tree);
+			if (!data.mCollisionData.mGRB_BV32Tree->load(stream, mismatch))
+			{
+				outputError<PxErrorCode::eINTERNAL_ERROR>(__LINE__, "BV32 binary image load error.");
+				return false;
+			}
 		}
 
 		const PxU32 nbGridModelTetrahedrons = readDword(mismatch, stream);
@@ -762,13 +754,13 @@ static bool loadDeformableVolumeMeshData(PxInputStream& stream, DeformableVolume
 
 		data.mMappingData.mTetsRemapSize = nbTetRemapSize;
 
-		data.mSimulationMesh.allocateTetrahedrons(nbGridModelTetrahedrons, serialFlags & IMSF_GRB_DATA);
-		data.mSimulationMesh.allocateVertices(nbGridModelVertices, serialFlags & IMSF_GRB_DATA);
+		data.mSimulationMesh.allocateTetrahedrons(nbGridModelTetrahedrons, 1);
+		data.mSimulationMesh.allocateVertices(nbGridModelVertices, 1);
 		data.mSimulationData.allocateGridModelData(nbGridModelTetrahedrons, nbGridModelVertices,
-			data.mCollisionMesh.mNbVertices, nbGridModelPartitions, nbGMRemapOutputSize, numTetsPerElement, serialFlags & IMSF_GRB_DATA);
-		data.mMappingData.allocatemappingData(data.mCollisionMesh.mNbVertices, nbTetRemapSize, data.mCollisionMesh.mNbTetrahedrons, serialFlags & IMSF_GRB_DATA);
+			data.mCollisionMesh.mNbVertices, nbGridModelPartitions, nbGMRemapOutputSize, numTetsPerElement, 1);
+		data.mMappingData.allocatemappingData(data.mCollisionMesh.mNbVertices, nbTetRemapSize, data.mCollisionMesh.mNbTetrahedrons, 1);
 
-		data.mMappingData.allocateTetRefData(nbGMTotalTetReferenceCount, data.mCollisionMesh.mNbVertices, serialFlags & IMSF_GRB_DATA);
+		data.mMappingData.allocateTetRefData(nbGMTotalTetReferenceCount, data.mCollisionMesh.mNbVertices, 1);
 
 		const PxU32 nbGridModelIndices = 4 * nbGridModelTetrahedrons;
 		readIndices(serialFlags, data.mSimulationMesh.mTetrahedrons, nbGridModelIndices, data.mSimulationMesh.has16BitIndices(), mismatch, stream);
@@ -1260,4 +1252,3 @@ PxInsertionCallback* physx::immediateCooking::getInsertionCallback()
 {
 	return &gSAIC;
 }
-

@@ -632,6 +632,11 @@ namespace Dy
 
 		void		initializeCommonData();
 
+		// Build the generalized inverse-mass linearization consumed by the
+		// AVBD position owner. This prepares articulated inertia/response
+		// matrices only; it does not apply or accumulate a velocity impulse.
+		void		prepareAvbdGeneralizedPositionResponse();
+
 		//gravity as input, joint force as output
 		void		getGeneralizedGravityForce(const PxVec3& gravity, PxArticulationCache& cache);
 

@@ -53,6 +53,8 @@ class FeatherstoneArticulation;
 struct AvbdIslandBatch {
   AvbdSolverBody *bodies;
   PxU32 numBodies;
+  FeatherstoneArticulation **articulationForBody;
+  PxU32 *linkIndexForBody;
 
   AvbdContactConstraint *constraints;
   PxU32 numConstraints;
@@ -135,7 +137,8 @@ public:
         &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors,
         mBatch.iterationOverride, mBatch.softParticles,
         mBatch.numSoftParticles, mBatch.softBodies, mBatch.numSoftBodies,
-        mBatch.softContacts, mBatch.numSoftContacts, mStats);
+        mBatch.softContacts, mBatch.numSoftContacts,
+        mBatch.articulationForBody, mBatch.linkIndexForBody, mStats);
   }
 
   virtual void release() override;

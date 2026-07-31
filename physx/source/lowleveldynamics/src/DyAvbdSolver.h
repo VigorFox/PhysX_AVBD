@@ -40,6 +40,8 @@ namespace physx {
 
 namespace Dy {
 
+class FeatherstoneArticulation;
+
 /**
  * @brief Main AVBD Solver class implementing the Block Coordinate Descent
  * algorithm
@@ -131,6 +133,8 @@ public:
                        physx::PxU32 numSoftBodies,
                        AvbdSoftContact *softContacts,
                        physx::PxU32 numSoftContacts,
+                       FeatherstoneArticulation *const *articulationForBody,
+                       const physx::PxU32 *linkIndexForBody,
                        AvbdSolverStats &stats);
 
   /**
@@ -160,6 +164,8 @@ public:
                    physx::PxU32 numSoftBodies,
                    AvbdSoftContact *softContacts,
                    physx::PxU32 numSoftContacts,
+                   FeatherstoneArticulation *const *articulationForBody,
+                   const physx::PxU32 *linkIndexForBody,
                    AvbdSolverStats &stats);
 
   /**
@@ -266,7 +272,9 @@ private:
       AvbdSoftParticle *softParticles = nullptr,
       physx::PxU32 numSoftParticles = 0,
       AvbdSoftContact *softContacts = nullptr,
-      physx::PxU32 numSoftContacts = 0);
+      physx::PxU32 numSoftContacts = 0,
+      AvbdSoftBody *softBodies = nullptr,
+      physx::PxU32 numSoftBodies = 0);
 
   /**
    * @brief Solve decoupled 3x3 system for a single body
@@ -394,6 +402,7 @@ private:
       AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
       const physx::PxArray<bool> &touchesKinematicShell,
       const physx::PxArray<physx::PxVec3> *shellLinearVelAtSolveStart,
+      const physx::PxArray<bool> *positionOwnedAngularBodies,
       AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
       bool hasJointConstraints, bool skipBodyStaticFriction,
       bool applyVelocityDamping,
@@ -491,8 +500,8 @@ private:
   /**
    * @brief Solve local 3x3 VBD system for a single soft particle
    * Accumulates VBD elastic forces (StVK, Neo-Hookean, bending) and
-   * AVBD penalty forces (contacts, attachments, pins) into a 3x3 system,
-   * then applies displacement = H^{-1} * f.
+   * AVBD penalty forces (contacts and pins) into a 3x3 system, then applies
+   * displacement = H^{-1} * f. Rigid attachments have a coupled owner.
    */
   void solveSoftParticle(
       PxU32 particleGlobalIdx,
@@ -500,7 +509,32 @@ private:
       AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
       AvbdSoftBody *softBodies, PxU32 numSoftBodies,
       AvbdSoftContact *softContacts, PxU32 numSoftContacts,
+      const AvbdSoftContactParticleRef *softContactRefs,
+      PxU32 softContactRefBegin, PxU32 softContactRefEnd,
       PxReal dt, PxReal invDt2);
+
+  /**
+   * @brief Solve every rigid-vertex attachment as one coupled positional
+   * block. This is the sole primal owner of
+   * eRIGID_ATTACHMENT_POSITION_AL.
+   */
+  void solveSoftRigidAttachmentsCoupled(
+      AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+      AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
+      AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+      PxReal dt,
+      FeatherstoneArticulation *const *articulationForBody,
+      const PxU32 *linkIndexForBody);
+
+  /**
+   * @brief Solve each two-weighted-soft-point equality once as a coupled
+   * positional block. This is the sole primal owner of
+   * eSOFT_PAIR_ATTACHMENT_POSITION_AL.
+   */
+  void solveSoftPairAttachmentsCoupled(
+      AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
+      AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+      PxReal dt);
 
   /**
    * @brief Dual update for soft body AVBD constraints (penalty growth)

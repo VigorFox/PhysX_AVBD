@@ -93,6 +93,7 @@ PX_FORCE_INLINE void copyToAvbdSolverBody(const PxsBodyCore &core,
   body.angularDampingBody = core.angularDamping;
   body.maxLinearVelocitySq = core.maxLinearVelocitySq;
   body.maxAngularVelocitySq = core.maxAngularVelocitySq;
+  body.gravityScale = core.disableGravity ? 0.0f : 1.0f;
 }
 
 /**
