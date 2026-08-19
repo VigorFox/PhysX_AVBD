@@ -30,16 +30,87 @@
 #include "DyAvbdParallel.h"
 #include "DyAvbdSolver.h"
 #include "DyAvbdTasks.h"
+#include "DyAvbdGpuWaveBackend.h"
 #include "DyDynamicsBase.h"
 
-#include <atomic>
+// Reading map:
+//   1. Solver knobs: AvbdSolverConfig in DyAvbdTypes.h.
+//   2. Public lifecycle: constructor/destroy/update/mergeResults below.
+//   3. Compatibility telemetry API: DyAvbdDynamicsTelemetryApi.inl.
+//   4. Runtime storage: DyAvbdDynamicsPrivate.inl. Profile data is task-local
+//      and reduced after the coordinator join; it is not context state.
+//
+// The context owns the runtime bridge; it is not the configuration object.
 
 namespace physx {
 
 struct PxsBodyCore;
 class PxsRigidBody;
 
+// Immutable, serially captured narrow-phase input for the first contact-prep
+// differential.  The payload deliberately contains no worker-owned output
+// pointers: report/force streams use parent-owned target tokens, while all
+// unsupported endpoint kinds fail closed to the legacy preparation path until
+// their commit ABI is explicit.
+struct AvbdContactPrepSnapshot {
+  PxU64 contactManagerKey;
+  PxReal restDistance;
+  PxU32 contactManagerIndex;
+  PxU32 npIndex;
+  PxU64 solverBody0;
+  PxU64 solverBody1;
+  PxU8 indexType0;
+  PxU8 indexType1;
+  PxU8 nbPatches;
+  PxU8 contactManagerAge;
+  PxU16 nbContacts;
+  PxU16 contactPointSize;
+  // These byte streams are immutable for the update and borrowed from the
+  // parent-owned narrow-phase output. A worker may only read them; the parent
+  // keeps the source buffers alive through the post-solver continuation.
+  const PxU8 *contactPatches;
+  const PxU8 *contactPoints;
+  // Optional compact copy of this manager's direct-mapped warm-start slots
+  // retained for ABI fallback. The live path prefers lambdaCacheDirect below;
+  // the parallel arrays keep the fallback payload opaque.
+  const PxU8 *lambdaCacheBytes;
+  const PxU8 *lambdaCacheSlots;
+  // Parent-owned direct-mapped cache range borrowed read-only for this update.
+  // The opaque pointer keeps CachedLambda out of the snapshot ABI.
+  const void *lambdaCacheDirect;
+  PxU32 lambdaCacheSlotCount;
+  PxU32 outputTargetBase;
+  PxU16 outputTargetCount;
+  // Row-cardinality contract: captured from the immutable NP stream and
+  // filled by the pure parser. Serial snapshot preparation can rebuild on the
+  // parent; deferred island preparation reports an internal error and drops
+  // the invalid frozen range instead of consuming partial rows.
+  PxU16 expectedResponseRows;
+  PxU16 emittedResponseRows;
+  PxU8 outputTargetFlags;
+  // Single-consumer commit token: set when this CM emitted at least one
+  // response row. Serial preparation commits it on the parent; deferred
+  // preparation commits its disjoint manager slot in the owning island task.
+  PxU8 managerStateCommit;
+  PxU8 eligible;
+  PxU8 padding[2];
+
+  AvbdContactPrepSnapshot()
+      : contactManagerKey(0), restDistance(0.0f),
+        contactManagerIndex(PX_MAX_U32), npIndex(PX_MAX_U32), solverBody0(0),
+        solverBody1(0), indexType0(0), indexType1(0), nbPatches(0),
+        contactManagerAge(255), nbContacts(0), contactPointSize(0),
+        contactPatches(nullptr), contactPoints(nullptr),
+        lambdaCacheBytes(nullptr), lambdaCacheSlots(nullptr),
+        lambdaCacheDirect(nullptr), lambdaCacheSlotCount(0),
+        outputTargetBase(0), outputTargetCount(0), expectedResponseRows(0),
+        emittedResponseRows(0), outputTargetFlags(0),
+        managerStateCommit(0), eligible(0), padding{0, 0} {}
+};
+
 namespace Dy {
+
+class AvbdKernelLabCapture;
 
 // Complete soft/VBD tuple selected for exactly one already-gathered rigid
 // island.  The provider must either return every pointer/count here or return
@@ -53,6 +124,7 @@ struct AvbdSoftIslandSelection {
   PxU32 numContacts;
   PxU32 islandIndex;
   PxU32 iterationOverride;
+  AvbdSoftIslandExecutionPlan executionPlan;
 
   AvbdSoftIslandSelection()
       : particles(nullptr), numParticles(0), bodies(nullptr), numBodies(0),
@@ -100,7 +172,6 @@ class AvbdDynamicsContext : public DynamicsContextBase {
   friend void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
                                       AvbdD6JointConstraint *constraints,
                                       PxU32 numConstraints);
-
 public:
   AvbdDynamicsContext(PxcNpMemBlockPool *memBlockPool,
                       PxcScratchAllocator &scratchAllocator,
@@ -110,7 +181,9 @@ public:
                       PxsMaterialManager *materialManager,
                       IG::SimpleIslandManager &islandManager, PxU64 contextID,
                       PxReal maxBiasCoefficient, PxReal lengthScale,
-                      PxSceneFlags sceneFlags);
+                      PxU32 avbdIterations,
+                      PxU32 avbdJointIterationOverride,
+                      bool avbdEnableEarlyStop, PxSceneFlags sceneFlags);
 
   virtual ~AvbdDynamicsContext();
 
@@ -130,13 +203,38 @@ public:
    */
   PxAllocatorCallback &getAllocator() { return mAllocatorAdapter; }
 
-  void beginIterationDiagnosticsFrame();
-  void recordIterationDiagnostics(PxU32 requestedIterations,
-                                  const AvbdSolverStats &stats,
-                                  bool hasJointConstraints,
-                                  const AvbdD6JointConstraint *d6Joints = nullptr,
-                                  PxU32 numD6 = 0);
-  void flushIterationDiagnosticsFrame();
+  // Commits contact-manager lifecycle tokens after validated snapshot
+  // preparation and before the solve consumes the rows.
+  void commitContactPrepSnapshots(AvbdContactPrepSnapshot *snapshots,
+                                  PxU32 startContactIdx,
+                                  PxU32 numContacts, PxU16 frameStamp);
+
+  /** Task factory used by an island task's dispatcher fan-in stages. */
+  AvbdTaskFactory &getTaskFactory() { return *mTaskFactory; }
+
+  // Diagnostic-only avbd_kernel_lab capture. A ticket is reserved during
+  // serial update before an island task is submitted; task code can then copy
+  // one prepared CPU color range without allocating, locking, or writing.
+  PxU32 reserveKernelLabCapture(PxU32 islandIndex, PxU32 bodyCount,
+                                PxU32 contactCount);
+  void captureKernelLabCpuColorPreRange(
+      PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 islandIndex,
+      PxU32 colorIndex, const PxU32 *ownerOrder, PxU32 begin, PxU32 end,
+      PxU32 workerCount, PxU32 taskGrainBodies, PxU32 taskCount,
+      PxU32 taskChunkBodies);
+  void captureKernelLabCpuColorPostRange(
+      PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 colorIndex);
+  void flushKernelLabCapture();
+
+  /** Current per-context warm-start cache epoch (zero is reserved invalid). */
+  PX_FORCE_INLINE PxU16 getAvbdFrameStamp() const {
+    // Use the nonzero 1..65535 range so the first frame after wrap still has
+    // an unambiguous age of one relative to the wrapped frame.
+    return static_cast<PxU16>(
+        ((mBodyVelocityHistoryFrame - 1u) % 65535u) + 1u);
+  }
+
+  #include "DyAvbdDynamicsTelemetryApi.inl"
 
   virtual void update(Cm::FlushPool &flushPool, PxBaseTask *continuation,
                       PxBaseTask *postPartitioningTask,
@@ -175,6 +273,28 @@ public:
     mSoftIslandProvider = provider;
   }
 
+  // Optional hybrid CPU-frontend/GPU-wave backend. Null is the canonical CPU
+  // path; attaching a backend never changes island ownership or writeback
+  // ordering, it only replaces one prepared owner-wave chunk transactionally.
+  PX_FORCE_INLINE void setRigidGpuWaveBackend(
+      AvbdRigidGpuWaveBackend *backend) {
+    mRigidGpuWaveBackend = backend;
+  }
+
+  PX_FORCE_INLINE AvbdRigidGpuWaveBackend *getRigidGpuWaveBackend() const {
+    return mRigidGpuWaveBackend;
+  }
+
+  // CPU-owned opaque packet producer/fallback/writeback table.  The table
+  // carries no GPU context or CPU object pointer in its packet ABI; the
+  // caller owns the returned lifetime token and must clear any attached GPU
+  // backend before destroying this context.
+  PX_FORCE_INLINE bool getRigidGpuWaveCallbackTable(
+      AvbdRigidGpuWaveCallbackTable &table) {
+    avbdGetRigidGpuWaveCallbackTable(table, this);
+    return table.isComplete();
+  }
+
   //-------------------------------------------------------------------------
   // Lambda Warm-Starting Cache (Public for external access)
   //-------------------------------------------------------------------------
@@ -196,9 +316,9 @@ public:
     PxReal tangentPenalty0; //!< Adaptive penalty for tangent 0
     PxReal tangentPenalty1; //!< Adaptive penalty for tangent 1
     PxVec3 prevStaticWorldPoint; //!< Deformable/static anchor for friction
-    PxU8 frameAge;          //!< Frames since last update (0 = current frame)
+    PxU16 frameStamp;
     PxU8 stick;             //!< Coulomb stick flag (static μ next frame)
-    PxU8 padding[2];
+    PxU8 padding[1];
   };
 
   PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
@@ -206,8 +326,8 @@ public:
 
   struct CachedContactManagerState {
     PxU64 key;      //!< Exact manager/body identity for slot validation
-    PxU8 frameAge; //!< 1 means the manager was active last frame
-    PxU8 padding[7];
+    PxU16 frameStamp;
+    PxU8 padding[6];
   };
 
   PxArray<CachedContactManagerState>
@@ -220,8 +340,8 @@ public:
     PxVec3 lambdaDriveLinear;
     PxVec3 lambdaDriveAngular;
     PxReal coneLambda;
-    PxU8 frameAge;
-    PxU8 padding[3];
+    PxU16 frameStamp;
+    PxU8 padding[2];
   };
 
   PxArray<CachedJointLambda> mJointLambdaCache; //!< Per-D6 warm-start storage
@@ -302,7 +422,10 @@ private:
                             AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
                             AvbdContactConstraint *constraints,
                             PxU32 maxConstraints, PxU32 startContactIdx,
-                            PxU32 numContactsToProcess, PxU32 bodyOffset);
+                            PxU32 numContactsToProcess, PxU32 bodyOffset,
+                            AvbdContactPrepSnapshot *snapshots = nullptr,
+                            AvbdContactOutputToken *outputTokens = nullptr,
+                            PxU32 outputTokenBase = 0);
 
   /**
    * @brief Convert PhysX constraints (joints) to AVBD joint constraints
@@ -322,404 +445,9 @@ private:
 
   //-------------------------------------------------------------------------
   // Member Variables
-  //-------------------------------------------------------------------------
-
-  AvbdSolver mSolver;                       //!< AVBD solver instance
-  AvbdParallelColoring mConstraintColoring; //!< Constraint graph coloring
-  PxcScratchAllocator &mScratchAllocator;   //!< Scratch memory allocator
-  AvbdSoftIslandProvider
-      *mSoftIslandProvider; //!< Scene-owned complete soft tuple provider
-
-  class ScratchAllocatorAdapter : public PxAllocatorCallback {
-  public:
-    ScratchAllocatorAdapter(PxcScratchAllocator &scratch);
-    virtual void *allocate(size_t size, const char *, const char *,
-                           int) override;
-    virtual void deallocate(void *) override;
-    PxcScratchAllocator &mScratch;
-  };
-  ScratchAllocatorAdapter mScratchAdapter;
-
-  class VirtualAllocatorAdapter : public PxAllocatorCallback {
-  public:
-    explicit VirtualAllocatorAdapter(Cm::VirtualAllocatorCallback &allocator);
-    virtual void *allocate(size_t size, const char *, const char *file,
-                           int line) override;
-    virtual void deallocate(void *ptr) override;
-
-  private:
-    Cm::VirtualAllocatorCallback &mAllocator;
-  };
-  VirtualAllocatorAdapter mAllocatorAdapter;
-
-  PxTaskManager *mTaskManager;   //!< Task manager for parallel execution
-  AvbdTaskFactory *mTaskFactory; //!< Factory for creating AVBD tasks
-  bool mFrictionEveryIteration; //!< Apply friction every iteration
-  bool mSolverInitialized;      //!< Whether solver has been initialized
-  bool mIterationDiagnosticsEnabled; //!< Print AVBD iteration summaries when enabled via env
-  bool mIterationDiagnosticsSequential; //!< Force sequential island solve for trustworthy diagnostics
-  bool mNormalRowDiagnosticsEnabled; //!< Emit detailed body-static row evidence
-  PxU32 mIterationDiagnosticsEvery; //!< Diagnostic print cadence in frames
-  std::atomic<PxU64> mDiagIslandCount;
-  std::atomic<PxU64> mDiagJointIslandCount;
-  std::atomic<PxU64> mDiagRequestedIterations;
-  std::atomic<PxU64> mDiagExecutedIterations;
-  std::atomic<PxU64> mDiagEarlyStopIslands;
-  std::atomic<PxU64> mDiagVelocityObjectivePositionRows;
-  std::atomic<PxU64> mDiagVelocityObjectivePointRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveManifoldRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveComponentRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveJointRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveUnsupportedRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveLegacyRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveInvalidRows;
-  std::atomic<PxU64> mDiagVelocityObjectiveFingerprint;
-  std::atomic<PxU64> mDiagContactObjectivePositionSlots;
-  std::atomic<PxU64> mDiagContactObjectivePointSlots;
-  std::atomic<PxU64> mDiagContactObjectiveManifoldSlots;
-  std::atomic<PxU64> mDiagContactObjectiveComponentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveJointSlots;
-  std::atomic<PxU64> mDiagContactObjectiveUnsupportedSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacySlots;
-  std::atomic<PxU64> mDiagContactObjectiveInvalidSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyNormalSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyRigidStaticTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyDynamicTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyDeformableTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyJointMixedTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveLegacyOtherTangentSlots;
-  std::atomic<PxU64> mDiagContactObjectiveFingerprint;
-  std::atomic<PxU64> mDiagJointObjectivePositionRows;
-  std::atomic<PxU64> mDiagJointObjectiveFinalizeRows;
-  std::atomic<PxU64> mDiagJointObjectiveUnsupportedRows;
-  std::atomic<PxU64> mDiagJointObjectiveLegacyRows;
-  std::atomic<PxU64> mDiagJointObjectiveInvalidRows;
-  std::atomic<PxU64> mDiagJointObjectiveFingerprint;
-  std::atomic<PxU64> mDiagBodyStaticNormalAlRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalAlEvaluations;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationEligibleRows;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationFiniteImpulseSkips;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips;
-  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityCorrections;
-  std::atomic<PxU64> mDiagBodyStaticRestitutionCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartHits;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartMisses;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge0;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge1;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge2;
-  std::atomic<PxU64> mDiagBodyStaticNormalWarmstartAge3;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerOnsetRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerSupportRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge0;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge1;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge2;
-  std::atomic<PxU64> mDiagBodyStaticNormalManagerAge3;
-  std::atomic<PxU64> mDiagBodyStaticNormalRowMissOnManagerSupportRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeBodies;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeBodies;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationEligibleRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationEligibleRows;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportShallowDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportDeepDepenetrationCorrections;
-  std::atomic<PxU64> mDiagBodyStaticMaterialFiniteBudgetRows;
-  std::atomic<PxU64> mDiagBodyStaticMaterialUnlimitedBudgetRows;
-  std::atomic<PxU64> mDiagContactFrictionTargetAlEvaluations;
-  std::atomic<PxU64> mDiagBodyStaticFrictionTargetRows;
-  std::atomic<PxU64> mDiagBodyStaticFrictionTargetCorrections;
-  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackRows;
-  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackCorrections;
-  std::atomic<PxU64> mDiagContactTargetNormalProjectionRows;
-  std::atomic<PxU64> mDiagContactTargetNormalCorrections;
-  std::atomic<PxU64> mDiagContactTargetTangentRows;
-  std::atomic<PxU64> mDiagContactTargetTangentCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableAlRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableAlEvaluations;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentCandidates;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentEvaluations;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentMixedRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentShellRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentTargetRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentRestitutionRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentFiniteRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformablePositionTangentScaleRejectRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableStrippedRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableShellSuppressedPrimalRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionRawRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionDominantRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionFewContactRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionMultiCornerRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeBodies;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeSpatialCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComFallbackCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeSecondaryRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeManifoldBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldOneRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldFourRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeManifoldAliasRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponents;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponentOneBody;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeComponentTwoBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentOneToEightRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentRestitution;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentFiniteImpulse;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentTargetVelocity;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentMixedScale;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentRigidStatic;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentJointIsland;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentLockedDof;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeComponentNonDynamicBody;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeBudgetDiagRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowComponents;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowNoCorrection;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowSolved;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowCommitCapable;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowBudgetExhausted;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowInfeasible;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowResidualUnclassified;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowNumericalFailure;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowIterationLimit;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowUnsupported;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowLowerRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowFreeRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowUpperRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizePreOwnerBodies;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeLegacyOwnerBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeProbeEligibleComponents;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeProbeCommittedComponents;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeProbeCommittedRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeProbeCommittedBodies;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies;
-  std::atomic<PxU64> mDiagSurfaceDeformableAlDepenetrationRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableAlFinalizeRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationFinalizeRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableAlDepenetrationFinalizeRows;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactReversalCorrections;
-  std::atomic<PxU64> mDiagSurfaceShellContacts;
-  std::atomic<PxU64> mDiagSurfaceShellDepenetrationCorrections;
-  std::atomic<PxU64> mDiagSurfaceShellFrictionRows;
-  std::atomic<PxU64> mDiagSurfaceShellFrictionCorrections;
-  std::atomic<PxU64> mDiagSurfaceShellFinalizeBodies;
-  std::atomic<PxU64> mDiagSurfaceShellFinalizeCorrections;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityDeltaNanos;
-  std::atomic<PxU64> mDiagBodyStaticFrictionTargetImpulseNanos;
-  std::atomic<PxU64> mDiagBodyStaticFrictionFallbackImpulseNanos;
-  std::atomic<PxU64> mDiagContactTargetNormalImpulseNanos;
-  std::atomic<PxU64> mDiagContactTargetTangentImpulseNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableFrictionImpulseNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeDeltaNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPreSeparationNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPostSeparationNanos;
-  std::atomic<PxU64> mDiagSurfaceDeformableFinalizeContactPostApproachNanos;
-  std::atomic<PxU64>
-      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos;
-  std::atomic<PxU64> mDiagSurfaceShellDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagSurfaceShellFrictionImpulseNanos;
-  std::atomic<PxU64> mDiagSurfaceShellFinalizeDeltaNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalRestoredLambdaMaxNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalRestoredPenaltyMaxNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalInitialPenaltyMaxNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalPreAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalPostAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalAlphaC0OffsetNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalPreAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalPostAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalPostAlSeparationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalAlOutwardDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalAlInwardDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticMaterialPoseSeparatingVelocityNanos;
-  std::atomic<PxU64> mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos;
-  std::atomic<PxU64> mDiagBodyStaticMaterialFiniteRemainingImpulseNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPreAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPostAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportPreAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportPostAlPenetrationNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportAlphaC0OffsetNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportAlOutwardDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetFinalizeDeltaNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportFinalizeDeltaNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos;
-  std::atomic<PxU64> mDiagJointRequestedIterations;
-  std::atomic<PxU64> mDiagJointExecutedIterations;
-  std::atomic<PxU64> mDiagJointBudgetHitIslands;
-  std::atomic<PxU64> mDiagJointEarlyStopIslands;
-  std::atomic<PxU64> mDiagJointContactCount;
-  std::atomic<PxU64> mDiagJointConstraintCount;
-  std::atomic<PxU64> mDiagJointLockedLinearRows;
-  std::atomic<PxU64> mDiagJointLimitedLinearRows;
-  std::atomic<PxU64> mDiagJointLockedAngularRows;
-  std::atomic<PxU64> mDiagJointLimitedAngularRows;
-  std::atomic<PxU64> mDiagJointLinearDriveRows;
-  std::atomic<PxU64> mDiagJointAngularDriveRows;
-  std::atomic<PxU64> mDiagJointConeRows;
-  std::atomic<PxU32> mDiagMaxRequestedIterations;
-  std::atomic<PxU32> mDiagMaxExecutedIterations;
-  std::atomic<PxU64> mDiagBodyStaticDepenetrationMaxCorrectionNanos;
-  std::atomic<PxU64> mDiagBodyStaticMaterialVelocityMaxDeltaNanos;
-  std::atomic<PxU32> mDiagJointMaxExecutedIterations;
-  std::atomic<PxU32> mDiagJointMaxLinearLambdaMilli;
-  std::atomic<PxU32> mDiagJointMaxAngularLambdaMilli;
-  std::atomic<PxU32> mDiagJointMaxLinearDriveLambdaMilli;
-  std::atomic<PxU32> mDiagJointMaxAngularDriveLambdaMilli;
-  std::atomic<PxU32> mDiagJointMaxConeLambdaMilli;
-  PxU32 mDiagSeqMaxLinearJointIndex;
-  PxU32 mDiagSeqMaxLinearJointBodyA;
-  PxU32 mDiagSeqMaxLinearJointBodyB;
-  PxU32 mDiagSeqMaxLinearDriveJointIndex;
-  PxU32 mDiagSeqMaxLinearDriveJointBodyA;
-  PxU32 mDiagSeqMaxLinearDriveJointBodyB;
-
-  //!< Track heap fallback allocations for cleanup at frame end
-  //!< No mutex needed since update() and mergeResults() are called from
-  //!< single-threaded contexts
-  PxArray<void *> mHeapFallbackAllocations;
+  // Storage details are kept in DyAvbdDynamicsPrivate.inl so this header
+  // remains focused on lifecycle and solver entry points.
+  #include "DyAvbdDynamicsPrivate.inl"
 };
 
 // Lambda cache write-back function (declared friend in AvbdDynamicsContext)
@@ -730,6 +458,26 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
 void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
                                  PxU32 numConstraints, PxU32 numBodies,
                                  PxReal dt);
+
+void writeContactImpulseToOutputTokens(
+    const AvbdContactConstraint *constraints,
+    const AvbdContactOutputToken *tokens,
+    AvbdContactOutputResult *results, PxU32 numConstraints, PxU32 numBodies,
+    PxReal dt);
+
+// Context-free snapshot parser. The caller owns all input/output ranges and
+// supplies the immutable configuration captured by the parent update.
+PxU32 prepareAvbdContactSnapshots(
+    PxReal dt, AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
+    AvbdContactConstraint *constraints, PxU32 maxConstraints,
+    PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset,
+    AvbdContactPrepSnapshot *snapshots, AvbdContactOutputToken *outputTokens,
+    PxU32 outputTokenBase, PxReal lengthScale, bool enableLambdaWarmStart,
+    PxU16 frameStamp);
+
+void commitContactOutputTokens(const AvbdContactOutputTarget *targets,
+                               AvbdContactOutputResult *results,
+                               PxU32 count);
 
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
@@ -752,7 +500,8 @@ Context *createAVBDDynamicsContext(
     Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
     PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
-    PxSceneFlags sceneFlags);
+    PxU32 avbdIterations, PxU32 avbdJointIterationOverride,
+    bool avbdEnableEarlyStop, PxSceneFlags sceneFlags);
 
 } // namespace Dy
 

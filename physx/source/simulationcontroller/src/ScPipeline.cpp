@@ -65,6 +65,7 @@
 #include "ScConstraintCore.h"
 #include "ScConstraintSim.h"
 #include "DyIslandManager.h"
+#include "DyAvbdDynamics.h"
 
 using namespace physx;
 using namespace Cm;
@@ -2537,7 +2538,7 @@ void Sc::Scene::updateSimulationController(PxBaseTask* continuation)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void Sc::Scene::postSolver(PxBaseTask* /*continuation*/)
+void Sc::Scene::postSolver(PxBaseTask* continuation)
 {
 	PX_PROFILE_ZONE("Sc::Scene::postSolver", mContextId);
 
@@ -2550,11 +2551,188 @@ void Sc::Scene::postSolver(PxBaseTask* /*continuation*/)
 	blockPool.swapFrictionStreams();
 
 	// The AVBD dynamics path solves an eligible dynamic rigid-soft complete
-	// tuple in the selected rigid island before this hook.  This post-solver
-	// stage advances only tuples not owned by dynamics (including world-static
-	// contact) and writes the dynamics-owned result back to host buffers.  It
-	// does not provide native soft island ownership or wake propagation.
+	// tuple in the selected rigid island before this hook.  A sufficiently
+	// large component-only pure-soft step has no native island owner, so P2
+	// schedules its complete existing step through the same Scene dispatcher.
+	// The task retains `continuation`; postSolver's own release removes only
+	// its reference, leaving afterIntegration blocked without a private wait.
+	if(scheduleAvbdCpuSoftComponentStep(continuation))
+		return;
+
 	stepAvbdCpuDeformableVolumes();
+	finishPostSolverAfterAvbdCpuSoftStep();
+}
+
+void Sc::Scene::avbdCpuSoftComponentStep(PxBaseTask* continuation)
+{
+	PX_PROFILE_ZONE("Sc::Scene::avbdCpuSoftComponentStep", mContextId);
+	Dy::AvbdDynamicsContext* const avbdContext =
+		static_cast<Dy::AvbdDynamicsContext*>(mDynamicsContext);
+	PX_ASSERT(avbdContext);
+	avbdContext->beginSolveTask();
+	const bool componentStepPrepared =
+		prepareAvbdCpuDeformableVolumesSolve();
+	if(componentStepPrepared &&
+		scheduleAvbdCpuSoftComponentPrediction(continuation))
+		return;
+
+	bool componentStepCompleted = false;
+	if(componentStepPrepared)
+	{
+		avbdContext->recordSerialPredictionStage();
+		predictAvbdCpuDeformableVolumes();
+		bool causalLayerTaskReady = false;
+		bool worldPlaneContactTaskReady = false;
+		bool rigidBoxSdfContactTaskReady = false;
+		bool rigidSphereSdfContactTaskReady = false;
+		componentStepCompleted = resumeAvbdCpuDeformableVolumesSolve(
+			&causalLayerTaskReady, &worldPlaneContactTaskReady,
+			&rigidBoxSdfContactTaskReady,
+			&rigidSphereSdfContactTaskReady);
+		while(!componentStepCompleted &&
+			(worldPlaneContactTaskReady || rigidBoxSdfContactTaskReady ||
+			 rigidSphereSdfContactTaskReady))
+		{
+			if(worldPlaneContactTaskReady)
+			{
+				if(scheduleAvbdCpuSoftComponentWorldPlaneContact(continuation))
+					return;
+				componentStepCompleted =
+					finishAvbdCpuSoftComponentWorldPlaneContactSerialFallback(
+						causalLayerTaskReady, worldPlaneContactTaskReady,
+						rigidBoxSdfContactTaskReady,
+						rigidSphereSdfContactTaskReady);
+			}
+			else if(rigidBoxSdfContactTaskReady)
+			{
+				if(scheduleAvbdCpuSoftComponentRigidBoxSdfContact(continuation))
+					return;
+				componentStepCompleted =
+					finishAvbdCpuSoftComponentRigidBoxSdfContactSerialFallback(
+						causalLayerTaskReady, worldPlaneContactTaskReady,
+						rigidBoxSdfContactTaskReady,
+						rigidSphereSdfContactTaskReady);
+			}
+			else
+			{
+				if(scheduleAvbdCpuSoftComponentRigidSphereSdfContact(continuation))
+					return;
+				componentStepCompleted =
+					finishAvbdCpuSoftComponentRigidSphereSdfContactSerialFallback(
+						causalLayerTaskReady, worldPlaneContactTaskReady,
+						rigidBoxSdfContactTaskReady,
+						rigidSphereSdfContactTaskReady);
+			}
+		}
+		if(causalLayerTaskReady &&
+			scheduleAvbdCpuSoftComponentCausalLayer(continuation))
+			return;
+		if(causalLayerTaskReady)
+			componentStepCompleted =
+				finishAvbdCpuSoftComponentCausalLayerSerialFallback();
+	}
+	// `finishStandaloneComponentSolve()` normally closes this counter before
+	// the root returns.  Close it here as well for an empty/failed prepare;
+	// the telemetry operation is idempotent after a normal completion.
+	finishAvbdCpuSoftComponentNoOpTask();
+	avbdContext->endSolveTask();
+	if(componentStepCompleted &&
+		scheduleAvbdCpuSoftComponentWriteBack(continuation))
+		return;
+
+	if(componentStepCompleted)
+	{
+		avbdContext->recordSerialWriteBackStage();
+		writeBackAvbdCpuDeformableVolumes();
+		finishAvbdCpuDeformableVolumesStandaloneStep();
+	}
+	finishPostSolverAfterAvbdCpuSoftStep();
+}
+
+void Sc::Scene::avbdCpuSoftComponentPredictionFinish(
+	PxBaseTask* continuation)
+{
+	PX_PROFILE_ZONE("Sc::Scene::avbdCpuSoftComponentPredictionFinish",
+		mContextId);
+	Dy::AvbdDynamicsContext* const avbdContext =
+		static_cast<Dy::AvbdDynamicsContext*>(mDynamicsContext);
+	PX_ASSERT(avbdContext);
+	bool causalLayerTaskReady = false;
+	bool worldPlaneContactTaskReady = false;
+	bool rigidBoxSdfContactTaskReady = false;
+	bool rigidSphereSdfContactTaskReady = false;
+	bool componentStepCompleted = resumeAvbdCpuDeformableVolumesSolve(
+		&causalLayerTaskReady, &worldPlaneContactTaskReady,
+		&rigidBoxSdfContactTaskReady,
+		&rigidSphereSdfContactTaskReady);
+	while(!componentStepCompleted &&
+		(worldPlaneContactTaskReady || rigidBoxSdfContactTaskReady ||
+		 rigidSphereSdfContactTaskReady))
+	{
+		if(worldPlaneContactTaskReady)
+		{
+			if(scheduleAvbdCpuSoftComponentWorldPlaneContact(continuation))
+				return;
+			componentStepCompleted =
+				finishAvbdCpuSoftComponentWorldPlaneContactSerialFallback(
+					causalLayerTaskReady, worldPlaneContactTaskReady,
+					rigidBoxSdfContactTaskReady,
+					rigidSphereSdfContactTaskReady);
+		}
+		else if(rigidBoxSdfContactTaskReady)
+		{
+			if(scheduleAvbdCpuSoftComponentRigidBoxSdfContact(continuation))
+				return;
+			componentStepCompleted =
+				finishAvbdCpuSoftComponentRigidBoxSdfContactSerialFallback(
+					causalLayerTaskReady, worldPlaneContactTaskReady,
+					rigidBoxSdfContactTaskReady,
+					rigidSphereSdfContactTaskReady);
+		}
+		else
+		{
+			if(scheduleAvbdCpuSoftComponentRigidSphereSdfContact(continuation))
+				return;
+			componentStepCompleted =
+				finishAvbdCpuSoftComponentRigidSphereSdfContactSerialFallback(
+					causalLayerTaskReady, worldPlaneContactTaskReady,
+					rigidBoxSdfContactTaskReady,
+					rigidSphereSdfContactTaskReady);
+		}
+	}
+	if(causalLayerTaskReady &&
+		scheduleAvbdCpuSoftComponentCausalLayer(continuation))
+		return;
+	if(causalLayerTaskReady)
+		componentStepCompleted =
+			finishAvbdCpuSoftComponentCausalLayerSerialFallback();
+	finishAvbdCpuSoftComponentNoOpTask();
+	avbdContext->endSolveTask();
+	if(componentStepCompleted &&
+		scheduleAvbdCpuSoftComponentWriteBack(continuation))
+		return;
+
+	if(componentStepCompleted)
+	{
+		avbdContext->recordSerialWriteBackStage();
+		writeBackAvbdCpuDeformableVolumes();
+		finishAvbdCpuDeformableVolumesStandaloneStep();
+	}
+	finishPostSolverAfterAvbdCpuSoftStep();
+}
+
+void Sc::Scene::avbdCpuSoftComponentWriteBackFinish(
+	PxBaseTask* /*continuation*/)
+{
+	PX_PROFILE_ZONE("Sc::Scene::avbdCpuSoftComponentWriteBackFinish",
+		mContextId);
+	finishAvbdCpuDeformableVolumesStandaloneStep();
+	finishPostSolverAfterAvbdCpuSoftStep();
+}
+
+void Sc::Scene::finishPostSolverAfterAvbdCpuSoftStep()
+{
+	PxcNpMemBlockPool& blockPool = mLLContext->getNpMemBlockPool();
 
 	mCcdBodies.clear();
 

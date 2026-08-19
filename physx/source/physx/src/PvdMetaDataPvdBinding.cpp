@@ -255,6 +255,7 @@ void PvdMetaDataBinding::registerSDKProperties(PvdDataStream& inStream)
 		inStream.createProperty<PxPhysics, ObjectRef>("HeightFields", "children", PropertyType::Array);
 		inStream.createProperty<PxPhysics, ObjectRef>("ConvexMeshes", "children", PropertyType::Array);
 		inStream.createProperty<PxPhysics, ObjectRef>("TriangleMeshes", "children", PropertyType::Array);
+		inStream.createProperty<PxPhysics, ObjectRef>("TetrahedronMeshes", "children", PropertyType::Array);
 		inStream.createProperty<PxPhysics, PxU32>("Version.Major");
 		inStream.createProperty<PxPhysics, PxU32>("Version.Minor");
 		inStream.createProperty<PxPhysics, PxU32>("Version.Bugfix");
@@ -356,6 +357,7 @@ void PvdMetaDataBinding::registerSDKProperties(PvdDataStream& inStream)
 
 		inStream.createProperty<PxScene, ObjectRef>("RigidStatics", "children", PropertyType::Array);
 		inStream.createProperty<PxScene, ObjectRef>("RigidDynamics", "children", PropertyType::Array);
+		inStream.createProperty<PxScene, ObjectRef>("DeformableVolumes", "children", PropertyType::Array);
 		inStream.createProperty<PxScene, ObjectRef>("Articulations", "children", PropertyType::Array);
 		inStream.createProperty<PxScene, ObjectRef>("Joints", "children", PropertyType::Array);
 		inStream.createProperty<PxScene, ObjectRef>("Aggregates", "children", PropertyType::Array);
@@ -415,8 +417,8 @@ void PvdMetaDataBinding::registerSDKProperties(PvdDataStream& inStream)
 	{
 		inStream.createClass<PxTetrahedronMesh>();
 		inStream.createProperty<PxTetrahedronMesh, PxVec3>("Points", "", PropertyType::Array);
-		inStream.createProperty<PxTetrahedronMesh, PxU32>("NbTriangles", "", PropertyType::Scalar);
-		inStream.createProperty<PxTetrahedronMesh, PxU32>("Triangles", "", PropertyType::Array);
+		inStream.createProperty<PxTetrahedronMesh, PxU32>("NbTetrahedrons", "", PropertyType::Scalar);
+		inStream.createProperty<PxTetrahedronMesh, PxU32>("Tetrahedrons", "", PropertyType::Array);
 		inStream.createProperty<PxTetrahedronMesh, ObjectRef>("Physics", "parents", PropertyType::Scalar);
 	}
 
@@ -445,6 +447,28 @@ void PvdMetaDataBinding::registerSDKProperties(PvdDataStream& inStream)
 	{
 		createClassAndDefineProperties<PxActor>(inStream);
 		inStream.createProperty<PxActor, ObjectRef>("Scene", "parents");
+	}
+	// PxDeformableVolume has no generated legacy-PVD metadata. Define the
+	// actor and its two tetrahedral domains explicitly so both the object tree
+	// and the live CPU AVBD mesh are observable in PVD.
+	{
+		inStream.createClass<PxDeformableVolume>();
+		inStream.deriveClass<PxActor, PxDeformableVolume>();
+		inStream.createProperty<PxDeformableVolume, ObjectRef>("CollisionMesh", "children");
+		inStream.createProperty<PxDeformableVolume, ObjectRef>("SimulationMesh", "children");
+		inStream.createProperty<PxDeformableVolume, PxU32>("Backend");
+		inStream.createProperty<PxDeformableVolume, bool>("IsSleeping");
+		inStream.createProperty<PxDeformableVolume, PxU32>("PositionIterations");
+		inStream.createProperty<PxDeformableVolume, PxU32>("VelocityIterations");
+		inStream.createProperty<PxDeformableVolume, PxU32>("CollisionVertexCount");
+		inStream.createProperty<PxDeformableVolume, PxU32>("CollisionTetrahedronCount");
+		inStream.createProperty<PxDeformableVolume, PxU32>("SimulationVertexCount");
+		inStream.createProperty<PxDeformableVolume, PxU32>("SimulationTetrahedronCount");
+		inStream.createProperty<PxDeformableVolume, PxVec3>("CollisionPositions", "", PropertyType::Array);
+		inStream.createProperty<PxDeformableVolume, PxU32>("CollisionTetrahedrons", "", PropertyType::Array);
+		inStream.createProperty<PxDeformableVolume, PxVec3>("SimulationPositions", "", PropertyType::Array);
+		inStream.createProperty<PxDeformableVolume, PxVec3>("SimulationVelocities", "", PropertyType::Array);
+		inStream.createProperty<PxDeformableVolume, PxU32>("SimulationTetrahedrons", "", PropertyType::Array);
 	}
 	// PxRigidActor
 	{
@@ -967,7 +991,7 @@ void PvdMetaDataBinding::createInstance(PvdDataStream& inStream, const PxTetrahe
 	{
 		const PxVec3* vertexPtr = inData.getVertices();
 		const PxU32 numVertices = inData.getNbVertices();
-		inStream.setPropertyValue(&inData, "Vertices", vertexPtr, numVertices);
+		inStream.setPropertyValue(&inData, "Points", vertexPtr, numVertices);
 	}
 
 	////invert mass array
@@ -982,7 +1006,7 @@ void PvdMetaDataBinding::createInstance(PvdDataStream& inStream, const PxTetrahe
 		const bool has16BitIndices = inData.getTetrahedronMeshFlags() & PxTetrahedronMeshFlag::e16_BIT_INDICES ? true : false;
 		const PxU32 numTetrahedrons = inData.getNbTetrahedrons();
 
-		inStream.setPropertyValue(&inData, "NbTetrahedron", numTetrahedrons);
+		inStream.setPropertyValue(&inData, "NbTetrahedrons", numTetrahedrons);
 
 		const PxU32 numIndexes = numTetrahedrons * 4;
 		const PxU8* tetrahedronsPtr = reinterpret_cast<const PxU8*>(inData.getTetrahedrons());
@@ -1427,26 +1451,120 @@ void PvdMetaDataBinding::sendAllProperties(PvdDataStream& inStream, const PxArti
 	inStream.setPropertyMessage(&inObj, values);
 }
 
+static void sendDeformableVolumeTetrahedrons(
+	PvdDataStream& inStream,
+	const PxDeformableVolume& inObj,
+	const PxTetrahedronMesh* mesh,
+	const char* propertyName)
+{
+	if(!mesh)
+		return;
+	const PxU32 indexCount = 4 * mesh->getNbTetrahedrons();
+	if(mesh->getTetrahedronMeshFlags() &
+		PxTetrahedronMeshFlag::e16_BIT_INDICES)
+	{
+		inStream.setPropertyValue(
+			&inObj, propertyName,
+			static_cast<const PxU16*>(mesh->getTetrahedrons()),
+			indexCount);
+	}
+	else
+	{
+		inStream.setPropertyValue(
+			&inObj, propertyName,
+			static_cast<const PxU32*>(mesh->getTetrahedrons()),
+			indexCount);
+	}
+}
+
+static void sendDeformableVolumePositions(
+	PvdDataStream& inStream,
+	const PxDeformableVolume& inObj,
+	const char* propertyName,
+	const PxVec4* source,
+	PxU32 count)
+{
+	if(!source || !count)
+		return;
+	PxArray<PxVec3> values(count);
+	for(PxU32 i = 0; i < count; ++i)
+		values[i] = source[i].getXYZ();
+	inStream.setPropertyValue(&inObj, propertyName, values.begin(), count);
+}
+
 void PvdMetaDataBinding::createInstance(PvdDataStream& inStream, const PxDeformableVolume& inObj, const PxScene& ownerScene, const PxPhysics& ownerPhysics, PsPvd* pvd)
 {
-	PX_UNUSED(inStream);
-	PX_UNUSED(inObj);
-	PX_UNUSED(ownerScene);
-	PX_UNUSED(ownerPhysics);
-	PX_UNUSED(pvd);
+	const PxTetrahedronMesh* collisionMesh = inObj.getCollisionMesh();
+	const PxTetrahedronMesh* simulationMesh = inObj.getSimulationMesh();
+	if(collisionMesh && !inStream.isInstanceValid(collisionMesh) &&
+		pvd->registerObject(collisionMesh))
+		createInstance(inStream, *collisionMesh, ownerPhysics);
+	if(simulationMesh && !inStream.isInstanceValid(simulationMesh) &&
+		pvd->registerObject(simulationMesh))
+		createInstance(inStream, *simulationMesh, ownerPhysics);
+
+	addSceneGroupProperty(inStream, "DeformableVolumes", inObj, ownerScene);
+	sendAllProperties(inStream, inObj);
+	sendDeformableVolumeTetrahedrons(
+		inStream, inObj, collisionMesh, "CollisionTetrahedrons");
+	sendDeformableVolumeTetrahedrons(
+		inStream, inObj, simulationMesh, "SimulationTetrahedrons");
 }
 
 void PvdMetaDataBinding::sendAllProperties(PvdDataStream& inStream, const PxDeformableVolume& inObj)
 {
-	PX_UNUSED(inStream);
-	PX_UNUSED(inObj);
+	const PxTetrahedronMesh* collisionMesh = inObj.getCollisionMesh();
+	const PxTetrahedronMesh* simulationMesh = inObj.getSimulationMesh();
+	inStream.setPropertyValue(&inObj, "CollisionMesh",
+		reinterpret_cast<const void*>(collisionMesh));
+	inStream.setPropertyValue(&inObj, "SimulationMesh",
+		reinterpret_cast<const void*>(simulationMesh));
+	inStream.setPropertyValue(&inObj, "Backend",
+		PxU32(inObj.getDeformableVolumeBackend()));
+	inStream.setPropertyValue(&inObj, "IsSleeping", inObj.isSleeping());
+	PxU32 positionIterations = 0;
+	PxU32 velocityIterations = 0;
+	inObj.getSolverIterationCounts(positionIterations, velocityIterations);
+	inStream.setPropertyValue(
+		&inObj, "PositionIterations", positionIterations);
+	inStream.setPropertyValue(
+		&inObj, "VelocityIterations", velocityIterations);
+
+	const PxU32 collisionVertexCount = collisionMesh
+		? collisionMesh->getNbVertices() : 0;
+	const PxU32 simulationVertexCount = simulationMesh
+		? simulationMesh->getNbVertices() : 0;
+	inStream.setPropertyValue(
+		&inObj, "CollisionVertexCount", collisionVertexCount);
+	inStream.setPropertyValue(&inObj, "CollisionTetrahedronCount",
+		collisionMesh ? collisionMesh->getNbTetrahedrons() : 0);
+	inStream.setPropertyValue(
+		&inObj, "SimulationVertexCount", simulationVertexCount);
+	inStream.setPropertyValue(&inObj, "SimulationTetrahedronCount",
+		simulationMesh ? simulationMesh->getNbTetrahedrons() : 0);
+
+	PxDeformableVolume& mutableObj =
+		const_cast<PxDeformableVolume&>(inObj);
+	if(inObj.getDeformableVolumeBackend() ==
+		PxDeformableVolumeBackend::eCPU_AVBD)
+	{
+		sendDeformableVolumePositions(inStream, inObj,
+			"CollisionPositions", mutableObj.getPositionInvMassBufferH(),
+			collisionVertexCount);
+		sendDeformableVolumePositions(inStream, inObj,
+			"SimulationPositions",
+			mutableObj.getSimPositionInvMassBufferH(),
+			simulationVertexCount);
+		sendDeformableVolumePositions(inStream, inObj,
+			"SimulationVelocities", mutableObj.getSimVelocityBufferH(),
+			simulationVertexCount);
+	}
 }
 
 void PvdMetaDataBinding::destroyInstance(PvdDataStream& inStream, const PxDeformableVolume& inObj, const PxScene& ownerScene)
 {
-	PX_UNUSED(inStream);
-	PX_UNUSED(inObj);
-	PX_UNUSED(ownerScene);
+	removeSceneGroupProperty(
+		inStream, "DeformableVolumes", inObj, ownerScene);
 }
 
 void PvdMetaDataBinding::createInstance(PvdDataStream& inStream, const PxDeformableSurface& inObj, const PxScene& ownerScene, const PxPhysics& ownerPhysics, PsPvd* pvd)

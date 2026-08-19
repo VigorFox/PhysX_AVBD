@@ -88,6 +88,12 @@ def main() -> int:
             "avbdSegmentEnterExpandedConvex(",
             "avbdSegmentEnterExpandedRotatingConvex(",
             "avbdQueryRigidConvexLocal(",
+            "const AvbdRigidConvexPointQuery* initialQuery = NULL",
+            "currentQuery = *initialQuery;",
+            "if(iteration == 0)",
+            "query = currentQuery;",
+            "if(iteration == 0 && initialQuery)",
+            "query = *initialQuery;",
             "currentQuery.signedDistance < margin",
             "for(PxU32 iteration = 0; iteration < 48; ++iteration)",
             "for(PxU32 iteration = 0; iteration < 64; ++iteration)",
@@ -99,10 +105,39 @@ def main() -> int:
             "result.featureKey = query.featureKey;",
         ),
     )
+    if point_entry.count(
+        "const AvbdRigidConvexPointQuery* initialQuery = NULL"
+    ) != 2:
+        errors.append(
+            "convex point advancement lost one of its two initial-query reuse contracts"
+        )
+
+    swept_bound = section(
+        soft,
+        "PX_FORCE_INLINE bool avbdSweptPointMayReachRigidConvexBound(",
+        "struct AvbdSweptConvexPointEntry",
+    )
+    require_all(
+        errors,
+        "convex swept outer-bound rejection",
+        swept_bound,
+        (
+            "const PxVec3 relativeStart = pointStart - centerStart;",
+            "const PxVec3 relativeEnd = pointEnd - centerEnd;",
+            "relativeStart.minimum(relativeEnd)",
+            "relativeStart.maximum(relativeEnd)",
+            "relativeMinimum.x <= expandedRadius",
+            "relativeMaximum.z >= -expandedRadius",
+        ),
+    )
+    if soft.count("avbdSweptPointMayReachRigidConvexBound(") != 3:
+        errors.append(
+            "convex swept outer bound must have one definition and two exact call sites"
+        )
 
     swept_sdf = section(
         soft,
-        "inline void avbdDetectSoftRigidConvexSweptSDF(",
+        "inline void avbdDetectSoftRigidConvexSweptSDFRange(",
         "struct AvbdSweptConvexEdgeEntry",
     )
     require_all(
@@ -113,6 +148,8 @@ def main() -> int:
             "sourceBody->compiled.speculativeCCDEnabled",
             "avbdIsSoftBodySurfaceVertex(",
             "avbdGetRigidConvexSweepPose(",
+            "avbdSweptPointMayReachRigidConvexBound(",
+            "convex.localRadius + margin",
             "particle.position - centerStart",
             "particle.predictedPosition - centerEnd",
             "avbdSegmentEnterExpandedConvex(",
@@ -151,7 +188,7 @@ def main() -> int:
 
     reverse = section(
         soft,
-        "inline void avbdDetectSoftRigidConvexSweptOGCFeatures(",
+        "PX_FORCE_INLINE bool avbdRigidConvexForwardVertexOwnsSweptFeature(",
         "inline void avbdDetectSoftRigidConvexOGCFeatures(",
     )
     require_all(
@@ -164,10 +201,13 @@ def main() -> int:
             "translationToleranceSq",
             "(displacement1 - displacement0)",
             "(displacement2 - displacement0)",
-            "bool forwardVertexOwns = false;",
+            "const bool forwardVertexOwns =",
             "if(currentQuery.signedDistance < margin)",
+            "avbdSweptPointMayReachRigidConvexBound(",
+            "convex.localRadius + margin",
             "avbdSegmentEnterExpandedConvex(",
             "avbdSegmentEnterExpandedRotatingConvex(",
+            "margin, vertexEntry, &currentQuery);",
             "if(forwardVertexOwns)",
             "centerEnd - centerStart - displacement0",
             "avbdTranslatedSegmentEnterExpandedSegmentInteriors(",
@@ -186,6 +226,10 @@ def main() -> int:
             "avbdAppendPreparedSoftContact(",
         ),
     )
+    if reverse.count("margin, vertexEntry, &currentQuery);") != 2:
+        errors.append(
+            "convex forward owner no longer reuses its initial query in both sweep paths"
+        )
 
     pose = section(
         soft,
@@ -301,6 +345,27 @@ def main() -> int:
         ),
     )
 
+    subset_proxy = section(
+        scene,
+        "bool rebuildSubsetCollisionDetectionScene(",
+        "PxU32 findCollisionBodyForParticle(",
+    )
+    require_all(
+        errors,
+        "selected-island cooked proxy body controls",
+        subset_proxy,
+        (
+            "const Dy::AvbdSoftBodyCompiledData& sourceCompiled =",
+            "sourceBodies[localBodyIndex].compiled;",
+            "subsetCompiled.speculativeCCDEnabled =",
+            "sourceCompiled.speculativeCCDEnabled;",
+            "subsetCompiled.maxDepenetrationVelocity =",
+            "sourceCompiled.maxDepenetrationVelocity;",
+            "subsetCompiled.selfCollisionStressTolerance =",
+            "sourceCompiled.selfCollisionStressTolerance;",
+        ),
+    )
+
     public_common = (
         "AVBD_CONVEX_REVERSE_SWEPT",
         "responseObserved",
@@ -381,6 +446,8 @@ def main() -> int:
         "geometry=convex forward=vertex-sdf "
         "reverse=edge-edge+vertex-face "
         "vertexOwner=forward-current-or-swept-sdf "
+        "initialQuery=reused "
+        "sweptBound=outer-aabb "
         "softMotion=translation-only "
         "rigidMotion=translation+rotation "
         "rotation=forward+reverse target=static+kinematic+dynamic "

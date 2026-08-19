@@ -80,6 +80,7 @@ static void renderCallback()
 {
 	if(sMaxFrames && sFrameCount >= sMaxFrames)
 	{
+		printVisualParallelismTelemetry(sFrameCount);
 		std::printf(
 			"[AVBD_VISUAL_SMOKE_PASS] frames=%u simulationMs=%.3f "
 			"simulationMsPerFrame=%.3f renderingMs=%.3f "

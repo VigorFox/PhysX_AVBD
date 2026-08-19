@@ -72,8 +72,8 @@ def main() -> int:
 
     swept = section(
         soft,
+        "inline void avbdDetectSoftRigidSphereSweptSDFRange(",
         "inline void avbdDetectSoftRigidSphereSweptSDF(",
-        "inline void avbdDetectSoftRigidOGCFeatures(",
     )
     require_all(
         errors,

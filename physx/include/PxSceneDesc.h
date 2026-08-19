@@ -235,7 +235,7 @@ struct PxSceneFlag
 
 		/*\brief Enables the GPU dynamics pipeline
 
-		When set to true, a CUDA ARCH 3.0 or above-enabled NVIDIA GPU is present and the CUDA context manager has been configured, this will run the GPU dynamics pipelin instead of the CPU dynamics pipeline.
+		When set to true, a CUDA ARCH 3.0 or above-enabled NVIDIA GPU is present and the CUDA context manager has been configured, this runs the GPU dynamics pipeline for the supported PGS/TGS path. For AVBD, the flag requests the CPU-authoritative hybrid owner-wave path only when PhysX was built with PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE. Normal builds ignore the GPU request for AVBD and run the CPU path; AVBD is never passed through the generic GPU solver controller.
 
 		Note that this flag is not mutable and must be set in PxSceneDesc at scene creation.
 		*/
@@ -741,6 +741,46 @@ public:
 	PxSolverType::Enum	solverType;
 
 	/**
+	\brief Maximum number of complete AVBD iterations performed per simulation step.
+
+	Each AVBD iteration includes a primal body sweep followed by the associated
+	dual-variable and stiffness updates. This value is the Scene-wide baseline;
+	articulations and deformables may explicitly request a higher iteration
+	count. When avbdEnableEarlyStop is enabled, a converged island may use fewer
+	iterations. PGS and TGS ignore this value.
+
+	<b>Range:</b> [1, 255]<br>
+	<b>Default:</b> 4
+	*/
+	PxU32 avbdIterations;
+
+	/**
+	\brief Minimum AVBD iteration budget for islands containing D6 or gear joints.
+
+	A non-zero value raises the complete-iteration budget of joint islands to at
+	least this value and prevents early termination before that many iterations
+	have executed. It does not affect contact-only islands or islands that only
+	contain deformables. Set this value to zero to disable the joint-specific
+	override and use the general AVBD early-stop floor.
+
+	<b>Range:</b> [0, 255] (0 disables the override)<br>
+	<b>Default:</b> 8
+	*/
+	PxU32 avbdJointIterationOverride;
+
+	/**
+	\brief Enables pose-delta early termination for rigid-only AVBD iteration loops.
+
+	Disabling this option makes every AVBD island execute its complete effective
+	iteration budget. Islands containing genuine deformables also execute their
+	complete effective budget because rigid pose deltas alone are not a valid
+	joint rigid/deformable convergence test. PGS and TGS ignore this value.
+
+	<b>Default:</b> true
+	*/
+	bool avbdEnableEarlyStop;
+
+	/**
 	\brief A contact with a relative velocity below this will not bounce. A typical value for simulation.
 	stability is about 0.2 * gravity.
 
@@ -1101,6 +1141,9 @@ PX_INLINE PxSceneDesc::PxSceneDesc(const PxTolerancesScale& scale):
 
 	frictionType					(PxFrictionType::ePATCH),
 	solverType						(PxSolverType::ePGS),
+	avbdIterations					(4),
+	avbdJointIterationOverride		(8),
+	avbdEnableEarlyStop				(true),
 	bounceThresholdVelocity			(0.2f * scale.speed),
 	frictionOffsetThreshold			(0.04f * scale.length),
 	frictionCorrelationDistance		(0.025f * scale.length),
@@ -1187,9 +1230,15 @@ PX_INLINE bool PxSceneDesc::isValid() const
 
 	if(solverType == PxSolverType::ePGS && (flags & PxSceneFlag::eENABLE_EXTERNAL_FORCES_EVERY_ITERATION_TGS))
 		return false;
-
-	if(solverType == PxSolverType::eAVBD && (flags & PxSceneFlag::eENABLE_GPU_DYNAMICS))
+	if(avbdIterations < 1 || avbdIterations > 255)
 		return false;
+	if(avbdJointIterationOverride > 255)
+		return false;
+
+	// AVBD with eENABLE_GPU_DYNAMICS remains structurally valid so a normal build
+	// can fail closed to CPU AVBD. Only an explicitly configured experimental
+	// build may attach the owner-wave component; Sc::Scene performs that build
+	// and runtime capability decision after descriptor validation.
 
 #if PX_SUPPORT_GPU_PHYSX
 	if(!PxIsPowerOfTwo(gpuMaxNumPartitions))

@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -448,13 +449,482 @@ struct Metrics
 	}
 };
 
-static const PxU32 sGridWidth = 6;
-static const PxU32 sGridHeight = 6;
-
-static PxU32 vertexIndex(PxU32 x, PxU32 y)
+// Keep this intentionally small and orthogonal to the correctness Metrics
+// above.  P0 needs a reproducible scene-step measurement before changing the
+// scheduler; it must not accidentally turn process startup or the gate's
+// post-step sampling into a "solver" time.
+struct SurfacePerformanceMetrics
 {
-	return y * sGridWidth + x;
+	PxU32 warmupFrames;
+	PxU32 simulatedFrames;
+	PxU32 profiledFrames;
+	PxU64 topologySurfaceVertices;
+	PxU64 topologySurfaceTriangles;
+	PxU64 topologyDeformableVolumes;
+	PxU64 topologyRigidActors;
+	PxU64 workspaceGrowthEvents;
+	PxU64 workspaceGrowthBytes;
+	PxU64 contactWorkspaceGrowthEvents;
+	PxU64 contactWorkspaceGrowthBytes;
+	PxU64 contactSweepScratchGrowthEvents;
+	PxU64 contactSweepScratchGrowthBytes;
+	PxU64 contactOutputGrowthEvents;
+	PxU64 contactOutputGrowthBytes;
+	PxU32 peakContactOutputCount;
+	PxU32 peakContactOutputCapacity;
+	PxU32 peakContactIncidenceCount;
+	PxU32 peakContactIncidenceCapacity;
+	PxU32 peakStateTransferContactCount;
+	PxU32 peakStateTransferContactCapacity;
+	PxU32 peakStateTransferUsedCapacity;
+	PxU32 particlePrimalColorCount;
+	PxU32 particlePrimalDynamicAccessGroupCount;
+	PxU64 particlePrimalColoredSerialSweeps;
+	PxU64 particlePrimalColoredSerialFallbackSweeps;
+	PxU64 particlePrimalCensusDynamicParticleSolves;
+	PxU64 particlePrimalCensusTriangleEvaluations;
+	PxU64 particlePrimalCensusCorotationalTetEvaluations;
+	PxU64 particlePrimalCensusNeoHookeanTetEvaluations;
+	PxU64 particlePrimalCensusBendingEvaluations;
+	PxU64 particlePrimalCensusContactEvaluations;
+	PxU64 particlePrimalCensusTetPacket8FullPackets;
+	PxU64 particlePrimalCensusTetPacket8TailLanes;
+	PxU64 particlePrimalTetPacketIrBodies;
+	PxU64 particlePrimalTetPacketIrPackets;
+	PxU64 particlePrimalTetPacketIrActiveLanes;
+	PxU64 particlePrimalTetPacketIrTailLanes;
+	PxU64 particlePrimalTetPacketIrActiveTailLanes;
+	PxU64 particlePrimalTetPacketIrInvalidBodies;
+	PxU64 collisionDetectionCalls;
+	PxU64 collisionBodyPairs;
+	PxU64 collisionOverlappingBodyPairs;
+	PxU64 collisionParticleSurfaceCandidates;
+	PxU64 collisionInsideTriangleTests;
+	PxU64 collisionClosestTriangleTests;
+	PxU64 collisionSelfTriangleTests;
+	PxU64 collisionSelfTriangleBoundsBuilt;
+	PxU64 collisionSelfVertexSweepEntriesBuilt;
+	PxU64 collisionSelfEdgeBoundsBuilt;
+	PxU64 collisionSurfaceBvhRefitNodes;
+	PxU64 collisionSurfaceBvhCandidates;
+	PxU64 collisionSurfaceEdgeBvhRefitNodes;
+	PxU64 collisionSurfaceEdgeBvhCandidates;
+	PxU64 collisionRigidParticleTests;
+	PxU64 collisionGeneratedGroundContacts;
+	PxU64 collisionGeneratedRigidContacts;
+	PxU64 collisionGeneratedSoftContacts;
+	PxU64 collisionGeneratedSelfContacts;
+	PxU64 componentFallbackSteps;
+	PxU64 nativeIslandSteps;
+	PxU32 taskGraphRequestedDispatcherWorkers;
+	PxU32 taskGraphPeakActiveSolveTasks;
+	PxU64 taskGraphSubmittedSolveTasks;
+	PxU64 taskGraphCompletedSolveTasks;
+	PxU64 taskGraphBarrierTasks;
+	PxU64 taskGraphSerialSolveTasks;
+	PxU64 taskGraphSubmittedPredictionTasks;
+	PxU64 taskGraphCompletedPredictionTasks;
+	PxU32 taskGraphPeakActivePredictionTasks;
+	PxU64 taskGraphSerialPredictionStages;
+	PxU64 taskGraphSubmittedWriteBackTasks;
+	PxU64 taskGraphCompletedWriteBackTasks;
+	PxU32 taskGraphPeakActiveWriteBackTasks;
+	PxU64 taskGraphSerialWriteBackStages;
+	PxU64 taskGraphSubmittedCausalLayerTasks;
+	PxU64 taskGraphCompletedCausalLayerTasks;
+	PxU32 taskGraphPeakActiveCausalLayerTasks;
+	PxU64 taskGraphCausalLayerFanIns;
+	PxU64 taskGraphSerialCausalLayerFallbacks;
+	PxU32 taskGraphMaxCausalLayerOccupancy;
+	PxU64 taskGraphTotalCausalLayerOccupancy;
+	PxU64 taskGraphCausalLayerParentReductionNanos;
+	PxU64 taskGraphCausalLayerTaskPoolGrowthEvents;
+	PxU64 taskGraphCausalLayerTaskPoolGrowthBytes;
+	PxU64 taskGraphSubmittedSelfBvhContactTasks;
+	PxU64 taskGraphCompletedSelfBvhContactTasks;
+	PxU32 taskGraphPeakActiveSelfBvhContactTasks;
+	PxU64 taskGraphSelfBvhContactFanIns;
+	PxU64 taskGraphSerialSelfBvhContactFallbacks;
+	PxU64 taskGraphPureSoftEligibleIslands;
+	PxU64 taskGraphPureSoftEligibleParticles;
+	PxF64 sceneMs;
+	PxReal avgStepMs;
+	PxReal p50StepMs;
+	PxReal p95StepMs;
+	PxReal maxStepMs;
+	std::vector<PxReal> stepSamplesMs;
+
+	SurfacePerformanceMetrics()
+		: warmupFrames(0), simulatedFrames(0), profiledFrames(0),
+		  topologySurfaceVertices(0), topologySurfaceTriangles(0),
+		  topologyDeformableVolumes(0), topologyRigidActors(0),
+		  workspaceGrowthEvents(0), workspaceGrowthBytes(0),
+		  contactWorkspaceGrowthEvents(0), contactWorkspaceGrowthBytes(0),
+		  contactSweepScratchGrowthEvents(0),
+		  contactSweepScratchGrowthBytes(0),
+		  contactOutputGrowthEvents(0), contactOutputGrowthBytes(0),
+		  peakContactOutputCount(0), peakContactOutputCapacity(0),
+		  peakContactIncidenceCount(0), peakContactIncidenceCapacity(0),
+		  peakStateTransferContactCount(0),
+		  peakStateTransferContactCapacity(0),
+		  peakStateTransferUsedCapacity(0),
+		  particlePrimalColorCount(0),
+		  particlePrimalDynamicAccessGroupCount(0),
+		  particlePrimalColoredSerialSweeps(0),
+		  particlePrimalColoredSerialFallbackSweeps(0),
+		  particlePrimalCensusDynamicParticleSolves(0),
+		  particlePrimalCensusTriangleEvaluations(0),
+		  particlePrimalCensusCorotationalTetEvaluations(0),
+		  particlePrimalCensusNeoHookeanTetEvaluations(0),
+		  particlePrimalCensusBendingEvaluations(0),
+		  particlePrimalCensusContactEvaluations(0),
+		  particlePrimalCensusTetPacket8FullPackets(0),
+		  particlePrimalCensusTetPacket8TailLanes(0),
+		  particlePrimalTetPacketIrBodies(0),
+		  particlePrimalTetPacketIrPackets(0),
+		  particlePrimalTetPacketIrActiveLanes(0),
+		  particlePrimalTetPacketIrTailLanes(0),
+		  particlePrimalTetPacketIrActiveTailLanes(0),
+		  particlePrimalTetPacketIrInvalidBodies(0),
+		  collisionDetectionCalls(0), collisionBodyPairs(0),
+		  collisionOverlappingBodyPairs(0),
+		  collisionParticleSurfaceCandidates(0),
+		  collisionInsideTriangleTests(0), collisionClosestTriangleTests(0),
+		  collisionSelfTriangleTests(0),
+		  collisionSelfTriangleBoundsBuilt(0),
+		  collisionSelfVertexSweepEntriesBuilt(0),
+		  collisionSelfEdgeBoundsBuilt(0),
+		  collisionSurfaceBvhRefitNodes(0),
+		  collisionSurfaceBvhCandidates(0),
+		  collisionSurfaceEdgeBvhRefitNodes(0),
+		  collisionSurfaceEdgeBvhCandidates(0),
+		  collisionRigidParticleTests(0),
+		  collisionGeneratedGroundContacts(0),
+		  collisionGeneratedRigidContacts(0),
+		  collisionGeneratedSoftContacts(0),
+		  collisionGeneratedSelfContacts(0),
+		  componentFallbackSteps(0), nativeIslandSteps(0),
+		  taskGraphRequestedDispatcherWorkers(0),
+		  taskGraphPeakActiveSolveTasks(0),
+		  taskGraphSubmittedSolveTasks(0),
+		  taskGraphCompletedSolveTasks(0), taskGraphBarrierTasks(0),
+		  taskGraphSerialSolveTasks(0),
+		  taskGraphSubmittedPredictionTasks(0),
+		  taskGraphCompletedPredictionTasks(0),
+		  taskGraphPeakActivePredictionTasks(0),
+		  taskGraphSerialPredictionStages(0),
+		  taskGraphSubmittedWriteBackTasks(0),
+		  taskGraphCompletedWriteBackTasks(0),
+		  taskGraphPeakActiveWriteBackTasks(0),
+		  taskGraphSerialWriteBackStages(0),
+		  taskGraphSubmittedCausalLayerTasks(0),
+		  taskGraphCompletedCausalLayerTasks(0),
+		  taskGraphPeakActiveCausalLayerTasks(0),
+		  taskGraphCausalLayerFanIns(0),
+		  taskGraphSerialCausalLayerFallbacks(0),
+		  taskGraphMaxCausalLayerOccupancy(0),
+		  taskGraphTotalCausalLayerOccupancy(0),
+		  taskGraphCausalLayerParentReductionNanos(0),
+		  taskGraphCausalLayerTaskPoolGrowthEvents(0),
+		  taskGraphCausalLayerTaskPoolGrowthBytes(0),
+		  taskGraphSubmittedSelfBvhContactTasks(0),
+		  taskGraphCompletedSelfBvhContactTasks(0),
+		  taskGraphPeakActiveSelfBvhContactTasks(0),
+		  taskGraphSelfBvhContactFanIns(0),
+		  taskGraphSerialSelfBvhContactFallbacks(0),
+		  taskGraphPureSoftEligibleIslands(0),
+		  taskGraphPureSoftEligibleParticles(0),
+		  sceneMs(0.0), avgStepMs(0.0f), p50StepMs(0.0f),
+		  p95StepMs(0.0f), maxStepMs(0.0f)
+	{
+	}
+};
+
+static SurfacePerformanceMetrics gSurfacePerformance;
+
+static bool simulateSurfaceScene(
+	PxScene& scene, PxReal dt, Metrics& metrics)
+{
+	const bool profileFrame =
+		gSurfacePerformance.simulatedFrames >=
+		gSurfacePerformance.warmupFrames;
+	PxTime sceneTimer;
+	scene.simulate(dt);
+	if(!scene.fetchResults(true))
+	{
+		++metrics.fetchFailures;
+		return false;
+	}
+	++gSurfacePerformance.simulatedFrames;
+	if(profileFrame)
+	{
+		PxSimulationStatistics sceneStatistics;
+		scene.getSimulationStatistics(sceneStatistics);
+		gSurfacePerformance.workspaceGrowthEvents +=
+			sceneStatistics.avbdCpuSoftBodyWorkspaceGrowthEvents;
+		gSurfacePerformance.workspaceGrowthBytes +=
+			sceneStatistics.avbdCpuSoftBodyWorkspaceGrowthBytes;
+		gSurfacePerformance.contactWorkspaceGrowthEvents +=
+			sceneStatistics.avbdCpuSoftBodyContactWorkspaceGrowthEvents;
+		gSurfacePerformance.contactWorkspaceGrowthBytes +=
+			sceneStatistics.avbdCpuSoftBodyContactWorkspaceGrowthBytes;
+		gSurfacePerformance.contactSweepScratchGrowthEvents +=
+			sceneStatistics.avbdCpuSoftBodyContactSweepScratchGrowthEvents;
+		gSurfacePerformance.contactSweepScratchGrowthBytes +=
+			sceneStatistics.avbdCpuSoftBodyContactSweepScratchGrowthBytes;
+		gSurfacePerformance.contactOutputGrowthEvents +=
+			sceneStatistics.avbdCpuSoftBodyContactOutputGrowthEvents;
+		gSurfacePerformance.contactOutputGrowthBytes +=
+			sceneStatistics.avbdCpuSoftBodyContactOutputGrowthBytes;
+		gSurfacePerformance.peakContactOutputCount = PxMax(
+			gSurfacePerformance.peakContactOutputCount,
+			sceneStatistics.avbdCpuSoftBodyPeakContactOutputCount);
+		gSurfacePerformance.peakContactOutputCapacity = PxMax(
+			gSurfacePerformance.peakContactOutputCapacity,
+			sceneStatistics.avbdCpuSoftBodyPeakContactOutputCapacity);
+		gSurfacePerformance.peakContactIncidenceCount = PxMax(
+			gSurfacePerformance.peakContactIncidenceCount,
+			sceneStatistics.avbdCpuSoftBodyPeakContactIncidenceCount);
+		gSurfacePerformance.peakContactIncidenceCapacity = PxMax(
+			gSurfacePerformance.peakContactIncidenceCapacity,
+			sceneStatistics.avbdCpuSoftBodyPeakContactIncidenceCapacity);
+		gSurfacePerformance.peakStateTransferContactCount = PxMax(
+			gSurfacePerformance.peakStateTransferContactCount,
+			sceneStatistics.avbdCpuSoftBodyPeakStateTransferContactCount);
+		gSurfacePerformance.peakStateTransferContactCapacity = PxMax(
+			gSurfacePerformance.peakStateTransferContactCapacity,
+			sceneStatistics.avbdCpuSoftBodyPeakStateTransferContactCapacity);
+		gSurfacePerformance.peakStateTransferUsedCapacity = PxMax(
+			gSurfacePerformance.peakStateTransferUsedCapacity,
+			sceneStatistics.avbdCpuSoftBodyPeakStateTransferUsedCapacity);
+		gSurfacePerformance.particlePrimalColorCount = PxMax(
+			gSurfacePerformance.particlePrimalColorCount,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalColorCount);
+		gSurfacePerformance.particlePrimalDynamicAccessGroupCount = PxMax(
+			gSurfacePerformance.particlePrimalDynamicAccessGroupCount,
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalDynamicAccessGroupCount);
+		gSurfacePerformance.particlePrimalColoredSerialSweeps +=
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalColoredSerialSweeps;
+		gSurfacePerformance.particlePrimalColoredSerialFallbackSweeps +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalColoredSerialFallbackSweeps;
+		gSurfacePerformance.particlePrimalCensusDynamicParticleSolves +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusDynamicParticleSolves;
+		gSurfacePerformance.particlePrimalCensusTriangleEvaluations +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusTriangleEvaluations;
+		gSurfacePerformance.particlePrimalCensusCorotationalTetEvaluations +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusCorotationalTetEvaluations;
+		gSurfacePerformance.particlePrimalCensusNeoHookeanTetEvaluations +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusNeoHookeanTetEvaluations;
+		gSurfacePerformance.particlePrimalCensusBendingEvaluations +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusBendingEvaluations;
+		gSurfacePerformance.particlePrimalCensusContactEvaluations +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusContactEvaluations;
+		gSurfacePerformance.particlePrimalCensusTetPacket8FullPackets +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusTetPacket8FullPackets;
+		gSurfacePerformance.particlePrimalCensusTetPacket8TailLanes +=
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalCensusTetPacket8TailLanes;
+		gSurfacePerformance.particlePrimalTetPacketIrBodies = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrBodies,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalTetPacketIrBodies);
+		gSurfacePerformance.particlePrimalTetPacketIrPackets = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrPackets,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalTetPacketIrPackets);
+		gSurfacePerformance.particlePrimalTetPacketIrActiveLanes = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrActiveLanes,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalTetPacketIrActiveLanes);
+		gSurfacePerformance.particlePrimalTetPacketIrTailLanes = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrTailLanes,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalTetPacketIrTailLanes);
+		gSurfacePerformance.particlePrimalTetPacketIrActiveTailLanes = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrActiveTailLanes,
+			sceneStatistics.
+				avbdCpuSoftBodyParticlePrimalTetPacketIrActiveTailLanes);
+		gSurfacePerformance.particlePrimalTetPacketIrInvalidBodies = PxMax(
+			gSurfacePerformance.particlePrimalTetPacketIrInvalidBodies,
+			sceneStatistics.avbdCpuSoftBodyParticlePrimalTetPacketIrInvalidBodies);
+		gSurfacePerformance.collisionDetectionCalls +=
+			sceneStatistics.avbdCpuSoftBodyCollisionDetectionCalls;
+		gSurfacePerformance.collisionBodyPairs +=
+			sceneStatistics.avbdCpuSoftBodyCollisionBodyPairs;
+		gSurfacePerformance.collisionOverlappingBodyPairs +=
+			sceneStatistics.avbdCpuSoftBodyCollisionOverlappingBodyPairs;
+		gSurfacePerformance.collisionParticleSurfaceCandidates +=
+			sceneStatistics.avbdCpuSoftBodyCollisionParticleSurfaceCandidates;
+		gSurfacePerformance.collisionInsideTriangleTests +=
+			sceneStatistics.avbdCpuSoftBodyCollisionInsideTriangleTests;
+		gSurfacePerformance.collisionClosestTriangleTests +=
+			sceneStatistics.avbdCpuSoftBodyCollisionClosestTriangleTests;
+		gSurfacePerformance.collisionSelfTriangleTests +=
+			sceneStatistics.avbdCpuSoftBodyCollisionSelfTriangleTests;
+		gSurfacePerformance.collisionSelfTriangleBoundsBuilt +=
+			sceneStatistics.
+				avbdCpuSoftBodyCollisionSelfTriangleBoundsBuilt;
+		gSurfacePerformance.collisionSelfVertexSweepEntriesBuilt +=
+			sceneStatistics.
+				avbdCpuSoftBodyCollisionSelfVertexSweepEntriesBuilt;
+		gSurfacePerformance.collisionSelfEdgeBoundsBuilt +=
+			sceneStatistics.avbdCpuSoftBodyCollisionSelfEdgeBoundsBuilt;
+		gSurfacePerformance.collisionSurfaceBvhRefitNodes +=
+			sceneStatistics.avbdCpuSoftBodyCollisionSurfaceBvhRefitNodes;
+		gSurfacePerformance.collisionSurfaceBvhCandidates +=
+			sceneStatistics.avbdCpuSoftBodyCollisionSurfaceBvhCandidates;
+		gSurfacePerformance.collisionSurfaceEdgeBvhRefitNodes +=
+			sceneStatistics.
+				avbdCpuSoftBodyCollisionSurfaceEdgeBvhRefitNodes;
+		gSurfacePerformance.collisionSurfaceEdgeBvhCandidates +=
+			sceneStatistics.
+				avbdCpuSoftBodyCollisionSurfaceEdgeBvhCandidates;
+		gSurfacePerformance.collisionRigidParticleTests +=
+			sceneStatistics.avbdCpuSoftBodyCollisionRigidParticleTests;
+		gSurfacePerformance.collisionGeneratedGroundContacts +=
+			sceneStatistics.avbdCpuSoftBodyCollisionGeneratedGroundContacts;
+		gSurfacePerformance.collisionGeneratedRigidContacts +=
+			sceneStatistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts;
+		gSurfacePerformance.collisionGeneratedSoftContacts +=
+			sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSoftContacts;
+		gSurfacePerformance.collisionGeneratedSelfContacts +=
+			sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSelfContacts;
+		gSurfacePerformance.componentFallbackSteps +=
+			sceneStatistics.avbdCpuSoftBodyComponentFallbackSteps;
+		gSurfacePerformance.nativeIslandSteps +=
+			sceneStatistics.avbdCpuSoftBodyNativeIslandSteps;
+		gSurfacePerformance.taskGraphRequestedDispatcherWorkers = PxMax(
+			gSurfacePerformance.taskGraphRequestedDispatcherWorkers,
+			sceneStatistics.avbdCpuTaskGraphRequestedDispatcherWorkers);
+		gSurfacePerformance.taskGraphPeakActiveSolveTasks = PxMax(
+			gSurfacePerformance.taskGraphPeakActiveSolveTasks,
+			sceneStatistics.avbdCpuTaskGraphPeakActiveSolveTasks);
+		gSurfacePerformance.taskGraphSubmittedSolveTasks +=
+			sceneStatistics.avbdCpuTaskGraphSubmittedSolveTasks;
+		gSurfacePerformance.taskGraphCompletedSolveTasks +=
+			sceneStatistics.avbdCpuTaskGraphCompletedSolveTasks;
+		gSurfacePerformance.taskGraphBarrierTasks +=
+			sceneStatistics.avbdCpuTaskGraphBarrierTasks;
+		gSurfacePerformance.taskGraphSerialSolveTasks +=
+			sceneStatistics.avbdCpuTaskGraphSerialSolveTasks;
+		gSurfacePerformance.taskGraphSubmittedPredictionTasks +=
+			sceneStatistics.avbdCpuTaskGraphSubmittedPredictionTasks;
+		gSurfacePerformance.taskGraphCompletedPredictionTasks +=
+			sceneStatistics.avbdCpuTaskGraphCompletedPredictionTasks;
+		gSurfacePerformance.taskGraphPeakActivePredictionTasks = PxMax(
+			gSurfacePerformance.taskGraphPeakActivePredictionTasks,
+			sceneStatistics.avbdCpuTaskGraphPeakActivePredictionTasks);
+		gSurfacePerformance.taskGraphSerialPredictionStages +=
+			sceneStatistics.avbdCpuTaskGraphSerialPredictionStages;
+		gSurfacePerformance.taskGraphSubmittedWriteBackTasks +=
+			sceneStatistics.avbdCpuTaskGraphSubmittedWriteBackTasks;
+		gSurfacePerformance.taskGraphCompletedWriteBackTasks +=
+			sceneStatistics.avbdCpuTaskGraphCompletedWriteBackTasks;
+		gSurfacePerformance.taskGraphPeakActiveWriteBackTasks = PxMax(
+			gSurfacePerformance.taskGraphPeakActiveWriteBackTasks,
+			sceneStatistics.avbdCpuTaskGraphPeakActiveWriteBackTasks);
+		gSurfacePerformance.taskGraphSerialWriteBackStages +=
+			sceneStatistics.avbdCpuTaskGraphSerialWriteBackStages;
+		gSurfacePerformance.taskGraphSubmittedCausalLayerTasks +=
+			sceneStatistics.avbdCpuTaskGraphSubmittedCausalLayerTasks;
+		gSurfacePerformance.taskGraphCompletedCausalLayerTasks +=
+			sceneStatistics.avbdCpuTaskGraphCompletedCausalLayerTasks;
+		gSurfacePerformance.taskGraphPeakActiveCausalLayerTasks = PxMax(
+			gSurfacePerformance.taskGraphPeakActiveCausalLayerTasks,
+			sceneStatistics.avbdCpuTaskGraphPeakActiveCausalLayerTasks);
+		gSurfacePerformance.taskGraphCausalLayerFanIns +=
+			sceneStatistics.avbdCpuTaskGraphCausalLayerFanIns;
+		gSurfacePerformance.taskGraphSerialCausalLayerFallbacks +=
+			sceneStatistics.avbdCpuTaskGraphSerialCausalLayerFallbacks;
+		gSurfacePerformance.taskGraphMaxCausalLayerOccupancy = PxMax(
+			gSurfacePerformance.taskGraphMaxCausalLayerOccupancy,
+			sceneStatistics.avbdCpuTaskGraphMaxCausalLayerOccupancy);
+		gSurfacePerformance.taskGraphTotalCausalLayerOccupancy +=
+			sceneStatistics.avbdCpuTaskGraphTotalCausalLayerOccupancy;
+		gSurfacePerformance.taskGraphCausalLayerParentReductionNanos +=
+			sceneStatistics.avbdCpuTaskGraphCausalLayerParentReductionNanos;
+		gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthEvents +=
+			sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents;
+		gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthBytes +=
+			sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes;
+		gSurfacePerformance.taskGraphSubmittedSelfBvhContactTasks +=
+			sceneStatistics.avbdCpuTaskGraphSubmittedSelfBvhContactTasks;
+		gSurfacePerformance.taskGraphCompletedSelfBvhContactTasks +=
+			sceneStatistics.avbdCpuTaskGraphCompletedSelfBvhContactTasks;
+		gSurfacePerformance.taskGraphPeakActiveSelfBvhContactTasks = PxMax(
+			gSurfacePerformance.taskGraphPeakActiveSelfBvhContactTasks,
+			sceneStatistics.avbdCpuTaskGraphPeakActiveSelfBvhContactTasks);
+		gSurfacePerformance.taskGraphSelfBvhContactFanIns +=
+			sceneStatistics.avbdCpuTaskGraphSelfBvhContactFanIns;
+		gSurfacePerformance.taskGraphSerialSelfBvhContactFallbacks +=
+			sceneStatistics.avbdCpuTaskGraphSerialSelfBvhContactFallbacks;
+		gSurfacePerformance.taskGraphPureSoftEligibleIslands +=
+			sceneStatistics.avbdCpuTaskGraphPureSoftEligibleIslands;
+		gSurfacePerformance.taskGraphPureSoftEligibleParticles +=
+			sceneStatistics.avbdCpuTaskGraphPureSoftEligibleParticles;
+		const PxReal sceneMs = PxReal(
+			sceneTimer.getElapsedSeconds() * 1000.0);
+		++gSurfacePerformance.profiledFrames;
+		gSurfacePerformance.sceneMs += sceneMs;
+		gSurfacePerformance.stepSamplesMs.push_back(sceneMs);
+	}
+	return true;
 }
+
+static void captureSurfacePerformanceTopology(
+	PxU32 surfaceVertices, PxU32 surfaceTriangles,
+	PxU32 deformableVolumes, PxU32 rigidActors)
+{
+	// A measurement process runs one case.  Capture the primary fixture once;
+	// individual case branches may create short-lived controls afterwards.
+	if(gSurfacePerformance.topologySurfaceVertices == 0)
+	{
+		gSurfacePerformance.topologySurfaceVertices = surfaceVertices;
+		gSurfacePerformance.topologySurfaceTriangles = surfaceTriangles;
+		gSurfacePerformance.topologyDeformableVolumes = deformableVolumes;
+		gSurfacePerformance.topologyRigidActors = rigidActors;
+	}
+}
+
+static void finalizeSurfacePerformanceMetrics()
+{
+	if(gSurfacePerformance.stepSamplesMs.empty())
+		return;
+	PxF64 sumStepMs = 0.0;
+	for(PxU32 i = 0;
+		i < PxU32(gSurfacePerformance.stepSamplesMs.size()); ++i)
+		sumStepMs += gSurfacePerformance.stepSamplesMs[i];
+	std::sort(
+		gSurfacePerformance.stepSamplesMs.begin(),
+		gSurfacePerformance.stepSamplesMs.end());
+	const PxU32 last =
+		PxU32(gSurfacePerformance.stepSamplesMs.size()) - 1;
+	gSurfacePerformance.avgStepMs = PxReal(
+		sumStepMs / PxF64(gSurfacePerformance.stepSamplesMs.size()));
+	// All stage values in AVBD_PERF are per-profile-frame averages.  Keep the
+	// scene-level timer on that same contract; otherwise it is a whole-window
+	// duration and cannot be compared with avgStepMs or future solver stages.
+	gSurfacePerformance.sceneMs =
+		sumStepMs / PxF64(gSurfacePerformance.stepSamplesMs.size());
+	gSurfacePerformance.p50StepMs =
+		gSurfacePerformance.stepSamplesMs[
+			PxU32(PxCeil(0.5f * PxReal(last)))];
+	gSurfacePerformance.p95StepMs =
+		gSurfacePerformance.stepSamplesMs[
+			PxU32(PxCeil(0.95f * PxReal(last)))];
+	gSurfacePerformance.maxStepMs =
+		gSurfacePerformance.stepSamplesMs[last];
+}
+
+static const PxU32 sDefaultGridWidth = 6;
+static const PxU32 sDefaultGridHeight = 6;
+static const PxU32 sPerformanceDenseGridWidth = 65;
+static const PxU32 sPerformanceDenseGridHeight = 65;
 
 static bool buildSurfaceMesh(
 	PxPhysics& physics,
@@ -464,7 +934,8 @@ static bool buildSurfaceMesh(
 	PxTriangleMesh*& triangleMesh,
 	bool groundCase,
 	bool selfCollisionCase,
-	bool partialElementFilterCase)
+	bool partialElementFilterCase,
+	bool densePerformanceCase)
 {
 	vertices.clear();
 	triangles.clear();
@@ -498,35 +969,39 @@ static bool buildSurfaceMesh(
 	}
 	else
 	{
-	vertices.reserve(sGridWidth * sGridHeight);
+	const PxU32 gridWidth = densePerformanceCase
+		? sPerformanceDenseGridWidth : sDefaultGridWidth;
+	const PxU32 gridHeight = densePerformanceCase
+		? sPerformanceDenseGridHeight : sDefaultGridHeight;
+	vertices.reserve(gridWidth * gridHeight);
 	triangles.reserve(
-		6 * (sGridWidth - 1) * (sGridHeight - 1));
+		6 * (gridWidth - 1) * (gridHeight - 1));
 
 	const PxReal spacing = 0.35f;
-	for(PxU32 y = 0; y < sGridHeight; ++y)
+	for(PxU32 y = 0; y < gridHeight; ++y)
 	{
-		for(PxU32 x = 0; x < sGridWidth; ++x)
+		for(PxU32 x = 0; x < gridWidth; ++x)
 		{
 			const PxReal localX =
 				(PxReal(x) -
-					0.5f * PxReal(sGridWidth - 1)) * spacing;
+					0.5f * PxReal(gridWidth - 1)) * spacing;
 			const PxReal localY =
 				(PxReal(y) -
-					0.5f * PxReal(sGridHeight - 1)) * spacing;
+					0.5f * PxReal(gridHeight - 1)) * spacing;
 			vertices.push_back(groundCase
 				? PxVec3(localX, 2.0f, localY)
 				: PxVec3(localX, 4.5f - PxReal(y) * spacing, 0.0f));
 		}
 	}
 
-	for(PxU32 y = 0; y + 1 < sGridHeight; ++y)
+	for(PxU32 y = 0; y + 1 < gridHeight; ++y)
 	{
-		for(PxU32 x = 0; x + 1 < sGridWidth; ++x)
+		for(PxU32 x = 0; x + 1 < gridWidth; ++x)
 		{
-			const PxU32 v00 = vertexIndex(x, y);
-			const PxU32 v10 = vertexIndex(x + 1, y);
-			const PxU32 v01 = vertexIndex(x, y + 1);
-			const PxU32 v11 = vertexIndex(x + 1, y + 1);
+			const PxU32 v00 = y * gridWidth + x;
+			const PxU32 v10 = v00 + 1;
+			const PxU32 v01 = v00 + gridWidth;
+			const PxU32 v11 = v01 + 1;
 			triangles.push_back(v00);
 			triangles.push_back(v01);
 			triangles.push_back(v10);
@@ -1725,10 +2200,8 @@ static bool runVolumePairFilterCase(
 				}
 			}
 
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 			{
-				++metrics.fetchFailures;
 				samplesFinite = false;
 				break;
 			}
@@ -1975,12 +2448,8 @@ static bool runBendingCase(
 				metrics.actorReadded = 1;
 			}
 
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 
 			for(PxU32 i = 0; i < 4; ++i)
 			{
@@ -2228,12 +2697,8 @@ static bool runFlatteningCase(
 				retargetIssued = true;
 			}
 
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 
 			for(PxU32 i = 0; i < 4; ++i)
 			{
@@ -2489,12 +2954,8 @@ static bool runMotionControlsCase(
 				metrics.actorReadded = 1;
 			}
 
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 
 			for(PxU32 i = 0; i < 4; ++i)
 			{
@@ -2723,12 +3184,8 @@ static bool runMaxDepenetrationVelocityCase(
 		bool finite = true;
 		for(PxU32 frame = 0; frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			for(PxU32 i = 0; i < 4; ++i)
 			{
 				if(!limited.positions[i].isFinite() ||
@@ -3024,12 +3481,8 @@ static bool runSpeculativeCcdCase(
 		bool discreteBoundsFinite = false;
 		for(PxU32 frame = 0; frame < simulatedFrames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			for(PxU32 i = 0; i < 4; ++i)
 			{
 				if(!speculative.positions[i].isFinite() ||
@@ -3459,12 +3912,8 @@ static bool runMovingKinematicFiniteSpeculativeCcdCase(
 		bool boundsFinite = true;
 		for(PxU32 frame = 0; frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 
 			if(frame < 3)
 			{
@@ -3769,7 +4218,17 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 			-PxPi * 5.0f / 18.0f,
 			PxVec3(0.0f, 0.0f, 1.0f));
 		const PxReal rotationalAngularSpeed =
-			(PxPi * 10.0f / 18.0f) / options.dt;
+			(PxPi * 10.0f / 9.0f) / options.dt;
+		const PxQuat rotationalDelta(
+			0.0f, 0.0f,
+			0.5f * rotationalAngularSpeed * options.dt,
+			0.0f);
+		// Match AvbdSolverBody's normalized-Euler prediction. A post-solve
+		// pose is not a valid authority for proving that the free endpoints
+		// are separated while the interior arc crosses the surface.
+		const PxQuat rotationalFreeEnd =
+			(rotationalStart +
+			 rotationalDelta * rotationalStart).getNormalized();
 		for(PxU32 i = 0; i < 2; ++i)
 		{
 			const PxVec3 center =
@@ -3819,7 +4278,7 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 			spheres[i]->setSolverIterationCounts(16, 1);
 			if(rotationalFiniteCase)
 			{
-				spheres[i]->setMaxAngularVelocity(200.0f);
+				spheres[i]->setMaxAngularVelocity(300.0f);
 				spheres[i]->setAngularVelocity(
 					PxVec3(
 						0.0f, 0.0f,
@@ -3860,12 +4319,8 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 		bool boundsFinite = true;
 		for(PxU32 frame = 0; frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 
 			if(frame == 0)
 			{
@@ -3912,8 +4367,7 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 							0.0f, surfaceOffsets[0].z),
 						rotationalStart);
 					const PxTransform endPose(
-						startPose.p,
-						negativeRigidPose.q.getNormalized());
+						startPose.p, rotationalFreeEnd);
 					for(PxU32 i = 0; i < 4; ++i)
 					{
 						const PxReal startSeparation =
@@ -3959,9 +4413,8 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 								startPose.p,
 								PxSlerp(
 									time, rotationalStart,
-									negativeRigidPose.q.
-										getNormalized()).
-											getNormalized());
+									rotationalFreeEnd).
+										getNormalized());
 							const PxReal sampleSeparation =
 								rotationalCapsuleCase
 									? getCapsuleSignedSeparation(
@@ -4057,6 +4510,9 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 					metrics.
 						dynamicSphereSweepPositiveMinSeparation <
 							PX_MAX_F32 ? 1u : 0u;
+				// Discrete redetection may arrest the flag-off rotating rigid
+				// at an intermediate pose. The authoritative control signal is
+				// that its flag-off surface remains unmoved.
 				metrics.
 					dynamicSphereSweepNegativeControlTunneled =
 						metrics.
@@ -4065,16 +4521,17 @@ static bool runDynamicFiniteRelativeSweptCcdCase(
 							metrics.
 								dynamicSphereSweepNegativeRigidDrop >
 								(rotationalFiniteCase
-									? 0.8f : 1.5f)
+									? 0.2f : 1.5f)
 							? 1u : 0u;
+				const bool rigidResponseDifference = rotationalFiniteCase
+					? PxAbs(
+						metrics.dynamicSphereSweepPositiveRigidDrop -
+						metrics.dynamicSphereSweepNegativeRigidDrop) > 0.05f
+					: metrics.dynamicSphereSweepPositiveRigidDrop + 0.05f <
+						metrics.dynamicSphereSweepNegativeRigidDrop;
 				metrics.
 					dynamicSphereSweepTwoSidedResponseObserved =
-						metrics.
-							dynamicSphereSweepPositiveRigidDrop +
-								0.05f <
-						metrics.
-							dynamicSphereSweepNegativeRigidDrop
-							? 1u : 0u;
+						rigidResponseDifference ? 1u : 0u;
 
 				scene->removeActor(*speculative.surface);
 				scene->removeActor(*discrete.surface);
@@ -4776,12 +5233,8 @@ static bool runFiniteReverseSweptCcdCase(
 		bool boundsFinite = true;
 		for(PxU32 frame = 0; frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			if(frame != 0)
 				continue;
 
@@ -5701,12 +6154,8 @@ static bool runTriangleSurfaceSweptCcdCase(
 		for(PxU32 frame = 0;
 			frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			if(frame != 0)
 				continue;
 			const PxVec3 positiveCentroid =
@@ -6113,12 +6562,8 @@ static bool runSmoothReverseFeatureCase(
 			getMotionSurfaceCentroid(freeControl);
 		for(PxU32 frame = 0; frame < options.frames; ++frame)
 		{
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			if(frame != 0)
 				continue;
 
@@ -6339,6 +6784,12 @@ static bool runSurfaceCase(
 	bool softSoftElementFilterCase,
 	bool skinningCase)
 {
+	const bool densePerformanceCase =
+		options.caseName == "surface-performance-dense-no-contact";
+	const PxU32 gridWidth = densePerformanceCase
+		? sPerformanceDenseGridWidth : sDefaultGridWidth;
+	const PxU32 gridHeight = densePerformanceCase
+		? sPerformanceDenseGridHeight : sDefaultGridHeight;
 	const bool kinematicSphereCase =
 		options.caseName == "surface-kinematic-sphere";
 	const bool dynamicSphereCase =
@@ -6519,7 +6970,8 @@ static bool runSurfaceCase(
 				articulationAttachmentCase ||
 				elementFilterCase || materialFrictionCase,
 			selfCollisionCase,
-			partialElementFilterCase))
+			partialElementFilterCase,
+			densePerformanceCase))
 			break;
 		if(selfCollisionSweptCase)
 		{
@@ -6635,7 +7087,7 @@ static bool runSurfaceCase(
 				   !softPairAttachmentCase &&
 				   !elementFilterCase &&
 				   !materialFrictionCase &&
-				   i < sGridWidth);
+				   i < gridWidth);
 			positions[i] = PxVec4(
 				initialPositions[i], pinned ? 0.0f : 1.0f);
 			velocities[i] = materialFrictionCase
@@ -6757,6 +7209,10 @@ static bool runSurfaceCase(
 		if(!scene->addActor(*surface) || surface->getScene() != scene)
 			break;
 		metrics.actorAdded = 1;
+		captureSurfacePerformanceTopology(
+			vertexCount, triangleMesh->getNbTriangles(), 0,
+			scene->getNbActors(PxActorTypeFlag::eRIGID_STATIC) +
+				scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
 		const PxU32 attachmentVertex = 0;
 		if(elementAttachmentCase &&
 			triangleMesh->getNbTriangles() == 0)
@@ -7539,7 +7995,7 @@ static bool runSurfaceCase(
 			PxMax<PxU32>(churnFrame + 1,
 				options.frames / 2));
 		const PxU32 mutationIndex =
-			vertexIndex(sGridWidth / 2, sGridHeight / 2);
+			(gridHeight / 2) * gridWidth + gridWidth / 2;
 		PxVec3 mutationTarget(0.0f);
 		PxVec3 restorePosition(0.0f);
 		PxReal kinematicAttachmentProgress = 0.0f;
@@ -7800,12 +8256,8 @@ static bool runSurfaceCase(
 				}
 			}
 
-			scene->simulate(options.dt);
-			if(!scene->fetchResults(true))
-			{
-				++metrics.fetchFailures;
+			if(!simulateSurfaceScene(*scene, options.dt, metrics))
 				break;
-			}
 			if(skinningCase)
 			{
 				const bool skinningFinite =
@@ -9221,6 +9673,309 @@ static void printResult(
 		passed ? "PASS" : "FAIL");
 }
 
+static const char* getAvbdCpuIsaModeName(PxU32 mode)
+{
+	return mode == PxAvbdCpuIsaMode::eAUTO ? "auto" :
+		(mode == PxAvbdCpuIsaMode::eSSE2 ? "sse2" :
+			(mode == PxAvbdCpuIsaMode::eAVX2_FMA ? "avx2fma" : "invalid"));
+}
+
+static const char* getAvbdCpuIsaCompiledBackendNames(PxU32 mask)
+{
+	return (mask & PxAvbdCpuIsaBackendFlag::eAVX2_FMA) ?
+		"sse2,avx2fma" : "sse2";
+}
+
+static void printSurfacePerformanceResult(
+	const Snippets::HeadlessOptions& options, bool passed)
+{
+#if PX_DEBUG
+	const char* buildProfile = "debug";
+#elif PX_CHECKED
+	const char* buildProfile = "checked";
+#elif PX_PROFILE
+	const char* buildProfile = "profile";
+#else
+	const char* buildProfile = "release";
+#endif
+	const PxU32 surfaceBodies =
+		gSurfacePerformance.topologySurfaceVertices > 0 ? 1u : 0u;
+	const bool taskGraphObserved =
+		gSurfacePerformance.taskGraphSubmittedSolveTasks > 0 ||
+		gSurfacePerformance.taskGraphSerialSolveTasks > 0;
+	const PxU32 actualSoftWorkers = taskGraphObserved
+		? PxMax(gSurfacePerformance.taskGraphPeakActiveSolveTasks, 1u)
+		: 1u;
+	const char* softScheduler = taskGraphObserved
+		? "sceneTaskgraph" : "componentSerial";
+	PxAvbdCpuIsaTelemetry cpuIsa;
+	PxGetAvbdCpuIsaTelemetry(cpuIsa);
+	std::printf(
+		"[AVBD_PERF] schema=2 snippet=" AVBD_SURFACE_SNIPPET_NAME " "
+		"case=%s buildProfile=%s requestedIsa=%s selectedIsa=%s "
+		"compiledIsaBackends=%s fmaSupported=%u fmaUsed=%u "
+		"forceIsaRejected=%u isaKernelSelfTest=%s isaProbeValue=%.9g sceneExecution=%s "
+		"dispatcherThreads=%u physicalCores=%u "
+		"softScheduler=%s softExecution=serial softWorkers=1 "
+		"actualSoftWorkers=%u taskCount=%llu chunkCount=0 barrierCount=%llu "
+		"taskGraphRequestedWorkers=%u taskGraphCompletedTasks=%llu "
+		"taskGraphSerialTasks=%llu taskGraphPureSoftEligibleIslands=%llu "
+		"taskGraphPureSoftEligibleParticles=%llu "
+		"predictionTaskCount=%llu predictionCompletedTasks=%llu "
+		"predictionPeakActiveTasks=%u predictionSerialStages=%llu "
+		"writeBackTaskCount=%llu writeBackCompletedTasks=%llu "
+		"writeBackPeakActiveTasks=%u writeBackSerialStages=%llu "
+		"causalLayerTaskCount=%llu causalLayerCompletedTasks=%llu "
+		"causalLayerPeakActiveTasks=%u causalLayerFanIns=%llu "
+		"causalLayerSerialFallbacks=%llu causalLayerMaxOccupancy=%u "
+		"causalLayerTotalOccupancy=%llu causalLayerParentReductionMs=%.9g "
+		"causalLayerTaskPoolGrowthEvents=%llu "
+		"causalLayerTaskPoolGrowthBytes=%llu "
+		"selfBvhContactTaskCount=%llu "
+		"selfBvhContactCompletedTasks=%llu "
+		"selfBvhContactPeakActiveTasks=%u "
+		"selfBvhContactFanIns=%llu "
+		"selfBvhContactSerialFallbacks=%llu "
+		"taskWorkMs=0 longestTaskMs=0 staticColorCount=0 dynamicColorCount=0 "
+		"p4ColorPlanCount=%u p4DynamicAccessGroupCount=%u "
+		"p4ColoredSerialSweeps=%llu p4ColoredSerialFallbackSweeps=%llu "
+		"p8CensusParticleSolves=%llu p8CensusTriEvaluations=%llu "
+		"p8CensusCorotationalTetEvaluations=%llu "
+		"p8CensusNeoHookeanTetEvaluations=%llu "
+		"p8CensusBendingEvaluations=%llu p8CensusContactEvaluations=%llu "
+		"p8CensusTetPacket8FullPackets=%llu "
+		"p8CensusTetPacket8TailLanes=%llu "
+		"p8TetIrBodies=%llu p8TetIrPackets=%llu "
+		"p8TetIrActiveLanes=%llu p8TetIrTailLanes=%llu "
+		"p8TetIrActiveTailLanes=%llu "
+		"p8TetIrInvalidBodies=%llu hostWritebackMeasured=0 "
+		"cpuSkinningMs=0 cpuSkinningMeasured=0 "
+		"topologySoftBodies=%u topologySoftParticles=%llu "
+		"topologyTriElements=%llu topologyTetElements=0 topologyBendElements=0 "
+		"topologySurfaceTriangles=%llu topologySurfaceVertices=%llu "
+		"topologySurfaceEdges=0 topologyRigidBoxes=0 topologyRigidActors=%llu "
+		"warmupFrames=%u profileFrames=%u "
+		"avgStepMs=%.9g p50StepMs=%.9g p95StepMs=%.9g maxStepMs=%.9g "
+		"initialContactMs=0 solverMs=0 sceneMs=%.9g metricsMs=0 "
+		"workspaceGrowthEvents=%llu workspaceGrowthBytes=%llu "
+		"contactWorkspaceGrowthEvents=%llu contactWorkspaceGrowthBytes=%llu "
+		"contactSweepScratchGrowthEvents=%llu "
+		"contactSweepScratchGrowthBytes=%llu "
+		"contactOutputGrowthEvents=%llu contactOutputGrowthBytes=%llu "
+		"peakContactOutputCount=%u peakContactOutputCapacity=%u "
+		"peakContactIncidenceCount=%u peakContactIncidenceCapacity=%u "
+		"peakStateTransferContactCount=%u "
+		"peakStateTransferContactCapacity=%u "
+		"peakStateTransferUsedCapacity=%u "
+		"collisionDetectionCalls=%llu collisionBodyPairs=%llu "
+		"collisionOverlappingBodyPairs=%llu "
+		"collisionParticleSurfaceCandidates=%llu "
+		"collisionInsideTriangleTests=%llu "
+		"collisionClosestTriangleTests=%llu "
+		"collisionSelfTriangleTests=%llu "
+		"collisionSelfTriangleBoundsBuilt=%llu "
+		"collisionSelfVertexSweepEntriesBuilt=%llu "
+		"collisionSelfEdgeBoundsBuilt=%llu "
+		"collisionSurfaceBvhRefitNodes=%llu "
+		"collisionSurfaceBvhCandidates=%llu "
+		"collisionSurfaceEdgeBvhRefitNodes=%llu "
+		"collisionSurfaceEdgeBvhCandidates=%llu "
+		"collisionRigidParticleTests=%llu "
+		"collisionGeneratedGroundContacts=%llu "
+		"collisionGeneratedRigidContacts=%llu "
+		"collisionGeneratedSoftContacts=%llu "
+		"collisionGeneratedSelfContacts=%llu "
+		"componentFallbackSteps=%llu nativeIslandSteps=%llu "
+		"sceneStepMeasured=1 solverMeasured=0 status=%s\n",
+		options.caseName.c_str(), buildProfile,
+		getAvbdCpuIsaModeName(cpuIsa.requestedIsa),
+		getAvbdCpuIsaModeName(cpuIsa.selectedIsa),
+		getAvbdCpuIsaCompiledBackendNames(cpuIsa.compiledBackendMask),
+		(cpuIsa.capabilityMask & PxAvbdCpuIsaCapabilityFlag::eFMA) ? 1u : 0u,
+		cpuIsa.fmaUsed,
+		cpuIsa.forceModeRejected,
+		cpuIsa.kernelSelfTestPassed ? "pass" : "fail",
+		double(cpuIsa.kernelSelfTestValue),
+		Snippets::getExecutionName(options.execution),
+		options.dispatcherThreads, PxThread::getNbPhysicalCores(),
+		softScheduler, actualSoftWorkers,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSubmittedSolveTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphBarrierTasks),
+		gSurfacePerformance.taskGraphRequestedDispatcherWorkers,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCompletedSolveTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSerialSolveTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphPureSoftEligibleIslands),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphPureSoftEligibleParticles),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSubmittedPredictionTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCompletedPredictionTasks),
+		gSurfacePerformance.taskGraphPeakActivePredictionTasks,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSerialPredictionStages),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSubmittedWriteBackTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCompletedWriteBackTasks),
+		gSurfacePerformance.taskGraphPeakActiveWriteBackTasks,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSerialWriteBackStages),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSubmittedCausalLayerTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCompletedCausalLayerTasks),
+		gSurfacePerformance.taskGraphPeakActiveCausalLayerTasks,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCausalLayerFanIns),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSerialCausalLayerFallbacks),
+		gSurfacePerformance.taskGraphMaxCausalLayerOccupancy,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphTotalCausalLayerOccupancy),
+		double(gSurfacePerformance.taskGraphCausalLayerParentReductionNanos) /
+			1.0e6,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthEvents),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthBytes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSubmittedSelfBvhContactTasks),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphCompletedSelfBvhContactTasks),
+		gSurfacePerformance.taskGraphPeakActiveSelfBvhContactTasks,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSelfBvhContactFanIns),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.taskGraphSerialSelfBvhContactFallbacks),
+		gSurfacePerformance.particlePrimalColorCount,
+		gSurfacePerformance.particlePrimalDynamicAccessGroupCount,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalColoredSerialSweeps),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.
+				particlePrimalColoredSerialFallbackSweeps),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusDynamicParticleSolves),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusTriangleEvaluations),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.
+				particlePrimalCensusCorotationalTetEvaluations),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.
+				particlePrimalCensusNeoHookeanTetEvaluations),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusBendingEvaluations),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusContactEvaluations),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusTetPacket8FullPackets),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalCensusTetPacket8TailLanes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrBodies),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrPackets),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrActiveLanes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrTailLanes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrActiveTailLanes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.particlePrimalTetPacketIrInvalidBodies),
+		surfaceBodies,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.topologySurfaceVertices),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.topologySurfaceTriangles),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.topologySurfaceTriangles),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.topologySurfaceVertices),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.topologyRigidActors),
+		gSurfacePerformance.warmupFrames,
+		gSurfacePerformance.profiledFrames,
+		double(gSurfacePerformance.avgStepMs),
+		double(gSurfacePerformance.p50StepMs),
+		double(gSurfacePerformance.p95StepMs),
+		double(gSurfacePerformance.maxStepMs),
+		gSurfacePerformance.sceneMs,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.workspaceGrowthEvents),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.workspaceGrowthBytes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactWorkspaceGrowthEvents),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactWorkspaceGrowthBytes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactSweepScratchGrowthEvents),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactSweepScratchGrowthBytes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactOutputGrowthEvents),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.contactOutputGrowthBytes),
+		gSurfacePerformance.peakContactOutputCount,
+		gSurfacePerformance.peakContactOutputCapacity,
+		gSurfacePerformance.peakContactIncidenceCount,
+		gSurfacePerformance.peakContactIncidenceCapacity,
+		gSurfacePerformance.peakStateTransferContactCount,
+		gSurfacePerformance.peakStateTransferContactCapacity,
+		gSurfacePerformance.peakStateTransferUsedCapacity,
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionDetectionCalls),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionBodyPairs),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionOverlappingBodyPairs),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionParticleSurfaceCandidates),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionInsideTriangleTests),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionClosestTriangleTests),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSelfTriangleTests),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSelfTriangleBoundsBuilt),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSelfVertexSweepEntriesBuilt),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSelfEdgeBoundsBuilt),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSurfaceBvhRefitNodes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSurfaceBvhCandidates),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSurfaceEdgeBvhRefitNodes),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionSurfaceEdgeBvhCandidates),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionRigidParticleTests),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionGeneratedGroundContacts),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionGeneratedRigidContacts),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionGeneratedSoftContacts),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.collisionGeneratedSelfContacts),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.componentFallbackSteps),
+		static_cast<unsigned long long>(
+			gSurfacePerformance.nativeIslandSteps),
+		passed ? "PASS" : "FAIL");
+}
+
 } // namespace
 
 #ifdef RENDER_SNIPPET
@@ -9251,6 +10006,173 @@ static PxArray<PxVec3> sVisualSkinningPositions;
 static PxArray<PxVec3> sVisualSkinningNormals;
 static bool sVisualExtensionsInitialized = false;
 static bool sVisualPaused = false;
+
+// The visual fixture exercises a single 25x25 cloth. Two workers leave the
+// parallel OGC and relaxed-color work underfed on ordinary desktop CPUs, while
+// an unrestricted core count creates tiny color-range tasks. Four is a
+// deliberately conservative interactive default; production applications
+// remain free to supply their own PxSceneDesc dispatcher policy.
+static PxU32 getVisualDispatcherWorkerCount()
+{
+	const char* const overrideValue = std::getenv(
+		"PHYSX_AVBD_VISUAL_DISPATCHER_THREADS");
+	if(overrideValue && overrideValue[0])
+	{
+		char* parseEnd = NULL;
+		const unsigned long parsed = std::strtoul(
+			overrideValue, &parseEnd, 10);
+		if(parseEnd && parseEnd != overrideValue && *parseEnd == '\0' &&
+			parsed >= 1u && parsed <= 64u)
+			return PxU32(parsed);
+		std::printf(
+			"[AVBD_VISUAL_CONFIG_WARNING] invalid "
+			"PHYSX_AVBD_VISUAL_DISPATCHER_THREADS=%s; using auto\n",
+			overrideValue);
+	}
+	const PxU32 physicalCores = PxThread::getNbPhysicalCores();
+	if(physicalCores <= 2)
+		return 2;
+	return PxMin(4u, physicalCores - 1u);
+}
+
+// Keep the visual smoke's scheduler evidence separate from the headless
+// performance accumulator above.  The render path does not use
+// simulateSurfaceScene(), so it must read these step-local Scene statistics
+// directly after fetchResults().  None of this state is read by simulation.
+struct VisualTaskTelemetry
+{
+	PxU64 submittedTasks;
+	PxU64 completedTasks;
+	PxU64 fanIns;
+	PxU64 serialFallbacks;
+	PxU32 peakActiveTasks;
+
+	VisualTaskTelemetry()
+		: submittedTasks(0), completedTasks(0), fanIns(0),
+		  serialFallbacks(0), peakActiveTasks(0)
+	{
+	}
+
+	void accumulate(
+		PxU32 submitted, PxU32 completed, PxU32 peakActive,
+		PxU32 frameFanIns, PxU32 frameSerialFallbacks)
+	{
+		submittedTasks += submitted;
+		completedTasks += completed;
+		fanIns += frameFanIns;
+		serialFallbacks += frameSerialFallbacks;
+		peakActiveTasks = PxMax(peakActiveTasks, peakActive);
+	}
+
+	bool hasValidAccounting() const
+	{
+		return submittedTasks == completedTasks;
+	}
+};
+
+struct VisualParallelismTelemetry
+{
+	PxU32 completedFrames;
+	PxU64 componentFallbackSteps;
+	PxU64 nativeIslandSteps;
+	PxU32 requestedDispatcherWorkers;
+	PxU32 particlePrimalColorCount;
+	PxU32 particlePrimalDynamicAccessGroupCount;
+	PxU64 particlePrimalColoredSerialSweeps;
+	PxU64 particlePrimalColoredSerialFallbackSweeps;
+	VisualTaskTelemetry solve;
+	VisualTaskTelemetry prediction;
+	VisualTaskTelemetry writeBack;
+	VisualTaskTelemetry causalLayer;
+	VisualTaskTelemetry worldPlaneContact;
+	VisualTaskTelemetry rigidBoxSdfContact;
+	VisualTaskTelemetry selfBvhContact;
+	PxU32 maxCausalLayerOccupancy;
+	PxU64 totalCausalLayerOccupancy;
+
+	VisualParallelismTelemetry()
+		: completedFrames(0), componentFallbackSteps(0),
+		  nativeIslandSteps(0), requestedDispatcherWorkers(0),
+		  particlePrimalColorCount(0),
+		  particlePrimalDynamicAccessGroupCount(0),
+		  particlePrimalColoredSerialSweeps(0),
+		  particlePrimalColoredSerialFallbackSweeps(0),
+		  maxCausalLayerOccupancy(0), totalCausalLayerOccupancy(0)
+	{
+	}
+};
+
+static VisualParallelismTelemetry sVisualParallelismTelemetry;
+
+static void captureVisualParallelismTelemetry(PxScene& scene)
+{
+	PxSimulationStatistics statistics;
+	scene.getSimulationStatistics(statistics);
+	VisualParallelismTelemetry& telemetry = sVisualParallelismTelemetry;
+	++telemetry.completedFrames;
+	telemetry.componentFallbackSteps +=
+		statistics.avbdCpuSoftBodyComponentFallbackSteps;
+	telemetry.nativeIslandSteps +=
+		statistics.avbdCpuSoftBodyNativeIslandSteps;
+	telemetry.requestedDispatcherWorkers = PxMax(
+		telemetry.requestedDispatcherWorkers,
+		statistics.avbdCpuTaskGraphRequestedDispatcherWorkers);
+	telemetry.particlePrimalColorCount = PxMax(
+		telemetry.particlePrimalColorCount,
+		statistics.avbdCpuSoftBodyParticlePrimalColorCount);
+	telemetry.particlePrimalDynamicAccessGroupCount = PxMax(
+		telemetry.particlePrimalDynamicAccessGroupCount,
+		statistics.avbdCpuSoftBodyParticlePrimalDynamicAccessGroupCount);
+	telemetry.particlePrimalColoredSerialSweeps +=
+		statistics.avbdCpuSoftBodyParticlePrimalColoredSerialSweeps;
+	telemetry.particlePrimalColoredSerialFallbackSweeps +=
+		statistics.avbdCpuSoftBodyParticlePrimalColoredSerialFallbackSweeps;
+	telemetry.solve.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedSolveTasks,
+		statistics.avbdCpuTaskGraphCompletedSolveTasks,
+		statistics.avbdCpuTaskGraphPeakActiveSolveTasks,
+		statistics.avbdCpuTaskGraphBarrierTasks,
+		statistics.avbdCpuTaskGraphSerialSolveTasks);
+	telemetry.prediction.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedPredictionTasks,
+		statistics.avbdCpuTaskGraphCompletedPredictionTasks,
+		statistics.avbdCpuTaskGraphPeakActivePredictionTasks, 0,
+		statistics.avbdCpuTaskGraphSerialPredictionStages);
+	telemetry.writeBack.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedWriteBackTasks,
+		statistics.avbdCpuTaskGraphCompletedWriteBackTasks,
+		statistics.avbdCpuTaskGraphPeakActiveWriteBackTasks, 0,
+		statistics.avbdCpuTaskGraphSerialWriteBackStages);
+	telemetry.causalLayer.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedCausalLayerTasks,
+		statistics.avbdCpuTaskGraphCompletedCausalLayerTasks,
+		statistics.avbdCpuTaskGraphPeakActiveCausalLayerTasks,
+		statistics.avbdCpuTaskGraphCausalLayerFanIns,
+		statistics.avbdCpuTaskGraphSerialCausalLayerFallbacks);
+	telemetry.maxCausalLayerOccupancy = PxMax(
+		telemetry.maxCausalLayerOccupancy,
+		statistics.avbdCpuTaskGraphMaxCausalLayerOccupancy);
+	telemetry.totalCausalLayerOccupancy +=
+		statistics.avbdCpuTaskGraphTotalCausalLayerOccupancy;
+	telemetry.worldPlaneContact.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedWorldPlaneContactTasks,
+		statistics.avbdCpuTaskGraphCompletedWorldPlaneContactTasks,
+		statistics.avbdCpuTaskGraphPeakActiveWorldPlaneContactTasks,
+		statistics.avbdCpuTaskGraphWorldPlaneContactFanIns,
+		statistics.avbdCpuTaskGraphSerialWorldPlaneContactFallbacks);
+	telemetry.rigidBoxSdfContact.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedRigidBoxSdfContactTasks,
+		statistics.avbdCpuTaskGraphCompletedRigidBoxSdfContactTasks,
+		statistics.avbdCpuTaskGraphPeakActiveRigidBoxSdfContactTasks,
+		statistics.avbdCpuTaskGraphRigidBoxSdfContactFanIns,
+		statistics.avbdCpuTaskGraphSerialRigidBoxSdfContactFallbacks);
+	telemetry.selfBvhContact.accumulate(
+		statistics.avbdCpuTaskGraphSubmittedSelfBvhContactTasks,
+		statistics.avbdCpuTaskGraphCompletedSelfBvhContactTasks,
+		statistics.avbdCpuTaskGraphPeakActiveSelfBvhContactTasks,
+		statistics.avbdCpuTaskGraphSelfBvhContactFanIns,
+		statistics.avbdCpuTaskGraphSerialSelfBvhContactFallbacks);
+}
 
 static bool buildVisualSurfaceMesh()
 {
@@ -9440,9 +10362,135 @@ static void resetVisualSurface()
 
 } // namespace
 
+void printVisualParallelismTelemetry(PxU32 expectedFrames)
+{
+	const VisualParallelismTelemetry& telemetry =
+		sVisualParallelismTelemetry;
+	PxU32 peakActiveTasks = telemetry.solve.peakActiveTasks;
+	peakActiveTasks = PxMax(
+		peakActiveTasks, telemetry.prediction.peakActiveTasks);
+	peakActiveTasks = PxMax(
+		peakActiveTasks, telemetry.writeBack.peakActiveTasks);
+	peakActiveTasks = PxMax(
+		peakActiveTasks, telemetry.causalLayer.peakActiveTasks);
+	peakActiveTasks = PxMax(
+		peakActiveTasks,
+		telemetry.worldPlaneContact.peakActiveTasks);
+	peakActiveTasks = PxMax(
+		peakActiveTasks,
+		telemetry.rigidBoxSdfContact.peakActiveTasks);
+	peakActiveTasks = PxMax(
+		peakActiveTasks, telemetry.selfBvhContact.peakActiveTasks);
+	const bool taskAccountingValid =
+		telemetry.solve.hasValidAccounting() &&
+		telemetry.prediction.hasValidAccounting() &&
+		telemetry.writeBack.hasValidAccounting() &&
+		telemetry.causalLayer.hasValidAccounting() &&
+		telemetry.worldPlaneContact.hasValidAccounting() &&
+		telemetry.rigidBoxSdfContact.hasValidAccounting() &&
+		telemetry.selfBvhContact.hasValidAccounting();
+	const bool frameAccountingValid =
+		telemetry.completedFrames == expectedFrames;
+	const bool colorPlanObserved =
+		telemetry.particlePrimalColorCount > 0 ||
+		telemetry.particlePrimalDynamicAccessGroupCount > 0 ||
+		telemetry.particlePrimalColoredSerialSweeps > 0 ||
+		telemetry.particlePrimalColoredSerialFallbackSweeps > 0;
+	const bool dispatcherParallelObserved = peakActiveTasks > 1;
+	std::printf(
+		"[AVBD_VISUAL_PARALLELISM] expectedFrames=%u capturedFrames=%u "
+		"componentFallbackSteps=%llu nativeIslandSteps=%llu "
+		"requestedDispatcherWorkers=%u peakActiveDispatcherTasks=%u "
+		"dispatcherParallelObserved=%u "
+		"frameAccounting=%s taskAccounting=%s telemetry=%s\n",
+		expectedFrames, telemetry.completedFrames,
+		static_cast<unsigned long long>(telemetry.componentFallbackSteps),
+		static_cast<unsigned long long>(telemetry.nativeIslandSteps),
+		telemetry.requestedDispatcherWorkers,
+		peakActiveTasks, dispatcherParallelObserved ? 1u : 0u,
+		frameAccountingValid ? "PASS" : "FAIL",
+		taskAccountingValid ? "PASS" : "FAIL",
+		(frameAccountingValid && taskAccountingValid) ? "PASS" : "FAIL");
+	std::printf(
+		"[AVBD_VISUAL_COLOR] planObserved=%u colorCount=%u "
+		"dynamicAccessGroups=%u coloredSerialSweeps=%llu "
+		"coloredSerialFallbackSweeps=%llu\n",
+		colorPlanObserved ? 1u : 0u,
+		telemetry.particlePrimalColorCount,
+		telemetry.particlePrimalDynamicAccessGroupCount,
+		static_cast<unsigned long long>(
+			telemetry.particlePrimalColoredSerialSweeps),
+		static_cast<unsigned long long>(
+			telemetry.particlePrimalColoredSerialFallbackSweeps));
+	std::printf(
+		"[AVBD_VISUAL_TASKGRAPH] tuple=submitted/completed/peak/fanInOrBarrier/serial "
+		"solve=%llu/%llu/%u/%llu/%llu "
+		"prediction=%llu/%llu/%u/%llu "
+		"writeBack=%llu/%llu/%u/%llu "
+		"causal=%llu/%llu/%u/%llu/%llu "
+		"causalMaxOccupancy=%u causalTotalOccupancy=%llu\n",
+		static_cast<unsigned long long>(telemetry.solve.submittedTasks),
+		static_cast<unsigned long long>(telemetry.solve.completedTasks),
+		telemetry.solve.peakActiveTasks,
+		static_cast<unsigned long long>(telemetry.solve.fanIns),
+		static_cast<unsigned long long>(telemetry.solve.serialFallbacks),
+		static_cast<unsigned long long>(
+			telemetry.prediction.submittedTasks),
+		static_cast<unsigned long long>(
+			telemetry.prediction.completedTasks),
+		telemetry.prediction.peakActiveTasks,
+		static_cast<unsigned long long>(
+			telemetry.prediction.serialFallbacks),
+		static_cast<unsigned long long>(telemetry.writeBack.submittedTasks),
+		static_cast<unsigned long long>(telemetry.writeBack.completedTasks),
+		telemetry.writeBack.peakActiveTasks,
+		static_cast<unsigned long long>(
+			telemetry.writeBack.serialFallbacks),
+		static_cast<unsigned long long>(
+			telemetry.causalLayer.submittedTasks),
+		static_cast<unsigned long long>(
+			telemetry.causalLayer.completedTasks),
+		telemetry.causalLayer.peakActiveTasks,
+		static_cast<unsigned long long>(telemetry.causalLayer.fanIns),
+		static_cast<unsigned long long>(
+			telemetry.causalLayer.serialFallbacks),
+		telemetry.maxCausalLayerOccupancy,
+		static_cast<unsigned long long>(telemetry.totalCausalLayerOccupancy));
+	std::printf(
+		"[AVBD_VISUAL_OGC_TASKGRAPH] tuple=submitted/completed/peak/fanIn/serial "
+		"worldPlane=%llu/%llu/%u/%llu/%llu "
+		"rigidBox=%llu/%llu/%u/%llu/%llu "
+		"selfBvh=%llu/%llu/%u/%llu/%llu\n",
+		static_cast<unsigned long long>(
+			telemetry.worldPlaneContact.submittedTasks),
+		static_cast<unsigned long long>(
+			telemetry.worldPlaneContact.completedTasks),
+		telemetry.worldPlaneContact.peakActiveTasks,
+		static_cast<unsigned long long>(telemetry.worldPlaneContact.fanIns),
+		static_cast<unsigned long long>(
+			telemetry.worldPlaneContact.serialFallbacks),
+		static_cast<unsigned long long>(
+			telemetry.rigidBoxSdfContact.submittedTasks),
+		static_cast<unsigned long long>(
+			telemetry.rigidBoxSdfContact.completedTasks),
+		telemetry.rigidBoxSdfContact.peakActiveTasks,
+		static_cast<unsigned long long>(telemetry.rigidBoxSdfContact.fanIns),
+		static_cast<unsigned long long>(
+			telemetry.rigidBoxSdfContact.serialFallbacks),
+		static_cast<unsigned long long>(
+			telemetry.selfBvhContact.submittedTasks),
+		static_cast<unsigned long long>(
+			telemetry.selfBvhContact.completedTasks),
+		telemetry.selfBvhContact.peakActiveTasks,
+		static_cast<unsigned long long>(telemetry.selfBvhContact.fanIns),
+		static_cast<unsigned long long>(
+			telemetry.selfBvhContact.serialFallbacks));
+}
+
 bool initVisualPhysics()
 {
 	cleanupVisualPhysics();
+	sVisualParallelismTelemetry = VisualParallelismTelemetry();
 
 	sVisualFoundation = PxCreateFoundation(
 		PX_PHYSICS_VERSION, sVisualAllocator,
@@ -9465,7 +10513,8 @@ bool initVisualPhysics()
 	sceneDesc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
 	sceneDesc.solverType = PxSolverType::eAVBD;
 	sceneDesc.filterShader = PxDefaultSimulationFilterShader;
-	sVisualDispatcher = PxDefaultCpuDispatcherCreate(2);
+	sVisualDispatcher = PxDefaultCpuDispatcherCreate(
+		getVisualDispatcherWorkerCount());
 	if(!sVisualDispatcher)
 		return false;
 	sceneDesc.cpuDispatcher = sVisualDispatcher;
@@ -9556,13 +10605,17 @@ void stepVisualPhysics()
 			AVBD_SURFACE_SNIPPET_NAME);
 		sVisualPaused = true;
 	}
-	else if(!updateVisualSurfaceSkinning())
+	else
 	{
-		std::printf(
-			"%s: CPU skinning update failed; "
-			"visual simulation paused.\n",
-			AVBD_SURFACE_SNIPPET_NAME);
-		sVisualPaused = true;
+		captureVisualParallelismTelemetry(*gSurfaceAvbdScene);
+		if(!updateVisualSurfaceSkinning())
+		{
+			std::printf(
+				"%s: CPU skinning update failed; "
+				"visual simulation paused.\n",
+				AVBD_SURFACE_SNIPPET_NAME);
+			sVisualPaused = true;
+		}
 	}
 }
 
@@ -9885,6 +10938,48 @@ static PxU32 countVisualSelfEdgeIntersections(bool& finite)
 	return intersections;
 }
 
+static bool measureVisualBoxTopShape(
+	PxReal& heightRange, PxReal& heightStandardDeviation)
+{
+	heightRange = 0.0f;
+	heightStandardDeviation = 0.0f;
+	if(!gSurfaceAvbdRenderData.positionsInvMass ||
+		!gSurfaceAvbdRenderData.triangleMesh)
+		return false;
+
+	const PxVec4* positions =
+		gSurfaceAvbdRenderData.positionsInvMass;
+	const PxU32 vertexCount =
+		gSurfaceAvbdRenderData.triangleMesh->getNbVertices();
+	PxReal minimumHeight = PX_MAX_F32;
+	PxReal maximumHeight = -PX_MAX_F32;
+	PxReal heightSum = 0.0f;
+	PxReal heightSquaredSum = 0.0f;
+	PxU32 measuredVertices = 0;
+	for(PxU32 vertex = 0; vertex < vertexCount; ++vertex)
+	{
+		if(!positions[vertex].isFinite())
+			return false;
+		const PxVec3 point = positions[vertex].getXYZ();
+		if(PxAbs(point.x) > 1.0f || PxAbs(point.z) > 1.0f)
+			continue;
+		minimumHeight = PxMin(minimumHeight, point.y);
+		maximumHeight = PxMax(maximumHeight, point.y);
+		heightSum += point.y;
+		heightSquaredSum += point.y * point.y;
+		measuredVertices++;
+	}
+	if(!measuredVertices)
+		return false;
+	const PxReal inverseCount = 1.0f / PxReal(measuredVertices);
+	const PxReal meanHeight = heightSum * inverseCount;
+	heightRange = maximumHeight - minimumHeight;
+	heightStandardDeviation = PxSqrt(PxMax(
+		0.0f, heightSquaredSum * inverseCount -
+			meanHeight * meanHeight));
+	return true;
+}
+
 static bool runVisualOgcBoxEdgeCase(
 	PxU32 frameCount, Metrics& metrics)
 {
@@ -9893,6 +10988,8 @@ static bool runVisualOgcBoxEdgeCase(
 	PxU32 firstHitFrame = PX_MAX_U32;
 	PxU32 firstSelfIntersectionFrame = PX_MAX_U32;
 	PxU32 nonFiniteFrames = 0;
+	PxReal maximumBoxTopHeightRange = 0.0f;
+	PxReal maximumBoxTopHeightStandardDeviation = 0.0f;
 	bool initialized = initVisualPhysics();
 	if(initialized)
 	{
@@ -9909,6 +11006,21 @@ static bool runVisualOgcBoxEdgeCase(
 				countVisualSelfEdgeIntersections(selfFinite);
 			if(!selfFinite)
 				nonFiniteFrames++;
+			PxReal frameBoxTopHeightRange = 0.0f;
+			PxReal frameBoxTopHeightStandardDeviation = 0.0f;
+			if(!measureVisualBoxTopShape(
+					frameBoxTopHeightRange,
+					frameBoxTopHeightStandardDeviation))
+				nonFiniteFrames++;
+			else
+			{
+				maximumBoxTopHeightRange = PxMax(
+					maximumBoxTopHeightRange,
+					frameBoxTopHeightRange);
+				maximumBoxTopHeightStandardDeviation = PxMax(
+					maximumBoxTopHeightStandardDeviation,
+					frameBoxTopHeightStandardDeviation);
+			}
 			if(hits > 0 && firstHitFrame == PX_MAX_U32)
 				firstHitFrame = frame;
 			if(selfIntersections > 0 &&
@@ -9927,16 +11039,22 @@ static bool runVisualOgcBoxEdgeCase(
 	const bool passed = initialized &&
 		nonFiniteFrames == 0 &&
 		maximumInteriorEdgeHits == 0 &&
-		maximumSelfEdgeIntersections == 0;
+		maximumSelfEdgeIntersections == 0 &&
+		maximumBoxTopHeightRange <= 0.10f &&
+		maximumBoxTopHeightStandardDeviation <= 0.03f;
 	std::printf(
 		"[AVBD_OGC_BOX_EDGE] frames=%u "
 		"maxInteriorEdgeHits=%u firstHitFrame=%u "
 		"maxSelfEdgeIntersections=%u "
 		"firstSelfIntersectionFrame=%u "
+		"maxBoxTopHeightRange=%.6f "
+		"maxBoxTopHeightStdDev=%.6f "
 		"nonFiniteFrames=%u result=%s\n",
 		frameCount, maximumInteriorEdgeHits, firstHitFrame,
 		maximumSelfEdgeIntersections,
 		firstSelfIntersectionFrame,
+		double(maximumBoxTopHeightRange),
+		double(maximumBoxTopHeightStandardDeviation),
 		nonFiniteFrames, passed ? "PASS" : "FAIL");
 	return passed;
 }
@@ -10031,6 +11149,7 @@ int snippetMain(int argc, const char* const* argv)
 		return Snippets::eHEADLESS_UNSUPPORTED;
 	}
 	if(options.caseName != "surface-lifecycle" &&
+		options.caseName != "surface-performance-dense-no-contact" &&
 		options.caseName != "surface-ogc-box-edge" &&
 		options.caseName != "surface-ground" &&
 		options.caseName != "surface-sleep-wake" &&
@@ -10174,6 +11293,20 @@ int snippetMain(int argc, const char* const* argv)
 		std::printf(
 			"[AVBD_GATE_CONFIG_ERROR] unknown case: %s\n",
 			options.caseName.c_str());
+		return Snippets::eHEADLESS_CONFIG_ERROR;
+	}
+	const char* warmupEnvironment =
+		std::getenv("PHYSX_AVBD_PROFILE_WARMUP");
+	gSurfacePerformance = SurfacePerformanceMetrics();
+	if(warmupEnvironment && warmupEnvironment[0] &&
+		(!Snippets::parseU32(
+			warmupEnvironment, 0, 100000000u,
+			gSurfacePerformance.warmupFrames) ||
+		 gSurfacePerformance.warmupFrames >= options.frames))
+	{
+		std::printf(
+			"[AVBD_GATE_CONFIG_ERROR] "
+			"invalid PHYSX_AVBD_PROFILE_WARMUP\n");
 		return Snippets::eHEADLESS_CONFIG_ERROR;
 	}
 	if(!Snippets::applyExecutionEnvironment(options))
@@ -10455,6 +11588,8 @@ int snippetMain(int argc, const char* const* argv)
 			double(gSurfaceSkinningMetrics.maxDisplacement),
 			passed ? "PASS" : "FAIL");
 	}
+	finalizeSurfacePerformanceMetrics();
+	printSurfacePerformanceResult(options, passed);
 	printResult(options, errorCallback, metrics, passed);
 	return passed ? Snippets::eHEADLESS_PASS
 		: Snippets::eHEADLESS_GATE_FAILED;

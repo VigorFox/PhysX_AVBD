@@ -29,12 +29,15 @@
 // Box stacks on a plane; optional headless ball shot knocks stacks down.
 
 #include <ctype.h>
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 #include "PxPhysicsAPI.h"
+#include "foundation/PxTime.h"
 #include "../snippetcommon/SnippetHeadless.h"
 
 #ifdef RENDER_SNIPPET
@@ -63,8 +66,28 @@ static bool gHeadlessMode = false;
 static bool gHeadlessBallShot = false;
 static bool gHeadlessSleepProbe = false;
 static bool gHeadlessLockProbe = false;
+static bool gHeadlessRigidStress = false;
+static bool gRigidStressWorkAttribution = false;
+static bool gRigidStressAvbdIterationsExplicit = false;
+static bool gRigidStressAvbdJointIterationOverrideExplicit = false;
+static bool gRigidStressAvbdEarlyStopExplicit = false;
+static bool gRigidStressEnhancedDeterminismRequested = false;
+static bool gRigidStressEnhancedDeterminismObserved = false;
+enum RigidStressLayout {
+  eRIGID_STRESS_INDEPENDENT_ISLANDS = 0,
+  eRIGID_STRESS_CONNECTED_ISLAND
+};
+static RigidStressLayout gRigidStressLayout =
+    eRIGID_STRESS_INDEPENDENT_ISLANDS;
+static PxU32 gRigidStressSceneAvbdIterations = 0;
+static PxU32 gRigidStressSceneAvbdJointIterationOverride = 0;
+static bool gRigidStressSceneAvbdEnableEarlyStop = false;
+static PxU32 gRigidStressRequestedAvbdIterations = 0;
+static PxU32 gRigidStressRequestedAvbdJointIterationOverride = 0;
+static bool gRigidStressRequestedAvbdEnableEarlyStop = false;
 static PxU32 gHeadlessFrameCount = 600;
 static PxU32 gBallShotFrame = 30;
+static PxU32 gRigidStressWarmupFrames = 10;
 static PxU32 gSimFrame = 0;
 static PxRigidDynamic *gShotBall = NULL;
 enum HelloWorldSleepWitness {
@@ -98,6 +121,157 @@ static std::vector<PxU8> gBoxResponseObserved;
 static std::vector<PxU8> gBoxIsTarget;
 static std::vector<PxU32> gBoxContactFrames;
 static std::vector<PxReal> gMechanicalEnergyHistory;
+
+static const PxU32 gRigidStressStackCount = 40;
+static const PxU32 gRigidStressStackSize = 20;
+static const PxReal gRigidStressBoxHalfExtent = 1.0f;
+static const PxU32 gRigidStressExpectedBoxCount =
+    gRigidStressStackCount * gRigidStressStackSize *
+    (gRigidStressStackSize + 1u) / 2u;
+static const PxReal gRigidStressBallRadius = 5.0f;
+static const PxReal gRigidStressBallDensity = 1000.0f;
+static const PxVec3 gRigidStressBallPosition(0.0f, 20.0f, 100.0f);
+static const PxVec3 gRigidStressBallVelocity(0.0f, -25.0f, -100.0f);
+static const PxU32 gRigidStressPositionIterations = 4;
+static const PxU32 gRigidStressVelocityIterations = 1;
+
+struct RigidStressWorkMetrics {
+  PxU64 avbdIslandSolves = 0;
+  PxU64 avbdInnerSweeps = 0;
+  PxU64 avbdBlockDescentZones = 0;
+  PxU64 avbdBodyColorPlans = 0;
+  PxU64 avbdBodyColorPasses = 0;
+  PxU64 avbdDualPasses = 0;
+  PxU64 avbdDualRanges = 0;
+  PxU64 avbdBodyRanges = 0;
+  PxU64 awakeDynamicBodies = 0;
+  PxU64 sceneStatsActiveDynamicBodies = 0;
+  PxU64 discreteContactPairs = 0;
+  PxU64 contactPairsWithContacts = 0;
+  PxU64 axisSolverConstraints = 0;
+  PxU64 solverPartitions = 0;
+  PxU32 peakAwakeDynamicBodies = 0;
+  PxU32 peakSceneStatsActiveDynamicBodies = 0;
+  PxU32 peakDiscreteContactPairs = 0;
+  PxU32 peakContactPairsWithContacts = 0;
+  PxU32 peakAxisSolverConstraints = 0;
+  PxU32 peakSolverPartitions = 0;
+  PxU32 sampledFrames = 0;
+  bool observed = false;
+};
+
+struct RigidStressProfilerCounts {
+  PxU64 islandSolves;
+  PxU64 innerSweeps;
+  PxU64 blockDescentZones;
+  PxU64 bodyColorPlans;
+  PxU64 bodyColorPasses;
+  PxU64 dualPasses;
+  PxU64 dualRanges;
+  PxU64 bodyRanges;
+
+  RigidStressProfilerCounts()
+      : islandSolves(0), innerSweeps(0), blockDescentZones(0),
+        bodyColorPlans(0), bodyColorPasses(0), dualPasses(0), dualRanges(0),
+        bodyRanges(0) {}
+};
+
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+class RigidStressProfilerCallback : public PxProfilerCallback {
+public:
+  RigidStressProfilerCallback()
+      : mIslandSolves(0), mInnerSweeps(0), mBlockDescentZones(0),
+        mBodyColorPlans(0), mBodyColorPasses(0), mDualPasses(0),
+        mDualRanges(0), mBodyRanges(0) {}
+  virtual ~RigidStressProfilerCallback() {}
+
+  void reset() {
+    mIslandSolves.store(0, std::memory_order_relaxed);
+    mInnerSweeps.store(0, std::memory_order_relaxed);
+    mBlockDescentZones.store(0, std::memory_order_relaxed);
+    mBodyColorPlans.store(0, std::memory_order_relaxed);
+    mBodyColorPasses.store(0, std::memory_order_relaxed);
+    mDualPasses.store(0, std::memory_order_relaxed);
+    mDualRanges.store(0, std::memory_order_relaxed);
+    mBodyRanges.store(0, std::memory_order_relaxed);
+  }
+
+  RigidStressProfilerCounts snapshot() const {
+    RigidStressProfilerCounts result;
+    result.islandSolves = mIslandSolves.load(std::memory_order_relaxed);
+    result.innerSweeps = mInnerSweeps.load(std::memory_order_relaxed);
+    result.blockDescentZones =
+        mBlockDescentZones.load(std::memory_order_relaxed);
+    result.bodyColorPlans = mBodyColorPlans.load(std::memory_order_relaxed);
+    result.bodyColorPasses = mBodyColorPasses.load(std::memory_order_relaxed);
+    result.dualPasses = mDualPasses.load(std::memory_order_relaxed);
+    result.dualRanges = mDualRanges.load(std::memory_order_relaxed);
+    result.bodyRanges = mBodyRanges.load(std::memory_order_relaxed);
+    return result;
+  }
+
+  virtual void *zoneStart(const char *eventName, bool,
+                          uint64_t) PX_OVERRIDE {
+    if (!eventName)
+      return NULL;
+    if (strcmp(eventName, "AVBD.solveIsland") == 0)
+      mIslandSolves.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.updateLambda") == 0)
+      mInnerSweeps.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.blockDescent") == 0)
+      mBlockDescentZones.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.buildRigidBodyColorPlan") == 0)
+      mBodyColorPlans.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.submitRigidColor") == 0)
+      mBodyColorPasses.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.submitRigidDual") == 0)
+      mDualPasses.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.updateLambdaRange") == 0)
+      mDualRanges.fetch_add(1, std::memory_order_relaxed);
+    else if (strcmp(eventName, "AVBD.solveRigidBodyRange") == 0)
+      mBodyRanges.fetch_add(1, std::memory_order_relaxed);
+    return NULL;
+  }
+
+  virtual void zoneEnd(void *, const char *, bool, uint64_t) PX_OVERRIDE {}
+
+private:
+  std::atomic<PxU64> mIslandSolves;
+  std::atomic<PxU64> mInnerSweeps;
+  std::atomic<PxU64> mBlockDescentZones;
+  std::atomic<PxU64> mBodyColorPlans;
+  std::atomic<PxU64> mBodyColorPasses;
+  std::atomic<PxU64> mDualPasses;
+  std::atomic<PxU64> mDualRanges;
+  std::atomic<PxU64> mBodyRanges;
+};
+
+static RigidStressProfilerCallback gRigidStressProfiler;
+#endif
+
+static RigidStressWorkMetrics gRigidStressWorkMetrics;
+static RigidStressProfilerCounts gRigidStressProfilerBaseline;
+static bool gRigidStressProfilerBaselineCaptured = false;
+
+struct RigidStressMetrics {
+  std::vector<PxReal> stepSamplesMs;
+  PxReal avgStepMs = 0.0f;
+  PxReal p50StepMs = 0.0f;
+  PxReal p95StepMs = 0.0f;
+  PxReal maxStepMs = 0.0f;
+  PxReal minBoxCenterY = PX_MAX_F32;
+  PxReal maxAbsPosition = 0.0f;
+  PxVec3 finalBallPosition = PxVec3(0.0f);
+  PxU32 finiteBoxes = 0;
+  PxU32 awakeBoxes = 0;
+  PxU32 movedBoxes = 0;
+  PxU64 stateDigestLow = 0;
+  PxU64 stateDigestHigh = 0;
+  PxU32 stateDigestActorCount = 0;
+  bool finalBallFinite = false;
+};
+
+static RigidStressMetrics gRigidStressMetrics;
 
 static const PxReal gBallShotRadius = 3.0f;
 static const PxVec3 gBallShotPos(0.0f, 22.0f, 70.0f);
@@ -399,6 +573,7 @@ static PxFilterFlags helloWorldFilterShader(
 enum HelloWorldHeadlessCase {
   eHELLO_CASE_STACK_SETTLE,
   eHELLO_CASE_BALL_SHOT,
+  eHELLO_CASE_RIGID_STRESS,
   eHELLO_CASE_SLEEP_IDLE,
   eHELLO_CASE_SLEEP_WAKE,
   eHELLO_CASE_SLEEP_DISABLED,
@@ -416,6 +591,11 @@ static bool tryParseHeadlessCase(const char *value,
   }
   if (Snippets::equalsIgnoreCase(value, "ball-shot")) {
     headlessCase = eHELLO_CASE_BALL_SHOT;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "rigid-stress") ||
+      Snippets::equalsIgnoreCase(value, "hellogrb-cpu")) {
+    headlessCase = eHELLO_CASE_RIGID_STRESS;
     return true;
   }
   if (Snippets::equalsIgnoreCase(value, "sleep-idle")) {
@@ -441,6 +621,8 @@ static const char *getHeadlessCaseName(HelloWorldHeadlessCase headlessCase) {
   switch (headlessCase) {
   case eHELLO_CASE_BALL_SHOT:
     return "ball-shot";
+  case eHELLO_CASE_RIGID_STRESS:
+    return "rigid-stress";
   case eHELLO_CASE_SLEEP_IDLE:
     return "sleep-idle";
   case eHELLO_CASE_SLEEP_WAKE:
@@ -464,6 +646,12 @@ static bool isLockProbeCase(HelloWorldHeadlessCase headlessCase) {
   return headlessCase == eHELLO_CASE_LOCK_FLAGS;
 }
 
+static const char *getRigidStressLayoutName() {
+  return gRigidStressLayout == eRIGID_STRESS_CONNECTED_ISLAND
+             ? "connected"
+             : "independent";
+}
+
 static void resetRuntimeState() {
   stackZ = 10.0f;
   gSimFrame = 0;
@@ -480,6 +668,14 @@ static void resetRuntimeState() {
   gMetrics = HelloWorldMetrics();
   gSleepMetrics = HelloWorldSleepProbeMetrics();
   gLockMetrics = HelloWorldLockProbeMetrics();
+  gRigidStressMetrics = RigidStressMetrics();
+  gRigidStressWorkMetrics = RigidStressWorkMetrics();
+  gRigidStressProfilerBaseline = RigidStressProfilerCounts();
+  gRigidStressProfilerBaselineCaptured = false;
+  gRigidStressEnhancedDeterminismObserved = false;
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  gRigidStressProfiler.reset();
+#endif
   gBoxes.clear();
   gPreviousBoxVelocities.clear();
   gPreviousBoxPositions.clear();
@@ -503,6 +699,9 @@ static PxRigidDynamic *createDynamic(const PxTransform &t,
     return NULL;
   dynamic->setAngularDamping(0.5f);
   dynamic->setLinearVelocity(velocity);
+  if (gHeadlessRigidStress)
+    dynamic->setSolverIterationCounts(gRigidStressPositionIterations,
+                                      gRigidStressVelocityIterations);
   PxShape *shape = NULL;
   if (dynamic->getShapes(&shape, 1) == 1 && shape) {
     PxFilterData filterData;
@@ -685,6 +884,9 @@ static void createStack(const PxTransform &t, PxU32 size, PxReal halfExtent,
         continue;
       }
       body->attachShape(*shape);
+      if (gHeadlessRigidStress)
+        body->setSolverIterationCounts(gRigidStressPositionIterations,
+                                       gRigidStressVelocityIterations);
       if (!PxRigidBodyExt::updateMassAndInertia(*body, 10.0f)) {
         body->release();
         gInitializationFailed = true;
@@ -721,6 +923,19 @@ static void spawnBallShot() {
          "radius=%.2f\n",
          gBallShotPos.x, gBallShotPos.y, gBallShotPos.z, gBallShotVel.x,
          gBallShotVel.y, gBallShotVel.z, gBallShotRadius);
+}
+
+static void createRigidStressProjectile() {
+  gShotBall = createDynamic(PxTransform(gRigidStressBallPosition),
+                            PxSphereGeometry(gRigidStressBallRadius),
+                            gRigidStressBallVelocity);
+  if (!gShotBall ||
+      !PxRigidBodyExt::updateMassAndInertia(*gShotBall,
+                                           gRigidStressBallDensity)) {
+    gMetrics.launchFailures++;
+    gInitializationFailed = true;
+    return;
+  }
 }
 
 static PxReal addMetric(PxReal lhs, PxReal rhs) {
@@ -1107,6 +1322,177 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
   gMetrics.completedFrames = currentFrame;
 }
 
+static void finalizeRigidStressMetrics() {
+  if (gRigidStressMetrics.stepSamplesMs.empty())
+    return;
+  PxF64 sumMs = 0.0;
+  for (PxU32 i = 0;
+       i < static_cast<PxU32>(gRigidStressMetrics.stepSamplesMs.size()); ++i)
+    sumMs += gRigidStressMetrics.stepSamplesMs[i];
+  std::sort(gRigidStressMetrics.stepSamplesMs.begin(),
+            gRigidStressMetrics.stepSamplesMs.end());
+  const PxU32 last =
+      static_cast<PxU32>(gRigidStressMetrics.stepSamplesMs.size()) - 1u;
+  gRigidStressMetrics.avgStepMs = PxReal(
+      sumMs / PxF64(gRigidStressMetrics.stepSamplesMs.size()));
+  gRigidStressMetrics.p50StepMs =
+      gRigidStressMetrics.stepSamplesMs[
+          PxU32(PxCeil(0.50f * PxReal(last)))];
+  gRigidStressMetrics.p95StepMs =
+      gRigidStressMetrics.stepSamplesMs[
+          PxU32(PxCeil(0.95f * PxReal(last)))];
+  gRigidStressMetrics.maxStepMs =
+      gRigidStressMetrics.stepSamplesMs[last];
+}
+
+struct RigidStressStateHasher {
+  PxU64 low;
+  PxU64 high;
+
+  RigidStressStateHasher()
+      : low(PxU64(14695981039346656037ULL)),
+        high(PxU64(7809847782465536322ULL)) {}
+
+  void appendByte(PxU8 value) {
+    low ^= PxU64(value);
+    low *= PxU64(1099511628211ULL);
+    high ^= PxU64(value ^ 0xa5u);
+    high *= PxU64(14029467366897019727ULL);
+    high ^= high >> 29;
+  }
+
+  void appendU32(PxU32 value) {
+    for (PxU32 byteIndex = 0; byteIndex < 4; ++byteIndex)
+      appendByte(PxU8((value >> (byteIndex * 8u)) & 0xffu));
+  }
+
+  void appendReal(PxReal value) {
+    PX_COMPILE_TIME_ASSERT(sizeof(PxReal) == sizeof(PxU32));
+    PxU32 bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    appendU32(bits);
+  }
+
+  void appendVec3(const PxVec3 &value) {
+    appendReal(value.x);
+    appendReal(value.y);
+    appendReal(value.z);
+  }
+
+  void appendQuat(const PxQuat &value) {
+    appendReal(value.x);
+    appendReal(value.y);
+    appendReal(value.z);
+    appendReal(value.w);
+  }
+};
+
+static void appendRigidStressActorState(RigidStressStateHasher &hasher,
+                                        PxU32 actorKind, PxU32 actorIndex,
+                                        const PxRigidDynamic *body,
+                                        PxU32 &actorCount) {
+  hasher.appendU32(actorKind);
+  hasher.appendU32(actorIndex);
+  hasher.appendByte(body ? 1u : 0u);
+  if (!body)
+    return;
+  const PxTransform pose = body->getGlobalPose();
+  hasher.appendVec3(pose.p);
+  hasher.appendQuat(pose.q);
+  hasher.appendVec3(body->getLinearVelocity());
+  hasher.appendVec3(body->getAngularVelocity());
+  hasher.appendByte(body->isSleeping() ? 1u : 0u);
+  hasher.appendReal(body->getWakeCounter());
+  ++actorCount;
+}
+
+static void finalizeRigidStressWorkMetrics() {
+  if (!gRigidStressWorkAttribution)
+    return;
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  const RigidStressProfilerCounts finalCounts =
+      gRigidStressProfiler.snapshot();
+  gRigidStressWorkMetrics.avbdIslandSolves =
+      finalCounts.islandSolves - gRigidStressProfilerBaseline.islandSolves;
+  gRigidStressWorkMetrics.avbdInnerSweeps =
+      finalCounts.innerSweeps - gRigidStressProfilerBaseline.innerSweeps;
+  gRigidStressWorkMetrics.avbdBlockDescentZones =
+      finalCounts.blockDescentZones -
+      gRigidStressProfilerBaseline.blockDescentZones;
+  gRigidStressWorkMetrics.avbdBodyColorPlans =
+      finalCounts.bodyColorPlans -
+      gRigidStressProfilerBaseline.bodyColorPlans;
+  gRigidStressWorkMetrics.avbdBodyColorPasses =
+      finalCounts.bodyColorPasses -
+      gRigidStressProfilerBaseline.bodyColorPasses;
+  gRigidStressWorkMetrics.avbdDualPasses =
+      finalCounts.dualPasses - gRigidStressProfilerBaseline.dualPasses;
+  gRigidStressWorkMetrics.avbdDualRanges =
+      finalCounts.dualRanges - gRigidStressProfilerBaseline.dualRanges;
+  gRigidStressWorkMetrics.avbdBodyRanges =
+      finalCounts.bodyRanges - gRigidStressProfilerBaseline.bodyRanges;
+  gRigidStressWorkMetrics.observed =
+      gRigidStressProfilerBaselineCaptured &&
+      gRigidStressWorkMetrics.sampledFrames ==
+          gHeadlessOptions.frames - gRigidStressWarmupFrames;
+#endif
+}
+
+static void sampleRigidStressFinalState() {
+  gRigidStressMetrics.finiteBoxes = 0;
+  gRigidStressMetrics.awakeBoxes = 0;
+  gRigidStressMetrics.movedBoxes = 0;
+  gRigidStressMetrics.minBoxCenterY = PX_MAX_F32;
+  gRigidStressMetrics.maxAbsPosition = 0.0f;
+  RigidStressStateHasher stateHasher;
+  PxU32 stateActorCount = 0;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gBoxes.size()); ++i) {
+    const PxRigidDynamic *body = gBoxes[i];
+    appendRigidStressActorState(stateHasher, 1u, i, body, stateActorCount);
+    if (!body)
+      continue;
+    const PxTransform pose = body->getGlobalPose();
+    const PxVec3 linearVelocity = body->getLinearVelocity();
+    const PxVec3 angularVelocity = body->getAngularVelocity();
+    if (!pose.isValid() || !linearVelocity.isFinite() ||
+        !angularVelocity.isFinite())
+      continue;
+    gRigidStressMetrics.finiteBoxes++;
+    gRigidStressMetrics.awakeBoxes += body->isSleeping() ? 0u : 1u;
+    gRigidStressMetrics.minBoxCenterY =
+        PxMin(gRigidStressMetrics.minBoxCenterY, pose.p.y);
+    gRigidStressMetrics.maxAbsPosition =
+        PxMax(gRigidStressMetrics.maxAbsPosition,
+              PxMax(PxAbs(pose.p.x),
+                    PxMax(PxAbs(pose.p.y), PxAbs(pose.p.z))));
+    if (i < static_cast<PxU32>(gPreviousBoxPositions.size()) &&
+        (pose.p - gPreviousBoxPositions[i]).magnitudeSquared() > 0.0025f)
+      gRigidStressMetrics.movedBoxes++;
+  }
+  appendRigidStressActorState(stateHasher, 2u, 0u, gShotBall,
+                              stateActorCount);
+  if (gShotBall) {
+    const PxTransform pose = gShotBall->getGlobalPose();
+    const PxVec3 linearVelocity = gShotBall->getLinearVelocity();
+    const PxVec3 angularVelocity = gShotBall->getAngularVelocity();
+    gRigidStressMetrics.finalBallFinite =
+        pose.isValid() && linearVelocity.isFinite() &&
+        angularVelocity.isFinite();
+    if (gRigidStressMetrics.finalBallFinite) {
+      gRigidStressMetrics.finalBallPosition = pose.p;
+      gRigidStressMetrics.maxAbsPosition =
+          PxMax(gRigidStressMetrics.maxAbsPosition,
+                PxMax(PxAbs(pose.p.x),
+                      PxMax(PxAbs(pose.p.y), PxAbs(pose.p.z))));
+    }
+  }
+  gRigidStressMetrics.stateDigestLow = stateHasher.low;
+  gRigidStressMetrics.stateDigestHigh = stateHasher.high;
+  gRigidStressMetrics.stateDigestActorCount = stateActorCount;
+  finalizeRigidStressWorkMetrics();
+  finalizeRigidStressMetrics();
+}
+
 struct HelloWorldGateEvaluation {
   PxU32 exitCode;
   const char *status;
@@ -1147,6 +1533,38 @@ static void setGateFailure(HelloWorldGateEvaluation &evaluation,
   evaluation.exitCode = Snippets::eHEADLESS_GATE_FAILED;
   evaluation.status = "FAIL";
   evaluation.reason = reason;
+}
+
+static HelloWorldGateEvaluation evaluateRigidStressGate() {
+  HelloWorldGateEvaluation evaluation;
+  evaluation.boxCount = static_cast<PxU32>(gBoxes.size());
+  const PxU32 expectedProfileFrames =
+      gHeadlessOptions.frames - gRigidStressWarmupFrames;
+  if (gMetrics.completedFrames != gHeadlessOptions.frames ||
+      gMetrics.fetchFailures)
+    setGateError(evaluation, "incomplete_simulation");
+  if (evaluation.boxCount != gRigidStressExpectedBoxCount || !gShotBall ||
+      gMetrics.launchFailures)
+    setGateError(evaluation, "actor_registry");
+  if (gRigidStressMetrics.stateDigestActorCount !=
+          gRigidStressExpectedBoxCount + 1u ||
+      (!gRigidStressMetrics.stateDigestLow &&
+       !gRigidStressMetrics.stateDigestHigh))
+    setGateError(evaluation, "state_fingerprint");
+  if (gRigidStressMetrics.stepSamplesMs.size() != expectedProfileFrames)
+    setGateError(evaluation, "profile_window");
+  if (gErrorCallback.getFatalCount() || gMetrics.fetchErrorState)
+    setGateFailure(evaluation, "physx_error");
+  if (gRigidStressMetrics.finiteBoxes != gRigidStressExpectedBoxCount ||
+      !gRigidStressMetrics.finalBallFinite)
+    setGateFailure(evaluation, "non_finite");
+  if (gRigidStressMetrics.maxAbsPosition > gMaxAbsPositionCap)
+    setGateFailure(evaluation, "runaway");
+  if (!gRigidStressMetrics.movedBoxes ||
+      gRigidStressMetrics.finalBallPosition.z >=
+          gRigidStressBallPosition.z - 10.0f)
+    setGateFailure(evaluation, "inactive_workload");
+  return evaluation;
 }
 
 static const char *getSleepProbeFinding() {
@@ -1359,6 +1777,8 @@ static HelloWorldGateEvaluation evaluateGate() {
     return evaluateSleepProbeGate();
   if (gHeadlessLockProbe)
     return evaluateLockProbeGate();
+  if (gHeadlessRigidStress)
+    return evaluateRigidStressGate();
 
   HelloWorldGateEvaluation evaluation;
   evaluation.boxCount = static_cast<PxU32>(gBoxes.size());
@@ -1464,6 +1884,10 @@ void initPhysics(bool interactive) {
     gInitializationFailed = true;
     return;
   }
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  if (!interactive && gHeadlessRigidStress && gRigidStressWorkAttribution)
+    PxSetProfilerCallback(&gRigidStressProfiler);
+#endif
 
   if (interactive) {
     gPvd = PxCreatePvd(*gFoundation);
@@ -1488,6 +1912,22 @@ void initPhysics(bool interactive) {
   }
 
   PxSceneDesc sceneDesc(gPhysics->getTolerancesScale());
+  if (gHeadlessRigidStress) {
+    if (gRigidStressAvbdIterationsExplicit)
+      sceneDesc.avbdIterations = gRigidStressRequestedAvbdIterations;
+    if (gRigidStressAvbdJointIterationOverrideExplicit)
+      sceneDesc.avbdJointIterationOverride =
+          gRigidStressRequestedAvbdJointIterationOverride;
+    if (gRigidStressAvbdEarlyStopExplicit)
+      sceneDesc.avbdEnableEarlyStop =
+          gRigidStressRequestedAvbdEnableEarlyStop;
+    gRigidStressSceneAvbdIterations = sceneDesc.avbdIterations;
+    gRigidStressSceneAvbdJointIterationOverride =
+        sceneDesc.avbdJointIterationOverride;
+    gRigidStressSceneAvbdEnableEarlyStop = sceneDesc.avbdEnableEarlyStop;
+    if (gRigidStressEnhancedDeterminismRequested)
+      sceneDesc.flags |= PxSceneFlag::eENABLE_ENHANCED_DETERMINISM;
+  }
   sceneDesc.gravity = (gHeadlessSleepProbe || gHeadlessLockProbe)
                           ? PxVec3(0.0f)
                           : PxVec3(0.0f, -9.81f, 0.0f);
@@ -1501,15 +1941,21 @@ void initPhysics(bool interactive) {
   }
   sceneDesc.cpuDispatcher = gDispatcher;
   sceneDesc.filterShader =
-      interactive ? PxDefaultSimulationFilterShader : helloWorldFilterShader;
+      (interactive || gHeadlessRigidStress)
+          ? PxDefaultSimulationFilterShader
+          : helloWorldFilterShader;
   sceneDesc.simulationEventCallback =
-      interactive ? NULL : &gSimulationCallback;
+      (interactive || gHeadlessRigidStress) ? NULL : &gSimulationCallback;
   sceneDesc.solverType = gSolverType;
   gScene = gPhysics->createScene(sceneDesc);
   if (!gScene) {
     gInitializationFailed = true;
     return;
   }
+  if (gHeadlessRigidStress)
+    gRigidStressEnhancedDeterminismObserved =
+        gScene->getFlags().isSet(
+            PxSceneFlag::eENABLE_ENHANCED_DETERMINISM);
   gSleepMetrics.sceneSleepingDisabled =
       gScene->getFlags().isSet(PxSceneFlag::eDISABLE_SLEEPING);
   gSleepMetrics.wakeCounterResetValue = gScene->getWakeCounterResetValue();
@@ -1551,6 +1997,33 @@ void initPhysics(bool interactive) {
            Snippets::getSolverTypeName(gSolverType),
            getHeadlessCaseName(gHeadlessCase), gLockMetrics.actorCount,
            gHeadlessMode ? "yes" : "no");
+  } else if (gHeadlessRigidStress) {
+    gBoxes.reserve(gRigidStressExpectedBoxCount);
+    gPreviousBoxVelocities.reserve(gRigidStressExpectedBoxCount);
+    gPreviousBoxPositions.reserve(gRigidStressExpectedBoxCount);
+    gBoxContactBaselines.reserve(gRigidStressExpectedBoxCount);
+    gBoxContactPositionBaselines.reserve(gRigidStressExpectedBoxCount);
+    gBoxContacted.reserve(gRigidStressExpectedBoxCount);
+    gBoxResponseObserved.reserve(gRigidStressExpectedBoxCount);
+    gBoxIsTarget.reserve(gRigidStressExpectedBoxCount);
+    gBoxContactFrames.reserve(gRigidStressExpectedBoxCount);
+    const PxReal stackSpacing =
+        gRigidStressLayout == eRIGID_STRESS_CONNECTED_ISLAND
+            ? 2.0f * gRigidStressBoxHalfExtent
+            : 10.0f;
+    for (PxU32 i = 0; i < gRigidStressStackCount; ++i)
+      createStack(PxTransform(PxVec3(0, 0, stackZ -= stackSpacing)),
+                  gRigidStressStackSize, gRigidStressBoxHalfExtent);
+    createRigidStressProjectile();
+    if (gBoxes.size() != gRigidStressExpectedBoxCount)
+      gInitializationFailed = true;
+    printf("[HelloWorld] init solver=%s workload=rigid-stress layout=%s stacks=%u "
+           "boxes=%u projectile=1 ground=plane gpuDynamics=0 "
+           "broadphase=cpu headless=%s\n",
+           Snippets::getSolverTypeName(gSolverType), getRigidStressLayoutName(),
+           gRigidStressStackCount,
+           static_cast<PxU32>(gBoxes.size()),
+           gHeadlessMode ? "yes" : "no");
   } else {
     for (PxU32 i = 0; i < 5; i++)
       createStack(PxTransform(PxVec3(0, 0, stackZ -= 10.0f)), 10, 2.0f,
@@ -1566,6 +2039,60 @@ void initPhysics(bool interactive) {
   }
 }
 
+static void beginRigidStressAttributionFrame() {
+  if (!gRigidStressWorkAttribution ||
+      gRigidStressProfilerBaselineCaptured ||
+      gSimFrame != gRigidStressWarmupFrames)
+    return;
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  gRigidStressProfilerBaseline = gRigidStressProfiler.snapshot();
+  gRigidStressProfilerBaselineCaptured = true;
+#endif
+}
+
+static void sampleRigidStressWorkAfterFetch() {
+  if (!gRigidStressWorkAttribution ||
+      gSimFrame < gRigidStressWarmupFrames)
+    return;
+  PxSimulationStatistics stats;
+  gScene->getSimulationStatistics(stats);
+  PxU32 awakeDynamicBodies = 0;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gBoxes.size()); ++i)
+    awakeDynamicBodies +=
+        gBoxes[i] && !gBoxes[i]->isSleeping() ? 1u : 0u;
+  awakeDynamicBodies +=
+      gShotBall && !gShotBall->isSleeping() ? 1u : 0u;
+  gRigidStressWorkMetrics.awakeDynamicBodies += awakeDynamicBodies;
+  gRigidStressWorkMetrics.sceneStatsActiveDynamicBodies +=
+      stats.nbActiveDynamicBodies;
+  gRigidStressWorkMetrics.discreteContactPairs +=
+      stats.nbDiscreteContactPairsTotal;
+  gRigidStressWorkMetrics.contactPairsWithContacts +=
+      stats.nbDiscreteContactPairsWithContacts;
+  gRigidStressWorkMetrics.axisSolverConstraints +=
+      stats.nbAxisSolverConstraints;
+  gRigidStressWorkMetrics.solverPartitions += stats.nbPartitions;
+  gRigidStressWorkMetrics.peakAwakeDynamicBodies =
+      PxMax(gRigidStressWorkMetrics.peakAwakeDynamicBodies,
+            awakeDynamicBodies);
+  gRigidStressWorkMetrics.peakSceneStatsActiveDynamicBodies =
+      PxMax(gRigidStressWorkMetrics.peakSceneStatsActiveDynamicBodies,
+            stats.nbActiveDynamicBodies);
+  gRigidStressWorkMetrics.peakDiscreteContactPairs =
+      PxMax(gRigidStressWorkMetrics.peakDiscreteContactPairs,
+            stats.nbDiscreteContactPairsTotal);
+  gRigidStressWorkMetrics.peakContactPairsWithContacts =
+      PxMax(gRigidStressWorkMetrics.peakContactPairsWithContacts,
+            stats.nbDiscreteContactPairsWithContacts);
+  gRigidStressWorkMetrics.peakAxisSolverConstraints =
+      PxMax(gRigidStressWorkMetrics.peakAxisSolverConstraints,
+            stats.nbAxisSolverConstraints);
+  gRigidStressWorkMetrics.peakSolverPartitions =
+      PxMax(gRigidStressWorkMetrics.peakSolverPartitions,
+            stats.nbPartitions);
+  ++gRigidStressWorkMetrics.sampledFrames;
+}
+
 void stepPhysics(bool interactive) {
   if (!gScene)
     return;
@@ -1577,9 +2104,25 @@ void stepPhysics(bool interactive) {
   if (!interactive && gHeadlessLockProbe &&
       gSimFrame == gLockImpulseFrame)
     applyLockProbeRuntimeExcitation();
-  gScene->simulate(interactive ? (1.0f / 60.0f) : gHeadlessOptions.dt);
   PxU32 errorState = 0;
-  if (!gScene->fetchResults(true, &errorState)) {
+  bool fetched = false;
+  if (!interactive && gHeadlessRigidStress) {
+    beginRigidStressAttributionFrame();
+    const bool profileFrame = gSimFrame >= gRigidStressWarmupFrames;
+    PxTime stepTimer;
+    gScene->simulate(gHeadlessOptions.dt);
+    fetched = gScene->fetchResults(true, &errorState);
+    if (fetched && profileFrame) {
+      gRigidStressMetrics.stepSamplesMs.push_back(
+          PxReal(stepTimer.getElapsedSeconds() * 1000.0));
+    }
+    if (fetched)
+      sampleRigidStressWorkAfterFetch();
+  } else {
+    gScene->simulate(interactive ? (1.0f / 60.0f) : gHeadlessOptions.dt);
+    fetched = gScene->fetchResults(true, &errorState);
+  }
+  if (!fetched) {
     if (!interactive) {
       gMetrics.fetchFailures++;
       gMetrics.fetchErrorState |= errorState;
@@ -1593,6 +2136,8 @@ void stepPhysics(bool interactive) {
       sampleSleepProbeAfterFetch(gSimFrame);
     else if (gHeadlessLockProbe)
       sampleLockProbeAfterFetch(gSimFrame);
+    else if (gHeadlessRigidStress)
+      gMetrics.completedFrames = gSimFrame + 1u;
     else
       sampleDynamics(gSimFrame, 120);
   }
@@ -1613,6 +2158,10 @@ void cleanupPhysics(bool interactive) {
     PX_RELEASE(gPvd);
     PX_RELEASE(transport);
   }
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  if (PxGetProfilerCallback() == &gRigidStressProfiler)
+    PxSetProfilerCallback(NULL);
+#endif
   PX_RELEASE(gFoundation);
   gShotBall = NULL;
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i)
@@ -1839,6 +2388,280 @@ static void printLockProbeGateResult(
       double(gLockControlSpeedMinimum));
 }
 
+static void printRigidStressDetails() {
+  printf("[SnippetHelloWorldRigidStress] layout=%s stacks=%u stackSize=%u boxes=%u "
+         "projectileRadius=%.9g projectileDensity=%.9g "
+         "projectileInitialPosition=(%.9g,%.9g,%.9g) "
+         "projectileInitialVelocity=(%.9g,%.9g,%.9g) "
+         "projectileFinalPosition=(%.9g,%.9g,%.9g) finiteBoxes=%u "
+         "awakeBoxes=%u movedBoxes=%u minBoxCenterY=%.9g "
+         "maxAbsPosition=%.9g\n",
+         getRigidStressLayoutName(), gRigidStressStackCount,
+         gRigidStressStackSize,
+         static_cast<PxU32>(gBoxes.size()), double(gRigidStressBallRadius),
+         double(gRigidStressBallDensity), double(gRigidStressBallPosition.x),
+         double(gRigidStressBallPosition.y), double(gRigidStressBallPosition.z),
+         double(gRigidStressBallVelocity.x),
+         double(gRigidStressBallVelocity.y),
+         double(gRigidStressBallVelocity.z),
+         double(gRigidStressMetrics.finalBallPosition.x),
+         double(gRigidStressMetrics.finalBallPosition.y),
+         double(gRigidStressMetrics.finalBallPosition.z),
+         gRigidStressMetrics.finiteBoxes, gRigidStressMetrics.awakeBoxes,
+         gRigidStressMetrics.movedBoxes,
+         double(gRigidStressMetrics.minBoxCenterY),
+         double(gRigidStressMetrics.maxAbsPosition));
+}
+
+static PxU32 getRigidStressAvbdEarlyStopActive() {
+  const bool avbdSolver =
+      gHeadlessOptions.solverType == PxSolverType::eAVBD;
+  const PxU32 earlyStopFloor =
+      PxMin(gRigidStressSceneAvbdIterations, PxU32(4));
+  return avbdSolver && gRigidStressSceneAvbdEnableEarlyStop &&
+                 gRigidStressSceneAvbdIterations - earlyStopFloor > 1
+             ? 1u
+             : 0u;
+}
+
+static void printRigidStressGateResult(
+    const HelloWorldGateEvaluation &evaluation, PxU32 physicsErrors,
+    PxU32 physicsWarnings) {
+  printf(
+      "[AVBD_GATE] schema=4 snippet=SnippetHelloWorld case=rigid-stress "
+      "solver=%s execution=%s requestedFrames=%u completedFrames=%u "
+      "layout=%s enhancedDeterminismRequested=%u "
+      "enhancedDeterminismObserved=%u avbdBackendPolicy=%s "
+      "dt=%.9g seed=%u dispatcherThreads=%u "
+      "avbdIterationPolicy=scene-desc avbdIterationSource=%s "
+      "avbdIterations=%u avbdIterationActive=%u "
+      "avbdIterationSemantics=budgeted-complete-primal-dual-stiffness "
+      "avbdJointIterationOverrideSource=%s "
+      "avbdJointIterationOverride=%u avbdJointIterationOverrideActive=0 "
+      "avbdEarlyStopSource=%s avbdEarlyStopEnabled=%u "
+      "avbdEarlyStopActive=%u "
+      "capability=SUPPORTED "
+      "validation=GATED status=%s reason=%s physicsErrors=%u "
+      "physicsWarnings=%u fetchFailures=%u fetchErrorState=%u "
+      "stacks=%u stackSize=%u boxCount=%u projectileCount=%u "
+      "finiteBoxes=%u finalBallFinite=%u awakeBoxes=%u movedBoxes=%u "
+      "minBoxCenterY=%.9g maxAbsPosition=%.9g finalBallX=%.9g "
+      "finalBallY=%.9g finalBallZ=%.9g "
+      "stateDigestAlgorithm=fnv1a64x2-v1 stateDigestActorCount=%u "
+      "stateDigest=%016llx%016llx\n",
+      Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+      Snippets::getExecutionName(gHeadlessOptions.execution),
+      gHeadlessOptions.frames, gMetrics.completedFrames,
+      getRigidStressLayoutName(),
+      gRigidStressEnhancedDeterminismRequested ? 1u : 0u,
+      gRigidStressEnhancedDeterminismObserved ? 1u : 0u,
+      gRigidStressEnhancedDeterminismObserved ? "ordered" : "fast",
+      double(gHeadlessOptions.dt), gHeadlessOptions.seed,
+      gHeadlessOptions.dispatcherThreads,
+      gRigidStressAvbdIterationsExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdIterations,
+      gHeadlessOptions.solverType == PxSolverType::eAVBD ? 1u : 0u,
+      gRigidStressAvbdJointIterationOverrideExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdJointIterationOverride,
+      gRigidStressAvbdEarlyStopExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdEnableEarlyStop ? 1u : 0u,
+      getRigidStressAvbdEarlyStopActive(),
+      evaluation.status,
+      evaluation.reason, physicsErrors, physicsWarnings,
+      gMetrics.fetchFailures, gMetrics.fetchErrorState,
+      gRigidStressStackCount, gRigidStressStackSize,
+      evaluation.boxCount,
+      gRigidStressMetrics.finalBallFinite ? 1u : 0u,
+      gRigidStressMetrics.finiteBoxes,
+      gRigidStressMetrics.finalBallFinite ? 1u : 0u,
+      gRigidStressMetrics.awakeBoxes, gRigidStressMetrics.movedBoxes,
+      double(gRigidStressMetrics.minBoxCenterY),
+      double(gRigidStressMetrics.maxAbsPosition),
+      double(gRigidStressMetrics.finalBallPosition.x),
+      double(gRigidStressMetrics.finalBallPosition.y),
+      double(gRigidStressMetrics.finalBallPosition.z),
+      gRigidStressMetrics.stateDigestActorCount,
+      static_cast<unsigned long long>(gRigidStressMetrics.stateDigestHigh),
+      static_cast<unsigned long long>(gRigidStressMetrics.stateDigestLow));
+}
+
+static void printRigidStressPerformanceResult(
+    const HelloWorldGateEvaluation &evaluation) {
+#if PX_DEBUG
+  const char *buildProfile = "debug";
+#elif PX_CHECKED
+  const char *buildProfile = "checked";
+#elif PX_PROFILE
+  const char *buildProfile = "profile";
+#else
+  const char *buildProfile = "release";
+#endif
+  printf(
+      "[AVBD_RIGID_PERF] schema=4 snippet=SnippetHelloWorld "
+      "case=rigid-stress buildProfile=%s solver=%s sceneExecution=%s "
+      "layout=%s enhancedDeterminismRequested=%u "
+      "enhancedDeterminismObserved=%u avbdBackendPolicy=%s "
+      "dispatcherThreads=%u cpuOnly=1 gpuDynamics=0 broadphase=cpu pvd=0 "
+      "stacks=%u stackSize=%u rigidBoxes=%u projectileCount=1 "
+      "projectileRadius=%.9g projectileDensity=%.9g "
+      "actorPositionIterations=%u actorVelocityIterations=%u "
+      "avbdIterationPolicy=scene-desc avbdIterationSource=%s "
+      "avbdIterations=%u avbdIterationActive=%u "
+      "avbdIterationSemantics=budgeted-complete-primal-dual-stiffness "
+      "avbdJointIterationOverrideSource=%s "
+      "avbdJointIterationOverride=%u avbdJointIterationOverrideActive=0 "
+      "avbdEarlyStopSource=%s avbdEarlyStopEnabled=%u "
+      "avbdEarlyStopActive=%u "
+      "warmupFrames=%u "
+      "profileFrames=%u avgStepMs=%.9g p50StepMs=%.9g p95StepMs=%.9g "
+      "maxStepMs=%.9g measurement=simulate-fetch instrumentation=%s "
+      "status=%s\n",
+      buildProfile,
+      Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+      Snippets::getExecutionName(gHeadlessOptions.execution),
+      getRigidStressLayoutName(),
+      gRigidStressEnhancedDeterminismRequested ? 1u : 0u,
+      gRigidStressEnhancedDeterminismObserved ? 1u : 0u,
+      gRigidStressEnhancedDeterminismObserved ? "ordered" : "fast",
+      gHeadlessOptions.dispatcherThreads, gRigidStressStackCount,
+      gRigidStressStackSize, gRigidStressExpectedBoxCount,
+      double(gRigidStressBallRadius), double(gRigidStressBallDensity),
+      gRigidStressPositionIterations, gRigidStressVelocityIterations,
+      gRigidStressAvbdIterationsExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdIterations,
+      gHeadlessOptions.solverType == PxSolverType::eAVBD ? 1u : 0u,
+      gRigidStressAvbdJointIterationOverrideExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdJointIterationOverride,
+      gRigidStressAvbdEarlyStopExplicit ? "explicit" : "default",
+      gRigidStressSceneAvbdEnableEarlyStop ? 1u : 0u,
+      getRigidStressAvbdEarlyStopActive(),
+      gRigidStressWarmupFrames,
+      static_cast<PxU32>(gRigidStressMetrics.stepSamplesMs.size()),
+      double(gRigidStressMetrics.avgStepMs),
+      double(gRigidStressMetrics.p50StepMs),
+      double(gRigidStressMetrics.p95StepMs),
+      double(gRigidStressMetrics.maxStepMs),
+      gRigidStressWorkAttribution ? "work-attribution" : "none",
+      evaluation.status);
+}
+
+static void printRigidStressWorkResult() {
+#if PX_DEBUG || PX_CHECKED || PX_PROFILE
+  const PxU32 profilerZoneBuild = 1u;
+#else
+  const PxU32 profilerZoneBuild = 0u;
+#endif
+  const bool avbdSolver =
+      gHeadlessOptions.solverType == PxSolverType::eAVBD;
+  const char *iterationSource =
+      gRigidStressAvbdIterationsExplicit ? "explicit" : "default";
+  const char *jointIterationOverrideSource =
+      gRigidStressAvbdJointIterationOverrideExplicit ? "explicit" : "default";
+  const char *earlyStopSource =
+      gRigidStressAvbdEarlyStopExplicit ? "explicit" : "default";
+  const PxU32 earlyStopActive = getRigidStressAvbdEarlyStopActive();
+  if (!gRigidStressWorkMetrics.observed) {
+    printf(
+        "[AVBD_RIGID_WORK] schema=4 snippet=SnippetHelloWorld "
+        "case=rigid-stress solver=%s workTelemetry=UNAVAILABLE "
+        "attributionMode=none profilerZoneBuild=%u profileFrames=%u "
+        "actorPositionIterations=%u actorVelocityIterations=%u "
+        "avbdIterationPolicy=scene-desc avbdIterationSource=%s "
+        "avbdIterations=%u avbdIterationActive=%u "
+        "avbdIterationSemantics=budgeted-complete-primal-dual-stiffness "
+        "avbdJointIterationOverrideSource=%s "
+        "avbdJointIterationOverride=%u avbdJointIterationOverrideActive=0 "
+        "avbdEarlyStopSource=%s avbdEarlyStopEnabled=%u "
+        "avbdEarlyStopActive=%u "
+        "avbdIslandSolves=UNAVAILABLE "
+        "avbdInnerSweeps=UNAVAILABLE avbdBlockDescentZones=UNAVAILABLE "
+        "avbdBodyColorPlans=UNAVAILABLE avbdBodyColorPasses=UNAVAILABLE "
+        "avbdDualPasses=UNAVAILABLE avbdDualRanges=UNAVAILABLE "
+        "avbdBodyRanges=UNAVAILABLE "
+        "avbdLocalSolveCount=UNAVAILABLE localSolveTelemetry=UNAVAILABLE "
+        "awakeDynamicBodies=UNAVAILABLE "
+        "sceneStatsActiveDynamicBodies=UNAVAILABLE "
+        "discreteContactPairs=UNAVAILABLE "
+        "contactPairsWithContacts=UNAVAILABLE "
+        "axisSolverConstraints=UNAVAILABLE solverPartitions=UNAVAILABLE\n",
+        Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+        profilerZoneBuild,
+        static_cast<PxU32>(gRigidStressMetrics.stepSamplesMs.size()),
+        gRigidStressPositionIterations, gRigidStressVelocityIterations,
+        iterationSource, gRigidStressSceneAvbdIterations,
+        avbdSolver ? 1u : 0u, jointIterationOverrideSource,
+        gRigidStressSceneAvbdJointIterationOverride, earlyStopSource,
+        gRigidStressSceneAvbdEnableEarlyStop ? 1u : 0u, earlyStopActive);
+    return;
+  }
+  printf(
+      "[AVBD_RIGID_WORK] schema=4 snippet=SnippetHelloWorld "
+      "case=rigid-stress solver=%s workTelemetry=OBSERVED "
+      "attributionMode=profiler-zones profilerZoneBuild=%u profileFrames=%u "
+      "actorPositionIterations=%u actorVelocityIterations=%u "
+      "avbdIterationPolicy=scene-desc avbdIterationSource=%s "
+      "avbdIterations=%u avbdIterationActive=%u "
+      "avbdIterationSemantics=budgeted-complete-primal-dual-stiffness "
+      "avbdJointIterationOverrideSource=%s "
+      "avbdJointIterationOverride=%u avbdJointIterationOverrideActive=0 "
+      "avbdEarlyStopSource=%s avbdEarlyStopEnabled=%u "
+      "avbdEarlyStopActive=%u "
+      "avbdIslandSolves=%llu "
+      "avbdInnerSweeps=%llu avbdBlockDescentZones=%llu "
+      "avbdBodyColorPlans=%llu avbdBodyColorPasses=%llu "
+      "avbdDualPasses=%llu avbdDualRanges=%llu "
+      "avbdBodyRanges=%llu "
+      "avbdLocalSolveCount=UNAVAILABLE localSolveTelemetry=UNAVAILABLE "
+      "awakeDynamicBodies=%llu peakAwakeDynamicBodies=%u "
+      "sceneStatsActiveDynamicBodies=%llu "
+      "peakSceneStatsActiveDynamicBodies=%u "
+      "discreteContactPairs=%llu peakDiscreteContactPairs=%u "
+      "contactPairsWithContacts=%llu peakContactPairsWithContacts=%u "
+      "axisSolverConstraints=%llu peakAxisSolverConstraints=%u "
+      "solverPartitions=%llu peakSolverPartitions=%u\n",
+      Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+      profilerZoneBuild, gRigidStressWorkMetrics.sampledFrames,
+      gRigidStressPositionIterations, gRigidStressVelocityIterations,
+      iterationSource, gRigidStressSceneAvbdIterations,
+      avbdSolver ? 1u : 0u, jointIterationOverrideSource,
+      gRigidStressSceneAvbdJointIterationOverride, earlyStopSource,
+      gRigidStressSceneAvbdEnableEarlyStop ? 1u : 0u, earlyStopActive,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdIslandSolves),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdInnerSweeps),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdBlockDescentZones),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdBodyColorPlans),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdBodyColorPasses),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdDualPasses),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdDualRanges),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.avbdBodyRanges),
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.awakeDynamicBodies),
+      gRigidStressWorkMetrics.peakAwakeDynamicBodies,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.sceneStatsActiveDynamicBodies),
+      gRigidStressWorkMetrics.peakSceneStatsActiveDynamicBodies,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.discreteContactPairs),
+      gRigidStressWorkMetrics.peakDiscreteContactPairs,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.contactPairsWithContacts),
+      gRigidStressWorkMetrics.peakContactPairsWithContacts,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.axisSolverConstraints),
+      gRigidStressWorkMetrics.peakAxisSolverConstraints,
+      static_cast<unsigned long long>(
+          gRigidStressWorkMetrics.solverPartitions),
+      gRigidStressWorkMetrics.peakSolverPartitions);
+}
+
 static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
   if (gHeadlessSleepProbe) {
     printSleepProbeDetails();
@@ -1846,6 +2669,10 @@ static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
   }
   if (gHeadlessLockProbe) {
     printLockProbeDetails();
+    return;
+  }
+  if (gHeadlessRigidStress) {
+    printRigidStressDetails();
     return;
   }
   const PxReal tailAverageMaxBoxSpeed =
@@ -1888,6 +2715,12 @@ static void printGateResult(const HelloWorldGateEvaluation &evaluation,
   }
   if (gHeadlessLockProbe) {
     printLockProbeGateResult(evaluation, physicsErrors, physicsWarnings);
+    return;
+  }
+  if (gHeadlessRigidStress) {
+    printRigidStressGateResult(evaluation, physicsErrors, physicsWarnings);
+    printRigidStressPerformanceResult(evaluation);
+    printRigidStressWorkResult();
     return;
   }
   const PxReal tailAverageMaxBoxSpeed =
@@ -1983,13 +2816,121 @@ int snippetMain(int argc, const char *const *argv) {
 
   bool legacyBallShotSeen = false;
   bool ballShotFrameSeen = false;
+  bool warmupFramesSeen = false;
+  bool workAttributionSeen = false;
+  bool avbdIterationsSeen = false;
+  bool avbdJointIterationOverrideSeen = false;
+  bool avbdEarlyStopSeen = false;
+  bool enhancedDeterminismSeen = false;
+  bool rigidStressLayoutSeen = false;
   bool caseSeen = false;
   bool headlessOnlyOptionSeen = false;
   PxU32 ballShotFrame = 30;
+  PxU32 rigidStressWarmupFrames = 10;
+  PxU32 rigidStressAvbdIterations = 0;
+  PxU32 rigidStressAvbdJointIterationOverride = 0;
+  bool rigidStressAvbdEnableEarlyStop = false;
+  bool rigidStressEnhancedDeterminism = false;
+  RigidStressLayout rigidStressLayout =
+      eRIGID_STRESS_INDEPENDENT_ISLANDS;
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i];
     if (!arg)
       continue;
+    if (strcmp(arg, "--work-attribution") == 0) {
+      if (workAttributionSeen)
+        return reportConfigurationError(options,
+                                        "duplicate_--work-attribution");
+      workAttributionSeen = true;
+      headlessOnlyOptionSeen = true;
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--warmup-frames=")) {
+      if (warmupFramesSeen)
+        return reportConfigurationError(options,
+                                        "duplicate_--warmup-frames");
+      warmupFramesSeen = true;
+      headlessOnlyOptionSeen = true;
+      if (!Snippets::parseU32(arg + strlen("--warmup-frames="), 0,
+                              100000000u, rigidStressWarmupFrames))
+        return reportConfigurationError(options,
+                                        "invalid_--warmup-frames_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--avbd-iterations=")) {
+      if (avbdIterationsSeen)
+        return reportConfigurationError(options,
+                                        "duplicate_--avbd-iterations");
+      avbdIterationsSeen = true;
+      headlessOnlyOptionSeen = true;
+      if (!Snippets::parseU32(arg + strlen("--avbd-iterations="), 1u, 255u,
+                              rigidStressAvbdIterations))
+        return reportConfigurationError(options,
+                                        "invalid_--avbd-iterations_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(
+            arg, "--avbd-joint-iteration-override=")) {
+      if (avbdJointIterationOverrideSeen)
+        return reportConfigurationError(
+            options, "duplicate_--avbd-joint-iteration-override");
+      avbdJointIterationOverrideSeen = true;
+      headlessOnlyOptionSeen = true;
+      if (!Snippets::parseU32(
+              arg + strlen("--avbd-joint-iteration-override="), 0u, 255u,
+              rigidStressAvbdJointIterationOverride))
+        return reportConfigurationError(
+            options, "invalid_--avbd-joint-iteration-override_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--avbd-early-stop=")) {
+      if (avbdEarlyStopSeen)
+        return reportConfigurationError(options,
+                                        "duplicate_--avbd-early-stop");
+      avbdEarlyStopSeen = true;
+      headlessOnlyOptionSeen = true;
+      const char *value = arg + strlen("--avbd-early-stop=");
+      if (Snippets::equalsIgnoreCase(value, "on"))
+        rigidStressAvbdEnableEarlyStop = true;
+      else if (Snippets::equalsIgnoreCase(value, "off"))
+        rigidStressAvbdEnableEarlyStop = false;
+      else
+        return reportConfigurationError(options,
+                                        "invalid_--avbd-early-stop_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--enhanced-determinism=")) {
+      if (enhancedDeterminismSeen)
+        return reportConfigurationError(
+            options, "duplicate_--enhanced-determinism");
+      enhancedDeterminismSeen = true;
+      headlessOnlyOptionSeen = true;
+      const char *value = arg + strlen("--enhanced-determinism=");
+      if (Snippets::equalsIgnoreCase(value, "on"))
+        rigidStressEnhancedDeterminism = true;
+      else if (Snippets::equalsIgnoreCase(value, "off"))
+        rigidStressEnhancedDeterminism = false;
+      else
+        return reportConfigurationError(
+            options, "invalid_--enhanced-determinism_value");
+      continue;
+    }
+    if (Snippets::hasOptionPrefix(arg, "--rigid-stress-layout=")) {
+      if (rigidStressLayoutSeen)
+        return reportConfigurationError(
+            options, "duplicate_--rigid-stress-layout");
+      rigidStressLayoutSeen = true;
+      headlessOnlyOptionSeen = true;
+      const char *value = arg + strlen("--rigid-stress-layout=");
+      if (Snippets::equalsIgnoreCase(value, "independent"))
+        rigidStressLayout = eRIGID_STRESS_INDEPENDENT_ISLANDS;
+      else if (Snippets::equalsIgnoreCase(value, "connected"))
+        rigidStressLayout = eRIGID_STRESS_CONNECTED_ISLAND;
+      else
+        return reportConfigurationError(
+            options, "invalid_--rigid-stress-layout_value");
+      continue;
+    }
     if (Snippets::isCommonHeadlessOption(arg)) {
       if (Snippets::hasOptionPrefix(arg, "--case=") ||
           Snippets::hasOptionPrefix(arg, "--scenario="))
@@ -2041,18 +2982,49 @@ int snippetMain(int argc, const char *const *argv) {
   options.caseName = getHeadlessCaseName(headlessCase);
   const bool sleepProbeCase = isSleepProbeCase(headlessCase);
   const bool lockProbeCase = isLockProbeCase(headlessCase);
+  const bool rigidStressCase = headlessCase == eHELLO_CASE_RIGID_STRESS;
   if (sleepProbeCase && !options.framesExplicit)
     options.frames = headlessCase == eHELLO_CASE_SLEEP_WAKE ? 360u : 180u;
   if (lockProbeCase && !options.framesExplicit)
+    options.frames = 120u;
+  if (rigidStressCase && !options.framesExplicit)
     options.frames = 120u;
 
   if (ballShotFrameSeen && headlessCase != eHELLO_CASE_BALL_SHOT)
     return reportConfigurationError(options,
                                     "--ball-shot-frame_requires_ball-shot");
+  if (warmupFramesSeen && !rigidStressCase)
+    return reportConfigurationError(options,
+                                    "--warmup-frames_requires_rigid-stress");
+  if (workAttributionSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options, "--work-attribution_requires_rigid-stress");
+  if (avbdIterationsSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options, "--avbd-iterations_requires_rigid-stress");
+  if (avbdJointIterationOverrideSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options,
+        "--avbd-joint-iteration-override_requires_rigid-stress");
+  if (avbdEarlyStopSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options, "--avbd-early-stop_requires_rigid-stress");
+  if (enhancedDeterminismSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options, "--enhanced-determinism_requires_rigid-stress");
+  if (rigidStressLayoutSeen && !rigidStressCase)
+    return reportConfigurationError(
+        options, "--rigid-stress-layout_requires_rigid-stress");
+#if !(PX_DEBUG || PX_CHECKED || PX_PROFILE)
+  if (workAttributionSeen)
+    return reportConfigurationError(
+        options, "--work-attribution_requires_instrumented_build");
+#endif
   if (!options.headless && headlessOnlyOptionSeen)
     return reportConfigurationError(options,
                                     "gate_option_requires_--headless");
-  if ((!sleepProbeCase && !lockProbeCase && options.frames < 360) ||
+  if ((!sleepProbeCase && !lockProbeCase && !rigidStressCase &&
+       options.frames < 360) ||
       (lockProbeCase && options.frames < 120) ||
       (sleepProbeCase && headlessCase != eHELLO_CASE_SLEEP_WAKE &&
        options.frames < 180) ||
@@ -2065,6 +3037,10 @@ int snippetMain(int argc, const char *const *argv) {
                                     : sleepProbeCase
                                         ? "sleep_frames_must_be_at_least_180"
                                         : "frames_must_be_at_least_360");
+  if (rigidStressCase &&
+      (options.frames < 2u || rigidStressWarmupFrames >= options.frames))
+    return reportConfigurationError(
+        options, "rigid-stress_requires_profile_frame_after_warmup");
   if (headlessCase == eHELLO_CASE_BALL_SHOT &&
       options.frames < ballShotFrame + 120u)
     return reportConfigurationError(options,
@@ -2084,8 +3060,23 @@ int snippetMain(int argc, const char *const *argv) {
   gHeadlessBallShot = headlessCase == eHELLO_CASE_BALL_SHOT;
   gHeadlessSleepProbe = sleepProbeCase;
   gHeadlessLockProbe = lockProbeCase;
+  gHeadlessRigidStress = rigidStressCase;
+  gRigidStressWorkAttribution = workAttributionSeen;
+  gRigidStressAvbdIterationsExplicit = avbdIterationsSeen;
+  gRigidStressAvbdJointIterationOverrideExplicit =
+      avbdJointIterationOverrideSeen;
+  gRigidStressAvbdEarlyStopExplicit = avbdEarlyStopSeen;
+  gRigidStressRequestedAvbdIterations = rigidStressAvbdIterations;
+  gRigidStressRequestedAvbdJointIterationOverride =
+      rigidStressAvbdJointIterationOverride;
+  gRigidStressRequestedAvbdEnableEarlyStop =
+      rigidStressAvbdEnableEarlyStop;
+  gRigidStressEnhancedDeterminismRequested =
+      rigidStressEnhancedDeterminism;
+  gRigidStressLayout = rigidStressLayout;
   gHeadlessFrameCount = options.frames;
   gBallShotFrame = ballShotFrame;
+  gRigidStressWarmupFrames = rigidStressWarmupFrames;
 
 #ifdef RENDER_SNIPPET
   if (!options.headless) {
@@ -2096,7 +3087,19 @@ int snippetMain(int argc, const char *const *argv) {
 #endif
 
   Snippets::printHeadlessConfig("SnippetHelloWorld", gHeadlessOptions);
-  if (gHeadlessBallShot) {
+  if (gHeadlessRigidStress) {
+    printf("[SnippetHelloWorldConfig] workload=rigid-stress source=HelloGRB "
+           "layout=%s enhancedDeterminismRequested=%u "
+           "stacks=%u stackSize=%u boxes=%u projectileRadius=%.9g "
+           "projectileDensity=%.9g warmupFrames=%u profileFrames=%u "
+           "gpuDynamics=0 broadphase=cpu pvd=0 validation=GATED\n",
+           getRigidStressLayoutName(),
+           gRigidStressEnhancedDeterminismRequested ? 1u : 0u,
+           gRigidStressStackCount, gRigidStressStackSize,
+           gRigidStressExpectedBoxCount, double(gRigidStressBallRadius),
+           double(gRigidStressBallDensity), gRigidStressWarmupFrames,
+           gHeadlessOptions.frames - gRigidStressWarmupFrames);
+  } else if (gHeadlessBallShot) {
     printf("[SnippetHelloWorldConfig] shotFrame=%u targetStackZ=0 "
            "direction=negative-z responseWindowFrames=%u\n",
            gBallShotFrame, gBoxResponseWindowFrames);
@@ -2135,6 +3138,8 @@ int snippetMain(int argc, const char *const *argv) {
     if (gMetrics.fetchFailures)
       break;
   }
+  if (gHeadlessRigidStress)
+    sampleRigidStressFinalState();
   HelloWorldGateEvaluation evaluation = evaluateGate();
   printGateDetails(evaluation);
   cleanupPhysics(false);

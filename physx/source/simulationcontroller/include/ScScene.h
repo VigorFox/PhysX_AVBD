@@ -117,6 +117,9 @@ namespace Dy
 {
 	class Context;
 #if PX_SUPPORT_GPU_PHYSX
+	class AvbdRigidGpuWaveCallbackSink;
+#endif
+#if PX_SUPPORT_GPU_PHYSX
 	class DeformableSurface;
 	class DeformableVolume;
 	class ParticleSystem;
@@ -219,6 +222,10 @@ namespace Sc
 		DeformableRigidInteraction() : mCount(0) {}
 	};
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable:4324) // Scene contains an intentional 16-byte aligned PBD manager.
+#endif
 	class Scene : public PxUserAllocated
 	{
 		struct SimpleBodyPair
@@ -497,6 +504,44 @@ namespace Sc
 					void						removeAvbdCpuDynamic(
 													BodyCore& core);
 					void						stepAvbdCpuDeformableVolumes();
+					bool						stepAvbdCpuDeformableVolumesSolveOnly();
+					bool						prepareAvbdCpuDeformableVolumesSolve();
+					void						predictAvbdCpuDeformableVolumes();
+					bool						resumeAvbdCpuDeformableVolumesSolve(
+											bool* causalLayerTaskReady = NULL,
+											bool* worldPlaneContactTaskReady = NULL,
+											bool* rigidBoxSdfContactTaskReady = NULL,
+											bool* rigidSphereSdfContactTaskReady = NULL);
+					void						writeBackAvbdCpuDeformableVolumes();
+					void						finishAvbdCpuDeformableVolumesStandaloneStep();
+					void						finishAvbdCpuSoftComponentNoOpTask();
+					bool						scheduleAvbdCpuSoftComponentStep(PxBaseTask* continuation);
+					bool						scheduleAvbdCpuSoftComponentPrediction(PxBaseTask* continuation);
+					bool						scheduleAvbdCpuSoftComponentCausalLayer(PxBaseTask* continuation);
+					bool						finishAvbdCpuSoftComponentCausalLayerSerialFallback();
+					bool						scheduleAvbdCpuSoftComponentWorldPlaneContact(PxBaseTask* continuation);
+					bool						finishAvbdCpuSoftComponentWorldPlaneContactSerialFallback(
+											bool& nextLayerReady,
+											bool& nextWorldPlaneContactTaskReady,
+											bool& nextRigidBoxSdfContactTaskReady,
+											bool& nextRigidSphereSdfContactTaskReady);
+					bool						scheduleAvbdCpuSoftComponentRigidBoxSdfContact(PxBaseTask* continuation);
+					bool						finishAvbdCpuSoftComponentRigidBoxSdfContactSerialFallback(
+											bool& nextLayerReady,
+											bool& nextWorldPlaneContactTaskReady,
+											bool& nextRigidBoxSdfContactTaskReady,
+											bool& nextRigidSphereSdfContactTaskReady);
+					bool						scheduleAvbdCpuSoftComponentRigidSphereSdfContact(PxBaseTask* continuation);
+					bool						finishAvbdCpuSoftComponentRigidSphereSdfContactSerialFallback(
+											bool& nextLayerReady,
+											bool& nextWorldPlaneContactTaskReady,
+											bool& nextRigidBoxSdfContactTaskReady,
+											bool& nextRigidSphereSdfContactTaskReady);
+					bool						scheduleAvbdCpuSoftComponentWriteBack(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentCausalLayerFinish(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentWorldPlaneContactFinish(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentRigidBoxSdfContactFinish(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentRigidSphereSdfContactFinish(PxBaseTask* continuation);
 					void						prepareAvbdCpuSoftIslandGeneration();
 
 	PX_FORCE_INLINE	PxsSimulationController*	getSimulationController()						{ return mSimulationController;	}
@@ -715,6 +760,7 @@ namespace Sc
 
 // PX_ENABLE_SIM_STATS
 					void						getStats(PxSimulationStatistics& stats) const;
+					void						getAvbdCpuSoftBodyStatistics(PxSimulationStatistics& stats) const;
 	PX_FORCE_INLINE	SimStats&					getStatsInternal() { return *mStats; }
 // PX_ENABLE_SIM_STATS
 
@@ -998,7 +1044,9 @@ namespace Sc
 					PxsMemoryManager*			mMemoryManager;
 
 #if PX_SUPPORT_GPU_PHYSX
-					PxsKernelWranglerManager*		mGpuWranglerManagers;
+				Dy::Context*				mAvbdGpuDynamicsContext;
+				Dy::AvbdRigidGpuWaveCallbackSink*	mAvbdGpuCallbackSink;
+				PxsKernelWranglerManager*		mGpuWranglerManagers;
 					PxsHeapMemoryAllocatorManager*	mHeapMemoryAllocationManager;
 #endif
 
@@ -1166,6 +1214,9 @@ namespace Sc
 					void						unregisterInteractions(PxBaseTask*);
 					void						postThirdPassIslandGen(PxBaseTask*);
 					void						postSolver(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentStep(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentPredictionFinish(PxBaseTask* continuation);
+					void						avbdCpuSoftComponentWriteBackFinish(PxBaseTask* continuation);
 					void						afterIntegration(PxBaseTask* continuation);  // performs sleep check, for instance
 					void						postCCDPass(PxBaseTask* continuation);
 					void						ccdBroadPhaseAABB(PxBaseTask* continuation);
@@ -1182,6 +1233,7 @@ namespace Sc
 					void						removeShapes(RigidSim& , PxInlineArray<ShapeSim*, 64>& , PxInlineArray<const ShapeCore*, 64>&, bool wakeOnLostTouch);
 
 	private:
+					void						finishPostSolverAfterAvbdCpuSoftStep();
 					void						addShapes(NpShape*const* shapes, PxU32 nbShapes, size_t ptrOffset, RigidSim& sim, ShapeSim*& prefetchedShapeSim, PxBounds3* outBounds);
 					void						updateContactDistances(PxBaseTask* continuation);
 					void						updateDirtyShapes(PxBaseTask* continuation);
@@ -1201,6 +1253,9 @@ namespace Sc
 
 					Cm::DelegateTask<Scene, &Scene::afterIntegration>					mAfterIntegration;
 					Cm::DelegateTask<Scene, &Scene::postSolver>							mPostSolver;
+					Cm::DelegateTask<Scene, &Scene::avbdCpuSoftComponentStep>	mAvbdCpuSoftComponentStep;
+					Cm::DelegateTask<Scene, &Scene::avbdCpuSoftComponentPredictionFinish>	mAvbdCpuSoftComponentPredictionFinish;
+					Cm::DelegateTask<Scene, &Scene::avbdCpuSoftComponentWriteBackFinish>	mAvbdCpuSoftComponentWriteBackFinish;
 					Cm::DelegateTask<Scene, &Scene::solver>								mSolver;
 					Cm::DelegateTask<Scene, &Scene::updateBodies>						mUpdateBodies;
 					Cm::DelegateTask<Scene, &Scene::updateShapes>						mUpdateShapes;
@@ -1422,6 +1477,9 @@ namespace Sc
 					bool								mSleepDeformableVolumeListValid;
 #endif
 	};
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 	bool	activateInteraction(Interaction* interaction);
 	void	activateInteractions(Sc::ActorSim& actorSim);

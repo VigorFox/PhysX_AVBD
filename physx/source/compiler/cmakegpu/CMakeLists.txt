@@ -36,6 +36,8 @@ ENDIF()
 
 OPTION(PX_GENERATE_GPU_STATIC_LIBRARIES "Generate PhysXGPU static libraries" OFF)
 OPTION(PX_GENERATE_GPU_REDUCED_ARCHITECTURES "Generate only a reduced number of GPU architectures for faster compilation" OFF)
+OPTION(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE
+	"Build the experimental AVBD GPU owner-wave hybrid backend" OFF)
 
 CMAKE_POLICY(SET CMP0057 NEW) # Enable IN_LIST
 

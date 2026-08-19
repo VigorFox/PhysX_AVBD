@@ -33,7 +33,10 @@ IF (NOT DEFINED PHYSX_CXX_FLAGS)
 ENDIF()
 
 # Get the CXX Flags from the Cached variables set by the PhysX CMakeLists
-SET(CMAKE_CXX_FLAGS "${PHYSX_CXX_FLAGS}")
+# CUDA 13 headers contain UTF-8 characters that trigger MSVC C4819 under the
+# default system code page.  This suppression is scoped to GPU host projects;
+# the ordinary CPU CMake path keeps its original /WX diagnostics.
+SET(CMAKE_CXX_FLAGS "${PHYSX_CXX_FLAGS} /wd4819")
 
 SET(CMAKE_CXX_FLAGS_DEBUG   ${PHYSX_CXX_FLAGS_DEBUG})
 SET(CMAKE_CXX_FLAGS_CHECKED ${PHYSX_CXX_FLAGS_CHECKED})
@@ -41,7 +44,7 @@ SET(CMAKE_CXX_FLAGS_PROFILE ${PHYSX_CXX_FLAGS_PROFILE})
 SET(CMAKE_CXX_FLAGS_RELEASE ${PHYSX_CXX_FLAGS_RELEASE})
 
 # Get the CXX Flags from the Cached variables set by the PhysX CMakeLists
-SET(CMAKE_C_FLAGS "${PHYSX_C_FLAGS}")
+SET(CMAKE_C_FLAGS "${PHYSX_C_FLAGS} /wd4819")
 
 SET(CMAKE_C_FLAGS_DEBUG   ${PHYSX_C_FLAGS_DEBUG})
 SET(CMAKE_C_FLAGS_CHECKED ${PHYSX_C_FLAGS_CHECKED})
@@ -51,13 +54,27 @@ SET(CMAKE_C_FLAGS_RELEASE ${PHYSX_C_FLAGS_RELEASE})
 # CUDA flags specific to windows:
 SET(CUDA_SUPPRESS_WARNINGS "-Xptxas -w -ftemplate-backtrace-limit=2")
 
-SET(PHYSX_CUDA_FLAGS "${PHYSX_CUDA_FLAGS} -D_WIN32_WINNT=0x0601 ${CUDA_SUPPRESS_WARNINGS}")
+# PhysX supplies the CUDA runtime registration/launch stubs in
+# CudaKernelWrangler.cpp and links the driver API directly.  Do not ask nvcc
+# to add cudart; CUDA 13 otherwise introduces duplicate runtime symbols in
+# the PhysXGpu shared target.
+SET(PHYSX_CUDA_FLAGS "${PHYSX_CUDA_FLAGS} -D_WIN32_WINNT=0x0601 -cudart=none ${CUDA_SUPPRESS_WARNINGS}")
 
 # Build debug info for all configurations
-SET(PHYSX_CUDA_FLAGS_DEBUG   "${CUDA_DEBUG_FLAG} --compiler-options=/W4,/nologo,/Zi,/Od,/RTC1,/wd4505,/wd4459,/wd4324,/wd4244 -G -g" CACHE INTERNAL "PhysX Debug CUDA Flags")
-SET(PHYSX_CUDA_FLAGS_CHECKED "${CUDA_NDEBUG_FLAG} -lineinfo --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244" CACHE INTERNAL "PhysX Checked CUDA Flags")
-SET(PHYSX_CUDA_FLAGS_PROFILE "${CUDA_NDEBUG_FLAG} -lineinfo --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244" CACHE INTERNAL "PhysX Profile CUDA Flags")
-SET(PHYSX_CUDA_FLAGS_RELEASE "${CUDA_NDEBUG_FLAG} -lineinfo --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244" CACHE INTERNAL "PhysX Release CUDA Flags")
+# CUDA 13 headers contain a small number of UTF-8 characters that trigger
+# MSVC C4819 under the default system code page.  The warning is external
+# header encoding noise, not a PhysX source diagnostic; suppress it only for
+# CUDA host compilation so the regular CPU /WX policy remains unchanged.
+SET(PHYSX_CUDA_FLAGS_DEBUG   "${CUDA_DEBUG_FLAG} -cudart=none --compiler-options=/W4,/nologo,/Zi,/Od,/RTC1,/wd4505,/wd4459,/wd4324,/wd4244,/wd4819 -G -g" CACHE INTERNAL "PhysX Debug CUDA Flags")
+SET(PHYSX_CUDA_FLAGS_CHECKED "${CUDA_NDEBUG_FLAG} -lineinfo -cudart=none --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244,/wd4819" CACHE INTERNAL "PhysX Checked CUDA Flags")
+SET(PHYSX_CUDA_FLAGS_PROFILE "${CUDA_NDEBUG_FLAG} -lineinfo -cudart=none --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244,/wd4819" CACHE INTERNAL "PhysX Profile CUDA Flags")
+SET(PHYSX_CUDA_FLAGS_RELEASE "${CUDA_NDEBUG_FLAG} -lineinfo -cudart=none --compiler-options=/W4,/nologo,/Ot,/Ox,/Zi,/wd4505,/wd4459,/wd4324,/wd4244,/wd4819" CACHE INTERNAL "PhysX Release CUDA Flags")
+
+# CMake otherwise adds cudart/cudadevrt to every CUDA target on Windows.  The
+# PhysX GPU layer supplies its own runtime registration stubs and uses the
+# CUDA driver API, so the target-level runtime must stay disabled as well as
+# the nvcc compile flag above.
+SET(CMAKE_CUDA_RUNTIME_LIBRARY None)
 
 # These flags are local to the directory the CMakeLists.txt is in, so don't get carried over to OTHER CMakeLists.txt (thus the CACHE variables above)
 SET(CMAKE_CUDA_FLAGS ${PHYSX_CUDA_FLAGS})

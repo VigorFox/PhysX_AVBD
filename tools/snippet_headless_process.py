@@ -136,6 +136,7 @@ class HeadlessProcessResult:
     timed_out: bool
     visible_window_detected: bool
     visible_window_titles: tuple[str, ...]
+    cpu_affinity_mask: int | None
 
 
 def windows_startup_info() -> subprocess.STARTUPINFO | None:
@@ -211,19 +212,84 @@ def _terminate_process_tree(
         process.kill()
 
 
+def _apply_process_affinity_mask(
+    process: subprocess.Popen[str], cpu_affinity_mask: int | None
+) -> int | None:
+    """Pin one launched snippet and confirm the effective Windows affinity mask.
+
+    This is deliberately process-scoped instead of a job-object affinity: the
+    headless runner's job object exists only to clean up descendants on a
+    timeout, whereas an explicit benchmark affinity must be observable on the
+    actual snippet process that owns the PhysX dispatcher.
+    """
+
+    if cpu_affinity_mask is None:
+        return None
+    if not isinstance(cpu_affinity_mask, int) or cpu_affinity_mask <= 0:
+        raise ValueError("cpu_affinity_mask must be a positive integer")
+    if os.name != "nt":
+        raise RuntimeError("cpu_affinity_mask is only supported on Windows")
+    pointer_bits = ctypes.sizeof(ctypes.c_size_t) * 8
+    maximum_mask = (1 << pointer_bits) - 1
+    if cpu_affinity_mask > maximum_mask:
+        raise ValueError(
+            "cpu_affinity_mask does not fit the native processor-mask width"
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.SetProcessAffinityMask.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_size_t,
+    )
+    kernel32.SetProcessAffinityMask.restype = wintypes.BOOL
+    kernel32.GetProcessAffinityMask.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_size_t),
+        ctypes.POINTER(ctypes.c_size_t),
+    )
+    kernel32.GetProcessAffinityMask.restype = wintypes.BOOL
+    process_handle = int(process._handle)  # type: ignore[attr-defined]
+    if not kernel32.SetProcessAffinityMask(process_handle, cpu_affinity_mask):
+        raise ctypes.WinError(ctypes.get_last_error())
+    effective_process_mask = ctypes.c_size_t()
+    system_mask = ctypes.c_size_t()
+    if not kernel32.GetProcessAffinityMask(
+        process_handle,
+        ctypes.byref(effective_process_mask),
+        ctypes.byref(system_mask),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if int(effective_process_mask.value) != cpu_affinity_mask:
+        raise RuntimeError(
+            "Windows applied a different process affinity mask: "
+            f"requested=0x{cpu_affinity_mask:X} "
+            f"effective=0x{int(effective_process_mask.value):X}"
+        )
+    return int(effective_process_mask.value)
+
+
 def run_headless_process(
     argv: Sequence[str],
     *,
     cwd: Path,
     env: Mapping[str, str],
     timeout_seconds: float,
+    cpu_affinity_mask: int | None = None,
 ) -> HeadlessProcessResult:
-    """Run one snippet and terminate fail-closed on timeout or visible UI."""
+    """Run one snippet and terminate fail-closed on timeout or visible UI.
+
+    When ``cpu_affinity_mask`` is set, the child is pinned before it can enter
+    the polling loop and the effective mask is returned with the result.  This
+    provides a reproducible host-configuration boundary for timing protocols;
+    it is intentionally opt-in so correctness gates retain their established
+    scheduler behaviour.
+    """
 
     job = _KillOnCloseJob()
     process: subprocess.Popen[str] | None = None
     stdout = ""
     stderr = ""
+    effective_affinity_mask: int | None = None
     try:
         process = subprocess.Popen(
             list(argv),
@@ -237,6 +303,9 @@ def run_headless_process(
             creationflags=windows_creation_flags(),
             startupinfo=windows_startup_info(),
             shell=False,
+        )
+        effective_affinity_mask = _apply_process_affinity_mask(
+            process, cpu_affinity_mask
         )
         job.assign(process)
         deadline = time.monotonic() + timeout_seconds
@@ -278,6 +347,7 @@ def run_headless_process(
             timed_out=timed_out,
             visible_window_detected=bool(visible_titles),
             visible_window_titles=visible_titles,
+            cpu_affinity_mask=effective_affinity_mask,
         )
     except BaseException:
         if process is not None:

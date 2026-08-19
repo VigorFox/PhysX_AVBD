@@ -46,6 +46,8 @@ ENDIF()
 OPTION(PX_SCALAR_MATH "Disable SIMD math" OFF)
 OPTION(PX_GENERATE_STATIC_LIBRARIES "Generate static libraries" OFF)
 OPTION(PX_EXPORT_LOWLEVEL_PDB "Export low level pdb's" OFF)
+OPTION(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE
+	"Build the experimental AVBD GPU owner-wave hybrid backend" OFF)
 
 IF(NOT DEFINED PHYSX_ROOT_DIR)
 

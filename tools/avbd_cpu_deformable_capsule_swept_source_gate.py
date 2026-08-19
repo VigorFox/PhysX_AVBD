@@ -90,6 +90,7 @@ def main() -> int:
             "PX_FORCE_INLINE bool avbdGetSweepAngularDistance(",
             "angularDistance = 2.0f * PxAcos(alignment);",
             "PX_FORCE_INLINE bool avbdGetRigidCapsuleSweepPose(",
+            "AvbdSoftContactTargetKind::eWORLD_STATIC",
             "struct AvbdSweptRotatingCapsulePointEntry",
             "PX_FORCE_INLINE bool "
             "avbdSegmentEnterExpandedRotatingCapsule(",
@@ -114,8 +115,8 @@ def main() -> int:
 
     swept = section(
         soft,
+        "inline void avbdDetectSoftRigidCapsuleSweptSDFRange(",
         "inline void avbdDetectSoftRigidCapsuleSweptSDF(",
-        "inline void avbdDetectSoftRigidCapsuleOGCFeatures(",
     )
     require_all(
         errors,
@@ -124,7 +125,6 @@ def main() -> int:
         (
             "!sourceBody->compiled.speculativeCCDEnabled",
             "avbdIsSoftBodySurfaceVertex(",
-            "AvbdSoftContactTargetKind::eWORLD_STATIC",
             "AvbdSoftContactTargetKind::eKINEMATIC_RIGID",
             "AvbdSoftContactTargetKind::eRIGID_BODY",
             "avbdGetRigidCapsuleSweepPose(",
@@ -154,6 +154,22 @@ def main() -> int:
         "inline void avbdDetectSoftRigidCapsuleSweptOGCFeatures(",
         "inline void avbdDetectSoftRigidCapsuleOGCFeatures(",
     )
+    reverse_forward_owner = section(
+        soft,
+        "PX_NOINLINE inline bool "
+        "avbdRigidCapsuleForwardVertexOwnsSweptFeature(",
+        "inline void avbdDetectSoftRigidCapsuleSweptOGCFeatures(",
+    )
+    require_all(
+        errors,
+        "capsule reverse forward-owner predicate",
+        reverse_forward_owner,
+        (
+            "avbdSegmentEnterExpandedCapsule(",
+            "avbdSegmentEnterExpandedRotatingCapsule(",
+            "currentSdf < margin",
+        ),
+    )
     require_all(
         errors,
         "capsule reverse rotation uses conservative feature entry",
@@ -162,7 +178,7 @@ def main() -> int:
             "const bool rotationsEquivalent =",
             "(displacement1 - displacement0)",
             "(displacement2 - displacement0)",
-            "avbdSegmentEnterExpandedRotatingCapsule(",
+            "avbdRigidCapsuleForwardVertexOwnsSweptFeature(",
             "const PxVec3 relativeCenterEnd =",
             "capsule.halfHeight + expandedRadius",
             "avbdRotatingSegmentEnterExpandedTriangleNonVertex(",
@@ -297,6 +313,9 @@ def main() -> int:
             "midSweepMinSeparation",
             "positiveAngularTravel",
             "negativeAngularTravel",
+            "rotationalFreeEnd",
+            "PxPi * 10.0f / 9.0f",
+            "abs(positive_angular - negative_angular) <= 0.05",
             "PxCapsuleGeometry(radius, halfHeight)",
             "getCapsuleSignedSeparation(",
         )

@@ -43,6 +43,9 @@ namespace physx
 	extern "C" void initSolverKernels10();
 	extern "C" void initSolverKernels11();
 	extern "C" void initSolverKernels13();
+#if defined(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	extern "C" void initSolverKernels14();
+#endif
 
 	void createPxgSolver()
 	{
@@ -60,6 +63,9 @@ namespace physx
 		initSolverKernels10();
 		initSolverKernels11();
 		initSolverKernels13();
+#if defined(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+		initSolverKernels14();
+#endif
 #endif
 	}
 

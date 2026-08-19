@@ -24,7 +24,7 @@ headless acceptance gates. It does not imply production readiness.
 | Contact extensions | Accepted | Contact modification/reporting, custom geometry and custom convex paths |
 | Moving triangle meshes | Integrated | Default and sphere-shot gates pass; wider stress policy remains open |
 | CPU cloth and soft bodies | Accepted for correctness | Public `PxScene` Surface/Volume lifecycle, interaction, collision and material semantics |
-| Performance and GPU | Pending | CPU soft-body optimization and the AVBD GPU backend are not complete |
+| Performance and GPU | In progress | CPU ISA dispatch foundation is integrated; AoSoA/SIMD solver kernels and the AVBD GPU backend remain incomplete |
 
 ## What AVBD Adds
 

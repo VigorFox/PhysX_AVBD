@@ -199,6 +199,330 @@ public:
 	*/
 	PxU32   peakConstraintMemory;
 
+	/**
+	\brief Number of AVBD CPU component-fallback soft-body solves in the current simulation step.
+
+	A value of zero does not imply that a scene contains no AVBD deformables: a
+	native rigid/soft island may own the step instead.  The associated workspace
+	growth fields therefore describe the component fallback path only.
+	*/
+	PxU32	avbdCpuSoftBodyComponentFallbackSteps;
+
+	/**
+	\brief Number of native rigid/soft AVBD island solves selected in the current simulation step.
+	*/
+	PxU32	avbdCpuSoftBodyNativeIslandSteps;
+
+	/**
+	\brief AVBD CPU ISA dispatch snapshot for this Scene.
+
+	`Requested` and `Selected` use 0=auto, 1=sse2, 2=avx2fma and 3=invalid.
+	`CompiledBackendMask` uses bit 0=SSE2 and bit 1=AVX2+FMA. Capability bits
+	are SSE2, AVX, OSXSAVE, XMM/YMM state, AVX2 and FMA in that order. These
+	are immutable process/context configuration diagnostics, not a timing API.
+	*/
+	PxU32	avbdCpuIsaRequested;
+	PxU32	avbdCpuIsaSelected;
+	PxU32	avbdCpuIsaCompiledBackendMask;
+	PxU32	avbdCpuIsaCapabilityMask;
+	PxU32	avbdCpuIsaForceModeRejected;
+	PxU32	avbdCpuIsaKernelSelfTestPassed;
+	PxU32	avbdCpuIsaFmaUsed;
+	PxReal	avbdCpuIsaKernelSelfTestValue;
+
+	/**
+	\brief AVBD CPU component-fallback persistent-workspace capacity growth in the current simulation step.
+
+	The fields include both the initial OGC contact preparation and all solver
+	redetection stages.  They are intended for performance telemetry; they are
+	not a memory-accounting API.
+	*/
+	PxU64	avbdCpuSoftBodyWorkspaceGrowthEvents;
+	PxU64	avbdCpuSoftBodyWorkspaceGrowthBytes;
+	PxU64	avbdCpuSoftBodyContactWorkspaceGrowthEvents;
+	PxU64	avbdCpuSoftBodyContactWorkspaceGrowthBytes;
+	PxU64	avbdCpuSoftBodyContactSweepScratchGrowthEvents;
+	PxU64	avbdCpuSoftBodyContactSweepScratchGrowthBytes;
+	PxU64	avbdCpuSoftBodyContactOutputGrowthEvents;
+	PxU64	avbdCpuSoftBodyContactOutputGrowthBytes;
+
+	/**
+	\brief Per completed component-fallback step contact capacity watermarks.
+
+	These values identify the contact-output, contact-incidence and contact-state
+	transfer capacities required by the observed step. They are diagnostics for
+	persistent-workspace policy, not a public allocation guarantee.
+	*/
+	PxU32	avbdCpuSoftBodyPeakContactOutputCount;
+	PxU32	avbdCpuSoftBodyPeakContactOutputCapacity;
+	PxU32	avbdCpuSoftBodyPeakContactIncidenceCount;
+	PxU32	avbdCpuSoftBodyPeakContactIncidenceCapacity;
+	PxU32	avbdCpuSoftBodyPeakStateTransferContactCount;
+	PxU32	avbdCpuSoftBodyPeakStateTransferContactCapacity;
+	PxU32	avbdCpuSoftBodyPeakStateTransferUsedCapacity;
+
+	/**
+	\brief AVBD CPU component-fallback P4 particle-primal color-plan telemetry.
+
+	`ColorCount` and `DynamicAccessGroupCount` are the largest complete plan
+	published in the step. The sweep counters distinguish the explicit
+	validation-only colored serial schedule from its required serial fallback;
+	they do not report worker parallelism.
+	*/
+	PxU32	avbdCpuSoftBodyParticlePrimalColorCount;
+	PxU32	avbdCpuSoftBodyParticlePrimalDynamicAccessGroupCount;
+	PxU64	avbdCpuSoftBodyParticlePrimalColoredSerialSweeps;
+	PxU64	avbdCpuSoftBodyParticlePrimalColoredSerialFallbackSweeps;
+
+	/**
+	\brief Read-only qualification counters for the default-off AVBD CPU
+	single-tet ground-patch experiment.
+
+	They count prepared PositionAL ground rows observed at redetection epochs.
+	They do not imply that a coupled patch solve was applied.
+	*/
+	PxU64	avbdCpuSoftBodyGroundTetPatchGroundPositionAlRows;
+	PxU64	avbdCpuSoftBodyGroundTetPatchFourSupportRows;
+	PxU64	avbdCpuSoftBodyGroundTetPatchSingleTetRows;
+	PxU64	avbdCpuSoftBodyGroundTetPatchActiveRows;
+
+	/**
+	\brief Default-off AVBD CPU world-static velocity-tangent-owner telemetry.
+
+	`Rows` counts final velocity rows that used the separate tangent owner;
+	`AppliedRows` counts finite local disk projections actually written.
+	*/
+	PxU64	avbdCpuSoftBodyWorldStaticVelocityTangentOwnerRows;
+	PxU64	avbdCpuSoftBodyWorldStaticVelocityTangentAppliedRows;
+	/**
+	\brief AVBD CPU P8.1 particle-primal material-work census.
+
+	The process-start opt-in census counts work that reached the scalar
+	particle-primal authority. `TetPacket8*` measures consecutive tet-incidence
+	capacity only; it does not report executed SIMD packets or permit a solver
+	ordering change.
+	*/
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusDynamicParticleSolves;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusTriangleEvaluations;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusCorotationalTetEvaluations;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusNeoHookeanTetEvaluations;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusBendingEvaluations;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusContactEvaluations;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusTetPacket8FullPackets;
+	PxU64	avbdCpuSoftBodyParticlePrimalCensusTetPacket8TailLanes;
+
+	/**
+	\brief AVBD CPU P8.2 canonical corotational-tet packet-IR telemetry.
+
+	These fields describe immutable topology metadata built under the P8.2
+	opt-in. They are explicitly not a count of executed SIMD packets.
+	*/
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrBodies;
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrPackets;
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrActiveLanes;
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrTailLanes;
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrActiveTailLanes;
+	PxU64	avbdCpuSoftBodyParticlePrimalTetPacketIrInvalidBodies;
+
+	/**
+	\brief AVBD CPU component-fallback OGC work counters for the current simulation step.
+
+	The counters include the initial detection and every outer redetection. They
+	are performance diagnostics only: they do not describe public contact-pair
+	statistics or relax OGC coverage.
+	*/
+	PxU64	avbdCpuSoftBodyCollisionDetectionCalls;
+	PxU64	avbdCpuSoftBodyCollisionBodyPairs;
+	PxU64	avbdCpuSoftBodyCollisionOverlappingBodyPairs;
+	PxU64	avbdCpuSoftBodyCollisionParticleSurfaceCandidates;
+	PxU64	avbdCpuSoftBodyCollisionInsideTriangleTests;
+	PxU64	avbdCpuSoftBodyCollisionClosestTriangleTests;
+	PxU64	avbdCpuSoftBodyCollisionSelfTriangleTests;
+	PxU64	avbdCpuSoftBodyCollisionSelfTriangleBoundsBuilt;
+	PxU64	avbdCpuSoftBodyCollisionSelfVertexSweepEntriesBuilt;
+	PxU64	avbdCpuSoftBodyCollisionSelfEdgeBoundsBuilt;
+	PxU64	avbdCpuSoftBodyCollisionSurfaceBvhRefitNodes;
+	PxU64	avbdCpuSoftBodyCollisionSurfaceBvhCandidates;
+	PxU64	avbdCpuSoftBodyCollisionSurfaceEdgeBvhRefitNodes;
+	PxU64	avbdCpuSoftBodyCollisionSurfaceEdgeBvhCandidates;
+	PxU64	avbdCpuSoftBodyCollisionRigidParticleTests;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleFaceCandidates;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleFaceTests;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleEdgeCandidates;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleEdgeTests;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleVertexCandidates;
+	PxU64	avbdCpuSoftBodyCollisionRigidTriangleVertexTests;
+	PxU64	avbdCpuSoftBodyCollisionGeneratedGroundContacts;
+	PxU64	avbdCpuSoftBodyCollisionGeneratedRigidContacts;
+	PxU64	avbdCpuSoftBodyCollisionGeneratedSoftContacts;
+	PxU64	avbdCpuSoftBodyCollisionGeneratedSelfContacts;
+
+	/**
+	\brief AVBD CPU Scene-taskgraph telemetry for the current simulation step.
+
+	The counters describe PxTaskManager/PxCpuDispatcher work only.  They do not
+	include an AVBD-private thread pool (none is permitted by the CPU AVBD
+	taskgraph contract). `peakActiveSolveTasks` is observed concurrency, whereas
+	`requestedDispatcherWorkers` is the dispatcher capacity requested by the
+	scene. `pureSoftEligible*` identifies large soft work by particle count, not
+	by the unrelated rigid-body count; it is a P2/P4 scheduling denominator.
+	*/
+	PxU32	avbdCpuTaskGraphRequestedDispatcherWorkers;
+	PxU32	avbdCpuTaskGraphSubmittedSolveTasks;
+	PxU32	avbdCpuTaskGraphCompletedSolveTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveSolveTasks;
+	PxU32	avbdCpuTaskGraphBarrierTasks;
+	PxU32	avbdCpuTaskGraphSerialSolveTasks;
+	PxU32	avbdCpuTaskGraphSubmittedPredictionTasks;
+	PxU32	avbdCpuTaskGraphCompletedPredictionTasks;
+	PxU32	avbdCpuTaskGraphPeakActivePredictionTasks;
+	PxU32	avbdCpuTaskGraphSerialPredictionStages;
+	PxU32	avbdCpuTaskGraphSubmittedWriteBackTasks;
+	PxU32	avbdCpuTaskGraphCompletedWriteBackTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveWriteBackTasks;
+	PxU32	avbdCpuTaskGraphSerialWriteBackStages;
+	/**
+	\brief AVBD P4.5 causal-layer particle-primal task/fan-in telemetry.
+
+	These are actual Scene dispatcher child tasks and parent reductions. They
+	do not reinterpret the P4 causal-plan/sweep counters as concurrency.
+	*/
+	PxU32	avbdCpuTaskGraphSubmittedCausalLayerTasks;
+	PxU32	avbdCpuTaskGraphCompletedCausalLayerTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveCausalLayerTasks;
+	PxU32	avbdCpuTaskGraphCausalLayerFanIns;
+	PxU32	avbdCpuTaskGraphSerialCausalLayerFallbacks;
+	PxU32	avbdCpuTaskGraphMaxCausalLayerOccupancy;
+	PxU64	avbdCpuTaskGraphTotalCausalLayerOccupancy;
+	PxU64	avbdCpuTaskGraphCausalLayerParentReductionNanos;
+	/** Parent-side persistent causal-layer task/observation pool capacity
+	   growth for this step. Payload bytes exclude allocator bookkeeping. */
+	PxU32	avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents;
+	PxU64	avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes;
+	/** AVBD P5.3b world-plane candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedWorldPlaneContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedWorldPlaneContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveWorldPlaneContactTasks;
+	PxU32	avbdCpuTaskGraphWorldPlaneContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialWorldPlaneContactFallbacks;
+	/** AVBD P5.4b static rigid-box discrete-SDF candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedRigidBoxSdfContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedRigidBoxSdfContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveRigidBoxSdfContactTasks;
+	PxU32	avbdCpuTaskGraphRigidBoxSdfContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialRigidBoxSdfContactFallbacks;
+	/** AVBD P5.5b static rigid-sphere discrete-SDF candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedRigidSphereSdfContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedRigidSphereSdfContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveRigidSphereSdfContactTasks;
+	PxU32	avbdCpuTaskGraphRigidSphereSdfContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialRigidSphereSdfContactFallbacks;
+	/** AVBD P5.6b static rigid-capsule discrete-SDF candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedRigidCapsuleSdfContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedRigidCapsuleSdfContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveRigidCapsuleSdfContactTasks;
+	PxU32	avbdCpuTaskGraphRigidCapsuleSdfContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialRigidCapsuleSdfContactFallbacks;
+	/** AVBD P5.7b static rigid-convex discrete-SDF candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedRigidConvexSdfContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedRigidConvexSdfContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveRigidConvexSdfContactTasks;
+	PxU32	avbdCpuTaskGraphRigidConvexSdfContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialRigidConvexSdfContactFallbacks;
+	/** AVBD P5.8b static rigid-triangle current-pose candidate task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedRigidTriangleSurfaceContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedRigidTriangleSurfaceContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveRigidTriangleSurfaceContactTasks;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialRigidTriangleSurfaceContactFallbacks;
+	/** AVBD P5.18a static-triangle task work and persistent-storage telemetry.
+	   These are explicit work/capacity observations, not timing or speedup data. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeaturePlanRows;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureFacePairWorkItems;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange;
+	/** AVBD P5.18c largest single child-family capacity/work bounds. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthEvents;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthBytes;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthEvents;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthBytes;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthEvents;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthBytes;
+	/** AVBD P5.18b static-triangle transaction resident capacity-model bytes.
+	   These exclude allocator bookkeeping and are not timing measurements. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceOutputResidentPayloadBytes;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes;
+	/** AVBD P5.18d dispatcher wall-clock overlap proxy; not CPU-time telemetry. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactTaskWallNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxTaskWallNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFanInSpanNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos;
+	/** AVBD P5.23 Scene-owned rigid-triangle transaction diagnostic wall-clock intervals. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactSerialTransactionNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactParentCompletionNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactPostContinuationNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactTaskSubmissionNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries;
+	/** AVBD P5.32 default-off forward-owner result-cache outcomes. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses;
+	/** AVBD P5.38 discrete OGC query-funnel diagnostics. */
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates;
+	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns;
+	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns;
+	/** AVBD P5.9d soft-pair OGC plan-range task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedSoftPairContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedSoftPairContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveSoftPairContactTasks;
+	PxU32	avbdCpuTaskGraphSoftPairContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialSoftPairContactFallbacks;
+	/** AVBD P5.10b self-BVH VF/EE task/fan-in telemetry. */
+	PxU32	avbdCpuTaskGraphSubmittedSelfBvhContactTasks;
+	PxU32	avbdCpuTaskGraphCompletedSelfBvhContactTasks;
+	PxU32	avbdCpuTaskGraphPeakActiveSelfBvhContactTasks;
+	PxU32	avbdCpuTaskGraphSelfBvhContactFanIns;
+	PxU32	avbdCpuTaskGraphSerialSelfBvhContactFallbacks;
+	PxU32	avbdCpuTaskGraphPureSoftEligibleIslands;
+	PxU32	avbdCpuTaskGraphPureSoftEligibleParticles;
+
 //broadphase:
 	/**
 	\brief Get number of broadphase volumes added for the current simulation step.
@@ -410,6 +734,210 @@ public:
 		compressedContactSize					(0),
 		requiredContactConstraintMemory			(0),
 		peakConstraintMemory					(0),
+		avbdCpuSoftBodyComponentFallbackSteps	(0),
+		avbdCpuSoftBodyNativeIslandSteps		(0),
+		avbdCpuIsaRequested					(0),
+		avbdCpuIsaSelected					(0),
+		avbdCpuIsaCompiledBackendMask			(0),
+		avbdCpuIsaCapabilityMask				(0),
+		avbdCpuIsaForceModeRejected			(0),
+		avbdCpuIsaKernelSelfTestPassed			(0),
+		avbdCpuIsaFmaUsed						(0),
+		avbdCpuIsaKernelSelfTestValue			(0.0f),
+		avbdCpuSoftBodyWorkspaceGrowthEvents	(0),
+		avbdCpuSoftBodyWorkspaceGrowthBytes		(0),
+		avbdCpuSoftBodyContactWorkspaceGrowthEvents(0),
+		avbdCpuSoftBodyContactWorkspaceGrowthBytes(0),
+		avbdCpuSoftBodyContactSweepScratchGrowthEvents(0),
+		avbdCpuSoftBodyContactSweepScratchGrowthBytes(0),
+		avbdCpuSoftBodyContactOutputGrowthEvents(0),
+		avbdCpuSoftBodyContactOutputGrowthBytes(0),
+		avbdCpuSoftBodyPeakContactOutputCount(0),
+		avbdCpuSoftBodyPeakContactOutputCapacity(0),
+		avbdCpuSoftBodyPeakContactIncidenceCount(0),
+		avbdCpuSoftBodyPeakContactIncidenceCapacity(0),
+		avbdCpuSoftBodyPeakStateTransferContactCount(0),
+		avbdCpuSoftBodyPeakStateTransferContactCapacity(0),
+		avbdCpuSoftBodyPeakStateTransferUsedCapacity(0),
+		avbdCpuSoftBodyParticlePrimalColorCount(0),
+		avbdCpuSoftBodyParticlePrimalDynamicAccessGroupCount(0),
+		avbdCpuSoftBodyParticlePrimalColoredSerialSweeps(0),
+		avbdCpuSoftBodyParticlePrimalColoredSerialFallbackSweeps(0),
+		avbdCpuSoftBodyGroundTetPatchGroundPositionAlRows(0),
+		avbdCpuSoftBodyGroundTetPatchFourSupportRows(0),
+		avbdCpuSoftBodyGroundTetPatchSingleTetRows(0),
+		avbdCpuSoftBodyGroundTetPatchActiveRows(0),
+		avbdCpuSoftBodyWorldStaticVelocityTangentOwnerRows(0),
+		avbdCpuSoftBodyWorldStaticVelocityTangentAppliedRows(0),
+		avbdCpuSoftBodyParticlePrimalCensusDynamicParticleSolves(0),
+		avbdCpuSoftBodyParticlePrimalCensusTriangleEvaluations(0),
+		avbdCpuSoftBodyParticlePrimalCensusCorotationalTetEvaluations(0),
+		avbdCpuSoftBodyParticlePrimalCensusNeoHookeanTetEvaluations(0),
+		avbdCpuSoftBodyParticlePrimalCensusBendingEvaluations(0),
+		avbdCpuSoftBodyParticlePrimalCensusContactEvaluations(0),
+		avbdCpuSoftBodyParticlePrimalCensusTetPacket8FullPackets(0),
+		avbdCpuSoftBodyParticlePrimalCensusTetPacket8TailLanes(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrBodies(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrPackets(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrActiveLanes(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrTailLanes(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrActiveTailLanes(0),
+		avbdCpuSoftBodyParticlePrimalTetPacketIrInvalidBodies(0),
+		avbdCpuSoftBodyCollisionDetectionCalls(0),
+		avbdCpuSoftBodyCollisionBodyPairs(0),
+		avbdCpuSoftBodyCollisionOverlappingBodyPairs(0),
+		avbdCpuSoftBodyCollisionParticleSurfaceCandidates(0),
+		avbdCpuSoftBodyCollisionInsideTriangleTests(0),
+		avbdCpuSoftBodyCollisionClosestTriangleTests(0),
+		avbdCpuSoftBodyCollisionSelfTriangleTests(0),
+		avbdCpuSoftBodyCollisionSelfTriangleBoundsBuilt(0),
+		avbdCpuSoftBodyCollisionSelfVertexSweepEntriesBuilt(0),
+		avbdCpuSoftBodyCollisionSelfEdgeBoundsBuilt(0),
+		avbdCpuSoftBodyCollisionSurfaceBvhRefitNodes(0),
+		avbdCpuSoftBodyCollisionSurfaceBvhCandidates(0),
+		avbdCpuSoftBodyCollisionSurfaceEdgeBvhRefitNodes(0),
+		avbdCpuSoftBodyCollisionSurfaceEdgeBvhCandidates(0),
+		avbdCpuSoftBodyCollisionRigidParticleTests(0),
+		avbdCpuSoftBodyCollisionRigidTriangleFaceCandidates(0),
+		avbdCpuSoftBodyCollisionRigidTriangleFaceTests(0),
+		avbdCpuSoftBodyCollisionRigidTriangleEdgeCandidates(0),
+		avbdCpuSoftBodyCollisionRigidTriangleEdgeTests(0),
+		avbdCpuSoftBodyCollisionRigidTriangleVertexCandidates(0),
+		avbdCpuSoftBodyCollisionRigidTriangleVertexTests(0),
+		avbdCpuSoftBodyCollisionGeneratedGroundContacts(0),
+		avbdCpuSoftBodyCollisionGeneratedRigidContacts(0),
+		avbdCpuSoftBodyCollisionGeneratedSoftContacts(0),
+		avbdCpuSoftBodyCollisionGeneratedSelfContacts(0),
+		avbdCpuTaskGraphRequestedDispatcherWorkers(0),
+		avbdCpuTaskGraphSubmittedSolveTasks(0),
+		avbdCpuTaskGraphCompletedSolveTasks(0),
+		avbdCpuTaskGraphPeakActiveSolveTasks(0),
+		avbdCpuTaskGraphBarrierTasks(0),
+		avbdCpuTaskGraphSerialSolveTasks(0),
+		avbdCpuTaskGraphSubmittedPredictionTasks(0),
+		avbdCpuTaskGraphCompletedPredictionTasks(0),
+		avbdCpuTaskGraphPeakActivePredictionTasks(0),
+		avbdCpuTaskGraphSerialPredictionStages(0),
+		avbdCpuTaskGraphSubmittedWriteBackTasks(0),
+		avbdCpuTaskGraphCompletedWriteBackTasks(0),
+		avbdCpuTaskGraphPeakActiveWriteBackTasks(0),
+		avbdCpuTaskGraphSerialWriteBackStages(0),
+		avbdCpuTaskGraphSubmittedCausalLayerTasks(0),
+		avbdCpuTaskGraphCompletedCausalLayerTasks(0),
+		avbdCpuTaskGraphPeakActiveCausalLayerTasks(0),
+		avbdCpuTaskGraphCausalLayerFanIns(0),
+		avbdCpuTaskGraphSerialCausalLayerFallbacks(0),
+		avbdCpuTaskGraphMaxCausalLayerOccupancy(0),
+		avbdCpuTaskGraphTotalCausalLayerOccupancy(0),
+		avbdCpuTaskGraphCausalLayerParentReductionNanos(0),
+		avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents(0),
+		avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes(0),
+		avbdCpuTaskGraphSubmittedWorldPlaneContactTasks(0),
+		avbdCpuTaskGraphCompletedWorldPlaneContactTasks(0),
+		avbdCpuTaskGraphPeakActiveWorldPlaneContactTasks(0),
+		avbdCpuTaskGraphWorldPlaneContactFanIns(0),
+		avbdCpuTaskGraphSerialWorldPlaneContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedRigidBoxSdfContactTasks(0),
+		avbdCpuTaskGraphCompletedRigidBoxSdfContactTasks(0),
+		avbdCpuTaskGraphPeakActiveRigidBoxSdfContactTasks(0),
+		avbdCpuTaskGraphRigidBoxSdfContactFanIns(0),
+		avbdCpuTaskGraphSerialRigidBoxSdfContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedRigidSphereSdfContactTasks(0),
+		avbdCpuTaskGraphCompletedRigidSphereSdfContactTasks(0),
+		avbdCpuTaskGraphPeakActiveRigidSphereSdfContactTasks(0),
+		avbdCpuTaskGraphRigidSphereSdfContactFanIns(0),
+		avbdCpuTaskGraphSerialRigidSphereSdfContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedRigidCapsuleSdfContactTasks(0),
+		avbdCpuTaskGraphCompletedRigidCapsuleSdfContactTasks(0),
+		avbdCpuTaskGraphPeakActiveRigidCapsuleSdfContactTasks(0),
+		avbdCpuTaskGraphRigidCapsuleSdfContactFanIns(0),
+		avbdCpuTaskGraphSerialRigidCapsuleSdfContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedRigidConvexSdfContactTasks(0),
+		avbdCpuTaskGraphCompletedRigidConvexSdfContactTasks(0),
+		avbdCpuTaskGraphPeakActiveRigidConvexSdfContactTasks(0),
+		avbdCpuTaskGraphRigidConvexSdfContactFanIns(0),
+		avbdCpuTaskGraphSerialRigidConvexSdfContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedRigidTriangleSurfaceContactTasks(0),
+		avbdCpuTaskGraphCompletedRigidTriangleSurfaceContactTasks(0),
+		avbdCpuTaskGraphPeakActiveRigidTriangleSurfaceContactTasks(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFanIns(0),
+		avbdCpuTaskGraphSerialRigidTriangleSurfaceContactFallbacks(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeaturePlanRows(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureFacePairWorkItems(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthEvents(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthEvents(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthEvents(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceOutputResidentPayloadBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactTaskWallNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxTaskWallNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFanInSpanNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactSerialTransactionNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactParentCompletionNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactPostContinuationNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactTaskSubmissionNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns(0),
+		avbdCpuTaskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns(0),
+		avbdCpuTaskGraphSubmittedSoftPairContactTasks(0),
+		avbdCpuTaskGraphCompletedSoftPairContactTasks(0),
+		avbdCpuTaskGraphPeakActiveSoftPairContactTasks(0),
+		avbdCpuTaskGraphSoftPairContactFanIns(0),
+		avbdCpuTaskGraphSerialSoftPairContactFallbacks(0),
+		avbdCpuTaskGraphSubmittedSelfBvhContactTasks(0),
+		avbdCpuTaskGraphCompletedSelfBvhContactTasks(0),
+		avbdCpuTaskGraphPeakActiveSelfBvhContactTasks(0),
+		avbdCpuTaskGraphSelfBvhContactFanIns(0),
+		avbdCpuTaskGraphSerialSelfBvhContactFallbacks(0),
+		avbdCpuTaskGraphPureSoftEligibleIslands(0),
+		avbdCpuTaskGraphPureSoftEligibleParticles(0),
 		nbDiscreteContactPairsTotal				(0),
 		nbDiscreteContactPairsWithCacheHits		(0),
 		nbDiscreteContactPairsWithContacts		(0),

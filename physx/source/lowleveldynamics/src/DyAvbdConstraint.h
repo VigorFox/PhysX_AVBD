@@ -210,6 +210,9 @@ struct AvbdCompiledVelocityObjective {
  */
 struct AvbdCompiledContactObjectiveProgram {
   enum { eMAX_OBJECTIVES = 3 };
+  // The high bit is a terminal producer-owned validity cache.  It reuses the
+  // existing byte so the contact ABI and hot-structure size do not grow.
+  enum { eVALIDATED = 0x80u };
 
   AvbdCompiledVelocityObjective entries[eMAX_OBJECTIVES];
   physx::PxU8 authoredSourceSlotMask;
@@ -231,6 +234,13 @@ PX_FORCE_INLINE void resetAvbdContactObjectiveProgram(
   program.legacySourceSlotMask = 0;
   program.entryCount = 0;
   program.invalid = 0;
+}
+
+PX_FORCE_INLINE void markAvbdContactObjectiveProgramValidated(
+    AvbdCompiledContactObjectiveProgram &program) {
+  // Only the final solve-island classification may publish this bit.  All
+  // mutating helpers clear it before changing the program.
+  program.invalid = AvbdCompiledContactObjectiveProgram::eVALIDATED;
 }
 
 PX_FORCE_INLINE physx::PxU8 getAvbdContactObjectiveSourceSlots(
@@ -277,7 +287,12 @@ PX_FORCE_INLINE bool canAssignAvbdVelocityObjective(
     physx::PxU64 objectiveKey) {
   const physx::PxU8 sourceSlotMask =
       getAvbdContactObjectiveSourceSlots(kind, span);
-  if (program.invalid || kind == AvbdVelocityObjectiveKind::None ||
+  // eVALIDATED is a cache publication bit, not a rejection state.  Joint and
+  // mixed-island compilers may probe a program after solveIsland has published
+  // that cache, before a mutating helper has an opportunity to clear it.
+  if ((program.invalid &
+       physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED)) != 0 ||
+      kind == AvbdVelocityObjectiveKind::None ||
       kind == AvbdVelocityObjectiveKind::Invalid ||
       sourceSlotMask == 0 || objectiveRowCount == 0)
     return false;
@@ -312,6 +327,9 @@ PX_FORCE_INLINE bool assignAvbdVelocityObjective(
     AvbdVelocityObjectiveReconstruction reconstruction,
     physx::PxU32 objectiveRowCount,
     physx::PxU64 objectiveKey) {
+  program.invalid = physx::PxU8(
+      program.invalid &
+      physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED));
   const physx::PxU8 sourceSlotMask =
       getAvbdContactObjectiveSourceSlots(kind, span);
   if (!canAssignAvbdVelocityObjective(
@@ -345,6 +363,9 @@ PX_FORCE_INLINE bool assignAvbdVelocityObjective(
 PX_FORCE_INLINE void setAvbdContactObjectiveLegacySources(
     AvbdCompiledContactObjectiveProgram &program,
     physx::PxU8 authoredSourceSlotMask) {
+  program.invalid = physx::PxU8(
+      program.invalid &
+      physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED));
   program.authoredSourceSlotMask =
       physx::PxU8(authoredSourceSlotMask & eCONTACT_SOURCE_ALL);
   if (program.invalid) {
@@ -482,6 +503,8 @@ PX_FORCE_INLINE bool isValidAvbdVelocityObjective(
 
 PX_FORCE_INLINE bool isValidAvbdContactObjectiveProgram(
     const AvbdCompiledContactObjectiveProgram &program) {
+  if (program.invalid == AvbdCompiledContactObjectiveProgram::eVALIDATED)
+    return true;
   if (program.invalid ||
       program.entryCount >
           AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES)
@@ -847,23 +870,8 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   /** Previous-frame world contact on static/deformable partner (friction). */
   physx::PxVec3 staticPrevWorldPoint;
 
-  /**
-   * Opt-in ownership diagnostic state. These values are populated for every
-   * prepared row so PHYSX_AVBD_ITER_DIAG can correlate cache restore, the
-   * exact pre-AL row state, and the post-AL/finalize stages without changing
-   * any solver decision.
-   */
-  physx::PxReal diagnosticRestoredNormalLambda;
-  physx::PxReal diagnosticRestoredNormalPenalty;
-  physx::PxReal diagnosticInitialNormalPenalty;
-  physx::PxReal diagnosticPreAlRawViolation;
-  physx::PxReal diagnosticPreAlViolation;
-  physx::PxReal diagnosticPreAlNormalCoordinate;
-  physx::PxU8 diagnosticNormalWarmstartHit;
-  physx::PxU8 diagnosticNormalWarmstartAge;
   /** Persistent contact-manager state used for normal ownership. */
   physx::PxU8 contactManagerEstablished;
-  physx::PxU8 contactManagerAge;
 
   /**
    * Support classification for surface-motion and friction policy.
@@ -901,7 +909,7 @@ struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
   //   The inner solve correction targets C(x) = lambda/rho (not 0):
   //     correctionMag = -(C(x) - lambda/rho) / w * baumgarte
   //   This lets lambda act as a "contact force memory" that accumulates
-  //   across outer iterations, enabling convergence with fewer iterations.
+  //   across complete AVBD iterations, enabling convergence with fewer passes.
   //
   //   Sign convention:
   //     contactNormal points from B toward A
@@ -1147,10 +1155,44 @@ PX_FORCE_INLINE bool hasVelocityFrictionManifoldOwner(
 
 PX_FORCE_INLINE bool hasVelocityTangentMaterialOwner(
     const AvbdContactConstraint &c) {
-  return hasVelocityTangentTargetOwner(c) ||
-         hasVelocityPassiveFrictionManifoldOwner(c) ||
-         hasVelocityPassiveFrictionComponentOwner(c) ||
-         hasVelocityBodyStaticFrictionSweepOwner(c);
+  // This predicate is queried from the per-contact dual and post-AL loops.
+  // The previous composition called four find helpers, each of which
+  // revalidated the complete objective program before scanning its entries.
+  // Validate once and scan the bounded three-entry program once instead.
+  // No arithmetic or objective precedence changes: this is exactly the union
+  // of the four owner/kind pairs above, with the same fail-closed validation.
+  const AvbdCompiledContactObjectiveProgram &program =
+      c.objectiveProgram;
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    const bool tangentTarget =
+        compiled.kind == AvbdVelocityObjectiveKind::TangentTarget &&
+        (compiled.owner == AvbdVelocityObjectiveOwner::PointFinalize ||
+         compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize);
+    const bool manifoldPassive =
+        compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction &&
+        compiled.span ==
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial;
+    const bool bodyStaticSweep =
+        compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction &&
+        compiled.span == AvbdVelocityObjectiveSpan::TangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::PoseDerived;
+    const bool componentPassive =
+        compiled.owner == AvbdVelocityObjectiveOwner::ComponentFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction;
+    if (tangentTarget || manifoldPassive || bodyStaticSweep ||
+        componentPassive) {
+      return true;
+    }
+  }
+  return false;
 }
 
 PX_FORCE_INLINE bool hasVelocityJointFinalizeOwner(
@@ -1181,7 +1223,8 @@ PX_FORCE_INLINE bool hasDeformablePositionTangentOwner(
  */
 PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-    physx::PxU32 numBodies) {
+    physx::PxU32 numBodies,
+    const AvbdBodyConstraintMap *contactMap = nullptr) {
   if (!contacts || numContacts == 0 || numBodies == 0)
     return;
 
@@ -1194,26 +1237,30 @@ PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
     physx::PxU32 tangentRowCount = 0;
     physx::PxU64 normalObjectiveKey = ~physx::PxU64(0);
     physx::PxU64 tangentObjectiveKey = ~physx::PxU64(0);
-    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    const physx::PxU32 *mapIndices = nullptr;
+    physx::PxU32 mapCount = 0;
+    const bool hasMapRange =
+        contactMap && contactMap->constraintOffsets &&
+        contactMap->constraintCounts && bodyIndex < contactMap->numBodies;
+    if (hasMapRange)
+      contactMap->getBodyConstraints(bodyIndex, mapIndices, mapCount);
+    const physx::PxU32 loopCount = hasMapRange ? mapCount : numContacts;
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
       const AvbdContactConstraint &contact = contacts[c];
-      if ((contact.header.bodyIndexA != bodyIndex &&
-           contact.header.bodyIndexB != bodyIndex) ||
-          !isBodyVsStaticContact(
-              contact.header.bodyIndexA,
-              contact.header.bodyIndexB, numBodies))
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
         continue;
       found = true;
-      const bool dynamicIsA =
-          contact.header.bodyIndexA == bodyIndex;
+      const bool dynamicIsA = contact.header.bodyIndexA == bodyIndex;
       const physx::PxReal linearScale =
-          dynamicIsA ? contact.invMassScaleA
-                     : contact.invMassScaleB;
+          dynamicIsA ? contact.invMassScaleA : contact.invMassScaleB;
       const physx::PxReal angularScale =
-          dynamicIsA ? contact.invInertiaScaleA
-                     : contact.invInertiaScaleB;
+          dynamicIsA ? contact.invInertiaScaleA : contact.invInertiaScaleB;
       const bool hasPassiveTangent =
-          contact.friction > 0.0f ||
-          contact.staticFriction > 0.0f;
+          contact.friction > 0.0f || contact.staticFriction > 0.0f;
       if (hasDeformableStaticAnchor(contact) ||
           hasKinematicShellAnchor(contact) ||
           contact.targetVelocity.magnitudeSquared() > 1.0e-12f ||
@@ -1246,17 +1293,16 @@ PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
     if (!found || !supported || normalRowCount == 0)
       continue;
 
-    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
       const AvbdContactConstraint &contact = contacts[c];
-      if ((contact.header.bodyIndexA != bodyIndex &&
-           contact.header.bodyIndexB != bodyIndex) ||
-          !isBodyVsStaticContact(
-              contact.header.bodyIndexA,
-              contact.header.bodyIndexB, numBodies))
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
         continue;
       const bool hasPassiveTangent =
-          contact.friction > 0.0f ||
-          contact.staticFriction > 0.0f;
+          contact.friction > 0.0f || contact.staticFriction > 0.0f;
       if (!canAssignAvbdVelocityObjective(
               contact.objectiveProgram,
               AvbdVelocityObjectiveOwner::ManifoldFinalize,
@@ -1278,42 +1324,41 @@ PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
       }
     }
     if (!supported) {
-      for (physx::PxU32 c = 0; c < numContacts; ++c) {
+      for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+        const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
         AvbdContactConstraint &contact = contacts[c];
-        if ((contact.header.bodyIndexA == bodyIndex ||
-             contact.header.bodyIndexB == bodyIndex) &&
-            isBodyVsStaticContact(
-                contact.header.bodyIndexA,
-                contact.header.bodyIndexB, numBodies))
+        if (isBodyVsStaticContact(contact.header.bodyIndexA,
+                                  contact.header.bodyIndexB, numBodies) &&
+            (hasMapRange || contact.header.bodyIndexA == bodyIndex ||
+             contact.header.bodyIndexB == bodyIndex))
           invalidateAvbdVelocityObjective(
               contact.objectiveProgram);
       }
       continue;
     }
-    for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
       AvbdContactConstraint &contact = contacts[c];
-      if ((contact.header.bodyIndexA != bodyIndex &&
-           contact.header.bodyIndexB != bodyIndex) ||
-          !isBodyVsStaticContact(
-              contact.header.bodyIndexA,
-              contact.header.bodyIndexB, numBodies))
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
         continue;
       assignAvbdVelocityObjective(
-          contact.objectiveProgram,
-          AvbdVelocityObjectiveOwner::ManifoldFinalize,
-          AvbdVelocityObjectiveKind::MaterialNormal,
-          AvbdVelocityObjectiveSpan::Normal,
-          AvbdVelocityObjectiveReconstruction::SolveStartInertial,
-          normalRowCount, normalObjectiveKey);
-      if (contact.friction > 0.0f ||
-          contact.staticFriction > 0.0f) {
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::ManifoldFinalize,
+              AvbdVelocityObjectiveKind::MaterialNormal,
+              AvbdVelocityObjectiveSpan::Normal,
+              AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+              normalRowCount, normalObjectiveKey);
+      if (contact.friction > 0.0f || contact.staticFriction > 0.0f) {
         assignAvbdVelocityObjective(
-            contact.objectiveProgram,
-            AvbdVelocityObjectiveOwner::ManifoldFinalize,
-            AvbdVelocityObjectiveKind::PassiveFriction,
-            AvbdVelocityObjectiveSpan::TangentCone,
-            AvbdVelocityObjectiveReconstruction::PoseDerived,
-            tangentRowCount, tangentObjectiveKey);
+               contact.objectiveProgram,
+               AvbdVelocityObjectiveOwner::ManifoldFinalize,
+               AvbdVelocityObjectiveKind::PassiveFriction,
+               AvbdVelocityObjectiveSpan::TangentCone,
+               AvbdVelocityObjectiveReconstruction::PoseDerived,
+               tangentRowCount, tangentObjectiveKey);
       }
     }
   }
@@ -1347,8 +1392,7 @@ PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
       continue;
 
     const bool hasPassiveTangent =
-        contact.friction > 0.0f ||
-        contact.staticFriction > 0.0f;
+        contact.friction > 0.0f || contact.staticFriction > 0.0f;
     const AvbdVelocityObjectiveOwner normalOwner =
         contact.restitution > 0.0f
             ? AvbdVelocityObjectiveOwner::PointFinalize

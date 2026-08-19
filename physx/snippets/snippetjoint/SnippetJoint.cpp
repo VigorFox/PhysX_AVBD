@@ -75,6 +75,7 @@ enum JointKind {
 enum JointHeadlessCase {
   eCASE_PASSIVE,
   eCASE_IMPACT_ALL,
+  eCASE_WIDE_JOINT_STRESS,
   eCASE_IMPACT_SINGLE,
   eCASE_FIXED_NO_BREAK,
   eCASE_FIXED_BREAK,
@@ -1429,6 +1430,8 @@ static bool tryParseHeadlessCase(const char *value,
     headlessCase = eCASE_PASSIVE;
   else if (Snippets::equalsIgnoreCase(value, "impact-all"))
     headlessCase = eCASE_IMPACT_ALL;
+  else if (Snippets::equalsIgnoreCase(value, "wide-joint-stress"))
+    headlessCase = eCASE_WIDE_JOINT_STRESS;
   else if (Snippets::equalsIgnoreCase(value, "impact"))
     headlessCase = eCASE_IMPACT_SINGLE;
   else if (Snippets::equalsIgnoreCase(value, "fixed-no-break"))
@@ -1503,6 +1506,8 @@ static const char *getHeadlessCaseName(JointHeadlessCase headlessCase) {
     return "passive";
   case eCASE_IMPACT_ALL:
     return "impact-all";
+  case eCASE_WIDE_JOINT_STRESS:
+    return "wide-joint-stress";
   case eCASE_IMPACT_SINGLE:
     return "impact";
   case eCASE_FIXED_NO_BREAK:
@@ -1688,6 +1693,10 @@ static bool isImpactCase() {
          gHeadlessCase == eCASE_IMPACT_SINGLE ||
          gHeadlessCase == eCASE_FIXED_NO_BREAK ||
          gHeadlessCase == eCASE_FIXED_BREAK;
+}
+
+static bool isWideJointStressCase() {
+  return gHeadlessCase == eCASE_WIDE_JOINT_STRESS;
 }
 
 static bool isForceStaticCase() {
@@ -3823,6 +3832,70 @@ static void createJointChain(JointKind kind, PxReal z) {
               getJointKindName(kind));
 }
 
+// Opt-in coverage fixture for the AVBD producer-owned local-system path.
+// One connected D6 star deliberately creates a wide joint island while
+// remaining outside the ordinary correctness snippets and their baselines.
+static void createWideJointStressScene() {
+  const PxU32 childCount = 32;
+  const PxU32 chainIndex = static_cast<PxU32>(gChains.size());
+  gChains.push_back(ChainRecord(eJOINT_D6, "wide-d6-star"));
+  ChainRecord &chain = gChains.back();
+  const PxTransform rootPose(PxVec3(0.0f, 30.0f, 0.0f));
+  const PxBoxGeometry childGeometry(1.0f, 0.5f, 0.5f);
+  PxRigidDynamic *root = PxCreateDynamic(
+      *gPhysics, rootPose, PxBoxGeometry(1.5f, 0.75f, 0.75f), *gMaterial,
+      1.0f);
+  if (!root) {
+    gInitializationFailed = true;
+    return;
+  }
+  PxShape *rootShape = NULL;
+  if (root->getShapes(&rootShape, 1) == 1 && rootShape) {
+    PxFilterData filterData;
+    filterData.word0 = eFILTER_CHAIN_BODY;
+    filterData.word1 = chainIndex;
+    filterData.word2 = 0;
+    rootShape->setSimulationFilterData(filterData);
+  }
+  gScene->addActor(*root);
+  chain.bodies.push_back(root);
+
+  for (PxU32 childIndex = 0; childIndex < childCount; ++childIndex) {
+    const PxU32 column = childIndex & 7u;
+    const PxU32 row = childIndex >> 3u;
+    const PxVec3 offset((PxReal(column) - 3.5f) * 4.0f,
+                        0.0f,
+                        (PxReal(row) - 1.5f) * 4.0f);
+    PxRigidDynamic *child = PxCreateDynamic(
+        *gPhysics, PxTransform(rootPose.p + offset), childGeometry, *gMaterial,
+        1.0f);
+    if (!child) {
+      gInitializationFailed = true;
+      return;
+    }
+    PxJoint *joint = createDampedD6(
+        root, PxTransform(offset), child, PxTransform(PxIdentity));
+    if (!joint) {
+      child->release();
+      gInitializationFailed = true;
+      return;
+    }
+    PxShape *shape = NULL;
+    if (child->getShapes(&shape, 1) == 1 && shape) {
+      PxFilterData filterData;
+      filterData.word0 = eFILTER_CHAIN_BODY;
+      filterData.word1 = chainIndex;
+      filterData.word2 = childIndex + 1;
+      shape->setSimulationFilterData(filterData);
+    }
+    chain.bodies.push_back(child);
+    chain.joints.push_back(joint);
+    if (childIndex == childCount / 2)
+      chain.targetBody = child;
+    gScene->addActor(*child);
+  }
+}
+
 static void createConfiguredJointScene() {
   gChains.reserve(5);
   if (isRevoluteMotorCase()) {
@@ -3887,6 +3960,11 @@ static void createConfiguredJointScene() {
 
   if (gHeadlessCase == eCASE_IMPACT_SINGLE) {
     createJointChain(gImpactJointKind, 0.0f);
+    return;
+  }
+
+  if (isWideJointStressCase()) {
+    createWideJointStressScene();
     return;
   }
 
@@ -7829,7 +7907,7 @@ static GateEvaluation evaluateGate() {
   // Kinetic energy alone is not monotonic for gravity-driven pendula. Keep
   // the legacy three-window trend as a passive jitter oracle, but do not use
   // it to reject a directed impact while potential and kinetic energy trade.
-  if (!isImpactCase()) {
+  if (!isImpactCase() && !isWideJointStressCase()) {
     const PxReal energyFloor =
         PxMax(1e-4f, gGateStats.peakKineticEnergy * 1e-5f);
     const PxReal energyMargin12 =
@@ -7856,7 +7934,47 @@ static GateEvaluation evaluateGate() {
   return evaluation;
 }
 
+static void printWideJointStressDetails() {
+  PxU32 bodyCount = 0;
+  PxU32 jointCount = 0;
+  PxU32 nonFinite = 0;
+  double positionDigest = 0.0;
+  double rotationDigest = 0.0;
+  for (PxU32 chainIndex = 0; chainIndex < gChains.size(); ++chainIndex) {
+    const ChainRecord &chain = gChains[chainIndex];
+    jointCount += static_cast<PxU32>(chain.joints.size());
+    for (PxU32 bodyIndex = 0; bodyIndex < chain.bodies.size(); ++bodyIndex) {
+      const PxRigidDynamic *body = chain.bodies[bodyIndex];
+      if (!body) {
+        nonFinite++;
+        continue;
+      }
+      const PxTransform pose = body->getGlobalPose();
+      if (!pose.p.isFinite() || !pose.q.isFinite()) {
+        nonFinite++;
+        continue;
+      }
+      const double weight =
+          1.0 + double(chainIndex) * 1000.0 + double(bodyIndex);
+      positionDigest += weight *
+                        (double(pose.p.x) + 3.0 * double(pose.p.y) +
+                         5.0 * double(pose.p.z));
+      rotationDigest += weight *
+                        (double(pose.q.x) + 3.0 * double(pose.q.y) +
+                         5.0 * double(pose.q.z) + 7.0 * double(pose.q.w));
+      bodyCount++;
+    }
+  }
+  std::printf(
+      "[AVBD_JOINT_STRESS] chains=%u bodies=%u d6Rows=%u nonFinite=%u "
+      "positionDigest=%.17g rotationDigest=%.17g\n",
+      static_cast<PxU32>(gChains.size()), bodyCount, jointCount, nonFinite,
+      positionDigest, rotationDigest);
+}
+
 static void printGateDetails() {
+  if (isWideJointStressCase())
+    printWideJointStressDetails();
   if (isRevoluteMotorOffCenterCase()) {
     std::printf(
         "[PROBE] [SnippetJointRevoluteMotorOffCenter] "
@@ -10098,6 +10216,8 @@ int snippetMain(int argc, const char *const *argv) {
     if (headlessCase == eCASE_IMPACT_ALL ||
         headlessCase == eCASE_IMPACT_SINGLE)
       options.frames = 1800;
+    else if (headlessCase == eCASE_WIDE_JOINT_STRESS)
+      options.frames = 600;
     else if (headlessCase == eCASE_FIXED_NO_BREAK ||
              headlessCase == eCASE_FIXED_BREAK)
       options.frames = 600;
@@ -10156,7 +10276,11 @@ int snippetMain(int argc, const char *const *argv) {
 #endif
 
   Snippets::printHeadlessConfig("SnippetJoint", gHeadlessOptions);
-  if (isNativeBreakReactionCase()) {
+  if (isWideJointStressCase()) {
+    std::printf(
+        "[AVBD_JOINT_STRESS_CONFIG] chainCount=1 chainLength=32 "
+        "joint=d6 gravity=negative-y ground=plane projectile=none\n");
+  } else if (isNativeBreakReactionCase()) {
     const PxReal configuredThreshold =
         gHeadlessCase == eCASE_NATIVE_BREAK
             ? gNativeLowBreakThreshold

@@ -208,6 +208,39 @@ PX_FORCE_INLINE PxVec3 avbdGetRigidContactSurfacePoint(
 		body.position + body.rotation.rotate(geometry.rigidLocalPoint);
 }
 
+PX_FORCE_INLINE PxMat33 avbdProjectLockedContactMatrix(
+	const AvbdSolverBody& body, const PxMat33& matrix,
+	bool angularRows, bool angularColumns)
+{
+	PxMat33 projected = matrix;
+	if(angularRows)
+	{
+		body.projectLockedAngularVector(projected.column0);
+		body.projectLockedAngularVector(projected.column1);
+		body.projectLockedAngularVector(projected.column2);
+	}
+	else
+	{
+		body.projectLockedLinearVector(projected.column0);
+		body.projectLockedLinearVector(projected.column1);
+		body.projectLockedLinearVector(projected.column2);
+	}
+	projected = projected.getTranspose();
+	if(angularColumns)
+	{
+		body.projectLockedAngularVector(projected.column0);
+		body.projectLockedAngularVector(projected.column1);
+		body.projectLockedAngularVector(projected.column2);
+	}
+	else
+	{
+		body.projectLockedLinearVector(projected.column0);
+		body.projectLockedLinearVector(projected.column1);
+		body.projectLockedLinearVector(projected.column2);
+	}
+	return projected.getTranspose();
+}
+
 PX_FORCE_INLINE bool avbdAddDynamicSoftRigidContactContribution_rigid(
 	const AvbdSoftContactGeometry& geometry,
 	const AvbdSoftContactAugmentedState& state,
@@ -217,8 +250,8 @@ PX_FORCE_INLINE bool avbdAddDynamicSoftRigidContactContribution_rigid(
 {
 	if(!geometry.hasRigidBodyTarget() ||
 		geometry.targetIndex != bodyIdx ||
-		geometry.particleIdx >= numParticles ||
-		particles[geometry.particleIdx].invMass <= 0.0f)
+		!avbdHasSoftContactDynamicQuerySupport(
+			geometry, particles, numParticles))
 		return false;
 
 	const PxVec3 worldOffset =
@@ -230,17 +263,28 @@ PX_FORCE_INLINE bool avbdAddDynamicSoftRigidContactContribution_rigid(
 		geometry, state, particles, surfacePoint, 1.0f,
 		particleForce, particleHessian);
 
-	rhs.linear += particleForce;
-	rhs.angular += worldOffset.cross(particleForce);
+	PxVec3 rigidLinearForce = particleForce;
+	body.projectLockedLinearVector(rigidLinearForce);
+	PxVec3 rigidAngularForce = worldOffset.cross(particleForce);
+	body.projectLockedAngularVector(rigidAngularForce);
+	rhs.linear += rigidLinearForce;
+	rhs.angular += rigidAngularForce;
 
 	const PxMat33 skew = avbdSkew(worldOffset);
-	lhs.linearLinear += particleHessian;
-	const PxMat33 linearAngular =
+	const PxMat33 linearLinear = avbdProjectLockedContactMatrix(
+		body, particleHessian, false, false);
+	PxMat33 linearAngular =
 		particleHessian * skew * (-1.0f);
+	linearAngular = avbdProjectLockedContactMatrix(
+		body, linearAngular, false, true);
+	PxMat33 angularAngular =
+		skew.getTranspose() * particleHessian * skew;
+	angularAngular = avbdProjectLockedContactMatrix(
+		body, angularAngular, true, true);
+	lhs.linearLinear += linearLinear;
 	lhs.linearAngular += linearAngular;
 	lhs.angularLinear += linearAngular.getTranspose();
-	lhs.angularAngular +=
-		skew.getTranspose() * particleHessian * skew;
+	lhs.angularAngular += angularAngular;
 	return true;
 }
 
@@ -291,8 +335,10 @@ PX_FORCE_INLINE void avbdAddKinematicShellContactContribution_rigid(
 	const PxVec3 rAw = body.rotation.rotate(geometry.rigidLocalPoint);
 	const PxReal geom =
 		avbdKinematicShellContactViolation(geometry, body);
-	const PxVec3 gradLin = n;
-	const PxVec3 gradAng = rAw.cross(n);
+	PxVec3 gradLin = n;
+	body.projectLockedLinearVector(gradLin);
+	PxVec3 gradAng = rAw.cross(n);
+	body.projectLockedAngularVector(gradAng);
 	const PxReal pen = PxMax(state.k, boostFloor);
 	const PxReal f = PxMin(0.0f, pen * geom + state.alLambda);
 	rhs.linear += gradLin * f;

@@ -32,15 +32,15 @@
 #include "NpArticulationReducedCoordinate.h"
 #include "NpArticulationTendon.h"
 #include "NpAggregate.h"
+#include "NpDeformableVolume.h"
+#include "geometry/PxTetrahedronMesh.h"
 #include "ScScene.h"
 #if PX_SUPPORT_GPU_PHYSX
 	#include "NpPBDParticleSystem.h"
 	#include "NpParticleBuffer.h"
 	#include "NpDeformableSurface.h"
-	#include "NpDeformableVolume.h"
 	#include "cudamanager/PxCudaContextManager.h"
 	#include "cudamanager/PxCudaContext.h"
-	#include "geometry/PxTetrahedronMesh.h"
 	#include "geometry/PxTriangleMeshGeometry.h"
 #endif
 #include "ScArticulationSim.h"
@@ -404,6 +404,9 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 					PxDeformableVolume* dv = dvEntries[i];
 					if (!dv->getShape())
 						continue;
+					if (dv->getDeformableVolumeBackend() ==
+						PxDeformableVolumeBackend::eCPU_AVBD)
+						continue;
 
 					// Re-stream attributes (shape hierarchy) now that the shape is available.
 					streamDeformableVolumeAttributes(*dv);
@@ -539,6 +542,61 @@ bool NpScene::fetchResults(bool block, PxU32* errorState)
 				}
 			}
 #endif
+			// CPU AVBD owns host buffers directly. Streaming them through the
+			// device-copy path above returns null and used to make the entire
+			// deformable mesh disappear from OmniPVD/PVD captures.
+			if (mDeformableVolumes.size() > 0)
+			{
+				PxDeformableVolume* const* dvEntries =
+					mDeformableVolumes.getEntries();
+				const PxU32 volumeCount = mDeformableVolumes.size();
+				for(PxU32 i = 0; i < volumeCount; ++i)
+				{
+					PxDeformableVolume* dv = dvEntries[i];
+					if(!dv->getShape() ||
+						dv->getDeformableVolumeBackend() !=
+							PxDeformableVolumeBackend::eCPU_AVBD)
+						continue;
+					PxTetrahedronMesh* collisionMesh =
+						dv->getCollisionMesh();
+					PxVec4* collisionPositions =
+						dv->getPositionInvMassBufferH();
+					if(collisionMesh && collisionPositions)
+					{
+						const PxU32 count = collisionMesh->getNbVertices();
+						OMNI_PVD_SET_ARRAY_EXPLICIT(
+							pvdWriter, pvdRegData, OMNI_PVD_CONTEXT_HANDLE,
+							PxTetrahedronMesh, positions, *collisionMesh,
+							reinterpret_cast<PxReal*>(collisionPositions),
+							count * 4);
+					}
+					PxTetrahedronMesh* simulationMesh =
+						dv->getSimulationMesh();
+					PxVec4* simulationPositions =
+						dv->getSimPositionInvMassBufferH();
+					PxVec4* simulationVelocities =
+						dv->getSimVelocityBufferH();
+					if(simulationMesh && simulationPositions)
+					{
+						const PxU32 count = simulationMesh->getNbVertices();
+						OMNI_PVD_SET_ARRAY_EXPLICIT(
+							pvdWriter, pvdRegData, OMNI_PVD_CONTEXT_HANDLE,
+							PxTetrahedronMesh, positions, *simulationMesh,
+							reinterpret_cast<PxReal*>(simulationPositions),
+							count * 4);
+						if(simulationVelocities)
+						{
+							OMNI_PVD_SET_ARRAY_EXPLICIT(
+								pvdWriter, pvdRegData,
+								OMNI_PVD_CONTEXT_HANDLE,
+								PxTetrahedronMesh, velocities,
+								*simulationMesh,
+								reinterpret_cast<PxReal*>(
+									simulationVelocities), count * 4);
+						}
+					}
+				}
+			}
 
 			NpOmniPvdSceneClient& ovdClient = getSceneOvdClientInternal();
 			ovdClient.resetForces();
@@ -690,4 +748,3 @@ void NpScene::fetchResultsFinish(PxU32* errorState)
 	mScenePvdClient.frameEnd();
 #endif
 }
-

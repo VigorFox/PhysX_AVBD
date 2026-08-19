@@ -1309,6 +1309,12 @@ inline PxFrictionType::Enum getPxSceneDescFrictionType( const PxSceneDesc* inOwn
 inline void setPxSceneDescFrictionType( PxSceneDesc* inOwner, PxFrictionType::Enum inData) { inOwner->frictionType = inData; }
 inline PxSolverType::Enum getPxSceneDescSolverType( const PxSceneDesc* inOwner ) { return inOwner->solverType; }
 inline void setPxSceneDescSolverType( PxSceneDesc* inOwner, PxSolverType::Enum inData) { inOwner->solverType = inData; }
+inline PxU32 getPxSceneDescAvbdIterations( const PxSceneDesc* inOwner ) { return inOwner->avbdIterations; }
+inline void setPxSceneDescAvbdIterations( PxSceneDesc* inOwner, PxU32 inData) { inOwner->avbdIterations = inData; }
+inline PxU32 getPxSceneDescAvbdJointIterationOverride( const PxSceneDesc* inOwner ) { return inOwner->avbdJointIterationOverride; }
+inline void setPxSceneDescAvbdJointIterationOverride( PxSceneDesc* inOwner, PxU32 inData) { inOwner->avbdJointIterationOverride = inData; }
+inline _Bool getPxSceneDescAvbdEnableEarlyStop( const PxSceneDesc* inOwner ) { return inOwner->avbdEnableEarlyStop; }
+inline void setPxSceneDescAvbdEnableEarlyStop( PxSceneDesc* inOwner, _Bool inData) { inOwner->avbdEnableEarlyStop = inData; }
 inline PxReal getPxSceneDescBounceThresholdVelocity( const PxSceneDesc* inOwner ) { return inOwner->bounceThresholdVelocity; }
 inline void setPxSceneDescBounceThresholdVelocity( PxSceneDesc* inOwner, PxReal inData) { inOwner->bounceThresholdVelocity = inData; }
 inline PxReal getPxSceneDescFrictionOffsetThreshold( const PxSceneDesc* inOwner ) { return inOwner->frictionOffsetThreshold; }
@@ -1372,6 +1378,9 @@ PX_PHYSX_CORE_API PxSceneDescGeneratedInfo::PxSceneDescGeneratedInfo()
 	, Limits( "Limits", setPxSceneDescLimits, getPxSceneDescLimits )
 	, FrictionType( "FrictionType", setPxSceneDescFrictionType, getPxSceneDescFrictionType )
 	, SolverType( "SolverType", setPxSceneDescSolverType, getPxSceneDescSolverType )
+	, AvbdIterations( "AvbdIterations", setPxSceneDescAvbdIterations, getPxSceneDescAvbdIterations )
+	, AvbdJointIterationOverride( "AvbdJointIterationOverride", setPxSceneDescAvbdJointIterationOverride, getPxSceneDescAvbdJointIterationOverride )
+	, AvbdEnableEarlyStop( "AvbdEnableEarlyStop", setPxSceneDescAvbdEnableEarlyStop, getPxSceneDescAvbdEnableEarlyStop )
 	, BounceThresholdVelocity( "BounceThresholdVelocity", setPxSceneDescBounceThresholdVelocity, getPxSceneDescBounceThresholdVelocity )
 	, FrictionOffsetThreshold( "FrictionOffsetThreshold", setPxSceneDescFrictionOffsetThreshold, getPxSceneDescFrictionOffsetThreshold )
 	, FrictionCorrelationDistance( "FrictionCorrelationDistance", setPxSceneDescFrictionCorrelationDistance, getPxSceneDescFrictionCorrelationDistance )
@@ -1413,6 +1422,9 @@ PX_PHYSX_CORE_API PxSceneDescGeneratedValues::PxSceneDescGeneratedValues( const 
 		,Limits( inSource->limits )
 		,FrictionType( inSource->frictionType )
 		,SolverType( inSource->solverType )
+		,AvbdIterations( inSource->avbdIterations )
+		,AvbdJointIterationOverride( inSource->avbdJointIterationOverride )
+		,AvbdEnableEarlyStop( inSource->avbdEnableEarlyStop )
 		,BounceThresholdVelocity( inSource->bounceThresholdVelocity )
 		,FrictionOffsetThreshold( inSource->frictionOffsetThreshold )
 		,FrictionCorrelationDistance( inSource->frictionCorrelationDistance )

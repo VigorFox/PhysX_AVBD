@@ -41,6 +41,299 @@ namespace physx {
 namespace Dy {
 
 class FeatherstoneArticulation;
+class AvbdRigidBodyRangeTask;
+class AvbdRigidDualRangeTask;
+// Test-owned accessor for the standalone AVBD kernel lab.  The friend does
+// not change the solver ABI; it lets the lab invoke the existing contact-only
+// scalar authority without copying its local 6x6 assembly mathematics.
+class AvbdKernelLabSolverAccess;
+
+struct AvbdOgcPairTrustRegionContext {
+  AvbdOgcPairState *pairStates;
+  physx::PxU32 numPairStates;
+  const physx::PxU32 *contactPairIndices;
+  physx::PxU32 numContactPairIndices;
+  // Separate particle-to-triangle-core incidence for geometric admission.
+  // These refs never enter the AL force/Hessian program: they let a particle
+  // candidate preserve the complete expanded collision triangle carried by a
+  // TBIX row, rather than only that row's compact centroid objective.
+  const physx::PxU32 *triangleCoreSafetyStarts;
+  physx::PxU32 numTriangleCoreSafetyStarts;
+  const AvbdSoftContactParticleRef *triangleCoreSafetyRefs;
+  physx::PxU32 numTriangleCoreSafetyRefs;
+
+  AvbdOgcPairTrustRegionContext()
+      : pairStates(nullptr), numPairStates(0), contactPairIndices(nullptr),
+        numContactPairIndices(0), triangleCoreSafetyStarts(nullptr),
+        numTriangleCoreSafetyStarts(0), triangleCoreSafetyRefs(nullptr),
+        numTriangleCoreSafetyRefs(0) {}
+
+  PX_FORCE_INLINE bool isComplete(physx::PxU32 numContacts) const {
+    return pairStates && numPairStates > 0 && contactPairIndices &&
+        numContactPairIndices == numContacts;
+  }
+
+  PX_FORCE_INLINE bool hasTriangleCoreSafetyPlan(
+      physx::PxU32 numParticles) const {
+    return triangleCoreSafetyStarts &&
+        numTriangleCoreSafetyStarts == numParticles + 1 &&
+        (numTriangleCoreSafetyRefs == 0 || triangleCoreSafetyRefs) &&
+        triangleCoreSafetyStarts[0] == 0 &&
+        triangleCoreSafetyStarts[numParticles] == numTriangleCoreSafetyRefs;
+  }
+};
+
+// Provider-owned, immutable-for-one-island-solve support program.  It keeps
+// the native mixed path from re-discovering soft ownership and contact
+// incidence after Scene has already compiled the same information while
+// preparing the island.  The arrays are deliberately non-owning: their
+// lifetime is the provider's selection storage, which is required to outlive
+// the solver task by the soft-island provider contract.
+struct AvbdSoftIslandExecutionPlan {
+  const physx::PxU32 *particleBodyIndices;
+  physx::PxU32 numParticleBodyIndices;
+  const physx::PxU32 *contactStarts;
+  physx::PxU32 numContactStarts;
+  const AvbdSoftContactParticleRef *contactRefs;
+  physx::PxU32 numContactRefs;
+
+  // Geometry-only companion CSR for triangle/OBB core rows.  It intentionally
+  // does not change contact-force ownership; it is consulted only by the OGC
+  // candidate trust-region filter before a particle position is committed.
+  const physx::PxU32 *triangleCoreSafetyStarts;
+  physx::PxU32 numTriangleCoreSafetyStarts;
+  const AvbdSoftContactParticleRef *triangleCoreSafetyRefs;
+  physx::PxU32 numTriangleCoreSafetyRefs;
+
+  // Mirror the particle-contact CSR for the rigid endpoint of a dynamic
+  // soft/rigid contact.  Each range preserves source contact order and lets
+  // the 6x6 rigid block consume the same immutable contact-ownership program
+  // instead of scanning every soft row once per body and iteration.
+  const physx::PxU32 *rigidTargetContactStarts;
+  physx::PxU32 numRigidTargetContactStarts;
+  const physx::PxU32 *rigidTargetContactRefs;
+  physx::PxU32 numRigidTargetContactRefs;
+
+  // Immutable collision-domain view for the optional terminal OGC epoch.
+  // Scene owns these proxy bodies and embeddings for the entire native island
+  // task.  The solver rebuilds only their positions from the final simulation
+  // pose, then performs current-pose box DCD into private scratch; this is
+  // deliberately not an AL-state or swept/CCD contact stream.
+  const AvbdRigidBox *terminalRigidBoxes;
+  physx::PxU32 numTerminalRigidBoxes;
+  const AvbdSoftBody *terminalCollisionBodies;
+  physx::PxU32 numTerminalCollisionBodies;
+  const AvbdWeightedContactPoint *terminalCollisionVertexMappings;
+  physx::PxU32 numTerminalCollisionVertexMappings;
+  physx::PxReal terminalContactRadius;
+
+  // Shared mutable OGC pair state.  This is intentionally separate from the
+  // persistent AL contact state: it governs geometric trust-region epochs,
+  // while the contact stream retains multiplier/penalty history.
+  AvbdOgcPairState *ogcPairStates;
+  physx::PxU32 numOgcPairStates;
+  const physx::PxU32 *ogcPairIndices;
+  physx::PxU32 numOgcPairIndices;
+
+  // Pair-major view of the same dynamic soft/rigid contact stream.  The
+  // contact-to-pair map above is convenient for a particle update; this CSR
+  // is the inverse schedule for a pair-owned manifold block.  Keeping both
+  // views immutable avoids per-sweep all-contact scans once a pair is active.
+  const physx::PxU32 *ogcPairContactStarts;
+  physx::PxU32 numOgcPairContactStarts;
+  const physx::PxU32 *ogcPairContactRefs;
+  physx::PxU32 numOgcPairContactRefs;
+
+  // The Scene provider may need the predicted soft pose to compile swept
+  // contact objectives before the native island task is submitted.  When it
+  // has done so, carry that lifecycle fact with the same immutable support
+  // program instead of making the mixed solver repeat a full particle pass.
+  // This is a per-solve Scene-provider token: it is never mutated by a
+  // worker, and the solver consumes it only after semantic plan validation.
+  bool softPredictionPrepared;
+
+  AvbdSoftIslandExecutionPlan()
+      : particleBodyIndices(nullptr), numParticleBodyIndices(0),
+        contactStarts(nullptr), numContactStarts(0), contactRefs(nullptr),
+        numContactRefs(0), triangleCoreSafetyStarts(nullptr),
+        numTriangleCoreSafetyStarts(0), triangleCoreSafetyRefs(nullptr),
+        numTriangleCoreSafetyRefs(0), rigidTargetContactStarts(nullptr),
+        numRigidTargetContactStarts(0), rigidTargetContactRefs(nullptr),
+        numRigidTargetContactRefs(0), terminalRigidBoxes(nullptr),
+        numTerminalRigidBoxes(0), terminalCollisionBodies(nullptr),
+        numTerminalCollisionBodies(0),
+        terminalCollisionVertexMappings(nullptr),
+        numTerminalCollisionVertexMappings(0), terminalContactRadius(0.0f),
+        ogcPairStates(nullptr), numOgcPairStates(0), ogcPairIndices(nullptr),
+        numOgcPairIndices(0), ogcPairContactStarts(nullptr),
+        numOgcPairContactStarts(0), ogcPairContactRefs(nullptr),
+        numOgcPairContactRefs(0),
+        softPredictionPrepared(false) {}
+
+  PX_FORCE_INLINE bool isComplete(physx::PxU32 numParticles) const {
+    return particleBodyIndices && numParticleBodyIndices == numParticles &&
+           contactStarts && numContactStarts == numParticles + 1 &&
+           (numContactRefs == 0 || contactRefs) &&
+           contactStarts[0] == 0 &&
+           contactStarts[numParticles] == numContactRefs;
+  }
+
+  PX_FORCE_INLINE bool hasRigidTargetContactPlan(
+      physx::PxU32 numRigidBodies) const {
+    return numRigidBodies > 0 && rigidTargetContactStarts &&
+           numRigidTargetContactStarts == numRigidBodies + 1 &&
+           (numRigidTargetContactRefs == 0 || rigidTargetContactRefs) &&
+           rigidTargetContactStarts[0] == 0 &&
+           rigidTargetContactStarts[numRigidBodies] ==
+               numRigidTargetContactRefs;
+  }
+
+  PX_FORCE_INLINE bool hasTriangleCoreSafetyPlan(
+      physx::PxU32 numParticles) const {
+    return triangleCoreSafetyStarts &&
+           numTriangleCoreSafetyStarts == numParticles + 1 &&
+           (numTriangleCoreSafetyRefs == 0 || triangleCoreSafetyRefs) &&
+           triangleCoreSafetyStarts[0] == 0 &&
+           triangleCoreSafetyStarts[numParticles] ==
+               numTriangleCoreSafetyRefs;
+  }
+
+  PX_FORCE_INLINE bool hasTerminalCurrentPoseBoxPlan(
+      physx::PxU32 numSimulationParticles) const {
+    return terminalRigidBoxes && numTerminalRigidBoxes > 0 &&
+           terminalCollisionBodies && numTerminalCollisionBodies > 0 &&
+           terminalCollisionVertexMappings &&
+           numTerminalCollisionVertexMappings > 0 &&
+           physx::PxIsFinite(terminalContactRadius) &&
+           terminalContactRadius > 0.0f &&
+           numSimulationParticles > 0;
+  }
+
+  PX_FORCE_INLINE bool hasMixedOgcPairPlan(physx::PxU32 numContacts) const {
+    return ogcPairStates && numOgcPairStates > 0 && ogcPairIndices &&
+           numOgcPairIndices == numContacts && numContacts > 0;
+  }
+
+  PX_FORCE_INLINE bool hasMixedOgcPairContactPlan(
+      physx::PxU32 numContacts) const {
+    return hasMixedOgcPairPlan(numContacts) && ogcPairContactStarts &&
+           numOgcPairContactStarts == numOgcPairStates + 1 &&
+           (numOgcPairContactRefs == 0 || ogcPairContactRefs) &&
+           ogcPairContactStarts[0] == 0 &&
+           ogcPairContactStarts[numOgcPairStates] ==
+               numOgcPairContactRefs;
+  }
+};
+
+// Persistent state for the rigid position/dual iteration loop.  The state is
+// deliberately limited to iteration control and transient pose snapshots;
+// contact/body ownership remains in the caller-owned island batch.  Keeping
+// this seam explicit allows a future PhysX-dispatcher fan-in to suspend after
+// one exact Gauss--Seidel dependency wave without adding solver-path atomics.
+struct AvbdRigidSolveIterationState {
+  AvbdSolverBody *bodies;
+  physx::PxU32 numBodies;
+  AvbdContactConstraint *contacts;
+  physx::PxU32 numContacts;
+  physx::PxReal dt;
+  const AvbdBodyConstraintMap *contactMap;
+  AvbdColorBatch *colorBatches;
+  physx::PxU32 numColors;
+  bool hasBodyStaticContact;
+  const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart;
+  AvbdSolverStats *stats;
+
+  bool useChebyshev;
+  bool enableEarlyStop;
+  physx::PxReal chebyOmega;
+  physx::PxU32 iters;
+  physx::PxU32 minIterations;
+  physx::PxReal rotationTolerance;
+  physx::PxU32 consecutiveConvergedIterations;
+  physx::PxU32 iter;
+  physx::PxU32 activeIteration;
+  bool iterationActive;
+  // Set only by the fast CPU task path after every disjoint contact range has
+  // completed. The ordered authority always leaves this false and executes
+  // the established scalar dual pass inside completeRigidSolveIteration().
+  bool parallelDualComplete;
+
+  physx::PxArray<physx::PxVec3> chebyPrevPos;
+  physx::PxArray<physx::PxVec3> chebyPrevPrevPos;
+  physx::PxArray<physx::PxQuat> chebyPrevRot;
+  physx::PxArray<physx::PxQuat> chebyPrevPrevRot;
+  physx::PxArray<physx::PxVec3> earlyStopPrevPos;
+  physx::PxArray<physx::PxQuat> earlyStopPrevRot;
+
+  AvbdRigidSolveIterationState()
+      : bodies(nullptr), numBodies(0), contacts(nullptr), numContacts(0),
+        dt(0.0f), contactMap(nullptr), colorBatches(nullptr), numColors(0),
+        hasBodyStaticContact(false), linearVelAtSolveStart(nullptr),
+        stats(nullptr), useChebyshev(false), enableEarlyStop(false),
+        chebyOmega(1.0f), iters(0), minIterations(0),
+        rotationTolerance(0.0f), consecutiveConvergedIterations(0), iter(0),
+        activeIteration(0), iterationActive(false),
+        parallelDualComplete(false) {}
+};
+
+// A fast deferred rigid island can publish exactly which post-AL contact
+// consumers may have work after final objective validation.  Unknown is the
+// fail-closed default used by ordered, synchronous, joint, and soft paths;
+// zero is a valid, proven-empty work set.
+struct AvbdPostAlContactWorkPlan {
+  enum : physx::PxU8 {
+    eUNKNOWN = 0xff,
+    ePASSIVE_COMPONENT = 1u << 0,
+    eCOMPLETE_MANIFOLD = 1u << 1,
+    ePOINT_TARGET = 1u << 2,
+  };
+
+  physx::PxU8 mask;
+
+  AvbdPostAlContactWorkPlan() : mask(eUNKNOWN) {}
+
+  void reset() { mask = eUNKNOWN; }
+  void publish(physx::PxU8 knownMask) { mask = knownMask; }
+  bool isKnown() const { return mask != eUNKNOWN; }
+  bool mayHave(physx::PxU8 work) const {
+    return !isKnown() || (mask & work) != 0;
+  }
+};
+
+// Contact-only rigid solve lifetime shared by the synchronous entry and the
+// dispatcher-driven wave task path.  All arrays are island-owned state; no
+// solver-global mutable scratch is used while islands overlap.
+struct AvbdRigidSolveContext {
+  AvbdRigidSolveIterationState iteration;
+  physx::PxReal invDt;
+  physx::PxReal invDt2;
+  physx::PxVec3 gravity;
+  bool hasBodyStaticContact;
+  bool deformableFastImpactIsland;
+  AvbdPostAlContactWorkPlan postAlContactWork;
+  physx::PxArray<bool> touchingBodyStatic;
+  physx::PxArray<physx::PxVec3> linearVelAtSolveStart;
+  physx::PxArray<physx::PxVec3> angularVelAtSolveStart;
+
+  physx::PxArray<physx::PxU32> dependencyWaveOffsets;
+  physx::PxArray<physx::PxU32> dependencyWaveBodies;
+  physx::PxU32 dependencyWaveCount;
+
+  // CPU-native non-deterministic schedule.  Colors are compact island-local
+  // independent sets: every writable dynamic body appears exactly once and
+  // no dynamic--dynamic contact has both endpoints in the same color.
+  physx::PxArray<physx::PxU32> bodyColorOffsets;
+  physx::PxArray<physx::PxU32> bodyColorBodies;
+  physx::PxU32 bodyColorCount;
+  physx::PxU32 maxBodyColorWidth;
+
+  AvbdRigidSolveContext()
+      : invDt(0.0f), invDt2(0.0f), gravity(0.0f),
+        hasBodyStaticContact(false),
+        deformableFastImpactIsland(false),
+        dependencyWaveCount(0),
+        bodyColorCount(0), maxBodyColorWidth(0) {}
+};
 
 /**
  * @brief Main AVBD Solver class implementing the Block Coordinate Descent
@@ -48,9 +341,8 @@ class FeatherstoneArticulation;
  *
  * The AVBD solver operates on position-level variables and uses:
  * 1. Prediction integration (explicit Euler)
- * 2. Graph coloring for parallel body updates
- * 3. Block descent solve for each body's local 6x6 system
- * 4. Augmented Lagrangian multiplier updates for constraint satisfaction
+ * 2. Block descent solve for each body's local 6x6 system
+ * 3. Augmented Lagrangian multiplier updates for constraint satisfaction
  */
 class AvbdSolver {
 public:
@@ -96,6 +388,34 @@ public:
              physx::PxU32 iterationOverride,
              AvbdSolverStats &stats);
 
+  /** Prepare the contact-only rigid path up to the first body iteration. */
+  bool prepareRigidSolve(physx::PxReal dt, AvbdSolverBody *bodies,
+                         physx::PxU32 numBodies,
+                         AvbdContactConstraint *contacts,
+                         physx::PxU32 numContacts,
+                         const physx::PxVec3 &gravity,
+                         const AvbdBodyConstraintMap *contactMap,
+                         AvbdColorBatch *colorBatches,
+                         physx::PxU32 numColors,
+                         physx::PxU32 iterationOverride,
+                         AvbdSolverStats &stats,
+                         AvbdRigidSolveContext &context);
+
+  /** Run the shared post-iteration stages after a prepared rigid solve. */
+  void finishRigidSolve(AvbdRigidSolveContext &context);
+
+  /** Build exact order-preserving dependency waves for a prepared island. */
+  void buildRigidDependencyWaves(AvbdRigidSolveContext &context);
+
+  /** Build a compact strict body-color plan for the fast CPU backend. */
+  bool buildRigidBodyColorPlan(AvbdRigidSolveContext &context);
+
+  /** Begin one prepared iteration before body-range tasks are submitted. */
+  bool beginRigidSolveIteration(AvbdRigidSolveIterationState &state);
+
+  /** Complete one prepared iteration after all body ranges have finished. */
+  bool completeRigidSolveIteration(AvbdRigidSolveIterationState &state);
+
   /**
    * @brief Execute one simulation step with joint constraints (unified D6 + gear)
    * @param dt Time step
@@ -133,6 +453,7 @@ public:
                        physx::PxU32 numSoftBodies,
                        AvbdSoftContact *softContacts,
                        physx::PxU32 numSoftContacts,
+                       const AvbdSoftIslandExecutionPlan *softExecutionPlan,
                        FeatherstoneArticulation *const *articulationForBody,
                        const physx::PxU32 *linkIndexForBody,
                        AvbdSolverStats &stats);
@@ -164,9 +485,11 @@ public:
                    physx::PxU32 numSoftBodies,
                    AvbdSoftContact *softContacts,
                    physx::PxU32 numSoftContacts,
+                   const AvbdSoftIslandExecutionPlan *softExecutionPlan,
                    FeatherstoneArticulation *const *articulationForBody,
                    const physx::PxU32 *linkIndexForBody,
-                   AvbdSolverStats &stats);
+                   AvbdSolverStats &stats,
+                   AvbdRigidSolveContext *deferredRigidContext = nullptr);
 
   /**
    * @brief Get solver configuration
@@ -176,7 +499,17 @@ public:
   /** Mutable config (scene bounce threshold, material gates). */
   AvbdSolverConfig &getConfigMutable() { return mConfig; }
 
+  /** Execute one rejected owner lane through the authoritative scalar path. */
+  bool solveRigidOwnerFallback(AvbdRigidSolveContext &context,
+                               const physx::PxU32 *ownerBodyOrder,
+                               physx::PxU32 lane);
+
 private:
+  friend class AvbdRigidBodyRangeTask;
+  friend class AvbdRigidDualRangeTask;
+  friend class AvbdSolveIslandTask;
+  friend class AvbdKernelLabSolverAccess;
+
   //-------------------------------------------------------------------------
   // Algorithm Stages
   //-------------------------------------------------------------------------
@@ -187,23 +520,6 @@ private:
    */
   void computePrediction(AvbdSolverBody *bodies, physx::PxU32 numBodies,
                          physx::PxReal dt, const physx::PxVec3 &gravity);
-
-  /**
-   * @brief Stage 2: Build constraint graph and compute body coloring
-   */
-  void computeGraphColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                            AvbdContactConstraint *contacts,
-                            physx::PxU32 numContacts,
-                            AvbdSolverStats &stats);
-
-  /**
-   * @brief Stage 2b: Compute body-based coloring for block coordinate descent
-   * Bodies sharing constraints get different colors, enabling parallel BCD.
-   */
-  void computeBodyColoring(AvbdSolverBody *bodies, physx::PxU32 numBodies,
-                           AvbdContactConstraint *contacts,
-                           physx::PxU32 numContacts,
-                           AvbdSolverStats &stats);
 
   /**
    * @brief Stage 3: Block coordinate descent iteration
@@ -219,6 +535,21 @@ private:
                              const AvbdBodyConstraintMap *contactMap = nullptr,
                              AvbdColorBatch *colorBatches = nullptr,
                              physx::PxU32 numColors = 0);
+
+  /** Solve a contiguous body-index range using the live Gauss--Seidel pose. */
+  void solveRigidBodyRange(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+      physx::PxReal dt, physx::PxReal invDt2,
+      const AvbdBodyConstraintMap *contactMap, const physx::PxU32 *bodyOrder,
+      physx::PxU32 begin, physx::PxU32 end);
+
+  /** Update one disjoint contact range for the fast CPU dual fan-out. */
+  void solveRigidDualRange(AvbdRigidSolveIterationState &state,
+                           physx::PxU32 begin, physx::PxU32 end);
+
+  /** Execute one or more exact serial AVBD iterations from resumable state. */
+  bool advanceRigidSolveIterations(AvbdRigidSolveIterationState &state);
 
   /**
    * @brief Shared contact primal rows for one body (Phase 1).
@@ -237,7 +568,9 @@ private:
       AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
       physx::PxReal dt, physx::PxReal massInvDt2, AvbdBlock6x6 &A,
       physx::PxVec3 &gLinear, physx::PxVec3 &gAngular,
-      physx::PxU32 &numTouching);
+      physx::PxU32 &numTouching,
+      const physx::PxU32 *rigidTargetContactStarts = nullptr,
+      const physx::PxU32 *rigidTargetContactRefs = nullptr);
 
   /**
    * @brief Solve local 6x6 system for a single body
@@ -274,7 +607,10 @@ private:
       AvbdSoftContact *softContacts = nullptr,
       physx::PxU32 numSoftContacts = 0,
       AvbdSoftBody *softBodies = nullptr,
-      physx::PxU32 numSoftBodies = 0);
+      physx::PxU32 numSoftBodies = 0,
+      const physx::PxU32 *rigidTargetContactStarts = nullptr,
+      const physx::PxU32 *rigidTargetContactRefs = nullptr,
+      const AvbdOgcPairTrustRegionContext *ogcPairContext = nullptr);
 
   /**
    * @brief Solve decoupled 3x3 system for a single body
@@ -346,6 +682,213 @@ private:
       const physx::PxVec3 &gravity, physx::PxReal dt, physx::PxU32 sweeps,
       AvbdSolverStats *stats);
 
+  /**
+   * @brief Conservative current-pose recovery for genuine soft/world-static
+   * SDF or ground overlap.
+   *
+   * This is deliberately a geometric safety stage, not another owner of the
+   * OGC margin.  It accepts only a negative true collision-surface gap from a
+   * non-CCD source body, applies a common-alpha support correction guarded by
+   * exact incident-tet determinants, and moves the velocity anchor together
+   * with position.
+   */
+  void applyWorldStaticSoftNormalDepenetrationSweeps(
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxU32 sweeps,
+      physx::PxArray<physx::PxU8> *recoveredContacts,
+      AvbdSolverStats *stats,
+      const AvbdSoftIslandExecutionPlan *ogcExecutionPlan = nullptr,
+      AvbdSolverBody *ogcRigidBodies = nullptr,
+      physx::PxU32 numOgcRigidBodies = 0,
+      const AvbdSoftContact *ogcContacts = nullptr,
+      physx::PxU32 numOgcContacts = 0);
+
+  // Fresh current-pose triangle/OBB cores use the same local support
+  // scheduling as dynamic pairs, but have no movable rigid endpoint. This
+  // intentionally deforms only the soft collision support; it never performs
+  // a coherent whole-volume escape from a plane or world-static box.
+  void applyWorldStaticTriangleCoreLocalManifold(
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxU32 sweeps, AvbdSolverStats *stats,
+      const AvbdSoftIslandExecutionPlan *ogcExecutionPlan = nullptr,
+      AvbdSolverBody *ogcRigidBodies = nullptr,
+      physx::PxU32 numOgcRigidBodies = 0,
+      const AvbdSoftContact *ogcContacts = nullptr,
+      physx::PxU32 numOgcContacts = 0);
+
+  /**
+   * @brief Coherent endpoint fallback for a deep non-CCD soft/world-static
+   *        overlap.
+   *
+   * A current-pose OGC row which first appears deeply inside a static target
+   * may be too late for independent support rows: correcting only those
+   * vertices can invert their incident tetrahedra before the material solve.
+   * This narrow fallback translates an otherwise unconstrained source body as
+   * one rigidly coherent soft configuration, preserving every tet F exactly.
+   */
+  void applyWorldStaticSoftBodyEndpointTranslations(
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxArray<physx::PxU8> *recoveredBodies,
+      physx::PxArray<physx::PxVec3> *recoveryNormals,
+      physx::PxArray<physx::PxVec3> *recoveryTranslations,
+      bool allowFreshTriangleCoreExit,
+      AvbdSolverStats *stats);
+
+  /** e=0 body-wide normal clamp for endpoint fallback translations. */
+  void clampWorldStaticSoftBodyEndpointVelocities(
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      const physx::PxArray<physx::PxU8> *recoveredBodies,
+      const physx::PxArray<physx::PxVec3> *recoveryNormals,
+      AvbdSolverStats *stats);
+
+  /** e=0 normal clamp for recovered soft/world-static contacts. */
+  void clampWorldStaticSoftInelasticNormalVelocities(
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      const physx::PxArray<physx::PxU8> *recoveredContacts,
+      AvbdSolverStats *stats);
+
+  /**
+   * @brief Build a local, common-face OGC manifold for freshly detected
+   *        dynamic box/triangle-core intersections.
+   *
+   * A triangle-core row carries three independently embedded collision
+   * vertices.  Before resorting to a body-wide escape, this stage chooses one
+   * OBB support face for the complete soft-body/rigid-shape pair and projects
+   * those three weighted supports through the ordinary coupled soft/rigid
+   * response.  The material solve can therefore absorb the load as local
+   * deformation.  `resolvedTriangleCoreContacts` is set only when every core
+   * triangle in a group is outside the selected face, letting the coherent
+   * endpoint translation remain a fail-closed fallback rather than the normal
+   * contact response.
+   */
+  void applyDynamicSoftRigidTriangleCoreLocalManifold(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxU32 sweeps,
+      physx::PxArray<physx::PxU8> *resolvedTriangleCoreContacts,
+      AvbdSolverStats *stats,
+      AvbdOgcPairState *ogcPairStates = nullptr,
+      physx::PxU32 numOgcPairStates = 0,
+      const physx::PxU32 *ogcPairIndices = nullptr,
+      physx::PxU32 numOgcPairIndices = 0,
+      const physx::PxU32 *ogcPairContactStarts = nullptr,
+      physx::PxU32 numOgcPairContactStarts = 0,
+      const physx::PxU32 *ogcPairContactRefs = nullptr,
+      physx::PxU32 numOgcPairContactRefs = 0);
+
+  /**
+   * @brief Coherent paired endpoint recovery for deep current-pose
+   *        soft/dynamic-rigid SDF overlap.
+   *
+   * This is the dynamic counterpart to the world-static coherent endpoint
+   * fallback.  It is intentionally much narrower than the ordinary
+   * Position-AL contact solve: it accepts only a non-CCD source which is
+   * already deeply inside the true collision surface, translates an entirely
+   * unconstrained soft body rigidly (preserving every tet F), and applies the
+   * equal generalized linear/angular response to the dynamic rigid target.
+   */
+  void applyDynamicSoftRigidBodyEndpointTranslations(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxU32 sweeps,
+      physx::PxArray<physx::PxU8> *recoveredContacts,
+       const physx::PxArray<physx::PxVec3> *precedingStaticTranslations,
+       bool allowFreshTriangleCoreExit,
+       bool preferLocalTriangleCoreManifold,
+       bool allowCoherentEndpointFallback,
+       AvbdSolverStats *stats,
+      AvbdOgcPairState *ogcPairStates = nullptr,
+      physx::PxU32 numOgcPairStates = 0,
+      const physx::PxU32 *ogcPairIndices = nullptr,
+      physx::PxU32 numOgcPairIndices = 0,
+      const physx::PxU32 *ogcPairContactStarts = nullptr,
+      physx::PxU32 numOgcPairContactStarts = 0,
+      const physx::PxU32 *ogcPairContactRefs = nullptr,
+      physx::PxU32 numOgcPairContactRefs = 0);
+
+  /** e=0 generalized velocity clamp for coherent dynamic endpoint recovery. */
+  void clampDynamicSoftRigidBodyEndpointVelocities(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      const physx::PxArray<physx::PxU8> *recoveredContacts,
+      AvbdSolverStats *stats);
+
+  /**
+   * @brief Conservative current-pose recovery for genuine dynamic soft/rigid
+   * SDF overlap.
+   *
+   * This intentionally consumes neither the OGC shell nor any swept/CCD
+   * objective: it is an after-solve geometric safety projection for a
+   * prepared eRIGID_SDF row whose actual surface gap is negative.  The soft
+   * correction is paired with an equal generalized rigid response and its
+   * initialPosition anchor moves with that correction, so the recovery is
+   * excluded from the subsequent soft velocity reconstruction.
+   */
+  void applyDynamicSoftRigidNormalDepenetrationSweeps(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+      AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      physx::PxU32 sweeps,
+      physx::PxArray<physx::PxU8> *recoveredContacts,
+      AvbdSolverStats *stats,
+      const AvbdOgcPairState *ogcPairStates = nullptr,
+      physx::PxU32 numOgcPairStates = 0,
+      const physx::PxU32 *ogcPairIndices = nullptr,
+      physx::PxU32 numOgcPairIndices = 0,
+      physx::PxReal softComplianceResponseScale = 1.0f,
+      bool projectToCurrentPoseBoundary = false,
+      const physx::PxU32 *ogcPairContactStarts = nullptr,
+      physx::PxU32 numOgcPairContactStarts = 0,
+      const physx::PxU32 *ogcPairContactRefs = nullptr,
+      physx::PxU32 numOgcPairContactRefs = 0);
+
+  /** e=0 normal clamp for dynamic soft/rigid recovery contacts. */
+  void clampDynamicSoftRigidInelasticNormalVelocities(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      const physx::PxArray<physx::PxU8> *recoveredContacts,
+      AvbdSolverStats *stats);
+
+  /**
+   * @brief Shared e=0 velocity block for pairs whose same-dt OGC admission
+   *        clipped an incoming endpoint at the physical collision boundary.
+   *
+   * Unlike geometric recovery this consumes neither an overlap nor every
+   * proximity row.  It transfers only the normal momentum that would have
+   * crossed an already-admitted DCD boundary through the weighted soft
+   * support and the target rigid's locked 6DOF response.  All pairs for a
+   * target are swept together, so opposing soft contacts balance on the same
+   * rigid instead of producing serial launch impulses.
+   */
+  void clampAdmittedMixedOgcPairNormalVelocities(
+      AvbdSolverBody *bodies, physx::PxU32 numBodies,
+      AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+      const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+      AvbdOgcPairState *pairStates, physx::PxU32 numPairStates,
+      const physx::PxU32 *contactPairIndices,
+      physx::PxU32 numContactPairIndices,
+      const physx::PxU32 *pairContactStarts,
+      physx::PxU32 numPairContactStarts,
+      const physx::PxU32 *pairContactRefs,
+      physx::PxU32 numPairContactRefs,
+      AvbdSolverStats *stats);
+
   /** e=0 normal clamp for rigid/static-particle soft contacts. */
   void clampKinematicShellInelasticNormalVelocities(
       AvbdSolverBody *bodies, physx::PxU32 numBodies,
@@ -369,11 +912,6 @@ private:
       physx::PxArray<physx::PxU8> *deformableNormalStageMask,
       AvbdSolverStats *stats);
 
-  /** Capture the exact normal-row state consumed by the first AL iteration. */
-  void captureBodyStaticNormalDiagnosticStart(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies,
-      AvbdContactConstraint *contacts, physx::PxU32 numContacts);
-
   /**
    * @brief Stage 5: Update velocities from position change
    * v = (x_new - x_n) / dt
@@ -391,7 +929,8 @@ private:
   void postAlStages(
       physx::PxReal dt, physx::PxReal invDt, AvbdSolverBody *bodies,
       physx::PxU32 numBodies, AvbdContactConstraint *contacts,
-      physx::PxU32 numContacts, const physx::PxVec3 &gravity,
+      physx::PxU32 numContacts, const AvbdBodyConstraintMap *contactMap,
+      const physx::PxVec3 &gravity,
       bool hasBodyStaticContact, bool deformableFastImpactIsland,
       const physx::PxArray<bool> &touchingBodyStatic,
       const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
@@ -399,6 +938,8 @@ private:
       bool allowRigidDeepPoseRecoverySplit,
       bool allowRigidFiniteMaterialPoseSplit,
       AvbdSoftParticle *shellParticles, physx::PxU32 numShellParticles,
+      const AvbdSoftBody *softBodiesForRecovery,
+      physx::PxU32 numSoftBodiesForRecovery,
       AvbdSoftContact *shellContacts, physx::PxU32 numShellContacts,
       const physx::PxArray<bool> &touchesKinematicShell,
       const physx::PxArray<physx::PxVec3> *shellLinearVelAtSolveStart,
@@ -407,7 +948,10 @@ private:
       bool hasJointConstraints, bool skipBodyStaticFriction,
       bool applyVelocityDamping,
       AvbdSoftParticle *softParticlesForVel,
-      physx::PxU32 numSoftParticlesForVel, AvbdSolverStats &stats);
+      physx::PxU32 numSoftParticlesForVel,
+      AvbdSolverStats &stats,
+      const AvbdPostAlContactWorkPlan *postAlContactWork = nullptr,
+      const AvbdSoftIslandExecutionPlan *terminalSoftExecutionPlan = nullptr);
 
   //-------------------------------------------------------------------------
   // Energy Minimization Framework
@@ -507,11 +1051,13 @@ private:
       PxU32 particleGlobalIdx,
       AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
       AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
-      AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+      const AvbdSoftBody &softBody,
       AvbdSoftContact *softContacts, PxU32 numSoftContacts,
       const AvbdSoftContactParticleRef *softContactRefs,
       PxU32 softContactRefBegin, PxU32 softContactRefEnd,
-      PxReal dt, PxReal invDt2);
+      PxReal dt, PxReal invDt2,
+      AvbdCpuIsaCorotationalTetPacket8Fn corotationalTetPacketKernel,
+      const AvbdOgcPairTrustRegionContext *ogcPairContext = nullptr);
 
   /**
    * @brief Solve every rigid-vertex attachment as one coupled positional
@@ -551,89 +1097,27 @@ private:
   //-------------------------------------------------------------------------
 
   AvbdSolverConfig mConfig;
-  AvbdGraphColoring mColoring;
-  AvbdParallelColoring
-      mParallelColoring; //!< Constraint-based parallel coloring
-  AvbdBodyParallelColoring
-      mBodyColoring; //!< Body-based parallel coloring for BCD
-  AvbdBodyConstraintMap
-      mContactMap; //!< Pre-computed contact-to-body mapping for O(1) lookup
-  AvbdBodyConstraintMap mD6Map;        //!< Pre-computed D6 joint mapping
 
-  physx::PxAllocatorCallback *mAllocator;
   bool mInitialized;
 
-  //-------------------------------------------------------------------------
-  // Optimized solving with pre-computed constraint mapping
-  //-------------------------------------------------------------------------
-
-  /**
-   * @brief Build constraint-to-body mapping for efficient lookup
-   */
-  void buildConstraintMapping(AvbdContactConstraint *contacts,
-                              physx::PxU32 numContacts, physx::PxU32 numBodies);
-
-  /**
-   * @brief Optimized version using pre-computed constraint map -
-   * O(constraints per body)
-   */
-  void solveBodyLocalConstraintsFast(AvbdSolverBody *bodies,
-                                     physx::PxU32 numBodies,
-                                     physx::PxU32 bodyIndex,
-                                     AvbdContactConstraint *contacts);
-
-  /**
-   * @brief Thread-safe version using external constraint map -
-   * O(constraints per body)
-   */
-  void solveBodyLocalConstraintsFastWithMap(
-      AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 bodyIndex,
-      AvbdContactConstraint *contacts, const AvbdBodyConstraintMap &contactMap);
-
-  /**
-   * @brief Build all constraint mappings for joints (called once before
-   * solve iterations)
-   */
-  void buildAllConstraintMappings(
-      physx::PxU32 numBodies, AvbdContactConstraint *contacts,
-      physx::PxU32 numContacts, AvbdD6JointConstraint *d6Joints,
-      physx::PxU32 numD6);
 };
 
 //=============================================================================
 // Inline Implementation
 //=============================================================================
 
-inline AvbdSolver::AvbdSolver() : mAllocator(nullptr), mInitialized(false) {
-  // Initialize coloring to safe defaults
-  mColoring.colorGroups = nullptr;
-  mColoring.numColors = 0;
-  mColoring.maxColors = 0;
-
-  // Explicitly initialize all constraint mappings to safe defaults
-  // (redundant if default constructors work, but safer)
-  mContactMap = AvbdBodyConstraintMap();
-  mD6Map = AvbdBodyConstraintMap();
-}
+inline AvbdSolver::AvbdSolver() : mInitialized(false) {}
 
 inline AvbdSolver::~AvbdSolver() { release(); }
 
 inline void AvbdSolver::initialize(const AvbdSolverConfig &config,
                                    physx::PxAllocatorCallback &allocator) {
+  PX_UNUSED(allocator);
   mConfig = config;
-  mAllocator = &allocator;
   mInitialized = true;
 }
 
 inline void AvbdSolver::release() {
-  if (mInitialized && mAllocator) {
-    if (mColoring.colorGroups != nullptr) {
-      mColoring.release(*mAllocator);
-    }
-    // Release all constraint mappings
-    mContactMap.release(*mAllocator);
-    mD6Map.release(*mAllocator);
-  }
   mInitialized = false;
 }
 

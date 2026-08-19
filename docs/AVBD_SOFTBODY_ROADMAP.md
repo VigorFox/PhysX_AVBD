@@ -1,8 +1,14 @@
-# AVBD Soft Body / Cloth System — Standalone Implementation
+# AVBD Soft Body / Cloth System — Standalone/Component Implementation
+
+> **Scope correction (2026-07-24)**: 本文的 “ALL PHASES COMPLETE” 只描述
+> `avbd_standalone` 和 Scene 外 CPU component 的数学实现，不表示 PhysX
+> `PxDeformableSurface` / `PxDeformableVolume` 已有 CPU `PxScene` backend。
+> 当前 CPU Scene 集成长程任务以
+> [AVBD_CPU_SOFT_BODY_HANDOFF.md](AVBD_CPU_SOFT_BODY_HANDOFF.md) 为准。
 
 > **Created**: 2026-03-15  
 > **Last Updated**: 2026-03-15  
-> **Status**: ✅ **ALL PHASES COMPLETE** — 118/118 tests PASS  
+> **Status**: ✅ **STANDALONE/COMPONENT PHASES COMPLETE** — historical 118/118 checkpoint
 > **Soft Body Tests**: test104–test120 (17 tests)  
 > **Architecture**: VBD energy-based elasticity + AVBD adaptive penalty contacts
 
@@ -10,7 +16,8 @@
 
 ## Executive Summary
 
-软体（Deformable Volume）和布料（Deformable Surface）已完整实现并通过全部测试。
+软体（Deformable Volume）和布料（Deformable Surface）的 standalone/component
+数学路径已实现并通过本文对应的历史测试。
 架构遵循 **VBD (Vertex Block Descent)** 论文框架，弹性力使用能量梯度 +
 Hessian 直接求解，接触/附着约束使用 AVBD 自适应罚函数。
 
@@ -432,11 +439,11 @@ for (contact) updateSoftContactDual(sc, particles, beta);
 | test118 | `materialPoisson` | Higher ν preserves volume better | ✅ PASS |
 | test119 | `convergenceSoftBench` | Monotonic improvement with iterations | ✅ PASS |
 
-### Phase 5: Unified Scene ✅
+### Phase 5: Standalone Unified Solver Scene ✅
 
 | Test | Name | Validates | Status |
 |------|------|-----------|--------|
-| test120 | `unifiedScene` | Rigid + articulation + soft body: stable | ✅ PASS |
+| test120 | `unifiedScene` | Standalone rigid + articulation + soft body: stable | ✅ PASS |
 
 ---
 

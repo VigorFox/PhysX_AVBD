@@ -104,8 +104,18 @@ public:
 	virtual Dy::Context*							createGpuDynamicsContext(Cm::FlushPool& taskPool, PxsKernelWranglerManager* gpuKernelWragler, 
 														PxCudaContextManager* cudaContextManager,
 														const PxGpuDynamicsMemoryConfig& config, IG::SimpleIslandManager& islandManager, PxU32 maxNumPartitions, PxU32 maxNumStaticPartitions, PxReal maxBiasCoefficient,
-														PxU32 gpuComputeVersion, PxvSimStats& simStats, PxsHeapMemoryAllocatorManager& heapMemoryManager, PxSolverType::Enum solverType,
-														PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags) PX_OVERRIDE;
+																PxU32 gpuComputeVersion, PxvSimStats& simStats, PxsHeapMemoryAllocatorManager& heapMemoryManager, PxSolverType::Enum solverType,
+																PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags) PX_OVERRIDE;
+
+	virtual bool createGpuAvbdDynamicsContext(
+		PxsKernelWranglerManager* gpuKernelWrangler,
+		PxCudaContextManager* cudaContextManager,
+		IG::SimpleIslandManager& islandManager,
+		Cm::VirtualAllocatorCallback& allocator,
+		Cm::VirtualAllocatorCallback& mappedAllocator,
+		PxReal maxBiasCoefficient, PxvSimStats& simStats,
+		PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags,
+		PxAvbdGpuDynamicsContext& context) PX_OVERRIDE;
 	
 	//internals
 		

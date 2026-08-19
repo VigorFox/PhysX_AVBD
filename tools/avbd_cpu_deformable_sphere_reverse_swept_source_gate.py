@@ -93,6 +93,24 @@ def main() -> int:
         "inline void avbdDetectSoftRigidSphereSweptOGCFeatures(",
         "inline void avbdDetectSoftRigidSphereOGCFeatures(",
     )
+    forward_owner = section(
+        soft,
+        "PX_FORCE_INLINE bool "
+        "avbdRigidSphereForwardVertexOwnsSweptFeature(",
+        "inline void avbdDetectSoftRigidSphereSweptOGCFeatures(",
+    )
+    require_all(
+        errors,
+        "sphere forward swept owner predicate",
+        forward_owner,
+        (
+            "particle.initialPosition - centerStart",
+            "particle.predictedPosition - centerEnd",
+            "currentSdf < margin",
+            "avbdSegmentEnterExpandedSphere(",
+            "sphere.radius + margin",
+        ),
+    )
     require_all(
         errors,
         "sphere reverse swept detector",
@@ -113,10 +131,12 @@ def main() -> int:
             "translationToleranceSq",
             "(displacement1 - displacement0)",
             "(displacement2 - displacement0)",
-            "const PxU32 triangleVertices[3] =",
-            "bool forwardVertexOwns = false;",
-            "currentSdf < margin ||",
-            "avbdSegmentEnterExpandedSphere(",
+            "PxArray<PxU8>* persistentForwardOwnerScratch = NULL",
+            "body.compiled.surfaceVertices.size()",
+            "avbdRigidSphereForwardVertexOwnsSweptFeature(",
+            "forwardOwnerScratch[v0] != 0",
+            "forwardOwnerScratch[v1] != 0",
+            "forwardOwnerScratch[v2] != 0",
             "if(forwardVertexOwns)",
             "const PxVec3 relativeEnd =",
             "centerEnd - displacement0;",
@@ -233,6 +253,8 @@ def main() -> int:
             "getSceneCpuVolumeSphereReverseSweptSeparations(",
             "minimumVertexSweepSeparation >",
             "? 0.05f : 0.10f",
+            "neither a soft nor a rigid response",
+            "positive_rigid_drop + 0.05",
         )
         + public_fragments,
     )

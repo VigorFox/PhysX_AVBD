@@ -32,6 +32,10 @@
 #include "foundation/PxSimpleTypes.h"
 #include "foundation/PxVec3.h"
 
+#if PX_X64
+#include <emmintrin.h>
+#endif
+
 namespace physx {
 
 /**
@@ -110,7 +114,6 @@ static const PxReal AVBD_REGULARIZATION_COEFFICIENT = 1e-6f;
 static const PxReal AVBD_PEN_SCALE_BODY_VS_STATIC = 2.0f;
 static const PxReal AVBD_PEN_SCALE_DYN_DYN = 0.05f;
 static const PxReal AVBD_CONTACT_BOOST_FRACTION = 0.005f;
-static const PxU32 AVBD_MIN_INNER_ITERS_BODY_VS_STATIC = 16u;
 // Surface-motion alias reject + friction ride caps (solve-loop contract Phase 4)
 static const PxReal AVBD_SURFACE_STEP_ALIAS_M = 0.5f;
 static const PxReal AVBD_SURFACE_VMESH_CAP = 8.0f;
@@ -175,10 +178,17 @@ struct AvbdSolverConfig {
   // Iteration control
   //-------------------------------------------------------------------------
 
-  physx::PxU32
-      outerIterations; //!< Number of outer ALM iterations (typically 1-4)
-  physx::PxU32 innerIterations; //!< Number of inner block descent iterations
-                                //!< per outer (typically 2-8)
+  //! Number of complete AVBD iterations. Each iteration performs the primal
+  //! body sweep and its dual-variable/stiffness updates.
+  physx::PxU32 iterations;
+
+  //! Minimum complete-iteration budget and early-stop floor for islands
+  //! containing D6 or gear joints. Zero disables the joint-specific override.
+  physx::PxU32 jointIterationOverride;
+
+  //! Allow converged rigid-only AVBD islands to stop before exhausting their
+  //! effective complete-iteration budget.
+  bool enableEarlyStop;
 
   //-------------------------------------------------------------------------
   // Augmented Lagrangian parameters
@@ -186,7 +196,7 @@ struct AvbdSolverConfig {
 
   physx::PxReal initialRho; //!< Initial penalty parameter for ALM
   physx::PxReal
-      rhoScale;         //!< Scale factor for rho adaptation per outer iteration
+      rhoScale;         //!< Scale factor for rho adaptation per AVBD iteration
   physx::PxReal maxRho; //!< Maximum penalty parameter
 
   //-------------------------------------------------------------------------
@@ -223,12 +233,8 @@ struct AvbdSolverConfig {
                     //!< Set to 0 to disable Chebyshev acceleration.
                     //!< Higher values give faster convergence but risk instability.
 
-  //-------------------------------------------------------------------------
-  // Convergence
-  //-------------------------------------------------------------------------
-
   physx::PxReal
-      positionTolerance; //!< Position error tolerance for early termination
+      positionTolerance; //!< Pose-delta threshold for early termination
   physx::PxReal velocityDamping; //!< Global velocity damping factor (0-1)
 
   /**
@@ -262,6 +268,13 @@ struct AvbdSolverConfig {
   bool enableParallelization; //!< Enable graph coloring for parallel body
                               //!< updates
 
+  // Select the legacy ordered body sweep as the scene's reproducibility
+  // authority.  This is deliberately separate from determinismFlags: the
+  // latter enables an older, still separately-audited sort/Kahan experiment,
+  // while PxSceneFlag::eENABLE_ENHANCED_DETERMINISM must preserve the current
+  // ordered solver trajectory instead of silently changing its math.
+  bool useOrderedBackend;
+
   bool enableLocal6x6Solve; //!< Use 6x6 local system solve in block descent
                             //!< (fallback to Gauss-Seidel when false)
 
@@ -272,8 +285,6 @@ struct AvbdSolverConfig {
                                         //!< ownership masks for opt-in gates
   bool enableBoundedComponentProductionProbe; //!< Opt-in complete-component
                                               //!< P3K owner replacement probe
-  bool enableMatrixFreeComponentOracle; //!< Opt-in read-only dense/matrix-free
-                                        //!< same-component comparison
 
   physx::PxU32 largeIslandThreshold; //!< Constraint count threshold to trigger
                                      //!< internal island parallelization.
@@ -312,19 +323,21 @@ struct AvbdSolverConfig {
   //-------------------------------------------------------------------------
 
   AvbdSolverConfig()
-      : lengthScale(1.0f), outerIterations(1), innerIterations(4), initialRho(1e4f),
+      : lengthScale(1.0f), iterations(4), jointIterationOverride(8),
+        enableEarlyStop(true), initialRho(1e4f),
         rhoScale(2.0f), maxRho(1e8f), defaultCompliance(1e-6f),
         contactCompliance(1e-4f), jointCompliance(1e-8f), contactDamping(0.5f),
         damping(0.5f), angularDamping(0.95f), rotationThreshold(0.001f),
         angularScale(400.0f), angularContactScale(0.2f), baumgarte(0.3f),
-        chebyshevRho(0.92f), positionTolerance(1e-4f), velocityDamping(0.99f),
+        chebyshevRho(0.92f), positionTolerance(1e-4f),
+        velocityDamping(0.99f),
         bounceThresholdVelocity(-2.0f),
         maxPositionCorrection(0.2f), maxAngularCorrection(0.5f),
         maxLambda(1e6f), enableParallelization(true),
+        useOrderedBackend(false),
         enableLocal6x6Solve(false), enableMassWeightedWeld(false),
         enableStageOwnershipDiagnostics(false),
         enableBoundedComponentProductionProbe(false),
-        enableMatrixFreeComponentOracle(false),
         largeIslandThreshold(128),
         avbdAlpha(0.95f), avbdBeta(1000.0f), avbdGamma(0.99f),
         avbdPenaltyMin(1000.0f), avbdPenaltyMax(1e9f),
@@ -347,6 +360,12 @@ struct AvbdSolverConfig {
         false; // Disable parallelization for strict determinism
   }
 
+  /** Select the current ordered scalar/GS backend without changing its math. */
+  void enableOrderedBackend() {
+    useOrderedBackend = true;
+    enableParallelization = false;
+  }
+
   /**
    * @brief Check if determinism is enabled
    */
@@ -354,560 +373,80 @@ struct AvbdSolverConfig {
     return (determinismFlags & AvbdDeterminismFlags::eDETERMINISTIC_DEFAULT) !=
            0;
   }
+
+  /** True when task scheduling must retain the ordered solver authority. */
+  bool requiresOrderedBackend() const {
+    return useOrderedBackend || isDeterministic();
+  }
 };
 
 /**
- * @brief AVBD solver statistics for debugging and profiling
+ * @brief Small cold-path AVBD solver profile payload.
+ *
+ * The default build uses the empty sink below.  Keep this payload limited to
+ * workload, deformable-contact ownership, and finalization health signals;
+ * per-row classifications and oracle/probe detail do not belong in the
+ * solver/task hot path.
  */
-struct AvbdSolverStats {
-  physx::PxU32 numBodies;      //!< Number of dynamic bodies solved
-  physx::PxU32 numContacts;    //!< Number of contact constraints
-  physx::PxU32 numJoints;      //!< Number of joint constraints
-  physx::PxU32 numColorGroups; //!< Number of color groups for parallelization
-  physx::PxU32 activeConstraints; //!< Number of active (violating) constraints
+// Full solver telemetry is an explicit cold/profile payload. The default
+// solver build uses an empty sink so island tasks do not carry or clear
+// diagnostic state in the hot path.
+#ifndef PX_AVBD_ENABLE_SOLVER_PROFILE
+#define PX_AVBD_ENABLE_SOLVER_PROFILE 0
+#endif
 
-  physx::PxU32 totalIterations; //!< Total inner iterations executed
-  physx::PxU32 velocityObjectivePositionRows;
-  physx::PxU32 velocityObjectivePointRows;
-  physx::PxU32 velocityObjectiveManifoldRows;
-  physx::PxU32 velocityObjectiveComponentRows;
-  physx::PxU32 velocityObjectiveJointRows;
-  physx::PxU32 velocityObjectiveUnsupportedRows;
-  physx::PxU32 velocityObjectiveLegacyRows;
-  physx::PxU32 velocityObjectiveInvalidRows;
-  physx::PxU64 velocityObjectiveFingerprint;
-  physx::PxU32 contactObjectivePositionSlots;
-  physx::PxU32 contactObjectivePointSlots;
-  physx::PxU32 contactObjectiveManifoldSlots;
-  physx::PxU32 contactObjectiveComponentSlots;
-  physx::PxU32 contactObjectiveJointSlots;
-  physx::PxU32 contactObjectiveUnsupportedSlots;
-  physx::PxU32 contactObjectiveLegacySlots;
-  physx::PxU32 contactObjectiveInvalidSlots;
-  physx::PxU32 contactObjectiveLegacyNormalSlots;
-  physx::PxU32 contactObjectiveLegacyTangentSlots;
-  physx::PxU32 contactObjectiveLegacyRigidStaticTangentSlots;
-  physx::PxU32 contactObjectiveLegacyDynamicTangentSlots;
-  physx::PxU32 contactObjectiveLegacyDeformableTangentSlots;
-  physx::PxU32 contactObjectiveLegacyJointMixedTangentSlots;
-  physx::PxU32 contactObjectiveLegacyOtherTangentSlots;
-  physx::PxU64 contactObjectiveFingerprint;
-  physx::PxU32 jointObjectivePositionRows;
-  physx::PxU32 jointObjectiveFinalizeRows;
-  physx::PxU32 jointObjectiveUnsupportedRows;
-  physx::PxU32 jointObjectiveLegacyRows;
-  physx::PxU32 jointObjectiveInvalidRows;
-  physx::PxU64 jointObjectiveFingerprint;
-  physx::PxU32 bodyStaticNormalAlRows;
-  physx::PxU64 bodyStaticNormalAlEvaluations;
-  physx::PxU32 bodyStaticDepenetrationCorrections;
-  physx::PxU32 bodyStaticDepenetrationEligibleRows;
-  physx::PxU32 bodyStaticDepenetrationFiniteImpulseSkips;
-  physx::PxU32 bodyStaticDepenetrationAuthoredFiniteImpulseSkips;
-  physx::PxU32 bodyStaticMaterialVelocityCorrections;
-  physx::PxU32 bodyStaticRestitutionCorrections;
-  physx::PxU32 bodyStaticNormalWarmstartHits;
-  physx::PxU32 bodyStaticNormalWarmstartMisses;
-  physx::PxU32 bodyStaticNormalWarmstartAge0;
-  physx::PxU32 bodyStaticNormalWarmstartAge1;
-  physx::PxU32 bodyStaticNormalWarmstartAge2;
-  physx::PxU32 bodyStaticNormalWarmstartAge3;
-  physx::PxU32 bodyStaticNormalManagerOnsetRows;
-  physx::PxU32 bodyStaticNormalManagerSupportRows;
-  physx::PxU32 bodyStaticNormalManagerAge0;
-  physx::PxU32 bodyStaticNormalManagerAge1;
-  physx::PxU32 bodyStaticNormalManagerAge2;
-  physx::PxU32 bodyStaticNormalManagerAge3;
-  physx::PxU32 bodyStaticNormalRowMissOnManagerSupportRows;
-  physx::PxU32 bodyStaticNormalOnsetFinalizeBodies;
-  physx::PxU32 bodyStaticNormalSupportFinalizeBodies;
-  physx::PxU32 bodyStaticNormalOnsetFinalizeCorrections;
-  physx::PxU32 bodyStaticNormalSupportFinalizeCorrections;
-  physx::PxU32 bodyStaticNormalOnsetDepenetrationEligibleRows;
-  physx::PxU32 bodyStaticNormalSupportDepenetrationEligibleRows;
-  physx::PxU32 bodyStaticNormalOnsetDepenetrationCorrections;
-  physx::PxU32 bodyStaticNormalSupportDepenetrationCorrections;
-  physx::PxU32 bodyStaticNormalOnsetShallowDepenetrationCorrections;
-  physx::PxU32 bodyStaticNormalOnsetDeepDepenetrationCorrections;
-  physx::PxU32 bodyStaticNormalSupportShallowDepenetrationCorrections;
-  physx::PxU32 bodyStaticNormalSupportDeepDepenetrationCorrections;
-  physx::PxU32 bodyStaticMaterialFiniteBudgetRows;
-  physx::PxU32 bodyStaticMaterialUnlimitedBudgetRows;
-  physx::PxU32 contactFrictionTargetAlEvaluations;
-  physx::PxU32 bodyStaticFrictionTargetRows;
-  physx::PxU32 bodyStaticFrictionTargetCorrections;
-  physx::PxU32 bodyStaticFrictionFallbackRows;
-  physx::PxU32 bodyStaticFrictionFallbackCorrections;
-  physx::PxU32 contactTargetNormalProjectionRows;
-  physx::PxU32 contactTargetNormalCorrections;
-  physx::PxU32 contactTargetTangentRows;
-  physx::PxU32 contactTargetTangentCorrections;
+#if PX_AVBD_ENABLE_SOLVER_PROFILE
+#define PX_AVBD_PROFILE_STAT(...)                                           \
+  do {                                                                      \
+    __VA_ARGS__;                                                            \
+  } while (false)
+#else
+#define PX_AVBD_PROFILE_STAT(...)                                           \
+  do {                                                                      \
+  } while (false)
+#endif
+
+struct AvbdSolverStatsPayload {
+  // Workload counters used to correlate solver cost with deformable contact
+  // topology. Keep this list intentionally small; detailed probes are retired.
+  physx::PxU32 numBodies;
+  physx::PxU32 numContacts;
+  physx::PxU32 numJoints;
+  physx::PxU32 totalIterations;
+
   physx::PxU32 surfaceDeformableAlRows;
-  physx::PxU64 surfaceDeformableAlEvaluations;
-  physx::PxU32 surfaceDeformablePositionTangentCandidates;
   physx::PxU32 surfaceDeformablePositionTangentRows;
-  physx::PxU64 surfaceDeformablePositionTangentEvaluations;
-  physx::PxU32 surfaceDeformablePositionTangentMixedRejectRows;
-  physx::PxU32 surfaceDeformablePositionTangentShellRejectRows;
-  physx::PxU32 surfaceDeformablePositionTangentTargetRejectRows;
-  physx::PxU32 surfaceDeformablePositionTangentRestitutionRejectRows;
-  physx::PxU32 surfaceDeformablePositionTangentFiniteRejectRows;
-  physx::PxU32 surfaceDeformablePositionTangentScaleRejectRows;
-  physx::PxU32 surfaceDeformableStrippedRows;
-  physx::PxU32 surfaceDeformableShellSuppressedPrimalRows;
   physx::PxU32 surfaceDeformableDepenetrationCorrections;
-  physx::PxU32 surfaceDeformableFrictionRawRows;
-  physx::PxU32 surfaceDeformableFrictionDominantRows;
-  physx::PxU32 surfaceDeformableFrictionFewContactRows;
-  physx::PxU32 surfaceDeformableFrictionMultiCornerRows;
   physx::PxU32 surfaceDeformableFrictionCorrections;
+
+  // Finalization health: invocation, applied correction, and bounded-shadow
+  // outcomes are the only retained signals needed for correctness triage.
   physx::PxU32 surfaceDeformableFinalizeBodies;
   physx::PxU32 surfaceDeformableFinalizeCorrections;
-  physx::PxU32 surfaceDeformableFinalizeSpatialCorrections;
-  physx::PxU32 surfaceDeformableFinalizeComFallbackCorrections;
-  physx::PxU32 surfaceDeformableFinalizeSecondaryRows;
-  physx::PxU32 surfaceDeformableFinalizeSecondaryResidualSeparationRows;
-  physx::PxU32 surfaceDeformableFinalizeManifoldBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldOneRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldTwoRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldThreeRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldFourRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldOverFourRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldFiveToEightRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldNineToSixteenRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldOverSixteenRowBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldMixedScaleBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldRankDeficientBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldAliasRows;
-  physx::PxU32 surfaceDeformableFinalizeManifoldDynamicIncidentBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldRigidStaticIncidentBodies;
-  physx::PxU32 surfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponents;
-  physx::PxU32 surfaceDeformableFinalizeComponentOneBody;
-  physx::PxU32 surfaceDeformableFinalizeComponentTwoBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentThreeToFourBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentFiveToEightBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentNineToSixteenBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentOverThirtyTwoBodies;
-  physx::PxU32 surfaceDeformableFinalizeComponentOneToEightRows;
-  physx::PxU32 surfaceDeformableFinalizeComponentNineToSixteenRows;
-  physx::PxU32 surfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows;
-  physx::PxU32 surfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows;
-  physx::PxU32 surfaceDeformableFinalizeComponentOverSixtyFourRows;
-  physx::PxU32 surfaceDeformableFinalizeComponentRestitution;
-  physx::PxU32 surfaceDeformableFinalizeComponentFiniteImpulse;
-  physx::PxU32 surfaceDeformableFinalizeComponentTargetVelocity;
-  physx::PxU32 surfaceDeformableFinalizeComponentMixedScale;
-  physx::PxU32 surfaceDeformableFinalizeComponentRigidStatic;
-  physx::PxU32 surfaceDeformableFinalizeComponentNonOwnerDeformable;
-  physx::PxU32 surfaceDeformableFinalizeComponentJointIsland;
-  physx::PxU32 surfaceDeformableFinalizeComponentLockedDof;
-  physx::PxU32 surfaceDeformableFinalizeComponentNonDynamicBody;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagNoCorrectionRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagWithinBudgetRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagOverBudgetRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagUnsupportedRows;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagComponentsWithinBudget;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagComponentsOverBudget;
-  physx::PxU32 surfaceDeformableFinalizeBudgetDiagComponentsUnsupported;
   physx::PxU32 surfaceDeformableFinalizeShadowComponents;
-  physx::PxU32 surfaceDeformableFinalizeShadowRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowNoCorrection;
   physx::PxU32 surfaceDeformableFinalizeShadowSolved;
-  physx::PxU32 surfaceDeformableFinalizeShadowCommitCapable;
-  physx::PxU32 surfaceDeformableFinalizeShadowBudgetExhausted;
-  physx::PxU32 surfaceDeformableFinalizeShadowInfeasible;
-  physx::PxU32 surfaceDeformableFinalizeShadowResidualUnclassified;
-  physx::PxU32 surfaceDeformableFinalizeShadowNumericalFailure;
-  physx::PxU32 surfaceDeformableFinalizeShadowIterationLimit;
   physx::PxU32 surfaceDeformableFinalizeShadowUnsupported;
-  physx::PxU32 surfaceDeformableFinalizeShadowUnsupportedFastImpact;
-  physx::PxU32 surfaceDeformableFinalizeShadowUnsupportedSnapshot;
-  physx::PxU32 surfaceDeformableFinalizeShadowLowerRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowFreeRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowUpperRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeComponents;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeNoCorrection;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeSolved;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeInfeasible;
-  physx::PxU32
-      surfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeNumericalFailure;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeIterationLimit;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeIterations;
-  physx::PxU32
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x;
-  physx::PxU32
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x;
-  physx::PxU32
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeCommittedComponents;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeOracleComponents;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeOracleRows;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeOracleMatched;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeOracleMismatched;
-  physx::PxU32 surfaceDeformableFinalizeShadowMatrixFreeOracleSkipped;
-  physx::PxU32 surfaceDeformableFinalizePreOwnerBodies;
-  physx::PxU32 surfaceDeformableFinalizeLegacyOwnerBodies;
-  physx::PxU32 surfaceDeformableFinalizeOwnerDiscoveryMismatchBodies;
-  physx::PxU32 surfaceDeformableFinalizeProbeEligibleComponents;
+  physx::PxU32 surfaceDeformableFinalizeShadowIterationLimit;
   physx::PxU32 surfaceDeformableFinalizeProbeCommittedComponents;
-  physx::PxU32 surfaceDeformableFinalizeProbeCommittedRows;
-  physx::PxU32 surfaceDeformableFinalizeProbeCommittedBodies;
-  physx::PxU32 surfaceDeformableFinalizeProbeReplacedOwnerBodies;
-  physx::PxU32 surfaceDeformableAlDepenetrationRows;
-  physx::PxU32 surfaceDeformableAlFinalizeRows;
-  physx::PxU32 surfaceDeformableDepenetrationFinalizeRows;
-  physx::PxU32 surfaceDeformableAlDepenetrationFinalizeRows;
-  physx::PxU32 surfaceDeformableFinalizeContactFalsePositiveCorrections;
-  physx::PxU32 surfaceDeformableFinalizeContactResidualSeparationCorrections;
   physx::PxU32 surfaceDeformableFinalizeContactReversalCorrections;
-  physx::PxU32 surfaceShellContacts;
-  physx::PxU32 surfaceShellDepenetrationCorrections;
-  physx::PxU32 surfaceShellFrictionRows;
-  physx::PxU32 surfaceShellFrictionCorrections;
-  physx::PxU32 surfaceShellFinalizeBodies;
-  physx::PxU32 surfaceShellFinalizeCorrections;
 
-  physx::PxReal constraintError;        //!< RMS constraint error
-  physx::PxReal maxPositionError;       //!< Maximum position error after solve
-  physx::PxReal avgPositionError;       //!< Average position error after solve
-  physx::PxReal maxConstraintViolation; //!< Maximum constraint violation
-  physx::PxReal bodyStaticDepenetrationDistance;
-  physx::PxReal bodyStaticDepenetrationMaxCorrection;
-  physx::PxReal bodyStaticMaterialVelocityDelta;
-  physx::PxReal bodyStaticMaterialVelocityMaxDelta;
-  physx::PxReal bodyStaticNormalRestoredLambdaMax;
-  physx::PxReal bodyStaticNormalRestoredPenaltyMax;
-  physx::PxReal bodyStaticNormalInitialPenaltyMax;
-  physx::PxReal bodyStaticNormalPreAlRawPenetration;
-  physx::PxReal bodyStaticNormalPostAlRawPenetration;
-  physx::PxReal bodyStaticNormalAlphaC0Offset;
-  physx::PxReal bodyStaticNormalPreAlPenetration;
-  physx::PxReal bodyStaticNormalPostAlPenetration;
-  physx::PxReal bodyStaticNormalPostAlSeparation;
-  physx::PxReal bodyStaticNormalAlOutwardDistance;
-  physx::PxReal bodyStaticNormalAlInwardDistance;
-  physx::PxReal bodyStaticMaterialPoseSeparatingVelocity;
-  physx::PxReal bodyStaticMaterialAllowedSeparatingVelocity;
-  physx::PxReal bodyStaticMaterialFiniteRemainingImpulse;
-  physx::PxReal bodyStaticNormalOnsetPreAlRawPenetration;
-  physx::PxReal bodyStaticNormalOnsetPreAlPenetration;
-  physx::PxReal bodyStaticNormalOnsetPostAlRawPenetration;
-  physx::PxReal bodyStaticNormalOnsetPostAlPenetration;
-  physx::PxReal bodyStaticNormalOnsetAlphaC0Offset;
-  physx::PxReal bodyStaticNormalOnsetAlOutwardDistance;
-  physx::PxReal bodyStaticNormalSupportPreAlRawPenetration;
-  physx::PxReal bodyStaticNormalSupportPreAlPenetration;
-  physx::PxReal bodyStaticNormalSupportPostAlRawPenetration;
-  physx::PxReal bodyStaticNormalSupportPostAlPenetration;
-  physx::PxReal bodyStaticNormalSupportAlphaC0Offset;
-  physx::PxReal bodyStaticNormalSupportAlOutwardDistance;
-  physx::PxReal bodyStaticNormalOnsetPoseSeparatingVelocity;
-  physx::PxReal bodyStaticNormalSupportPoseSeparatingVelocity;
-  physx::PxReal bodyStaticNormalOnsetFinalizeDelta;
-  physx::PxReal bodyStaticNormalSupportFinalizeDelta;
-  physx::PxReal bodyStaticNormalOnsetDepenetrationDistance;
-  physx::PxReal bodyStaticNormalSupportDepenetrationDistance;
-  physx::PxReal bodyStaticNormalOnsetShallowDepenetrationDistance;
-  physx::PxReal bodyStaticNormalOnsetDeepDepenetrationDistance;
-  physx::PxReal bodyStaticNormalSupportShallowDepenetrationDistance;
-  physx::PxReal bodyStaticNormalSupportDeepDepenetrationDistance;
-  physx::PxReal bodyStaticFrictionTargetImpulse;
-  physx::PxReal bodyStaticFrictionFallbackImpulse;
-  physx::PxReal contactTargetNormalImpulse;
-  physx::PxReal contactTargetTangentImpulse;
-  physx::PxReal surfaceDeformableDepenetrationDistance;
-  physx::PxReal surfaceDeformableFrictionImpulse;
+  physx::PxReal constraintError;
   physx::PxReal surfaceDeformableFinalizeDelta;
-  physx::PxReal surfaceDeformableFinalizeContactPreSeparation;
-  physx::PxReal surfaceDeformableFinalizeContactPostSeparation;
-  physx::PxReal surfaceDeformableFinalizeContactPostApproach;
-  physx::PxReal surfaceDeformableFinalizeSecondaryResidualSeparation;
-  physx::PxReal surfaceShellDepenetrationDistance;
-  physx::PxReal surfaceShellFrictionImpulse;
-  physx::PxReal surfaceShellFinalizeDelta;
 
-  physx::PxReal totalEnergy; //!< Total system energy (kinetic + potential)
-
-  physx::PxU64 solveTimeUs; //!< Solve time in microseconds
-
-  void reset() {
-    numBodies = 0;
-    numContacts = 0;
-    numJoints = 0;
-    numColorGroups = 0;
-    activeConstraints = 0;
-    totalIterations = 0;
-    velocityObjectivePositionRows = 0;
-    velocityObjectivePointRows = 0;
-    velocityObjectiveManifoldRows = 0;
-    velocityObjectiveComponentRows = 0;
-    velocityObjectiveJointRows = 0;
-    velocityObjectiveUnsupportedRows = 0;
-    velocityObjectiveLegacyRows = 0;
-    velocityObjectiveInvalidRows = 0;
-    velocityObjectiveFingerprint = 0;
-    contactObjectivePositionSlots = 0;
-    contactObjectivePointSlots = 0;
-    contactObjectiveManifoldSlots = 0;
-    contactObjectiveComponentSlots = 0;
-    contactObjectiveJointSlots = 0;
-    contactObjectiveUnsupportedSlots = 0;
-    contactObjectiveLegacySlots = 0;
-    contactObjectiveInvalidSlots = 0;
-    contactObjectiveLegacyNormalSlots = 0;
-    contactObjectiveLegacyTangentSlots = 0;
-    contactObjectiveLegacyRigidStaticTangentSlots = 0;
-    contactObjectiveLegacyDynamicTangentSlots = 0;
-    contactObjectiveLegacyDeformableTangentSlots = 0;
-    contactObjectiveLegacyJointMixedTangentSlots = 0;
-    contactObjectiveLegacyOtherTangentSlots = 0;
-    contactObjectiveFingerprint = 0;
-    jointObjectivePositionRows = 0;
-    jointObjectiveFinalizeRows = 0;
-    jointObjectiveUnsupportedRows = 0;
-    jointObjectiveLegacyRows = 0;
-    jointObjectiveInvalidRows = 0;
-    jointObjectiveFingerprint = 0;
-    bodyStaticNormalAlRows = 0;
-    bodyStaticNormalAlEvaluations = 0;
-    bodyStaticDepenetrationCorrections = 0;
-    bodyStaticDepenetrationEligibleRows = 0;
-    bodyStaticDepenetrationFiniteImpulseSkips = 0;
-    bodyStaticDepenetrationAuthoredFiniteImpulseSkips = 0;
-    bodyStaticMaterialVelocityCorrections = 0;
-    bodyStaticRestitutionCorrections = 0;
-    bodyStaticNormalWarmstartHits = 0;
-    bodyStaticNormalWarmstartMisses = 0;
-    bodyStaticNormalWarmstartAge0 = 0;
-    bodyStaticNormalWarmstartAge1 = 0;
-    bodyStaticNormalWarmstartAge2 = 0;
-    bodyStaticNormalWarmstartAge3 = 0;
-    bodyStaticNormalManagerOnsetRows = 0;
-    bodyStaticNormalManagerSupportRows = 0;
-    bodyStaticNormalManagerAge0 = 0;
-    bodyStaticNormalManagerAge1 = 0;
-    bodyStaticNormalManagerAge2 = 0;
-    bodyStaticNormalManagerAge3 = 0;
-    bodyStaticNormalRowMissOnManagerSupportRows = 0;
-    bodyStaticNormalOnsetFinalizeBodies = 0;
-    bodyStaticNormalSupportFinalizeBodies = 0;
-    bodyStaticNormalOnsetFinalizeCorrections = 0;
-    bodyStaticNormalSupportFinalizeCorrections = 0;
-    bodyStaticNormalOnsetDepenetrationEligibleRows = 0;
-    bodyStaticNormalSupportDepenetrationEligibleRows = 0;
-    bodyStaticNormalOnsetDepenetrationCorrections = 0;
-    bodyStaticNormalSupportDepenetrationCorrections = 0;
-    bodyStaticNormalOnsetShallowDepenetrationCorrections = 0;
-    bodyStaticNormalOnsetDeepDepenetrationCorrections = 0;
-    bodyStaticNormalSupportShallowDepenetrationCorrections = 0;
-    bodyStaticNormalSupportDeepDepenetrationCorrections = 0;
-    bodyStaticMaterialFiniteBudgetRows = 0;
-    bodyStaticMaterialUnlimitedBudgetRows = 0;
-    contactFrictionTargetAlEvaluations = 0;
-    bodyStaticFrictionTargetRows = 0;
-    bodyStaticFrictionTargetCorrections = 0;
-    bodyStaticFrictionFallbackRows = 0;
-    bodyStaticFrictionFallbackCorrections = 0;
-    contactTargetNormalProjectionRows = 0;
-    contactTargetNormalCorrections = 0;
-    contactTargetTangentRows = 0;
-    contactTargetTangentCorrections = 0;
-    surfaceDeformableAlRows = 0;
-    surfaceDeformableAlEvaluations = 0;
-    surfaceDeformablePositionTangentCandidates = 0;
-    surfaceDeformablePositionTangentRows = 0;
-    surfaceDeformablePositionTangentEvaluations = 0;
-    surfaceDeformablePositionTangentMixedRejectRows = 0;
-    surfaceDeformablePositionTangentShellRejectRows = 0;
-    surfaceDeformablePositionTangentTargetRejectRows = 0;
-    surfaceDeformablePositionTangentRestitutionRejectRows = 0;
-    surfaceDeformablePositionTangentFiniteRejectRows = 0;
-    surfaceDeformablePositionTangentScaleRejectRows = 0;
-    surfaceDeformableStrippedRows = 0;
-    surfaceDeformableShellSuppressedPrimalRows = 0;
-    surfaceDeformableDepenetrationCorrections = 0;
-    surfaceDeformableFrictionRawRows = 0;
-    surfaceDeformableFrictionDominantRows = 0;
-    surfaceDeformableFrictionFewContactRows = 0;
-    surfaceDeformableFrictionMultiCornerRows = 0;
-    surfaceDeformableFrictionCorrections = 0;
-    surfaceDeformableFinalizeBodies = 0;
-    surfaceDeformableFinalizeCorrections = 0;
-    surfaceDeformableFinalizeSpatialCorrections = 0;
-    surfaceDeformableFinalizeComFallbackCorrections = 0;
-    surfaceDeformableFinalizeSecondaryRows = 0;
-    surfaceDeformableFinalizeSecondaryResidualSeparationRows = 0;
-    surfaceDeformableFinalizeManifoldBodies = 0;
-    surfaceDeformableFinalizeManifoldOneRowBodies = 0;
-    surfaceDeformableFinalizeManifoldTwoRowBodies = 0;
-    surfaceDeformableFinalizeManifoldThreeRowBodies = 0;
-    surfaceDeformableFinalizeManifoldFourRowBodies = 0;
-    surfaceDeformableFinalizeManifoldOverFourRowBodies = 0;
-    surfaceDeformableFinalizeManifoldFiveToEightRowBodies = 0;
-    surfaceDeformableFinalizeManifoldNineToSixteenRowBodies = 0;
-    surfaceDeformableFinalizeManifoldOverSixteenRowBodies = 0;
-    surfaceDeformableFinalizeManifoldMixedScaleBodies = 0;
-    surfaceDeformableFinalizeManifoldRankDeficientBodies = 0;
-    surfaceDeformableFinalizeManifoldAliasRows = 0;
-    surfaceDeformableFinalizeManifoldDynamicIncidentBodies = 0;
-    surfaceDeformableFinalizeManifoldRigidStaticIncidentBodies = 0;
-    surfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies = 0;
-    surfaceDeformableFinalizeComponents = 0;
-    surfaceDeformableFinalizeComponentOneBody = 0;
-    surfaceDeformableFinalizeComponentTwoBodies = 0;
-    surfaceDeformableFinalizeComponentThreeToFourBodies = 0;
-    surfaceDeformableFinalizeComponentFiveToEightBodies = 0;
-    surfaceDeformableFinalizeComponentNineToSixteenBodies = 0;
-    surfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies = 0;
-    surfaceDeformableFinalizeComponentOverThirtyTwoBodies = 0;
-    surfaceDeformableFinalizeComponentOneToEightRows = 0;
-    surfaceDeformableFinalizeComponentNineToSixteenRows = 0;
-    surfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows = 0;
-    surfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows = 0;
-    surfaceDeformableFinalizeComponentOverSixtyFourRows = 0;
-    surfaceDeformableFinalizeComponentRestitution = 0;
-    surfaceDeformableFinalizeComponentFiniteImpulse = 0;
-    surfaceDeformableFinalizeComponentTargetVelocity = 0;
-    surfaceDeformableFinalizeComponentMixedScale = 0;
-    surfaceDeformableFinalizeComponentRigidStatic = 0;
-    surfaceDeformableFinalizeComponentNonOwnerDeformable = 0;
-    surfaceDeformableFinalizeComponentJointIsland = 0;
-    surfaceDeformableFinalizeComponentLockedDof = 0;
-    surfaceDeformableFinalizeComponentNonDynamicBody = 0;
-    surfaceDeformableFinalizeBudgetDiagRows = 0;
-    surfaceDeformableFinalizeBudgetDiagNoCorrectionRows = 0;
-    surfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows = 0;
-    surfaceDeformableFinalizeBudgetDiagWithinBudgetRows = 0;
-    surfaceDeformableFinalizeBudgetDiagOverBudgetRows = 0;
-    surfaceDeformableFinalizeBudgetDiagUnsupportedRows = 0;
-    surfaceDeformableFinalizeBudgetDiagComponentsWithinBudget = 0;
-    surfaceDeformableFinalizeBudgetDiagComponentsOverBudget = 0;
-    surfaceDeformableFinalizeBudgetDiagComponentsUnsupported = 0;
-    surfaceDeformableFinalizeShadowComponents = 0;
-    surfaceDeformableFinalizeShadowRows = 0;
-    surfaceDeformableFinalizeShadowNoCorrection = 0;
-    surfaceDeformableFinalizeShadowSolved = 0;
-    surfaceDeformableFinalizeShadowCommitCapable = 0;
-    surfaceDeformableFinalizeShadowBudgetExhausted = 0;
-    surfaceDeformableFinalizeShadowInfeasible = 0;
-    surfaceDeformableFinalizeShadowResidualUnclassified = 0;
-    surfaceDeformableFinalizeShadowNumericalFailure = 0;
-    surfaceDeformableFinalizeShadowIterationLimit = 0;
-    surfaceDeformableFinalizeShadowUnsupported = 0;
-    surfaceDeformableFinalizeShadowUnsupportedFastImpact = 0;
-    surfaceDeformableFinalizeShadowUnsupportedSnapshot = 0;
-    surfaceDeformableFinalizeShadowLowerRows = 0;
-    surfaceDeformableFinalizeShadowFreeRows = 0;
-    surfaceDeformableFinalizeShadowUpperRows = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeComponents = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeRows = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeNoCorrection = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeSolved = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeInfeasible = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeNumericalFailure = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeIterationLimit = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeIterations = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeCommittedComponents = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeOracleComponents = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeOracleRows = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeOracleMatched = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeOracleMismatched = 0;
-    surfaceDeformableFinalizeShadowMatrixFreeOracleSkipped = 0;
-    surfaceDeformableFinalizePreOwnerBodies = 0;
-    surfaceDeformableFinalizeLegacyOwnerBodies = 0;
-    surfaceDeformableFinalizeOwnerDiscoveryMismatchBodies = 0;
-    surfaceDeformableFinalizeProbeEligibleComponents = 0;
-    surfaceDeformableFinalizeProbeCommittedComponents = 0;
-    surfaceDeformableFinalizeProbeCommittedRows = 0;
-    surfaceDeformableFinalizeProbeCommittedBodies = 0;
-    surfaceDeformableFinalizeProbeReplacedOwnerBodies = 0;
-    surfaceDeformableAlDepenetrationRows = 0;
-    surfaceDeformableAlFinalizeRows = 0;
-    surfaceDeformableDepenetrationFinalizeRows = 0;
-    surfaceDeformableAlDepenetrationFinalizeRows = 0;
-    surfaceDeformableFinalizeContactFalsePositiveCorrections = 0;
-    surfaceDeformableFinalizeContactResidualSeparationCorrections = 0;
-    surfaceDeformableFinalizeContactReversalCorrections = 0;
-    surfaceShellContacts = 0;
-    surfaceShellDepenetrationCorrections = 0;
-    surfaceShellFrictionRows = 0;
-    surfaceShellFrictionCorrections = 0;
-    surfaceShellFinalizeBodies = 0;
-    surfaceShellFinalizeCorrections = 0;
-    constraintError = 0.0f;
-    maxPositionError = 0.0f;
-    avgPositionError = 0.0f;
-    maxConstraintViolation = 0.0f;
-    bodyStaticDepenetrationDistance = 0.0f;
-    bodyStaticDepenetrationMaxCorrection = 0.0f;
-    bodyStaticMaterialVelocityDelta = 0.0f;
-    bodyStaticMaterialVelocityMaxDelta = 0.0f;
-    bodyStaticNormalRestoredLambdaMax = 0.0f;
-    bodyStaticNormalRestoredPenaltyMax = 0.0f;
-    bodyStaticNormalInitialPenaltyMax = 0.0f;
-    bodyStaticNormalPreAlRawPenetration = 0.0f;
-    bodyStaticNormalPostAlRawPenetration = 0.0f;
-    bodyStaticNormalAlphaC0Offset = 0.0f;
-    bodyStaticNormalPreAlPenetration = 0.0f;
-    bodyStaticNormalPostAlPenetration = 0.0f;
-    bodyStaticNormalPostAlSeparation = 0.0f;
-    bodyStaticNormalAlOutwardDistance = 0.0f;
-    bodyStaticNormalAlInwardDistance = 0.0f;
-    bodyStaticMaterialPoseSeparatingVelocity = 0.0f;
-    bodyStaticMaterialAllowedSeparatingVelocity = 0.0f;
-    bodyStaticMaterialFiniteRemainingImpulse = 0.0f;
-    bodyStaticNormalOnsetPreAlRawPenetration = 0.0f;
-    bodyStaticNormalOnsetPreAlPenetration = 0.0f;
-    bodyStaticNormalOnsetPostAlRawPenetration = 0.0f;
-    bodyStaticNormalOnsetPostAlPenetration = 0.0f;
-    bodyStaticNormalOnsetAlphaC0Offset = 0.0f;
-    bodyStaticNormalOnsetAlOutwardDistance = 0.0f;
-    bodyStaticNormalSupportPreAlRawPenetration = 0.0f;
-    bodyStaticNormalSupportPreAlPenetration = 0.0f;
-    bodyStaticNormalSupportPostAlRawPenetration = 0.0f;
-    bodyStaticNormalSupportPostAlPenetration = 0.0f;
-    bodyStaticNormalSupportAlphaC0Offset = 0.0f;
-    bodyStaticNormalSupportAlOutwardDistance = 0.0f;
-    bodyStaticNormalOnsetPoseSeparatingVelocity = 0.0f;
-    bodyStaticNormalSupportPoseSeparatingVelocity = 0.0f;
-    bodyStaticNormalOnsetFinalizeDelta = 0.0f;
-    bodyStaticNormalSupportFinalizeDelta = 0.0f;
-    bodyStaticNormalOnsetDepenetrationDistance = 0.0f;
-    bodyStaticNormalSupportDepenetrationDistance = 0.0f;
-    bodyStaticNormalOnsetShallowDepenetrationDistance = 0.0f;
-    bodyStaticNormalOnsetDeepDepenetrationDistance = 0.0f;
-    bodyStaticNormalSupportShallowDepenetrationDistance = 0.0f;
-    bodyStaticNormalSupportDeepDepenetrationDistance = 0.0f;
-    bodyStaticFrictionTargetImpulse = 0.0f;
-    bodyStaticFrictionFallbackImpulse = 0.0f;
-    contactTargetNormalImpulse = 0.0f;
-    contactTargetTangentImpulse = 0.0f;
-    surfaceDeformableDepenetrationDistance = 0.0f;
-    surfaceDeformableFrictionImpulse = 0.0f;
-    surfaceDeformableFinalizeDelta = 0.0f;
-    surfaceDeformableFinalizeContactPreSeparation = 0.0f;
-    surfaceDeformableFinalizeContactPostSeparation = 0.0f;
-    surfaceDeformableFinalizeContactPostApproach = 0.0f;
-    surfaceDeformableFinalizeSecondaryResidualSeparation = 0.0f;
-    surfaceShellDepenetrationDistance = 0.0f;
-    surfaceShellFrictionImpulse = 0.0f;
-    surfaceShellFinalizeDelta = 0.0f;
-    totalEnergy = 0.0f;
-    solveTimeUs = 0;
-  }
+  PX_FORCE_INLINE void reset() { *this = AvbdSolverStatsPayload(); }
 };
+static_assert(sizeof(AvbdSolverStatsPayload) <= 80,
+              "AVBD profile payload must remain a small cold-path record");
+
+#if PX_AVBD_ENABLE_SOLVER_PROFILE
+using AvbdSolverStats = AvbdSolverStatsPayload;
+#else
+struct AvbdSolverStats {
+  PX_FORCE_INLINE void reset() {}
+};
+static_assert(sizeof(AvbdSolverStats) <= 1,
+              "default AVBD stats sink must remain empty");
+#endif
 
 //-----------------------------------------------------------------------------
 // Graph Coloring Types
@@ -1049,6 +588,17 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
   PX_FORCE_INLINE void addConstraintContribution(const physx::PxVec3 &gradPos,
                                                  const physx::PxVec3 &gradRot,
                                                  physx::PxReal invCompliance) {
+#if PX_X64
+    const __m128 scale = _mm_set1_ps(invCompliance);
+    addConstraintContributionSse2(linearLinear, gradPos, gradPos, scale,
+                                  invCompliance);
+    addConstraintContributionSse2(linearAngular, gradPos, gradRot, scale,
+                                  invCompliance);
+    addConstraintContributionSse2(angularLinear, gradRot, gradPos, scale,
+                                  invCompliance);
+    addConstraintContributionSse2(angularAngular, gradRot, gradRot, scale,
+                                  invCompliance);
+#else
     // H += invCompliance * grad * grad^T
     for (physx::PxU32 i = 0; i < 3; ++i) {
       for (physx::PxU32 j = 0; j < 3; ++j) {
@@ -1058,6 +608,7 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
         angularAngular(i, j) += invCompliance * gradRot[i] * gradRot[j];
       }
     }
+#endif
   }
 
   /**
@@ -1071,6 +622,10 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
       const physx::PxVec3 &gradPos, const physx::PxVec3 &gradRot,
       physx::PxReal invCompliance, physx::PxReal linearScale,
       physx::PxReal angularScale) {
+    if (linearScale == 1.0f && angularScale == 1.0f) {
+      addConstraintContribution(gradPos, gradRot, invCompliance);
+      return;
+    }
     const physx::PxReal nonnegativeLinear =
         physx::PxMax(0.0f, linearScale);
     const physx::PxReal nonnegativeAngular =
@@ -1090,6 +645,33 @@ struct PX_ALIGN_PREFIX(16) AvbdBlock6x6 {
       }
     }
   }
+
+#if PX_X64
+  PX_FORCE_INLINE static void addConstraintContributionSse2(
+      physx::PxMat33 &matrix, const physx::PxVec3 &row,
+      const physx::PxVec3 &column, const __m128 scale,
+      physx::PxReal scalarScale) {
+    // PxMat33 is column-major and contains exactly nine contiguous PxReal
+    // values.  The first eight values can be updated as two SSE2 vectors;
+    // the final (column2.z) element stays scalar so no adjacent matrix bytes
+    // are read or written.  Each lane retains the scalar order
+    // (invCompliance * row[i]) * column[j].
+    const __m128 row01 = _mm_set_ps(row.x, row.z, row.y, row.x);
+    const __m128 column01 =
+        _mm_set_ps(column.y, column.x, column.x, column.x);
+    const __m128 row12 = _mm_set_ps(row.y, row.x, row.z, row.y);
+    const __m128 column12 =
+        _mm_set_ps(column.z, column.z, column.y, column.y);
+    const __m128 delta01 = _mm_mul_ps(_mm_mul_ps(scale, row01), column01);
+    const __m128 delta12 = _mm_mul_ps(_mm_mul_ps(scale, row12), column12);
+    physx::PxReal *values = &matrix.column0.x;
+    _mm_storeu_ps(values,
+                  _mm_add_ps(_mm_loadu_ps(values), delta01));
+    _mm_storeu_ps(values + 4,
+                  _mm_add_ps(_mm_loadu_ps(values + 4), delta12));
+    values[8] += scalarScale * row.z * column.z;
+  }
+#endif
 
 } PX_ALIGN_SUFFIX(16);
 
@@ -1501,6 +1083,76 @@ struct AvbdBodyConstraintMap {
   }
 
   /**
+   * @brief Build the mapping into caller-owned, preallocated storage.
+   *
+   * The storage must be reserved before a task is submitted.  This keeps the
+   * preparation path allocation-free once island work is dispatched and lets
+   * a future task own one disjoint map slot without touching a shared heap.
+   * On failure the map remains empty; the caller may release the supplied
+   * buffers and use build() as the serial fallback.
+   */
+  template <typename ConstraintType>
+  bool buildInPlace(physx::PxU32 numBodiesIn,
+                    const ConstraintType *constraints,
+                    physx::PxU32 numConstraints,
+                    physx::PxU32 *counts, physx::PxU32 *offsets,
+                    physx::PxU32 *indices,
+                    physx::PxU32 indexCapacity) {
+    if (constraintOffsets || constraintCounts || constraintIndices ||
+        !counts || !offsets || (indexCapacity > 0 && !indices))
+      return false;
+
+    for (physx::PxU32 i = 0; i < numBodiesIn; ++i)
+      counts[i] = 0;
+
+    for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+      const physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+      const physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+      if (bodyA < numBodiesIn)
+        ++counts[bodyA];
+      if (bodyB < numBodiesIn)
+        ++counts[bodyB];
+    }
+
+    offsets[0] = 0;
+    for (physx::PxU32 i = 0; i < numBodiesIn; ++i) {
+      if (counts[i] > PX_MAX_U32 - offsets[i])
+        return false;
+      offsets[i + 1] = offsets[i] + counts[i];
+    }
+    const physx::PxU32 totalRefs = offsets[numBodiesIn];
+    if (totalRefs > indexCapacity || (totalRefs > 0 && !indices))
+      return false;
+
+    // Preserve the same packed order as build(): counts become write cursors
+    // for the second pass and are final per-body counts after the fill.
+    for (physx::PxU32 i = 0; i < numBodiesIn; ++i)
+      counts[i] = 0;
+    for (physx::PxU32 c = 0; c < numConstraints; ++c) {
+      const physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+      const physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+      if (bodyA < numBodiesIn) {
+        const physx::PxU32 idx = offsets[bodyA] + counts[bodyA];
+        indices[idx] = c;
+        ++counts[bodyA];
+      }
+      if (bodyB < numBodiesIn) {
+        const physx::PxU32 idx = offsets[bodyB] + counts[bodyB];
+        indices[idx] = c;
+        ++counts[bodyB];
+      }
+    }
+
+    constraintOffsets = offsets;
+    constraintCounts = counts;
+    constraintIndices = indices;
+    numBodies = numBodiesIn;
+    totalConstraintRefs = totalRefs;
+    capacity = numBodiesIn;
+    return true;
+  }
+
+  /**
    * @brief Get constraints for a specific body
    * @param bodyIndex Body index
    * @param outIndices Output pointer to constraint indices
@@ -1545,5 +1197,4 @@ struct AvbdBodyConstraintMap {
 } // namespace Dy
 
 } // namespace physx
-
 #endif // DY_AVBD_TYPES_H

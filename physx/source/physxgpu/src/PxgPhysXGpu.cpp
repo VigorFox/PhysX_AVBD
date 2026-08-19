@@ -37,6 +37,9 @@
 #include "PxgArticulationCore.h"
 #include "PxgDynamicsContext.h"
 #include "PxgTGSDynamicsContext.h"
+#if defined(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+#include "PxgAvbdDynamicsContextImpl.h"
+#endif
 #include "CudaKernelWrangler.h"
 #include "CudaContextManager.h"
 #include "PhysXDeviceSettings.h"
@@ -246,6 +249,48 @@ Dy::Context* PxgPhysXGpu::createGpuDynamicsContext(Cm::FlushPool& taskPool, PxsK
 		return PX_PLACEMENT_NEW(PX_ALLOC(sizeof(PxgDynamicsContext), "PxgDynamicsContext"), PxgDynamicsContext)(taskPool, gpuKernelWrangler, cudaContextManager, config, islandManager,
 			maxNumPartitions, maxNumStaticPartitions, maxBiasCoefficient, simStats, 
 			allocDesc, lengthScale, contextID, sceneFlags);
+}
+
+//----------------------------------------------------------------------------//
+
+bool PxgPhysXGpu::createGpuAvbdDynamicsContext(
+	PxsKernelWranglerManager* gpuKernelWrangler,
+	PxCudaContextManager* cudaContextManager,
+	IG::SimpleIslandManager& islandManager,
+	Cm::VirtualAllocatorCallback& allocator,
+	Cm::VirtualAllocatorCallback& mappedAllocator,
+	PxReal maxBiasCoefficient, PxvSimStats& simStats,
+	PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags,
+	PxAvbdGpuDynamicsContext& context)
+{
+	context = PxAvbdGpuDynamicsContext();
+#if defined(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	if(!gpuKernelWrangler || !cudaContextManager)
+		return false;
+
+	PxgAvbdDynamicsContextImpl* impl = PX_PLACEMENT_NEW(
+		PX_ALLOC(sizeof(PxgAvbdDynamicsContextImpl),
+			"PxgAvbdDynamicsContext"), PxgAvbdDynamicsContextImpl)(
+			gpuKernelWrangler, cudaContextManager, islandManager, allocator,
+			mappedAllocator, simStats, maxBiasCoefficient, lengthScale,
+			contextID, sceneFlags);
+	context.context = impl;
+	context.waveBackend = static_cast<Dy::AvbdRigidGpuWaveBackend*>(impl);
+	context.callbackSink = static_cast<Dy::AvbdRigidGpuWaveCallbackSink*>(impl);
+	return true;
+#else
+	PX_UNUSED(gpuKernelWrangler);
+	PX_UNUSED(cudaContextManager);
+	PX_UNUSED(islandManager);
+	PX_UNUSED(allocator);
+	PX_UNUSED(mappedAllocator);
+	PX_UNUSED(maxBiasCoefficient);
+	PX_UNUSED(simStats);
+	PX_UNUSED(lengthScale);
+	PX_UNUSED(contextID);
+	PX_UNUSED(sceneFlags);
+	return false;
+#endif
 }
 
 //----------------------------------------------------------------------------//

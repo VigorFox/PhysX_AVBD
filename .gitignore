@@ -1,2 +1,95 @@
 /refrence
 /build.bat
+/AGENTS.md
+/.agents/*.lock
+/.agents/*.lock.release.*
+/.agents/*_bin/
+
+# Local PhysX build products.
+/physx/bin/
+/physx/lib/
+
+# Compiler/linker output is always reproducible; measured JSON/CSV reports are
+# intentionally not covered by these global rules.
+*.exe
+*.obj
+*.pdb
+*.lib
+*.dll
+*.exp
+*.map
+*.pgc
+*.pgd
+*.tlog
+*.lastbuildstate
+*.log
+
+# Rebuildable AVBD probes and temporary CMake/MSBuild trees. Keep source,
+# JSON/CSV measurements, and handoff reports visible to Git.
+/tools/**/*.exe
+/tools/**/*.obj
+/tools/**/*.pdb
+/tools/**/*.lib
+/tools/**/*.dll
+/tools/**/*.exp
+/tools/**/*.map
+/tools/**/*.pgc
+/tools/**/*.pgd
+/tools/**/*.tlog
+/tools/**/*.lastbuildstate
+/tools/**/*.log
+/tools/**/CMakeFiles/
+/tools/**/CMakeCache.txt
+/tools/**/cmake_install.cmake
+/tools/**/*.sln
+/tools/**/*.vcxproj
+/tools/**/*.vcxproj.filters
+
+# Maintainer-local AVBD optimization labs and numbered iteration probes.
+# These are useful while tuning a candidate, but are not product build,
+# regression, or release assets and must not grow the main repository.
+/tools/avbd_kernel_lab/
+/tools/avbd_kernel_lab_source_gate.py
+/tools/avbd_kernel_lab_trace_roundtrip_gate.py
+/tools/avbd_p[0-9]*
+/tools/p[0-9]*
+/tools/run_avbd_p[0-9]*
+/tools/avbd_contact_once_gate.py
+/tools/avbd_contact_once_pareto.py
+/tools/avbd_frozen_macro_gate.py
+/tools/avbd_gpu_contact_once_crossover.py
+/tools/avbd_gpu_contact_once_gate.py
+/tools/avbd_gpu_experimental_feature_gate.py
+/tools/avbd_gpu_manifold_block_crossover.py
+/tools/avbd_gpu_manifold_block_gate.py
+/tools/avbd_manifold_block_crossover.py
+/tools/avbd_manifold_block_gate.py
+/tools/avbd_manifold_snapshot_dual_pareto.py
+/tools/avbd_webphysics_port_gate.py
+/tools/avbd_rigid_simd_experimental_dispatch.h
+/tools/avbd_cpu_taskgraph_source_gate.py
+/tools/avbd_r0_switch_audit.py
+/tools/codex_workspace_lock.py
+/tools/run_avbd_default_scalar_regression_gate.py
+/tools/run_avbd_post_al_ab.py
+
+# Local AVBD measurements, A/B comparison trees, and scratch sources.
+/tools/perf_baselines/
+/tools/post_*/
+/tools/post_*.json
+/tools/tmp_*
+
+# Maintainer-local AVBD iteration journals, handoffs, and validation reports.
+# Durable conclusions belong in the maintained roadmap and production tests.
+/docs/AVBD_ALGORITHM_CPU_GPU_STRATEGY_*.md
+/docs/AVBD_CHANGE_AUDIT_LOG.md
+/docs/AVBD_CPU_OPTIMIZATION_CURRENT_STATUS.md
+/docs/AVBD_DEFORMABLE_VOLUME_TRUE_BOUNDARY_FIX_GUIDE.md
+/docs/AVBD_RIGID_MIXED_SOLVE_TIGHTENING_HANDOFF.md
+/docs/AVBD_SCALABLE_RIGID_MATERIAL_COMPONENT_HANDOFF.md
+/docs/AVBD_SNIPPET_VALIDATION_HANDOFF.md
+/docs/avbd_cpu_p1/
+/docs/avbd_cpu_r0/
+/docs/avbd_rigid_mixed_solve_tightening/
+/docs/avbd_scalable_rigid_material_component/
+/docs/avbd_snippet_validation/

@@ -395,9 +395,20 @@ public:
   physx::PxU32 colorBodies(AvbdContactConstraint *constraints,
                             physx::PxU32 numConstraints,
                             AvbdSolverBody *bodies,
-                            physx::PxU32 numBodies) {
+                            physx::PxU32 numBodies,
+                            const AvbdBodyConstraintMap *contactMap = nullptr) {
     if (!mInitialized || numBodies == 0 || !mAllocator) {
       return 0;
+    }
+
+    // The original experimental implementation allocated a 32-bit adjacency
+    // mask and inspected only the first 32 bodies.  That silently produced
+    // invalid ownership layers for any realistic island.  Keep the coloring
+    // facility cold for now, but make its census exact and map-backed so it is
+    // a valid input to the future task-graph split.
+    if (mBodyBatches[0].capacity < numBodies) {
+      release();
+      initialize(numBodies, *mAllocator);
     }
 
     // Reset batches
@@ -405,52 +416,49 @@ public:
       mBodyBatches[i].reset();
     }
 
-    // Build adjacency list for bodies
-    // Two bodies are adjacent if they share a constraint
-    physx::PxU32 *adjacencyMask = static_cast<physx::PxU32 *>(
-        mAllocator->allocate(sizeof(physx::PxU32) * numBodies, "adjacencyMask",
+    // Greedy body coloring. A body's incident span is read from the map when
+    // available; the fallback preserves the legacy API for callers that have
+    // not prepared a map yet.
+    physx::PxU32 *bodyColors = static_cast<physx::PxU32 *>(
+        mAllocator->allocate(sizeof(physx::PxU32) * numBodies,
+                             "AvbdBodyParallelColoring::bodyColors",
                              __FILE__, __LINE__));
-
-    // Check if allocation failed
-    if (!adjacencyMask) {
-      // Cannot perform coloring - return 0 colors
+    if (!bodyColors)
       return 0;
-    }
-
     for (physx::PxU32 i = 0; i < numBodies; ++i) {
-      adjacencyMask[i] = 0;
-      bodies[i].colorGroup = 0xFFFFFFFF; // Uncolored
-    }
-
-    // Build adjacency from constraints
-    for (physx::PxU32 c = 0; c < numConstraints; ++c) {
-      physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
-      physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
-
-      if (bodyA < numBodies && bodyB < numBodies) {
-        adjacencyMask[bodyA] |= (1u << bodyB);
-        adjacencyMask[bodyB] |= (1u << bodyA);
-      }
+      bodyColors[i] = PX_MAX_U32;
+      bodies[i].colorGroup = PX_MAX_U32;
     }
 
     mNumColors = 0;
-
-    // Greedy coloring of bodies
     for (physx::PxU32 i = 0; i < numBodies; ++i) {
       if (bodies[i].isStatic()) {
         bodies[i].colorGroup = STATIC_COLOR;
+        bodyColors[i] = STATIC_COLOR;
         mBodyBatches[STATIC_COLOR].addBody(i);
         continue;
       }
 
-      // Find colors used by neighbors
       physx::PxU32 usedColors = 0;
-      physx::PxU32 neighborMask = adjacencyMask[i];
-      
-      // Check each neighbor's color
-      for (physx::PxU32 j = 0; j < numBodies && j < 32; ++j) {
-        if ((neighborMask & (1u << j)) && bodies[j].colorGroup < MAX_COLORS) {
-          usedColors |= (1u << bodies[j].colorGroup);
+      const physx::PxU32 *mapIndices = nullptr;
+      physx::PxU32 mapCount = 0;
+      const bool hasMapRange =
+          contactMap && contactMap->constraintOffsets &&
+          contactMap->constraintCounts && i < contactMap->numBodies;
+      if (hasMapRange)
+        contactMap->getBodyConstraints(i, mapIndices, mapCount);
+      const physx::PxU32 loopCount = hasMapRange ? mapCount : numConstraints;
+      for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+        const physx::PxU32 c =
+            hasMapRange ? mapIndices[loopIndex] : loopIndex;
+        if (c >= numConstraints)
+          continue;
+        const physx::PxU32 bodyA = constraints[c].header.bodyIndexA;
+        const physx::PxU32 bodyB = constraints[c].header.bodyIndexB;
+        const physx::PxU32 neighbor = bodyA == i ? bodyB : bodyA;
+        if (neighbor < numBodies && neighbor != i &&
+            bodyColors[neighbor] < MAX_COLORS) {
+          usedColors |= (1u << bodyColors[neighbor]);
         }
       }
 
@@ -462,6 +470,7 @@ public:
 
       if (color < MAX_COLORS) {
         bodies[i].colorGroup = color;
+        bodyColors[i] = color;
         mBodyBatches[color].addBody(i);
         if (color + 1 > mNumColors) {
           mNumColors = color + 1;
@@ -469,7 +478,7 @@ public:
       }
     }
 
-    mAllocator->deallocate(adjacencyMask);
+    mAllocator->deallocate(bodyColors);
 
     // Count active batches
     mNumBatches = 0;

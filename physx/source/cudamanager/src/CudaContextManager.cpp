@@ -575,7 +575,13 @@ CudaCtxMgr::CudaCtxMgr(const PxCudaContextManagerDesc& desc, PxErrorCallback& er
 				return;
 			}
 			
+			// CUDA 13 changed cuCtxCreate to the v4 parameter form. Keep the
+			// legacy call for older CUDA SDKs used by existing PhysX builds.
+#if CUDA_VERSION >= 13000
+			status = cuCtxCreate(&mCtx, NULL, (unsigned int)flags, mDevHandle);
+#else
 			status = cuCtxCreate(&mCtx, (unsigned int)flags, mDevHandle);
+#endif
 			if (CUDA_SUCCESS != status)
 			{
 				const size_t bufferSize = 128;
@@ -1524,5 +1530,4 @@ PxCudaContextManager* createCudaContextManager(const PxCudaContextManagerDesc& d
 #endif
 
 } // end physx namespace
-
 

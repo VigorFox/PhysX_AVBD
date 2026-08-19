@@ -75,13 +75,6 @@ static PxVec3 computeKinematicContactStep(
   return pointVelocity * dt;
 }
 
-#ifndef AVBD_JOINT_DEBUG
-#define AVBD_JOINT_DEBUG 0
-#endif
-#ifndef AVBD_JOINT_DEBUG_FRAMES
-#define AVBD_JOINT_DEBUG_FRAMES 2
-#endif
-
 static constexpr physx::PxU16 AVBD_PRISMATIC_LIMIT_ENABLED_FLAG = 0x0002;
 
 // Match the standalone contact cache's 1 mm local-anchor quantization.  The
@@ -304,55 +297,77 @@ static PhysXJointType getJointTypeFromConcreteType(PxU16 concreteType) {
   }
 }
 
-PxU32 AvbdDynamicsContext::prepareAvbdContacts(
-    const IG::IslandSim &islandSim, PxReal dt,
+struct AvbdContactPrepSource {
+  const PxArray<PxsIndexedContactManager> *contactList;
+  PxsContactManagerOutputIterator *outputIterator;
+  PxArray<AvbdDynamicsContext::CachedContactManagerState> *managerStateCache;
+  const PxArray<AvbdDynamicsContext::CachedLambda> *lambdaCache;
+  bool enableLambdaWarmStart;
+  PxReal lengthScale;
+  PxU16 frameStamp;
+};
+
+static PxU32 prepareAvbdContactsImpl(
+    const IG::IslandSim *islandSim, const AvbdContactPrepSource &source,
+    PxReal dt,
     AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
     AvbdContactConstraint *constraints, PxU32 maxConstraints,
-    PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset) {
+    PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset,
+    AvbdContactPrepSnapshot *snapshots, AvbdContactOutputToken *outputTokens,
+    PxU32 outputTokenBase) {
 
   PxU32 constraintIndex = 0;
   const PxU32 endContactIdx = startContactIdx + numContactsToProcess;
   const PxU32 actualMax =
-      PxMin(static_cast<PxU32>(mContactList.size()), endContactIdx);
+      snapshots ? endContactIdx
+                : PxMin(static_cast<PxU32>(source.contactList->size()),
+                        endContactIdx);
   const PxU32 bodyEnd = bodyOffset + islandBodyCount;
-  const PxU32 numActiveKinematics = islandSim.getNbActiveKinematics();
-  const PxNodeIndex *activeKinematics = islandSim.getActiveKinematics();
-
-  // Debug counters for lambda warm-starting diagnosis
-  static PxU32 sDebugHits = 0;
-  static PxU32 sDebugMisses = 0;
-  static PxU32 sFrameCount = 0;
-  PxU32 localHits = 0;
-  PxU32 localMisses = 0;
+  const PxU32 numActiveKinematics =
+      snapshots || !islandSim ? 0 : islandSim->getNbActiveKinematics();
+  const PxNodeIndex *activeKinematics =
+      snapshots || !islandSim ? nullptr : islandSim->getActiveKinematics();
+  const PxU16 frameStamp = source.frameStamp;
 
   for (PxU32 i = startContactIdx;
        i < actualMax && constraintIndex < maxConstraints; ++i) {
-    const PxsIndexedContactManager &icm = mContactList[i];
-    PxsContactManager *cm = icm.contactManager;
+    AvbdContactPrepSnapshot *snapshot =
+        snapshots ? &snapshots[i] : nullptr;
+    const PxsIndexedContactManager *icmPtr =
+        snapshot ? nullptr : &(*source.contactList)[i];
+    PxsContactManager *cm = snapshot ? nullptr : icmPtr->contactManager;
 
-    if (!cm)
+    if ((!snapshot && !cm) ||
+        (snapshot && (!snapshot->eligible ||
+                      snapshot->contactManagerIndex == PX_MAX_U32)))
       continue;
+    if (snapshot)
+      snapshot->emittedResponseRows = 0;
 
     PxU32 globalBody0Idx = PX_MAX_U32;
     PxU32 globalBody1Idx = PX_MAX_U32;
     PxsRigidBody *kinematicBodyA = nullptr;
     PxsRigidBody *kinematicBodyB = nullptr;
 
-    if (icm.indexType0 == PxsIndexedInteraction::eBODY) {
-      globalBody0Idx = static_cast<PxU32>(icm.solverBody0);
-    } else if (icm.indexType0 == PxsIndexedInteraction::eKINEMATIC) {
-      const PxU32 kinematicIndex = static_cast<PxU32>(icm.solverBody0);
+    const PxU8 indexType0 = snapshot ? snapshot->indexType0 : icmPtr->indexType0;
+    const PxU8 indexType1 = snapshot ? snapshot->indexType1 : icmPtr->indexType1;
+    const PxU64 solverBody0 = snapshot ? snapshot->solverBody0 : icmPtr->solverBody0;
+    const PxU64 solverBody1 = snapshot ? snapshot->solverBody1 : icmPtr->solverBody1;
+    if (indexType0 == PxsIndexedInteraction::eBODY) {
+      globalBody0Idx = static_cast<PxU32>(solverBody0);
+    } else if (indexType0 == PxsIndexedInteraction::eKINEMATIC) {
+        const PxU32 kinematicIndex = static_cast<PxU32>(solverBody0);
       if (kinematicIndex < numActiveKinematics)
         kinematicBodyA =
-            getRigidBodyFromIG(islandSim, activeKinematics[kinematicIndex]);
+            getRigidBodyFromIG(*islandSim, activeKinematics[kinematicIndex]);
     }
-    if (icm.indexType1 == PxsIndexedInteraction::eBODY) {
-      globalBody1Idx = static_cast<PxU32>(icm.solverBody1);
-    } else if (icm.indexType1 == PxsIndexedInteraction::eKINEMATIC) {
-      const PxU32 kinematicIndex = static_cast<PxU32>(icm.solverBody1);
+    if (indexType1 == PxsIndexedInteraction::eBODY) {
+      globalBody1Idx = static_cast<PxU32>(solverBody1);
+    } else if (indexType1 == PxsIndexedInteraction::eKINEMATIC) {
+      const PxU32 kinematicIndex = static_cast<PxU32>(solverBody1);
       if (kinematicIndex < numActiveKinematics)
         kinematicBodyB =
-            getRigidBodyFromIG(islandSim, activeKinematics[kinematicIndex]);
+            getRigidBodyFromIG(*islandSim, activeKinematics[kinematicIndex]);
     }
 
     if (globalBody0Idx == PX_MAX_U32 && globalBody1Idx == PX_MAX_U32)
@@ -373,11 +388,14 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     if (localBody0Idx == PX_MAX_U32 && localBody1Idx == PX_MAX_U32)
       continue;
 
-    const PxU32 npIndex = cm->getWorkUnit().mNpIndex;
-    PxsContactManagerOutput &output =
-        mOutputIterator.getContactManagerOutput(npIndex);
+    const PxU32 npIndex = snapshot ? snapshot->npIndex : cm->getWorkUnit().mNpIndex;
+    PxsContactManagerOutput *output =
+        snapshot ? nullptr
+                 : &source.outputIterator->getContactManagerOutput(npIndex);
 
-    if (output.nbContacts == 0)
+    const PxU32 nbContacts = snapshot ? snapshot->nbContacts : output->nbContacts;
+    const PxU32 nbPatches = snapshot ? snapshot->nbPatches : output->nbPatches;
+    if (nbContacts == 0)
       continue;
     // NOTE: Do NOT filter by eHAS_TOUCH here. AVBD is a position-based solver
     // that predicts positions (gravity warmstart) before solving. Near-miss
@@ -391,20 +409,26 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     AvbdSolverBody *bodyB = (localBody1Idx < islandBodyCount)
                                 ? &avbdBodies[localBody1Idx]
                                 : nullptr;
-    const PxU32 cmIdx = cm->getIndex();
-    PxU8 contactManagerAge = 255;
-    const PxU64 contactManagerKey = makeAvbdContactManagerKey(
-        cm, globalBody0Idx, globalBody1Idx);
-    CachedContactManagerState *contactManagerState = nullptr;
-    if (cmIdx < mContactManagerStateCache.size()) {
-      contactManagerState = &mContactManagerStateCache[cmIdx];
-      if (contactManagerState->key == contactManagerKey)
-        contactManagerAge = contactManagerState->frameAge;
+    const PxU32 cmIdx = snapshot ? snapshot->contactManagerIndex : cm->getIndex();
+    PxU8 contactManagerAge = snapshot ? snapshot->contactManagerAge : 255;
+    const PxU64 contactManagerKey =
+        snapshot ? snapshot->contactManagerKey
+                 : makeAvbdContactManagerKey(cm, globalBody0Idx, globalBody1Idx);
+    AvbdDynamicsContext::CachedContactManagerState *contactManagerState = nullptr;
+    if (source.managerStateCache &&
+        cmIdx < source.managerStateCache->size()) {
+      contactManagerState = &(*source.managerStateCache)[cmIdx];
+      if (!snapshot && contactManagerState->key == contactManagerKey &&
+          contactManagerState->frameStamp != 0) {
+        const PxU16 age = static_cast<PxU16>(
+            frameStamp - contactManagerState->frameStamp);
+        contactManagerAge = age >= 255u ? PxU8(255) : PxU8(age);
+      }
     }
     const PxU32 managerConstraintStart = constraintIndex;
 
-    const PxU8 *contactData = output.contactPoints;
-    const PxU8 *patchData = output.contactPatches;
+    const PxU8 *contactData = snapshot ? snapshot->contactPoints : output->contactPoints;
+    const PxU8 *patchData = snapshot ? snapshot->contactPatches : output->contactPatches;
 
     if (!contactData || !patchData)
       continue;
@@ -414,15 +438,16 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     // to select the format; fixed sizeof(PxContact) arithmetic silently read
     // later modified points from the middle of the preceding point.
     const PxContactStreamIterator stream(
-        patchData, contactData, output.getInternalFaceIndice(),
-        output.nbPatches, output.nbContacts);
+        patchData, contactData,
+        snapshot ? nullptr : output->getInternalFaceIndice(), nbPatches,
+        nbContacts);
     if (stream.forceNoResponse)
       continue;
     const PxU32 contactPointSize = stream.contactPointSize;
     const bool hasExtendedContact =
         stream.mStreamFormat != PxContactStreamIterator::eSIMPLE_STREAM;
 
-    for (PxU8 patchIdx = 0; patchIdx < output.nbPatches; ++patchIdx) {
+    for (PxU8 patchIdx = 0; patchIdx < nbPatches; ++patchIdx) {
       const PxContactPatch *patch = reinterpret_cast<const PxContactPatch *>(
           patchData + patchIdx * sizeof(PxContactPatch));
 
@@ -437,8 +462,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
       // farthest point in the patch as deterministic manifold anchors, then
       // accumulate every AVBD row into its nearest anchor during writeback.
       PxFrictionPatch *reportFrictionPatch =
-          output.frictionPatches
-              ? reinterpret_cast<PxFrictionPatch *>(output.frictionPatches) +
+          output && output->frictionPatches
+              ? reinterpret_cast<PxFrictionPatch *>(output->frictionPatches) +
                     patchIdx
               : nullptr;
       PxU32 reportAnchorCount = 0;
@@ -538,32 +563,28 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
         //   penalty = clamp(penalty * gamma, PENALTY_MIN, PENALTY_MAX)
         const PxU64 cacheKey = makeAvbdContactCacheKey(
             globalBody0Idx, globalBody1Idx, constraint.contactPointA,
-            constraint.contactPointB, getLengthScale());
+            constraint.contactPointB, source.lengthScale);
         const PxU64 cacheIdx64 =
-            static_cast<PxU64>(cmIdx) * CONTACT_CACHE_SLOTS_PER_CM +
-            (cacheKey & (CONTACT_CACHE_SLOTS_PER_CM - 1u));
+            static_cast<PxU64>(cmIdx) *
+                AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM +
+            (cacheKey & (AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM - 1u));
         const PxU32 cacheIdx = cacheIdx64 < PX_MAX_U32
                                    ? static_cast<PxU32>(cacheIdx64)
                                    : PX_MAX_U32;
         constraint.cacheIndex = cacheIdx;
         constraint.cacheKey = cacheKey;
-        constraint.diagnosticRestoredNormalLambda = 0.0f;
-        constraint.diagnosticRestoredNormalPenalty =
-            AvbdConstants::AVBD_MIN_PENALTY_RHO;
-        constraint.diagnosticInitialNormalPenalty =
-            AvbdConstants::AVBD_MIN_PENALTY_RHO;
-        constraint.diagnosticPreAlRawViolation = 0.0f;
-        constraint.diagnosticPreAlViolation = 0.0f;
-        constraint.diagnosticPreAlNormalCoordinate = 0.0f;
-        constraint.diagnosticNormalWarmstartHit = 0;
-        constraint.diagnosticNormalWarmstartAge = 255;
         constraint.contactManagerEstablished =
             contactManagerAge == 1 ? 1 : 0;
-        constraint.contactManagerAge = contactManagerAge;
         constraint.contactImpulseWriteback =
-            output.contactForces
-                ? output.contactForces + startContact + c
+            !snapshot && output && output->contactForces
+                ? output->contactForces + startContact + c
                 : nullptr;
+        if (snapshot && outputTokens) {
+          AvbdContactOutputToken &token =
+              outputTokens[outputTokenBase + constraintIndex];
+          token.targetIndex = snapshot->outputTargetBase + startContact + c;
+          token.flags = snapshot->outputTargetFlags;
+        }
         constraint.frictionImpulseWriteback = nullptr;
         constraint.frictionSweepImpulse = PxVec3(0.0f);
         constraint.velocityNormalImpulse = -1.0f;
@@ -596,9 +617,41 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
 
         const bool bodyVsStatic =
             (bodyA != nullptr) != (bodyB != nullptr);
-        const PxReal restDist = cm->getRestDistance();
+        const PxReal restDist = snapshot ? snapshot->restDistance
+                                         : cm->getRestDistance();
         const bool deformableStaticAnchor =
             isDeformableStaticAnchorContact(bodyVsStatic, restDist);
+
+        const AvbdDynamicsContext::CachedLambda *cachedLambda = nullptr;
+        if (snapshot) {
+          const PxU64 cacheBase = static_cast<PxU64>(cmIdx) *
+                                  AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM;
+          if (snapshot->lambdaCacheDirect && cacheIdx64 >= cacheBase) {
+            const PxU64 slotOffset = cacheIdx64 - cacheBase;
+            if (slotOffset < AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM)
+              cachedLambda = reinterpret_cast<
+                  const AvbdDynamicsContext::CachedLambda *>(
+                  snapshot->lambdaCacheDirect) + slotOffset;
+          } else if (snapshot->lambdaCacheBytes && cacheIdx64 >= cacheBase) {
+            const PxU64 slotOffset = cacheIdx64 - cacheBase;
+            if (slotOffset < AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM &&
+                snapshot->lambdaCacheSlots) {
+              const PxU8 slot = static_cast<PxU8>(slotOffset);
+              for (PxU32 compactSlot = 0;
+                   compactSlot < snapshot->lambdaCacheSlotCount;
+                   ++compactSlot) {
+                if (snapshot->lambdaCacheSlots[compactSlot] == slot) {
+                  cachedLambda = reinterpret_cast<const AvbdDynamicsContext::CachedLambda *>(
+                                     snapshot->lambdaCacheBytes) +
+                                 compactSlot;
+                  break;
+                }
+              }
+            }
+          }
+        } else if (source.lambdaCache && cacheIdx < source.lambdaCache->size()) {
+          cachedLambda = &(*source.lambdaCache)[cacheIdx];
+        }
 
         if (deformableStaticAnchor) {
           // Entry 108: no lambda/penalty warmstart on deformable mesh anchors.
@@ -610,11 +663,12 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           constraint.tangentPenalty0 = wsPenaltyMin;
           constraint.tangentPenalty1 = wsPenaltyMin;
           setFrictionStick(constraint, false);
-          localMisses++;
-        } else if (mEnableLambdaWarmStart && cacheIdx < mLambdaCache.size()) {
-          CachedLambda &cached = mLambdaCache[cacheIdx];
-          if (cached.key == cacheKey &&
-              cached.frameAge <= LAMBDA_MAX_AGE) {
+        } else if (source.enableLambdaWarmStart && cachedLambda) {
+          const AvbdDynamicsContext::CachedLambda &cached = *cachedLambda;
+          const PxU16 frameAge =
+              static_cast<PxU16>(frameStamp - cached.frameStamp);
+          if (cached.key == cacheKey && cached.frameStamp != 0 &&
+              frameAge <= AvbdDynamicsContext::LAMBDA_MAX_AGE) {
             // Apply warmstart decay (ref Eq. 19)
             constraint.header.lambda = cached.lambda * wsAlpha * wsGamma;
             constraint.tangentLambda0 =
@@ -629,9 +683,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
             constraint.tangentPenalty1 = PxClamp(
                 cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
             setFrictionStick(constraint, cached.stick != 0);
-            constraint.diagnosticNormalWarmstartHit = 1;
-            constraint.diagnosticNormalWarmstartAge = cached.frameAge;
-            localHits++;
           } else {
             constraint.header.lambda = 0.0f;
             constraint.tangentLambda0 = 0.0f;
@@ -640,7 +691,6 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
             constraint.tangentPenalty0 = wsPenaltyMin;
             constraint.tangentPenalty1 = wsPenaltyMin;
             setFrictionStick(constraint, false);
-            localMisses++;
           }
         } else {
           constraint.header.lambda = 0.0f;
@@ -650,12 +700,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           constraint.tangentPenalty0 = wsPenaltyMin;
           constraint.tangentPenalty1 = wsPenaltyMin;
           setFrictionStick(constraint, false);
-          localMisses++;
         }
 
-        constraint.diagnosticRestoredNormalLambda = constraint.header.lambda;
-        constraint.diagnosticRestoredNormalPenalty =
-            constraint.header.penalty;
         constraint.contactNormal = normal;
         constraint.targetVelocity =
             extendedContact ? extendedContact->targetVelocity : PxVec3(0.0f);
@@ -728,6 +774,8 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
           constraint.staticPrevWorldPoint = PxVec3(0.0f);
         }
 
+        if (snapshot)
+          ++snapshot->emittedResponseRows;
         ++constraintIndex;
       }
     }
@@ -736,19 +784,61 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
     // least one response row in the current step.  Notification-only streams,
     // forceNoResponse pairs, and points disabled with maxImpulse=0 must leave a
     // lifecycle gap so a later response is classified as contact onset.
-    if (contactManagerState && constraintIndex > managerConstraintStart) {
-      contactManagerState->key = contactManagerKey;
-      contactManagerState->frameAge = 0;
+    if (constraintIndex > managerConstraintStart) {
+      if (snapshot)
+        snapshot->managerStateCommit = 1;
+      else if (contactManagerState) {
+        contactManagerState->key = contactManagerKey;
+        contactManagerState->frameStamp = frameStamp;
+      }
     }
   }
 
-  // Update global debug counters and print statistics
-  sDebugHits += localHits;
-  sDebugMisses += localMisses;
-  sFrameCount++;
-  // DEBUG: Lambda cache statistics intentionally disabled in production.
-
   return constraintIndex;
+}
+
+PxU32 AvbdDynamicsContext::prepareAvbdContacts(
+    const IG::IslandSim &islandSim, PxReal dt,
+    AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
+    AvbdContactConstraint *constraints, PxU32 maxConstraints,
+    PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset,
+    AvbdContactPrepSnapshot *snapshots, AvbdContactOutputToken *outputTokens,
+    PxU32 outputTokenBase) {
+  if (snapshots) {
+    return prepareAvbdContactSnapshots(
+        dt, avbdBodies, islandBodyCount, constraints, maxConstraints,
+        startContactIdx, numContactsToProcess, bodyOffset, snapshots,
+        outputTokens, outputTokenBase, getLengthScale(),
+        mEnableLambdaWarmStart, getAvbdFrameStamp());
+  }
+  const AvbdContactPrepSource source = {
+      &mContactList,
+      &mOutputIterator,
+      &mContactManagerStateCache,
+      &mLambdaCache,
+      mEnableLambdaWarmStart,
+      getLengthScale(),
+      getAvbdFrameStamp()};
+  return prepareAvbdContactsImpl(
+      &islandSim, source, dt, avbdBodies, islandBodyCount, constraints,
+      maxConstraints, startContactIdx, numContactsToProcess, bodyOffset,
+      snapshots, outputTokens, outputTokenBase);
+}
+
+PxU32 physx::Dy::prepareAvbdContactSnapshots(
+    PxReal dt, AvbdSolverBody *avbdBodies, PxU32 islandBodyCount,
+    AvbdContactConstraint *constraints, PxU32 maxConstraints,
+    PxU32 startContactIdx, PxU32 numContactsToProcess, PxU32 bodyOffset,
+    AvbdContactPrepSnapshot *snapshots, AvbdContactOutputToken *outputTokens,
+    PxU32 outputTokenBase, PxReal lengthScale, bool enableLambdaWarmStart,
+    PxU16 frameStamp) {
+  const AvbdContactPrepSource source = {
+      nullptr, nullptr, nullptr, nullptr, enableLambdaWarmStart, lengthScale,
+      frameStamp};
+  return prepareAvbdContactsImpl(
+      nullptr, source, dt, avbdBodies, islandBodyCount, constraints,
+      maxConstraints, startContactIdx, numContactsToProcess, bodyOffset,
+      snapshots, outputTokens, outputTokenBase);
 }
 
 void AvbdDynamicsContext::prepareAvbdConstraints(
@@ -861,22 +951,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
       const PxU16 concreteType = getConstraintConcreteType(constraint->index);
       const PhysXJointType jointType =
           getJointTypeFromConcreteType(concreteType);
-
-#if AVBD_JOINT_DEBUG
-      if (getAvbdMotorFrameCounter() < AVBD_JOINT_DEBUG_FRAMES) {
-        printf("[Constraint Parse] type: %d, internal type: %d, block size: "
-               "%u, expected: %zu\n",
-               jointType, concreteType, constraint->constantBlockSize,
-               sizeof(PhysXJointData));
-        if (constraint->constantBlockSize >= sizeof(PhysXJointData)) {
-          const PhysXJointData *physXData =
-              static_cast<const PhysXJointData *>(constraint->constantBlock);
-          printf("  -> invMassScale0: %f, c2b0.p.x: %f, c2b1.p.x: %f\n",
-                 physXData->invMassScale.linear0, physXData->c2b[0].p.x,
-                 physXData->c2b[1].p.x);
-        }
-      }
-#endif
 
       if (jointType == eJOINT_GEAR) {
         // Process GearJoint
@@ -1092,16 +1166,6 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               const PhysXPrismaticJointData *prismaticData =
                   static_cast<const PhysXPrismaticJointData *>(
                       constraint->constantBlock);
-
-#if AVBD_JOINT_DEBUG
-              if (getAvbdMotorFrameCounter() < AVBD_JOINT_DEBUG_FRAMES) {
-                printf("[Parse Prismatic->D6] sizeof(PhysXPrismaticJointData)=%zu, "
-                       "flags=%u, limit(L=%f, U=%f)\n",
-                       sizeof(PhysXPrismaticJointData),
-                       (unsigned int)prismaticData->jointFlags,
-                       prismaticData->limit.lower, prismaticData->limit.upper);
-              }
-#endif
 
               AvbdD6JointConstraint &c = d6Constraints[numD6++];
               c.initDefaults();

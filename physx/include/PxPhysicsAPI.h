@@ -148,6 +148,7 @@ Alternatively, one can instead directly #include a subset of the below files.
 // PhysX Core SDK
 #include "PxActor.h"
 #include "PxAggregate.h"
+#include "PxAvbdCpuIsa.h"
 #include "PxArticulationReducedCoordinate.h"
 #include "PxArticulationJointReducedCoordinate.h"
 #include "PxArticulationLink.h"

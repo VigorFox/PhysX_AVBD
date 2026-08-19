@@ -34,6 +34,8 @@ set(PHYSX_PRESET "" CACHE STRING "PhysX build preset (e.g., vc17win64, linux-gcc
 
 # GPU options must be set before project() to determine CUDA language requirement
 option(PX_GENERATE_GPU_PROJECTS "Generate GPU projects" ON)
+option(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE
+  "Build the experimental AVBD GPU owner-wave hybrid backend" OFF)
 
 # Apply preset switches (PX_GENERATE_GPU_PROJECTS, etc.) BEFORE project() so that
 # cpu-only presets can disable CUDA without requiring a separate command-line flag.
@@ -433,10 +435,17 @@ if(PX_GENERATE_GPU_PROJECTS)
         "    - ${CUDAToolkit_LIBRARY_DIR}")
     endif()
     
-    # Also link CUDA runtime if available
-    if(TARGET CUDA::cudart)
+    # CUDA language targets already carry the runtime needed by the GPU
+    # component archives.  On Windows, adding CUDA::cudart again here causes
+    # CUDA 13 to pull a second runtime-registration object into PhysXGpu and
+    # produces LNK2005 duplicates with CudaKernelWrangler.  Keep the explicit
+    # target link for non-Windows toolchains where the shared GPU target does
+    # not inherit the CUDA runtime from its component targets.
+    if(TARGET CUDA::cudart AND NOT WIN32)
       message(STATUS "[OK] Linking PhysXGpu with CUDA::cudart")
       target_link_libraries(PhysXGpu ${CUDA_LINK_SCOPE} CUDA::cudart)
+    elseif(TARGET CUDA::cudart)
+      message(STATUS "[OK] CUDA::cudart supplied by Windows GPU component targets")
     else()
       message(STATUS "[WARN] CUDA::cudart target not available")
     endif()

@@ -31,6 +31,7 @@
 #include "DyArticulationTendon.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdConstraint.h"
+#include "DyAvbdKernelLabCapture.h"
 #include "DyAvbdTasks.h"
 #include "DyConstraint.h"
 #include "DyConstraintPrep.h"
@@ -47,6 +48,8 @@
 #include "foundation/PxMath.h"
 
 #include <cstdlib>
+#include <cstdint>
+#include <cstring>
 
 using namespace physx;
 using namespace physx::Dy;
@@ -72,56 +75,26 @@ static bool isEnvFlagEnabled(const char *name) {
   return value && value[0] && value[0] != '0';
 }
 
-static PxU32 getEnvUInt(const char *name, PxU32 defaultValue) {
-  const char *value = std::getenv(name);
-  if (!value || !value[0])
-    return defaultValue;
-
-  const int parsed = std::atoi(value);
-  return parsed > 0 ? PxU32(parsed) : defaultValue;
+static PX_FORCE_INLINE void mixAvbdContactManagerKey(PxU64 &hash, PxU32 value) {
+  hash ^= value;
+  hash *= 1099511628211ull;
 }
 
-template <typename T>
-static void atomicMax(std::atomic<T> &target, T value) {
-  T current = target.load(std::memory_order_relaxed);
-  while (current < value &&
-         !target.compare_exchange_weak(current, value,
-                                       std::memory_order_relaxed,
-                                       std::memory_order_relaxed)) {
-  }
+static PxU64 makeAvbdContactManagerKey(const PxsContactManager *manager,
+                                       PxU32 globalBody0Idx,
+                                       PxU32 globalBody1Idx) {
+  const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(manager);
+  PxU64 hash = 14695981039346656037ull;
+  mixAvbdContactManagerKey(hash, static_cast<PxU32>(address));
+  mixAvbdContactManagerKey(
+      hash, static_cast<PxU32>(static_cast<PxU64>(address) >> 32));
+  mixAvbdContactManagerKey(hash, globalBody0Idx);
+  mixAvbdContactManagerKey(hash, globalBody1Idx);
+  return hash != 0 ? hash : 1;
 }
-
-static PxU32 toMilliUnits(PxReal value) {
-  const PxReal scaled = PxAbs(value) * 1000.0f;
-  return scaled >= PxReal(PX_MAX_U32) ? PX_MAX_U32 : PxU32(scaled);
-}
-
-static PxU64 toNanoUnits(PxReal value) {
-  const double scaled = double(PxAbs(value)) * 1000000000.0;
-  const PxU64 maxValue = ~PxU64(0);
-  return scaled >= double(maxValue) ? maxValue : PxU64(scaled);
-}
-
-static PxU32 maxAbsComponentMilli(const PxVec3 &value) {
-  return PxMax(toMilliUnits(value.x),
-               PxMax(toMilliUnits(value.y), toMilliUnits(value.z)));
-}
-
-// Debug: set to 1 to process all islands sequentially (no task parallelism)
-// This makes output deterministic and easier to debug.
-#define AVBD_DEBUG_SEQUENTIAL 0
 
 // Accessor for the solver to get current frame
 physx::PxU64 getAvbdMotorFrameCounter() { return gAvbdMotorFrameCounter; }
-
-#ifndef AVBD_JOINT_DEBUG
-#define AVBD_JOINT_DEBUG 0
-#endif
-#ifndef AVBD_JOINT_DEBUG_FRAMES
-#define AVBD_JOINT_DEBUG_FRAMES 2
-#endif
-
-
 
 //=============================================================================
 // Articulation Internal Joints Helper (forward declaration)
@@ -224,309 +197,34 @@ AvbdDynamicsContext::AvbdDynamicsContext(
     Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
     PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
-    PxSceneFlags sceneFlags)
+    PxU32 avbdIterations, PxU32 avbdJointIterationOverride,
+    bool avbdEnableEarlyStop, PxSceneFlags sceneFlags)
     : DynamicsContextBase(memBlockPool, taskPool, simStats, allocator,
                           materialManager, islandManager, contextID,
                           maxBiasCoefficient, lengthScale, sceneFlags),
       mScratchAllocator(scratchAllocator), mSoftIslandProvider(nullptr),
+      mRigidGpuWaveBackend(nullptr),
+      mAvbdIterations(avbdIterations),
+      mAvbdJointIterationOverride(avbdJointIterationOverride),
+      mAvbdEnableEarlyStop(avbdEnableEarlyStop),
       mScratchAdapter(scratchAllocator), mAllocatorAdapter(allocator),
       mTaskManager(taskManager),
+      mKernelLabCapture(nullptr),
+      mKernelLabCaptureReservationSubmitted(false),
+      mTaskGraphSerialMode(
+          isEnvFlagEnabled("PHYSX_AVBD_TASKGRAPH_SERIAL")),
       mFrictionEveryIteration(
-          sceneFlags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION),
-      mIterationDiagnosticsEnabled(isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG")),
-        mIterationDiagnosticsSequential(
-          isEnvFlagEnabled("PHYSX_AVBD_ITER_DIAG_SEQUENTIAL")),
-      mNormalRowDiagnosticsEnabled(
-          isEnvFlagEnabled("PHYSX_AVBD_NORMAL_ROW_DIAG")),
-      mIterationDiagnosticsEvery(getEnvUInt("PHYSX_AVBD_ITER_DIAG_EVERY", 60)),
-      mDiagIslandCount(0), mDiagJointIslandCount(0),
-      mDiagRequestedIterations(0), mDiagExecutedIterations(0),
-      mDiagEarlyStopIslands(0),
-      mDiagVelocityObjectivePositionRows(0),
-      mDiagVelocityObjectivePointRows(0),
-      mDiagVelocityObjectiveManifoldRows(0),
-      mDiagVelocityObjectiveComponentRows(0),
-      mDiagVelocityObjectiveJointRows(0),
-      mDiagVelocityObjectiveUnsupportedRows(0),
-      mDiagVelocityObjectiveLegacyRows(0),
-      mDiagVelocityObjectiveInvalidRows(0),
-      mDiagVelocityObjectiveFingerprint(0),
-      mDiagContactObjectivePositionSlots(0),
-      mDiagContactObjectivePointSlots(0),
-      mDiagContactObjectiveManifoldSlots(0),
-      mDiagContactObjectiveComponentSlots(0),
-      mDiagContactObjectiveJointSlots(0),
-      mDiagContactObjectiveUnsupportedSlots(0),
-      mDiagContactObjectiveLegacySlots(0),
-      mDiagContactObjectiveInvalidSlots(0),
-      mDiagContactObjectiveLegacyNormalSlots(0),
-      mDiagContactObjectiveLegacyTangentSlots(0),
-      mDiagContactObjectiveLegacyRigidStaticTangentSlots(0),
-      mDiagContactObjectiveLegacyDynamicTangentSlots(0),
-      mDiagContactObjectiveLegacyDeformableTangentSlots(0),
-      mDiagContactObjectiveLegacyJointMixedTangentSlots(0),
-      mDiagContactObjectiveLegacyOtherTangentSlots(0),
-      mDiagContactObjectiveFingerprint(0),
-      mDiagJointObjectivePositionRows(0),
-      mDiagJointObjectiveFinalizeRows(0),
-      mDiagJointObjectiveUnsupportedRows(0),
-      mDiagJointObjectiveLegacyRows(0),
-      mDiagJointObjectiveInvalidRows(0),
-      mDiagJointObjectiveFingerprint(0),
-      mDiagBodyStaticNormalAlRows(0),
-      mDiagBodyStaticNormalAlEvaluations(0),
-      mDiagBodyStaticDepenetrationCorrections(0),
-      mDiagBodyStaticDepenetrationEligibleRows(0),
-      mDiagBodyStaticDepenetrationFiniteImpulseSkips(0),
-      mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips(0),
-      mDiagBodyStaticMaterialVelocityCorrections(0),
-      mDiagBodyStaticRestitutionCorrections(0),
-      mDiagBodyStaticNormalWarmstartHits(0),
-      mDiagBodyStaticNormalWarmstartMisses(0),
-      mDiagBodyStaticNormalWarmstartAge0(0),
-      mDiagBodyStaticNormalWarmstartAge1(0),
-      mDiagBodyStaticNormalWarmstartAge2(0),
-      mDiagBodyStaticNormalWarmstartAge3(0),
-      mDiagBodyStaticNormalManagerOnsetRows(0),
-      mDiagBodyStaticNormalManagerSupportRows(0),
-      mDiagBodyStaticNormalManagerAge0(0),
-      mDiagBodyStaticNormalManagerAge1(0),
-      mDiagBodyStaticNormalManagerAge2(0),
-      mDiagBodyStaticNormalManagerAge3(0),
-      mDiagBodyStaticNormalRowMissOnManagerSupportRows(0),
-      mDiagBodyStaticNormalOnsetFinalizeBodies(0),
-      mDiagBodyStaticNormalSupportFinalizeBodies(0),
-      mDiagBodyStaticNormalOnsetFinalizeCorrections(0),
-      mDiagBodyStaticNormalSupportFinalizeCorrections(0),
-      mDiagBodyStaticNormalOnsetDepenetrationEligibleRows(0),
-      mDiagBodyStaticNormalSupportDepenetrationEligibleRows(0),
-      mDiagBodyStaticNormalOnsetDepenetrationCorrections(0),
-      mDiagBodyStaticNormalSupportDepenetrationCorrections(0),
-      mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections(0),
-      mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections(0),
-      mDiagBodyStaticNormalSupportShallowDepenetrationCorrections(0),
-      mDiagBodyStaticNormalSupportDeepDepenetrationCorrections(0),
-      mDiagBodyStaticMaterialFiniteBudgetRows(0),
-      mDiagBodyStaticMaterialUnlimitedBudgetRows(0),
-      mDiagContactFrictionTargetAlEvaluations(0),
-      mDiagBodyStaticFrictionTargetRows(0),
-      mDiagBodyStaticFrictionTargetCorrections(0),
-      mDiagBodyStaticFrictionFallbackRows(0),
-      mDiagBodyStaticFrictionFallbackCorrections(0),
-      mDiagContactTargetNormalProjectionRows(0),
-      mDiagContactTargetNormalCorrections(0),
-      mDiagContactTargetTangentRows(0),
-      mDiagContactTargetTangentCorrections(0),
-      mDiagSurfaceDeformableAlRows(0),
-      mDiagSurfaceDeformableAlEvaluations(0),
-      mDiagSurfaceDeformablePositionTangentCandidates(0),
-      mDiagSurfaceDeformablePositionTangentRows(0),
-      mDiagSurfaceDeformablePositionTangentEvaluations(0),
-      mDiagSurfaceDeformablePositionTangentMixedRejectRows(0),
-      mDiagSurfaceDeformablePositionTangentShellRejectRows(0),
-      mDiagSurfaceDeformablePositionTangentTargetRejectRows(0),
-      mDiagSurfaceDeformablePositionTangentRestitutionRejectRows(0),
-      mDiagSurfaceDeformablePositionTangentFiniteRejectRows(0),
-      mDiagSurfaceDeformablePositionTangentScaleRejectRows(0),
-      mDiagSurfaceDeformableStrippedRows(0),
-      mDiagSurfaceDeformableShellSuppressedPrimalRows(0),
-      mDiagSurfaceDeformableDepenetrationCorrections(0),
-      mDiagSurfaceDeformableFrictionRawRows(0),
-      mDiagSurfaceDeformableFrictionDominantRows(0),
-      mDiagSurfaceDeformableFrictionFewContactRows(0),
-      mDiagSurfaceDeformableFrictionMultiCornerRows(0),
-      mDiagSurfaceDeformableFrictionCorrections(0),
-      mDiagSurfaceDeformableFinalizeBodies(0),
-      mDiagSurfaceDeformableFinalizeCorrections(0),
-      mDiagSurfaceDeformableFinalizeSpatialCorrections(0),
-      mDiagSurfaceDeformableFinalizeComFallbackCorrections(0),
-      mDiagSurfaceDeformableFinalizeSecondaryRows(0),
-      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows(0),
-      mDiagSurfaceDeformableFinalizeManifoldBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldOneRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldFourRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldAliasRows(0),
-      mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies(0),
-      mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies(0),
-      mDiagSurfaceDeformableFinalizeComponents(0),
-      mDiagSurfaceDeformableFinalizeComponentOneBody(0),
-      mDiagSurfaceDeformableFinalizeComponentTwoBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies(0),
-      mDiagSurfaceDeformableFinalizeComponentOneToEightRows(0),
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows(0),
-      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows(0),
-      mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows(0),
-      mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows(0),
-      mDiagSurfaceDeformableFinalizeComponentRestitution(0),
-      mDiagSurfaceDeformableFinalizeComponentFiniteImpulse(0),
-      mDiagSurfaceDeformableFinalizeComponentTargetVelocity(0),
-      mDiagSurfaceDeformableFinalizeComponentMixedScale(0),
-      mDiagSurfaceDeformableFinalizeComponentRigidStatic(0),
-      mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable(0),
-      mDiagSurfaceDeformableFinalizeComponentJointIsland(0),
-      mDiagSurfaceDeformableFinalizeComponentLockedDof(0),
-      mDiagSurfaceDeformableFinalizeComponentNonDynamicBody(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget(0),
-      mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported(0),
-      mDiagSurfaceDeformableFinalizeShadowComponents(0),
-      mDiagSurfaceDeformableFinalizeShadowRows(0),
-      mDiagSurfaceDeformableFinalizeShadowNoCorrection(0),
-      mDiagSurfaceDeformableFinalizeShadowSolved(0),
-      mDiagSurfaceDeformableFinalizeShadowCommitCapable(0),
-      mDiagSurfaceDeformableFinalizeShadowBudgetExhausted(0),
-      mDiagSurfaceDeformableFinalizeShadowInfeasible(0),
-      mDiagSurfaceDeformableFinalizeShadowResidualUnclassified(0),
-      mDiagSurfaceDeformableFinalizeShadowNumericalFailure(0),
-      mDiagSurfaceDeformableFinalizeShadowIterationLimit(0),
-      mDiagSurfaceDeformableFinalizeShadowUnsupported(0),
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact(0),
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot(0),
-      mDiagSurfaceDeformableFinalizeShadowLowerRows(0),
-      mDiagSurfaceDeformableFinalizeShadowFreeRows(0),
-      mDiagSurfaceDeformableFinalizeShadowUpperRows(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x(
-          0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x(
-          0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x(
-          0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched(0),
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped(0),
-      mDiagSurfaceDeformableFinalizePreOwnerBodies(0),
-      mDiagSurfaceDeformableFinalizeLegacyOwnerBodies(0),
-      mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies(0),
-      mDiagSurfaceDeformableFinalizeProbeEligibleComponents(0),
-      mDiagSurfaceDeformableFinalizeProbeCommittedComponents(0),
-      mDiagSurfaceDeformableFinalizeProbeCommittedRows(0),
-      mDiagSurfaceDeformableFinalizeProbeCommittedBodies(0),
-      mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies(0),
-      mDiagSurfaceDeformableAlDepenetrationRows(0),
-      mDiagSurfaceDeformableAlFinalizeRows(0),
-      mDiagSurfaceDeformableDepenetrationFinalizeRows(0),
-      mDiagSurfaceDeformableAlDepenetrationFinalizeRows(0),
-      mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections(0),
-      mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections(0),
-      mDiagSurfaceDeformableFinalizeContactReversalCorrections(0),
-      mDiagSurfaceShellContacts(0),
-      mDiagSurfaceShellDepenetrationCorrections(0),
-      mDiagSurfaceShellFrictionRows(0),
-      mDiagSurfaceShellFrictionCorrections(0),
-      mDiagSurfaceShellFinalizeBodies(0),
-      mDiagSurfaceShellFinalizeCorrections(0),
-      mDiagBodyStaticDepenetrationDistanceNanos(0),
-      mDiagBodyStaticMaterialVelocityDeltaNanos(0),
-      mDiagBodyStaticFrictionTargetImpulseNanos(0),
-      mDiagBodyStaticFrictionFallbackImpulseNanos(0),
-      mDiagContactTargetNormalImpulseNanos(0),
-      mDiagContactTargetTangentImpulseNanos(0),
-      mDiagSurfaceDeformableDepenetrationDistanceNanos(0),
-      mDiagSurfaceDeformableFrictionImpulseNanos(0),
-      mDiagSurfaceDeformableFinalizeDeltaNanos(0),
-      mDiagSurfaceDeformableFinalizeContactPreSeparationNanos(0),
-      mDiagSurfaceDeformableFinalizeContactPostSeparationNanos(0),
-      mDiagSurfaceDeformableFinalizeContactPostApproachNanos(0),
-      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos(0),
-      mDiagSurfaceShellDepenetrationDistanceNanos(0),
-      mDiagSurfaceShellFrictionImpulseNanos(0),
-      mDiagSurfaceShellFinalizeDeltaNanos(0),
-      mDiagBodyStaticNormalRestoredLambdaMaxNanos(0),
-      mDiagBodyStaticNormalRestoredPenaltyMaxNanos(0),
-      mDiagBodyStaticNormalInitialPenaltyMaxNanos(0),
-      mDiagBodyStaticNormalPreAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalPostAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalAlphaC0OffsetNanos(0),
-      mDiagBodyStaticNormalPreAlPenetrationNanos(0),
-      mDiagBodyStaticNormalPostAlPenetrationNanos(0),
-      mDiagBodyStaticNormalPostAlSeparationNanos(0),
-      mDiagBodyStaticNormalAlOutwardDistanceNanos(0),
-      mDiagBodyStaticNormalAlInwardDistanceNanos(0),
-      mDiagBodyStaticMaterialPoseSeparatingVelocityNanos(0),
-      mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos(0),
-      mDiagBodyStaticMaterialFiniteRemainingImpulseNanos(0),
-      mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalOnsetPreAlPenetrationNanos(0),
-      mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalOnsetPostAlPenetrationNanos(0),
-      mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos(0),
-      mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos(0),
-      mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalSupportPreAlPenetrationNanos(0),
-      mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos(0),
-      mDiagBodyStaticNormalSupportPostAlPenetrationNanos(0),
-      mDiagBodyStaticNormalSupportAlphaC0OffsetNanos(0),
-      mDiagBodyStaticNormalSupportAlOutwardDistanceNanos(0),
-      mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos(0),
-      mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos(0),
-      mDiagBodyStaticNormalOnsetFinalizeDeltaNanos(0),
-      mDiagBodyStaticNormalSupportFinalizeDeltaNanos(0),
-      mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos(0),
-      mDiagBodyStaticNormalSupportDepenetrationDistanceNanos(0),
-      mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos(0),
-      mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos(0),
-      mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos(0),
-      mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos(0),
-      mDiagJointRequestedIterations(0),
-      mDiagJointExecutedIterations(0), mDiagJointBudgetHitIslands(0),
-      mDiagJointEarlyStopIslands(0), mDiagJointContactCount(0),
-      mDiagJointConstraintCount(0), mDiagMaxRequestedIterations(0),
-      mDiagJointLockedLinearRows(0), mDiagJointLimitedLinearRows(0),
-      mDiagJointLockedAngularRows(0), mDiagJointLimitedAngularRows(0),
-      mDiagJointLinearDriveRows(0), mDiagJointAngularDriveRows(0),
-      mDiagJointConeRows(0),
-      mDiagMaxExecutedIterations(0),
-      mDiagBodyStaticDepenetrationMaxCorrectionNanos(0),
-      mDiagBodyStaticMaterialVelocityMaxDeltaNanos(0),
-      mDiagJointMaxExecutedIterations(0),
-      mDiagJointMaxLinearLambdaMilli(0),
-      mDiagJointMaxAngularLambdaMilli(0),
-      mDiagJointMaxLinearDriveLambdaMilli(0),
-      mDiagJointMaxAngularDriveLambdaMilli(0),
-      mDiagJointMaxConeLambdaMilli(0), mDiagSeqMaxLinearJointIndex(PX_MAX_U32),
-      mDiagSeqMaxLinearJointBodyA(PX_MAX_U32),
-      mDiagSeqMaxLinearJointBodyB(PX_MAX_U32),
-      mDiagSeqMaxLinearDriveJointIndex(PX_MAX_U32),
-      mDiagSeqMaxLinearDriveJointBodyA(PX_MAX_U32),
-      mDiagSeqMaxLinearDriveJointBodyB(PX_MAX_U32) {
+          sceneFlags & PxSceneFlag::eENABLE_FRICTION_EVERY_ITERATION) {
+  PX_ASSERT(mAvbdIterations > 0 && mAvbdIterations <= 255);
+  PX_ASSERT(mAvbdJointIterationOverride <= 255);
   mSolverInitialized = false;
 
   // Use the main allocator callback for tasks, NOT the scratch adapter.
   // Tasks need explicit deallocation, which ScratchAllocatorAdapter doesn't
   // provide.
   mTaskFactory = new AvbdTaskFactory(mTaskManager, mAllocatorAdapter);
+  if (isEnvFlagEnabled("PHYSX_AVBD_KERNEL_LAB_CAPTURE"))
+    mKernelLabCapture = new AvbdKernelLabCapture();
 
   // Initialize lambda warm-starting cache
   mEnableLambdaWarmStart = true;
@@ -637,2950 +335,12 @@ void AvbdDynamicsContext::ensureBodyVelocityHistoryCapacity(
   }
 }
 
-void AvbdDynamicsContext::beginIterationDiagnosticsFrame() {
-  if (!mIterationDiagnosticsEnabled)
-    return;
-
-  mDiagIslandCount.store(0, std::memory_order_relaxed);
-  mDiagJointIslandCount.store(0, std::memory_order_relaxed);
-  mDiagRequestedIterations.store(0, std::memory_order_relaxed);
-  mDiagExecutedIterations.store(0, std::memory_order_relaxed);
-  mDiagEarlyStopIslands.store(0, std::memory_order_relaxed);
-  mDiagVelocityObjectivePositionRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectivePointRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveManifoldRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveComponentRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveJointRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveUnsupportedRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveLegacyRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveInvalidRows.store(
-      0, std::memory_order_relaxed);
-  mDiagVelocityObjectiveFingerprint.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectivePositionSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectivePointSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveManifoldSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveComponentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveJointSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveUnsupportedSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacySlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveInvalidSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyNormalSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyRigidStaticTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyDynamicTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyDeformableTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyJointMixedTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyOtherTangentSlots.store(
-      0, std::memory_order_relaxed);
-  mDiagContactObjectiveFingerprint.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectivePositionRows.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectiveFinalizeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectiveUnsupportedRows.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectiveLegacyRows.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectiveInvalidRows.store(
-      0, std::memory_order_relaxed);
-  mDiagJointObjectiveFingerprint.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlRows.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlEvaluations.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationCorrections.store(0,
-                                                std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationEligibleRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationFiniteImpulseSkips.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialVelocityCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticRestitutionCorrections.store(0,
-                                              std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartHits.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartMisses.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge0.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge1.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge2.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge3.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerOnsetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerSupportRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge0.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge1.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge2.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge3.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalRowMissOnManagerSupportRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationEligibleRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationEligibleRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportShallowDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDeepDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialFiniteBudgetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialUnlimitedBudgetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagContactFrictionTargetAlEvaluations.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackRows.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetNormalProjectionRows.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetNormalCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetTangentRows.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetTangentCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlRows.store(0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlEvaluations.store(0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentCandidates.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentEvaluations.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentMixedRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentShellRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentTargetRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentRestitutionRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentFiniteRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentScaleRejectRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableStrippedRows.store(0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableShellSuppressedPrimalRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionRawRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionDominantRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionFewContactRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionMultiCornerRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSpatialCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComFallbackCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOneRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldFourRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldAliasRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOneBody.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentTwoBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOneToEightRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentRestitution.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentFiniteImpulse.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentTargetVelocity.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentMixedScale.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentRigidStatic.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentJointIsland.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentLockedDof.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNonDynamicBody.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowNoCorrection.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowSolved.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowCommitCapable.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowBudgetExhausted.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowInfeasible.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowResidualUnclassified.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowNumericalFailure.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowIterationLimit.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupported.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowLowerRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowFreeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUpperRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x
-      .store(0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizePreOwnerBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeLegacyOwnerBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeEligibleComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedComponents.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlDepenetrationRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlFinalizeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationFinalizeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlDepenetrationFinalizeRows.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactReversalCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellContacts.store(0, std::memory_order_relaxed);
-  mDiagSurfaceShellDepenetrationCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionRows.store(0, std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeBodies.store(0, std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeCorrections.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialVelocityDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetNormalImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagContactTargetTangentImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPreSeparationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPostSeparationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPostApproachNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalRestoredLambdaMaxNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalRestoredPenaltyMaxNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalInitialPenaltyMaxNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalPreAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlphaC0OffsetNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalPreAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlSeparationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlOutwardDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlInwardDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialPoseSeparatingVelocityNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialFiniteRemainingImpulseNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPreAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPostAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPreAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPostAlPenetrationNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportAlphaC0OffsetNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportAlOutwardDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagJointRequestedIterations.store(0, std::memory_order_relaxed);
-  mDiagJointExecutedIterations.store(0, std::memory_order_relaxed);
-  mDiagJointBudgetHitIslands.store(0, std::memory_order_relaxed);
-  mDiagJointEarlyStopIslands.store(0, std::memory_order_relaxed);
-  mDiagJointContactCount.store(0, std::memory_order_relaxed);
-  mDiagJointConstraintCount.store(0, std::memory_order_relaxed);
-  mDiagJointLockedLinearRows.store(0, std::memory_order_relaxed);
-  mDiagJointLimitedLinearRows.store(0, std::memory_order_relaxed);
-  mDiagJointLockedAngularRows.store(0, std::memory_order_relaxed);
-  mDiagJointLimitedAngularRows.store(0, std::memory_order_relaxed);
-  mDiagJointLinearDriveRows.store(0, std::memory_order_relaxed);
-  mDiagJointAngularDriveRows.store(0, std::memory_order_relaxed);
-  mDiagJointConeRows.store(0, std::memory_order_relaxed);
-  mDiagMaxRequestedIterations.store(0, std::memory_order_relaxed);
-  mDiagMaxExecutedIterations.store(0, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationMaxCorrectionNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagBodyStaticMaterialVelocityMaxDeltaNanos.store(
-      0, std::memory_order_relaxed);
-  mDiagJointMaxExecutedIterations.store(0, std::memory_order_relaxed);
-  mDiagJointMaxLinearLambdaMilli.store(0, std::memory_order_relaxed);
-  mDiagJointMaxAngularLambdaMilli.store(0, std::memory_order_relaxed);
-  mDiagJointMaxLinearDriveLambdaMilli.store(0, std::memory_order_relaxed);
-  mDiagJointMaxAngularDriveLambdaMilli.store(0, std::memory_order_relaxed);
-  mDiagJointMaxConeLambdaMilli.store(0, std::memory_order_relaxed);
-  mDiagSeqMaxLinearJointIndex = PX_MAX_U32;
-  mDiagSeqMaxLinearJointBodyA = PX_MAX_U32;
-  mDiagSeqMaxLinearJointBodyB = PX_MAX_U32;
-  mDiagSeqMaxLinearDriveJointIndex = PX_MAX_U32;
-  mDiagSeqMaxLinearDriveJointBodyA = PX_MAX_U32;
-  mDiagSeqMaxLinearDriveJointBodyB = PX_MAX_U32;
-}
-
-void AvbdDynamicsContext::recordIterationDiagnostics(
-    PxU32 requestedIterations, const AvbdSolverStats &stats,
-    bool hasJointConstraints, const AvbdD6JointConstraint *d6Joints,
-    PxU32 numD6) {
-  if (!mIterationDiagnosticsEnabled)
-    return;
-
-  mDiagIslandCount.fetch_add(1, std::memory_order_relaxed);
-  if (hasJointConstraints)
-    mDiagJointIslandCount.fetch_add(1, std::memory_order_relaxed);
-
-  mDiagRequestedIterations.fetch_add(requestedIterations,
-                                     std::memory_order_relaxed);
-  mDiagExecutedIterations.fetch_add(stats.totalIterations,
-                                    std::memory_order_relaxed);
-  if (stats.totalIterations < requestedIterations)
-    mDiagEarlyStopIslands.fetch_add(1, std::memory_order_relaxed);
-
-  mDiagVelocityObjectivePositionRows.fetch_add(
-      stats.velocityObjectivePositionRows, std::memory_order_relaxed);
-  mDiagVelocityObjectivePointRows.fetch_add(
-      stats.velocityObjectivePointRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveManifoldRows.fetch_add(
-      stats.velocityObjectiveManifoldRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveComponentRows.fetch_add(
-      stats.velocityObjectiveComponentRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveJointRows.fetch_add(
-      stats.velocityObjectiveJointRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveUnsupportedRows.fetch_add(
-      stats.velocityObjectiveUnsupportedRows,
-      std::memory_order_relaxed);
-  mDiagVelocityObjectiveLegacyRows.fetch_add(
-      stats.velocityObjectiveLegacyRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveInvalidRows.fetch_add(
-      stats.velocityObjectiveInvalidRows, std::memory_order_relaxed);
-  mDiagVelocityObjectiveFingerprint.fetch_add(
-      stats.velocityObjectiveFingerprint, std::memory_order_relaxed);
-  mDiagContactObjectivePositionSlots.fetch_add(
-      stats.contactObjectivePositionSlots, std::memory_order_relaxed);
-  mDiagContactObjectivePointSlots.fetch_add(
-      stats.contactObjectivePointSlots, std::memory_order_relaxed);
-  mDiagContactObjectiveManifoldSlots.fetch_add(
-      stats.contactObjectiveManifoldSlots, std::memory_order_relaxed);
-  mDiagContactObjectiveComponentSlots.fetch_add(
-      stats.contactObjectiveComponentSlots, std::memory_order_relaxed);
-  mDiagContactObjectiveJointSlots.fetch_add(
-      stats.contactObjectiveJointSlots, std::memory_order_relaxed);
-  mDiagContactObjectiveUnsupportedSlots.fetch_add(
-      stats.contactObjectiveUnsupportedSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacySlots.fetch_add(
-      stats.contactObjectiveLegacySlots, std::memory_order_relaxed);
-  mDiagContactObjectiveInvalidSlots.fetch_add(
-      stats.contactObjectiveInvalidSlots, std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyNormalSlots.fetch_add(
-      stats.contactObjectiveLegacyNormalSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyRigidStaticTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyRigidStaticTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyDynamicTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyDynamicTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyDeformableTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyDeformableTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyJointMixedTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyJointMixedTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveLegacyOtherTangentSlots.fetch_add(
-      stats.contactObjectiveLegacyOtherTangentSlots,
-      std::memory_order_relaxed);
-  mDiagContactObjectiveFingerprint.fetch_add(
-      stats.contactObjectiveFingerprint, std::memory_order_relaxed);
-  mDiagJointObjectivePositionRows.fetch_add(
-      stats.jointObjectivePositionRows, std::memory_order_relaxed);
-  mDiagJointObjectiveFinalizeRows.fetch_add(
-      stats.jointObjectiveFinalizeRows, std::memory_order_relaxed);
-  mDiagJointObjectiveUnsupportedRows.fetch_add(
-      stats.jointObjectiveUnsupportedRows, std::memory_order_relaxed);
-  mDiagJointObjectiveLegacyRows.fetch_add(
-      stats.jointObjectiveLegacyRows, std::memory_order_relaxed);
-  mDiagJointObjectiveInvalidRows.fetch_add(
-      stats.jointObjectiveInvalidRows, std::memory_order_relaxed);
-  mDiagJointObjectiveFingerprint.fetch_add(
-      stats.jointObjectiveFingerprint, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlRows.fetch_add(
-      stats.bodyStaticNormalAlRows, std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlEvaluations.fetch_add(
-      stats.bodyStaticNormalAlEvaluations, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationCorrections.fetch_add(
-      stats.bodyStaticDepenetrationCorrections, std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationEligibleRows.fetch_add(
-      stats.bodyStaticDepenetrationEligibleRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationFiniteImpulseSkips.fetch_add(
-      stats.bodyStaticDepenetrationFiniteImpulseSkips,
-      std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips.fetch_add(
-      stats.bodyStaticDepenetrationAuthoredFiniteImpulseSkips,
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialVelocityCorrections.fetch_add(
-      stats.bodyStaticMaterialVelocityCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticRestitutionCorrections.fetch_add(
-      stats.bodyStaticRestitutionCorrections, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartHits.fetch_add(
-      stats.bodyStaticNormalWarmstartHits, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartMisses.fetch_add(
-      stats.bodyStaticNormalWarmstartMisses, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge0.fetch_add(
-      stats.bodyStaticNormalWarmstartAge0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge1.fetch_add(
-      stats.bodyStaticNormalWarmstartAge1, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge2.fetch_add(
-      stats.bodyStaticNormalWarmstartAge2, std::memory_order_relaxed);
-  mDiagBodyStaticNormalWarmstartAge3.fetch_add(
-      stats.bodyStaticNormalWarmstartAge3, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerOnsetRows.fetch_add(
-      stats.bodyStaticNormalManagerOnsetRows, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerSupportRows.fetch_add(
-      stats.bodyStaticNormalManagerSupportRows, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge0.fetch_add(
-      stats.bodyStaticNormalManagerAge0, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge1.fetch_add(
-      stats.bodyStaticNormalManagerAge1, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge2.fetch_add(
-      stats.bodyStaticNormalManagerAge2, std::memory_order_relaxed);
-  mDiagBodyStaticNormalManagerAge3.fetch_add(
-      stats.bodyStaticNormalManagerAge3, std::memory_order_relaxed);
-  mDiagBodyStaticNormalRowMissOnManagerSupportRows.fetch_add(
-      stats.bodyStaticNormalRowMissOnManagerSupportRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeBodies.fetch_add(
-      stats.bodyStaticNormalOnsetFinalizeBodies,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeBodies.fetch_add(
-      stats.bodyStaticNormalSupportFinalizeBodies,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeCorrections.fetch_add(
-      stats.bodyStaticNormalOnsetFinalizeCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeCorrections.fetch_add(
-      stats.bodyStaticNormalSupportFinalizeCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationEligibleRows.fetch_add(
-      stats.bodyStaticNormalOnsetDepenetrationEligibleRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationEligibleRows.fetch_add(
-      stats.bodyStaticNormalSupportDepenetrationEligibleRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalOnsetDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalSupportDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalOnsetShallowDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalOnsetDeepDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportShallowDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalSupportShallowDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDeepDepenetrationCorrections.fetch_add(
-      stats.bodyStaticNormalSupportDeepDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialFiniteBudgetRows.fetch_add(
-      stats.bodyStaticMaterialFiniteBudgetRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialUnlimitedBudgetRows.fetch_add(
-      stats.bodyStaticMaterialUnlimitedBudgetRows,
-      std::memory_order_relaxed);
-  mDiagContactFrictionTargetAlEvaluations.fetch_add(
-      stats.contactFrictionTargetAlEvaluations,
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetRows.fetch_add(
-      stats.bodyStaticFrictionTargetRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetCorrections.fetch_add(
-      stats.bodyStaticFrictionTargetCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackRows.fetch_add(
-      stats.bodyStaticFrictionFallbackRows,
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackCorrections.fetch_add(
-      stats.bodyStaticFrictionFallbackCorrections,
-      std::memory_order_relaxed);
-  mDiagContactTargetNormalProjectionRows.fetch_add(
-      stats.contactTargetNormalProjectionRows,
-      std::memory_order_relaxed);
-  mDiagContactTargetNormalCorrections.fetch_add(
-      stats.contactTargetNormalCorrections,
-      std::memory_order_relaxed);
-  mDiagContactTargetTangentRows.fetch_add(
-      stats.contactTargetTangentRows,
-      std::memory_order_relaxed);
-  mDiagContactTargetTangentCorrections.fetch_add(
-      stats.contactTargetTangentCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlRows.fetch_add(
-      stats.surfaceDeformableAlRows, std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlEvaluations.fetch_add(
-      stats.surfaceDeformableAlEvaluations, std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentCandidates.fetch_add(
-      stats.surfaceDeformablePositionTangentCandidates,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentRows.fetch_add(
-      stats.surfaceDeformablePositionTangentRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentEvaluations.fetch_add(
-      stats.surfaceDeformablePositionTangentEvaluations,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentMixedRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentMixedRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentShellRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentShellRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentTargetRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentTargetRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentRestitutionRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentRestitutionRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentFiniteRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentFiniteRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformablePositionTangentScaleRejectRows.fetch_add(
-      stats.surfaceDeformablePositionTangentScaleRejectRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableStrippedRows.fetch_add(
-      stats.surfaceDeformableStrippedRows, std::memory_order_relaxed);
-  mDiagSurfaceDeformableShellSuppressedPrimalRows.fetch_add(
-      stats.surfaceDeformableShellSuppressedPrimalRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationCorrections.fetch_add(
-      stats.surfaceDeformableDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionRawRows.fetch_add(
-      stats.surfaceDeformableFrictionRawRows, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionDominantRows.fetch_add(
-      stats.surfaceDeformableFrictionDominantRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionFewContactRows.fetch_add(
-      stats.surfaceDeformableFrictionFewContactRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionMultiCornerRows.fetch_add(
-      stats.surfaceDeformableFrictionMultiCornerRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionCorrections.fetch_add(
-      stats.surfaceDeformableFrictionCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBodies.fetch_add(
-      stats.surfaceDeformableFinalizeBodies, std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSpatialCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeSpatialCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComFallbackCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeComFallbackCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryRows.fetch_add(
-      stats.surfaceDeformableFinalizeSecondaryRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows.fetch_add(
-      stats.surfaceDeformableFinalizeSecondaryResidualSeparationRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOneRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldOneRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldTwoRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldThreeRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldFourRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldFourRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldOverFourRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldFiveToEightRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldNineToSixteenRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldOverSixteenRowBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldMixedScaleBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldRankDeficientBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldAliasRows.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldAliasRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldDynamicIncidentBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies.fetch_add(
-      stats.surfaceDeformableFinalizeManifoldRigidStaticIncidentBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies
-      .fetch_add(
-          stats
-              .surfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies,
-          std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponents.fetch_add(
-      stats.surfaceDeformableFinalizeComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOneBody.fetch_add(
-      stats.surfaceDeformableFinalizeComponentOneBody,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentTwoBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentTwoBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentThreeToFourBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentFiveToEightBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentNineToSixteenBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies.fetch_add(
-      stats.surfaceDeformableFinalizeComponentOverThirtyTwoBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOneToEightRows.fetch_add(
-      stats.surfaceDeformableFinalizeComponentOneToEightRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows.fetch_add(
-      stats.surfaceDeformableFinalizeComponentNineToSixteenRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows.fetch_add(
-      stats.surfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows.fetch_add(
-      stats.surfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows.fetch_add(
-      stats.surfaceDeformableFinalizeComponentOverSixtyFourRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentRestitution.fetch_add(
-      stats.surfaceDeformableFinalizeComponentRestitution,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentFiniteImpulse.fetch_add(
-      stats.surfaceDeformableFinalizeComponentFiniteImpulse,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentTargetVelocity.fetch_add(
-      stats.surfaceDeformableFinalizeComponentTargetVelocity,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentMixedScale.fetch_add(
-      stats.surfaceDeformableFinalizeComponentMixedScale,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentRigidStatic.fetch_add(
-      stats.surfaceDeformableFinalizeComponentRigidStatic,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable.fetch_add(
-      stats.surfaceDeformableFinalizeComponentNonOwnerDeformable,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentJointIsland.fetch_add(
-      stats.surfaceDeformableFinalizeComponentJointIsland,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentLockedDof.fetch_add(
-      stats.surfaceDeformableFinalizeComponentLockedDof,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeComponentNonDynamicBody.fetch_add(
-      stats.surfaceDeformableFinalizeComponentNonDynamicBody,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagNoCorrectionRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagWithinBudgetRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagOverBudgetRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagUnsupportedRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagComponentsWithinBudget,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagComponentsOverBudget,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported.fetch_add(
-      stats.surfaceDeformableFinalizeBudgetDiagComponentsUnsupported,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowComponents.fetch_add(
-      stats.surfaceDeformableFinalizeShadowComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowNoCorrection.fetch_add(
-      stats.surfaceDeformableFinalizeShadowNoCorrection,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowSolved.fetch_add(
-      stats.surfaceDeformableFinalizeShadowSolved,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowCommitCapable.fetch_add(
-      stats.surfaceDeformableFinalizeShadowCommitCapable,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowBudgetExhausted.fetch_add(
-      stats.surfaceDeformableFinalizeShadowBudgetExhausted,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowInfeasible.fetch_add(
-      stats.surfaceDeformableFinalizeShadowInfeasible,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowResidualUnclassified.fetch_add(
-      stats.surfaceDeformableFinalizeShadowResidualUnclassified,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowNumericalFailure.fetch_add(
-      stats.surfaceDeformableFinalizeShadowNumericalFailure,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowIterationLimit.fetch_add(
-      stats.surfaceDeformableFinalizeShadowIterationLimit,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupported.fetch_add(
-      stats.surfaceDeformableFinalizeShadowUnsupported,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact.fetch_add(
-      stats.surfaceDeformableFinalizeShadowUnsupportedFastImpact,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot.fetch_add(
-      stats.surfaceDeformableFinalizeShadowUnsupportedSnapshot,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowLowerRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowLowerRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowFreeRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowFreeRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowUpperRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowUpperRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeNoCorrection,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeSolved,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeInfeasible,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeNumericalFailure,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeIterationLimit,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeIterations,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x
-      .fetch_add(
-          stats
-              .surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x,
-          std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x
-      .fetch_add(
-          stats
-              .surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x,
-          std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x
-      .fetch_add(
-          stats
-              .surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x,
-          std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeCommittedComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeOracleComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeOracleRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeOracleMatched,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeOracleMismatched,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped.fetch_add(
-      stats.surfaceDeformableFinalizeShadowMatrixFreeOracleSkipped,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizePreOwnerBodies.fetch_add(
-      stats.surfaceDeformableFinalizePreOwnerBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeLegacyOwnerBodies.fetch_add(
-      stats.surfaceDeformableFinalizeLegacyOwnerBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies.fetch_add(
-      stats.surfaceDeformableFinalizeOwnerDiscoveryMismatchBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeEligibleComponents.fetch_add(
-      stats.surfaceDeformableFinalizeProbeEligibleComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedComponents.fetch_add(
-      stats.surfaceDeformableFinalizeProbeCommittedComponents,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedRows.fetch_add(
-      stats.surfaceDeformableFinalizeProbeCommittedRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeCommittedBodies.fetch_add(
-      stats.surfaceDeformableFinalizeProbeCommittedBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies.fetch_add(
-      stats.surfaceDeformableFinalizeProbeReplacedOwnerBodies,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlDepenetrationRows.fetch_add(
-      stats.surfaceDeformableAlDepenetrationRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlFinalizeRows.fetch_add(
-      stats.surfaceDeformableAlFinalizeRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationFinalizeRows.fetch_add(
-      stats.surfaceDeformableDepenetrationFinalizeRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableAlDepenetrationFinalizeRows.fetch_add(
-      stats.surfaceDeformableAlDepenetrationFinalizeRows,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeContactFalsePositiveCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeContactResidualSeparationCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactReversalCorrections.fetch_add(
-      stats.surfaceDeformableFinalizeContactReversalCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceShellContacts.fetch_add(
-      stats.surfaceShellContacts, std::memory_order_relaxed);
-  mDiagSurfaceShellDepenetrationCorrections.fetch_add(
-      stats.surfaceShellDepenetrationCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionRows.fetch_add(
-      stats.surfaceShellFrictionRows, std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionCorrections.fetch_add(
-      stats.surfaceShellFrictionCorrections,
-      std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeBodies.fetch_add(
-      stats.surfaceShellFinalizeBodies, std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeCorrections.fetch_add(
-      stats.surfaceShellFinalizeCorrections,
-      std::memory_order_relaxed);
-  mDiagBodyStaticDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialVelocityDeltaNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticMaterialVelocityDelta),
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionTargetImpulseNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticFrictionTargetImpulse),
-      std::memory_order_relaxed);
-  mDiagBodyStaticFrictionFallbackImpulseNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticFrictionFallbackImpulse),
-      std::memory_order_relaxed);
-  mDiagContactTargetNormalImpulseNanos.fetch_add(
-      toNanoUnits(stats.contactTargetNormalImpulse),
-      std::memory_order_relaxed);
-  mDiagContactTargetTangentImpulseNanos.fetch_add(
-      toNanoUnits(stats.contactTargetTangentImpulse),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFrictionImpulseNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableFrictionImpulse),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeDeltaNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableFinalizeDelta),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPreSeparationNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableFinalizeContactPreSeparation),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPostSeparationNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableFinalizeContactPostSeparation),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeContactPostApproachNanos.fetch_add(
-      toNanoUnits(stats.surfaceDeformableFinalizeContactPostApproach),
-      std::memory_order_relaxed);
-  mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos.fetch_add(
-      toNanoUnits(
-          stats.surfaceDeformableFinalizeSecondaryResidualSeparation),
-      std::memory_order_relaxed);
-  mDiagSurfaceShellDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.surfaceShellDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagSurfaceShellFrictionImpulseNanos.fetch_add(
-      toNanoUnits(stats.surfaceShellFrictionImpulse),
-      std::memory_order_relaxed);
-  mDiagSurfaceShellFinalizeDeltaNanos.fetch_add(
-      toNanoUnits(stats.surfaceShellFinalizeDelta),
-      std::memory_order_relaxed);
-  atomicMax(mDiagBodyStaticDepenetrationMaxCorrectionNanos,
-            toNanoUnits(stats.bodyStaticDepenetrationMaxCorrection));
-  atomicMax(mDiagBodyStaticMaterialVelocityMaxDeltaNanos,
-            toNanoUnits(stats.bodyStaticMaterialVelocityMaxDelta));
-  atomicMax(mDiagBodyStaticNormalRestoredLambdaMaxNanos,
-            toNanoUnits(stats.bodyStaticNormalRestoredLambdaMax));
-  atomicMax(mDiagBodyStaticNormalRestoredPenaltyMaxNanos,
-            toNanoUnits(stats.bodyStaticNormalRestoredPenaltyMax));
-  atomicMax(mDiagBodyStaticNormalInitialPenaltyMaxNanos,
-            toNanoUnits(stats.bodyStaticNormalInitialPenaltyMax));
-  mDiagBodyStaticNormalPreAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalPreAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalPostAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlphaC0OffsetNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalAlphaC0Offset),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalPreAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalPreAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalPostAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalPostAlSeparationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalPostAlSeparation),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlOutwardDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalAlOutwardDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalAlInwardDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalAlInwardDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialPoseSeparatingVelocityNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticMaterialPoseSeparatingVelocity),
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticMaterialAllowedSeparatingVelocity),
-      std::memory_order_relaxed);
-  mDiagBodyStaticMaterialFiniteRemainingImpulseNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticMaterialFiniteRemainingImpulse),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetPreAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPreAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetPreAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetPostAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPostAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetPostAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetAlphaC0Offset),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetAlOutwardDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportPreAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPreAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportPreAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportPostAlRawPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPostAlPenetrationNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportPostAlPenetration),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportAlphaC0OffsetNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportAlphaC0Offset),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportAlOutwardDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportAlOutwardDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetPoseSeparatingVelocity),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportPoseSeparatingVelocity),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetFinalizeDeltaNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetFinalizeDelta),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportFinalizeDeltaNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportFinalizeDelta),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(
-          stats.bodyStaticNormalOnsetShallowDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalOnsetDeepDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(
-          stats.bodyStaticNormalSupportShallowDepenetrationDistance),
-      std::memory_order_relaxed);
-  mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos.fetch_add(
-      toNanoUnits(stats.bodyStaticNormalSupportDeepDepenetrationDistance),
-      std::memory_order_relaxed);
-
-  atomicMax(mDiagMaxRequestedIterations, requestedIterations);
-  atomicMax(mDiagMaxExecutedIterations, stats.totalIterations);
-
-  if (hasJointConstraints) {
-    mDiagJointRequestedIterations.fetch_add(requestedIterations,
-                                            std::memory_order_relaxed);
-    mDiagJointExecutedIterations.fetch_add(stats.totalIterations,
-                                           std::memory_order_relaxed);
-    mDiagJointContactCount.fetch_add(stats.numContacts,
-                                     std::memory_order_relaxed);
-    mDiagJointConstraintCount.fetch_add(stats.numJoints,
-                                        std::memory_order_relaxed);
-    if (stats.totalIterations >= requestedIterations)
-      mDiagJointBudgetHitIslands.fetch_add(1, std::memory_order_relaxed);
-    else
-      mDiagJointEarlyStopIslands.fetch_add(1, std::memory_order_relaxed);
-
-    atomicMax(mDiagJointMaxExecutedIterations, stats.totalIterations);
-
-    PxU64 lockedLinearRows = 0;
-    PxU64 limitedLinearRows = 0;
-    PxU64 lockedAngularRows = 0;
-    PxU64 limitedAngularRows = 0;
-    PxU64 linearDriveRows = 0;
-    PxU64 angularDriveRows = 0;
-    PxU64 coneRows = 0;
-    PxU32 maxLinearLambdaMilli = 0;
-    PxU32 maxAngularLambdaMilli = 0;
-    PxU32 maxLinearDriveLambdaMilli = 0;
-    PxU32 maxAngularDriveLambdaMilli = 0;
-    PxU32 maxConeLambdaMilli = 0;
-    PxU32 maxLinearLambdaJointIndex = PX_MAX_U32;
-    PxU32 maxLinearLambdaJointBodyA = PX_MAX_U32;
-    PxU32 maxLinearLambdaJointBodyB = PX_MAX_U32;
-    PxU32 maxLinearDriveJointIndex = PX_MAX_U32;
-    PxU32 maxLinearDriveJointBodyA = PX_MAX_U32;
-    PxU32 maxLinearDriveJointBodyB = PX_MAX_U32;
-
-    for (PxU32 i = 0; i < numD6; ++i) {
-      const AvbdD6JointConstraint &joint = d6Joints[i];
-      for (PxU32 axis = 0; axis < 3; ++axis) {
-        const PxU32 linearMotion = joint.getLinearMotion(axis);
-        if (linearMotion == 0)
-          lockedLinearRows++;
-        else if (linearMotion == 1)
-          limitedLinearRows++;
-
-        const PxU32 angularMotion = joint.getAngularMotion(axis);
-        if (angularMotion == 0)
-          lockedAngularRows++;
-        else if (angularMotion == 1)
-          limitedAngularRows++;
-
-        if (joint.isLinearDriveEnabled(axis))
-          linearDriveRows++;
-        if (joint.isAngularDriveEnabled(axis))
-          angularDriveRows++;
-      }
-
-      if (joint.coneAngleLimit > 0.0f)
-        coneRows++;
-
-      maxLinearLambdaMilli = PxMax(maxLinearLambdaMilli,
-          maxAbsComponentMilli(joint.lambdaLinear));
-      maxAngularLambdaMilli = PxMax(maxAngularLambdaMilli,
-          maxAbsComponentMilli(joint.lambdaAngular));
-      maxLinearDriveLambdaMilli = PxMax(maxLinearDriveLambdaMilli,
-          maxAbsComponentMilli(joint.lambdaDriveLinear));
-      maxAngularDriveLambdaMilli = PxMax(maxAngularDriveLambdaMilli,
-          maxAbsComponentMilli(joint.lambdaDriveAngular));
-      maxConeLambdaMilli = PxMax(maxConeLambdaMilli,
-          toMilliUnits(joint.coneLambda));
-
-      if (mIterationDiagnosticsSequential) {
-        const PxU32 linearLambdaMilli = maxAbsComponentMilli(joint.lambdaLinear);
-        if (linearLambdaMilli >= maxLinearLambdaMilli) {
-          maxLinearLambdaJointIndex = i;
-          maxLinearLambdaJointBodyA = joint.header.bodyIndexA;
-          maxLinearLambdaJointBodyB = joint.header.bodyIndexB;
-        }
-
-        const PxU32 linearDriveLambdaMilli =
-            maxAbsComponentMilli(joint.lambdaDriveLinear);
-        if (linearDriveLambdaMilli >= maxLinearDriveLambdaMilli) {
-          maxLinearDriveJointIndex = i;
-          maxLinearDriveJointBodyA = joint.header.bodyIndexA;
-          maxLinearDriveJointBodyB = joint.header.bodyIndexB;
-        }
-      }
-    }
-
-    mDiagJointLockedLinearRows.fetch_add(lockedLinearRows,
-                                         std::memory_order_relaxed);
-    mDiagJointLimitedLinearRows.fetch_add(limitedLinearRows,
-                                          std::memory_order_relaxed);
-    mDiagJointLockedAngularRows.fetch_add(lockedAngularRows,
-                                          std::memory_order_relaxed);
-    mDiagJointLimitedAngularRows.fetch_add(limitedAngularRows,
-                                           std::memory_order_relaxed);
-    mDiagJointLinearDriveRows.fetch_add(linearDriveRows,
-                                        std::memory_order_relaxed);
-    mDiagJointAngularDriveRows.fetch_add(angularDriveRows,
-                                         std::memory_order_relaxed);
-    mDiagJointConeRows.fetch_add(coneRows, std::memory_order_relaxed);
-    atomicMax(mDiagJointMaxLinearLambdaMilli, maxLinearLambdaMilli);
-    atomicMax(mDiagJointMaxAngularLambdaMilli, maxAngularLambdaMilli);
-    atomicMax(mDiagJointMaxLinearDriveLambdaMilli, maxLinearDriveLambdaMilli);
-    atomicMax(mDiagJointMaxAngularDriveLambdaMilli, maxAngularDriveLambdaMilli);
-    atomicMax(mDiagJointMaxConeLambdaMilli, maxConeLambdaMilli);
-    if (mIterationDiagnosticsSequential) {
-      mDiagSeqMaxLinearJointIndex = maxLinearLambdaJointIndex;
-      mDiagSeqMaxLinearJointBodyA = maxLinearLambdaJointBodyA;
-      mDiagSeqMaxLinearJointBodyB = maxLinearLambdaJointBodyB;
-      mDiagSeqMaxLinearDriveJointIndex = maxLinearDriveJointIndex;
-      mDiagSeqMaxLinearDriveJointBodyA = maxLinearDriveJointBodyA;
-      mDiagSeqMaxLinearDriveJointBodyB = maxLinearDriveJointBodyB;
-    }
-  }
-}
-
-void AvbdDynamicsContext::flushIterationDiagnosticsFrame() {
-  if (!mIterationDiagnosticsEnabled)
-    return;
-
-  const PxU64 frame = gAvbdMotorFrameCounter;
-  if (frame != 1 && mIterationDiagnosticsEvery > 1 &&
-      (frame % mIterationDiagnosticsEvery) != 0)
-    return;
-
-  const PxU64 islandCount = mDiagIslandCount.load(std::memory_order_relaxed);
-  if (islandCount == 0)
-    return;
-
-  const PxU64 jointIslands =
-      mDiagJointIslandCount.load(std::memory_order_relaxed);
-  const PxU64 requested =
-      mDiagRequestedIterations.load(std::memory_order_relaxed);
-  const PxU64 executed =
-      mDiagExecutedIterations.load(std::memory_order_relaxed);
-  const PxU64 earlyStopIslands =
-      mDiagEarlyStopIslands.load(std::memory_order_relaxed);
-  const PxU64 velocityObjectivePositionRows =
-      mDiagVelocityObjectivePositionRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectivePointRows =
-      mDiagVelocityObjectivePointRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveManifoldRows =
-      mDiagVelocityObjectiveManifoldRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveComponentRows =
-      mDiagVelocityObjectiveComponentRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveJointRows =
-      mDiagVelocityObjectiveJointRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveUnsupportedRows =
-      mDiagVelocityObjectiveUnsupportedRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveLegacyRows =
-      mDiagVelocityObjectiveLegacyRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveInvalidRows =
-      mDiagVelocityObjectiveInvalidRows.load(
-          std::memory_order_relaxed);
-  const PxU64 velocityObjectiveFingerprint =
-      mDiagVelocityObjectiveFingerprint.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectivePositionSlots =
-      mDiagContactObjectivePositionSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectivePointSlots =
-      mDiagContactObjectivePointSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveManifoldSlots =
-      mDiagContactObjectiveManifoldSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveComponentSlots =
-      mDiagContactObjectiveComponentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveJointSlots =
-      mDiagContactObjectiveJointSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveUnsupportedSlots =
-      mDiagContactObjectiveUnsupportedSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacySlots =
-      mDiagContactObjectiveLegacySlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveInvalidSlots =
-      mDiagContactObjectiveInvalidSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyNormalSlots =
-      mDiagContactObjectiveLegacyNormalSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyTangentSlots =
-      mDiagContactObjectiveLegacyTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyRigidStaticTangentSlots =
-      mDiagContactObjectiveLegacyRigidStaticTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyDynamicTangentSlots =
-      mDiagContactObjectiveLegacyDynamicTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyDeformableTangentSlots =
-      mDiagContactObjectiveLegacyDeformableTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyJointMixedTangentSlots =
-      mDiagContactObjectiveLegacyJointMixedTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveLegacyOtherTangentSlots =
-      mDiagContactObjectiveLegacyOtherTangentSlots.load(
-          std::memory_order_relaxed);
-  const PxU64 contactObjectiveFingerprint =
-      mDiagContactObjectiveFingerprint.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectivePositionRows =
-      mDiagJointObjectivePositionRows.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectiveFinalizeRows =
-      mDiagJointObjectiveFinalizeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectiveUnsupportedRows =
-      mDiagJointObjectiveUnsupportedRows.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectiveLegacyRows =
-      mDiagJointObjectiveLegacyRows.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectiveInvalidRows =
-      mDiagJointObjectiveInvalidRows.load(
-          std::memory_order_relaxed);
-  const PxU64 jointObjectiveFingerprint =
-      mDiagJointObjectiveFingerprint.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalAlRows =
-      mDiagBodyStaticNormalAlRows.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalAlEvaluations =
-      mDiagBodyStaticNormalAlEvaluations.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationCorrections =
-      mDiagBodyStaticDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationEligibleRows =
-      mDiagBodyStaticDepenetrationEligibleRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationFiniteImpulseSkips =
-      mDiagBodyStaticDepenetrationFiniteImpulseSkips.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationAuthoredFiniteImpulseSkips =
-      mDiagBodyStaticDepenetrationAuthoredFiniteImpulseSkips.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialVelocityCorrections =
-      mDiagBodyStaticMaterialVelocityCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticRestitutionCorrections =
-      mDiagBodyStaticRestitutionCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationDistanceNanos =
-      mDiagBodyStaticDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialVelocityDeltaNanos =
-      mDiagBodyStaticMaterialVelocityDeltaNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartHits =
-      mDiagBodyStaticNormalWarmstartHits.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartMisses =
-      mDiagBodyStaticNormalWarmstartMisses.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartAge0 =
-      mDiagBodyStaticNormalWarmstartAge0.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartAge1 =
-      mDiagBodyStaticNormalWarmstartAge1.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartAge2 =
-      mDiagBodyStaticNormalWarmstartAge2.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalWarmstartAge3 =
-      mDiagBodyStaticNormalWarmstartAge3.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerOnsetRows =
-      mDiagBodyStaticNormalManagerOnsetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerSupportRows =
-      mDiagBodyStaticNormalManagerSupportRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerAge0 =
-      mDiagBodyStaticNormalManagerAge0.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerAge1 =
-      mDiagBodyStaticNormalManagerAge1.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerAge2 =
-      mDiagBodyStaticNormalManagerAge2.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalManagerAge3 =
-      mDiagBodyStaticNormalManagerAge3.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalRowMissOnManagerSupportRows =
-      mDiagBodyStaticNormalRowMissOnManagerSupportRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetFinalizeBodies =
-      mDiagBodyStaticNormalOnsetFinalizeBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportFinalizeBodies =
-      mDiagBodyStaticNormalSupportFinalizeBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetFinalizeCorrections =
-      mDiagBodyStaticNormalOnsetFinalizeCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportFinalizeCorrections =
-      mDiagBodyStaticNormalSupportFinalizeCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetDepenetrationEligibleRows =
-      mDiagBodyStaticNormalOnsetDepenetrationEligibleRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportDepenetrationEligibleRows =
-      mDiagBodyStaticNormalSupportDepenetrationEligibleRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetDepenetrationCorrections =
-      mDiagBodyStaticNormalOnsetDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportDepenetrationCorrections =
-      mDiagBodyStaticNormalSupportDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetShallowDepenetrationCorrections =
-      mDiagBodyStaticNormalOnsetShallowDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetDeepDepenetrationCorrections =
-      mDiagBodyStaticNormalOnsetDeepDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportShallowDepenetrationCorrections =
-      mDiagBodyStaticNormalSupportShallowDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportDeepDepenetrationCorrections =
-      mDiagBodyStaticNormalSupportDeepDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialFiniteBudgetRows =
-      mDiagBodyStaticMaterialFiniteBudgetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialUnlimitedBudgetRows =
-      mDiagBodyStaticMaterialUnlimitedBudgetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 contactFrictionTargetAlEvaluations =
-      mDiagContactFrictionTargetAlEvaluations.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionTargetRows =
-      mDiagBodyStaticFrictionTargetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionTargetCorrections =
-      mDiagBodyStaticFrictionTargetCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionFallbackRows =
-      mDiagBodyStaticFrictionFallbackRows.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionFallbackCorrections =
-      mDiagBodyStaticFrictionFallbackCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetNormalProjectionRows =
-      mDiagContactTargetNormalProjectionRows.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetNormalCorrections =
-      mDiagContactTargetNormalCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetTangentRows =
-      mDiagContactTargetTangentRows.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetTangentCorrections =
-      mDiagContactTargetTangentCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableAlRows =
-      mDiagSurfaceDeformableAlRows.load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableAlEvaluations =
-      mDiagSurfaceDeformableAlEvaluations.load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentCandidates =
-      mDiagSurfaceDeformablePositionTangentCandidates.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentRows =
-      mDiagSurfaceDeformablePositionTangentRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentEvaluations =
-      mDiagSurfaceDeformablePositionTangentEvaluations.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentMixedRejectRows =
-      mDiagSurfaceDeformablePositionTangentMixedRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentShellRejectRows =
-      mDiagSurfaceDeformablePositionTangentShellRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentTargetRejectRows =
-      mDiagSurfaceDeformablePositionTangentTargetRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentRestitutionRejectRows =
-      mDiagSurfaceDeformablePositionTangentRestitutionRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentFiniteRejectRows =
-      mDiagSurfaceDeformablePositionTangentFiniteRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformablePositionTangentScaleRejectRows =
-      mDiagSurfaceDeformablePositionTangentScaleRejectRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableStrippedRows =
-      mDiagSurfaceDeformableStrippedRows.load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableShellSuppressedPrimalRows =
-      mDiagSurfaceDeformableShellSuppressedPrimalRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableDepenetrationCorrections =
-      mDiagSurfaceDeformableDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionRawRows =
-      mDiagSurfaceDeformableFrictionRawRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionDominantRows =
-      mDiagSurfaceDeformableFrictionDominantRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionFewContactRows =
-      mDiagSurfaceDeformableFrictionFewContactRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionMultiCornerRows =
-      mDiagSurfaceDeformableFrictionMultiCornerRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionCorrections =
-      mDiagSurfaceDeformableFrictionCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBodies =
-      mDiagSurfaceDeformableFinalizeBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeCorrections =
-      mDiagSurfaceDeformableFinalizeCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeSpatialCorrections =
-      mDiagSurfaceDeformableFinalizeSpatialCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComFallbackCorrections =
-      mDiagSurfaceDeformableFinalizeComFallbackCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeSecondaryRows =
-      mDiagSurfaceDeformableFinalizeSecondaryRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeSecondaryResidualSeparationRows =
-      mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldBodies =
-      mDiagSurfaceDeformableFinalizeManifoldBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldOneRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldOneRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldTwoRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldTwoRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldThreeRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldThreeRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldFourRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldFourRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldOverFourRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldOverFourRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldFiveToEightRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldFiveToEightRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldNineToSixteenRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldNineToSixteenRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldOverSixteenRowBodies =
-      mDiagSurfaceDeformableFinalizeManifoldOverSixteenRowBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldMixedScaleBodies =
-      mDiagSurfaceDeformableFinalizeManifoldMixedScaleBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldRankDeficientBodies =
-      mDiagSurfaceDeformableFinalizeManifoldRankDeficientBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldAliasRows =
-      mDiagSurfaceDeformableFinalizeManifoldAliasRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldDynamicIncidentBodies =
-      mDiagSurfaceDeformableFinalizeManifoldDynamicIncidentBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeManifoldRigidStaticIncidentBodies =
-      mDiagSurfaceDeformableFinalizeManifoldRigidStaticIncidentBodies.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies =
-          mDiagSurfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponents =
-      mDiagSurfaceDeformableFinalizeComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentOneBody =
-      mDiagSurfaceDeformableFinalizeComponentOneBody.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentTwoBodies =
-      mDiagSurfaceDeformableFinalizeComponentTwoBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentThreeToFourBodies =
-      mDiagSurfaceDeformableFinalizeComponentThreeToFourBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentFiveToEightBodies =
-      mDiagSurfaceDeformableFinalizeComponentFiveToEightBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentNineToSixteenBodies =
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenBodies.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies =
-          mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentOverThirtyTwoBodies =
-      mDiagSurfaceDeformableFinalizeComponentOverThirtyTwoBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentOneToEightRows =
-      mDiagSurfaceDeformableFinalizeComponentOneToEightRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentNineToSixteenRows =
-      mDiagSurfaceDeformableFinalizeComponentNineToSixteenRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows =
-      mDiagSurfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows =
-          mDiagSurfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentOverSixtyFourRows =
-      mDiagSurfaceDeformableFinalizeComponentOverSixtyFourRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentRestitution =
-      mDiagSurfaceDeformableFinalizeComponentRestitution.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentFiniteImpulse =
-      mDiagSurfaceDeformableFinalizeComponentFiniteImpulse.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentTargetVelocity =
-      mDiagSurfaceDeformableFinalizeComponentTargetVelocity.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentMixedScale =
-      mDiagSurfaceDeformableFinalizeComponentMixedScale.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentRigidStatic =
-      mDiagSurfaceDeformableFinalizeComponentRigidStatic.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentNonOwnerDeformable =
-      mDiagSurfaceDeformableFinalizeComponentNonOwnerDeformable.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentJointIsland =
-      mDiagSurfaceDeformableFinalizeComponentJointIsland.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentLockedDof =
-      mDiagSurfaceDeformableFinalizeComponentLockedDof.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeComponentNonDynamicBody =
-      mDiagSurfaceDeformableFinalizeComponentNonDynamicBody.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBudgetDiagRows =
-      mDiagSurfaceDeformableFinalizeBudgetDiagRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBudgetDiagNoCorrectionRows =
-      mDiagSurfaceDeformableFinalizeBudgetDiagNoCorrectionRows.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows =
-          mDiagSurfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBudgetDiagWithinBudgetRows =
-      mDiagSurfaceDeformableFinalizeBudgetDiagWithinBudgetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBudgetDiagOverBudgetRows =
-      mDiagSurfaceDeformableFinalizeBudgetDiagOverBudgetRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeBudgetDiagUnsupportedRows =
-      mDiagSurfaceDeformableFinalizeBudgetDiagUnsupportedRows.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeBudgetDiagComponentsWithinBudget =
-          mDiagSurfaceDeformableFinalizeBudgetDiagComponentsWithinBudget
-              .load(std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeBudgetDiagComponentsOverBudget =
-          mDiagSurfaceDeformableFinalizeBudgetDiagComponentsOverBudget
-              .load(std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeBudgetDiagComponentsUnsupported =
-          mDiagSurfaceDeformableFinalizeBudgetDiagComponentsUnsupported
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowComponents =
-      mDiagSurfaceDeformableFinalizeShadowComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowRows =
-      mDiagSurfaceDeformableFinalizeShadowRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowNoCorrection =
-      mDiagSurfaceDeformableFinalizeShadowNoCorrection.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowSolved =
-      mDiagSurfaceDeformableFinalizeShadowSolved.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowCommitCapable =
-      mDiagSurfaceDeformableFinalizeShadowCommitCapable.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowBudgetExhausted =
-      mDiagSurfaceDeformableFinalizeShadowBudgetExhausted.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowInfeasible =
-      mDiagSurfaceDeformableFinalizeShadowInfeasible.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowResidualUnclassified =
-      mDiagSurfaceDeformableFinalizeShadowResidualUnclassified.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowNumericalFailure =
-      mDiagSurfaceDeformableFinalizeShadowNumericalFailure.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowIterationLimit =
-      mDiagSurfaceDeformableFinalizeShadowIterationLimit.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowUnsupported =
-      mDiagSurfaceDeformableFinalizeShadowUnsupported.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowUnsupportedFastImpact =
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedFastImpact.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowUnsupportedSnapshot =
-      mDiagSurfaceDeformableFinalizeShadowUnsupportedSnapshot.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowLowerRows =
-      mDiagSurfaceDeformableFinalizeShadowLowerRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowFreeRows =
-      mDiagSurfaceDeformableFinalizeShadowFreeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowUpperRows =
-      mDiagSurfaceDeformableFinalizeShadowUpperRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeComponents =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeRows =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeNoCorrection =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNoCorrection.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeSolved =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeSolved.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeInfeasible =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeInfeasible.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified =
-          mDiagSurfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeNumericalFailure =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeNumericalFailure.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeIterationLimit =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimit.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeIterations =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterations.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x =
-          mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x
-              .load(std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x =
-          mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x
-              .load(std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x =
-          mDiagSurfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x
-              .load(std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeCommittedComponents =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeCommittedComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeOracleComponents =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeOracleRows =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeOracleMatched =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMatched.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeOracleMismatched =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleMismatched.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeShadowMatrixFreeOracleSkipped =
-      mDiagSurfaceDeformableFinalizeShadowMatrixFreeOracleSkipped.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizePreOwnerBodies =
-      mDiagSurfaceDeformableFinalizePreOwnerBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeLegacyOwnerBodies =
-      mDiagSurfaceDeformableFinalizeLegacyOwnerBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeOwnerDiscoveryMismatchBodies =
-      mDiagSurfaceDeformableFinalizeOwnerDiscoveryMismatchBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeProbeEligibleComponents =
-      mDiagSurfaceDeformableFinalizeProbeEligibleComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeProbeCommittedComponents =
-      mDiagSurfaceDeformableFinalizeProbeCommittedComponents.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeProbeCommittedRows =
-      mDiagSurfaceDeformableFinalizeProbeCommittedRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeProbeCommittedBodies =
-      mDiagSurfaceDeformableFinalizeProbeCommittedBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeProbeReplacedOwnerBodies =
-      mDiagSurfaceDeformableFinalizeProbeReplacedOwnerBodies.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableAlDepenetrationRows =
-      mDiagSurfaceDeformableAlDepenetrationRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableAlFinalizeRows =
-      mDiagSurfaceDeformableAlFinalizeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableDepenetrationFinalizeRows =
-      mDiagSurfaceDeformableDepenetrationFinalizeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableAlDepenetrationFinalizeRows =
-      mDiagSurfaceDeformableAlDepenetrationFinalizeRows.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactFalsePositiveCorrections =
-      mDiagSurfaceDeformableFinalizeContactFalsePositiveCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactResidualSeparationCorrections =
-      mDiagSurfaceDeformableFinalizeContactResidualSeparationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactReversalCorrections =
-      mDiagSurfaceDeformableFinalizeContactReversalCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceShellContacts =
-      mDiagSurfaceShellContacts.load(std::memory_order_relaxed);
-  const PxU64 surfaceShellDepenetrationCorrections =
-      mDiagSurfaceShellDepenetrationCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceShellFrictionRows =
-      mDiagSurfaceShellFrictionRows.load(std::memory_order_relaxed);
-  const PxU64 surfaceShellFrictionCorrections =
-      mDiagSurfaceShellFrictionCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceShellFinalizeBodies =
-      mDiagSurfaceShellFinalizeBodies.load(std::memory_order_relaxed);
-  const PxU64 surfaceShellFinalizeCorrections =
-      mDiagSurfaceShellFinalizeCorrections.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionTargetImpulseNanos =
-      mDiagBodyStaticFrictionTargetImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticFrictionFallbackImpulseNanos =
-      mDiagBodyStaticFrictionFallbackImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetNormalImpulseNanos =
-      mDiagContactTargetNormalImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 contactTargetTangentImpulseNanos =
-      mDiagContactTargetTangentImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableDepenetrationDistanceNanos =
-      mDiagSurfaceDeformableDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFrictionImpulseNanos =
-      mDiagSurfaceDeformableFrictionImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeDeltaNanos =
-      mDiagSurfaceDeformableFinalizeDeltaNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactPreSeparationNanos =
-      mDiagSurfaceDeformableFinalizeContactPreSeparationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactPostSeparationNanos =
-      mDiagSurfaceDeformableFinalizeContactPostSeparationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceDeformableFinalizeContactPostApproachNanos =
-      mDiagSurfaceDeformableFinalizeContactPostApproachNanos.load(
-          std::memory_order_relaxed);
-  const PxU64
-      surfaceDeformableFinalizeSecondaryResidualSeparationNanos =
-          mDiagSurfaceDeformableFinalizeSecondaryResidualSeparationNanos.load(
-              std::memory_order_relaxed);
-  const PxU64 surfaceShellDepenetrationDistanceNanos =
-      mDiagSurfaceShellDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceShellFrictionImpulseNanos =
-      mDiagSurfaceShellFrictionImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 surfaceShellFinalizeDeltaNanos =
-      mDiagSurfaceShellFinalizeDeltaNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalRestoredLambdaMaxNanos =
-      mDiagBodyStaticNormalRestoredLambdaMaxNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalRestoredPenaltyMaxNanos =
-      mDiagBodyStaticNormalRestoredPenaltyMaxNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalInitialPenaltyMaxNanos =
-      mDiagBodyStaticNormalInitialPenaltyMaxNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalPreAlRawPenetrationNanos =
-      mDiagBodyStaticNormalPreAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalPostAlRawPenetrationNanos =
-      mDiagBodyStaticNormalPostAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalAlphaC0OffsetNanos =
-      mDiagBodyStaticNormalAlphaC0OffsetNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalPreAlPenetrationNanos =
-      mDiagBodyStaticNormalPreAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalPostAlPenetrationNanos =
-      mDiagBodyStaticNormalPostAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalPostAlSeparationNanos =
-      mDiagBodyStaticNormalPostAlSeparationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalAlOutwardDistanceNanos =
-      mDiagBodyStaticNormalAlOutwardDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalAlInwardDistanceNanos =
-      mDiagBodyStaticNormalAlInwardDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialPoseSeparatingVelocityNanos =
-      mDiagBodyStaticMaterialPoseSeparatingVelocityNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialAllowedSeparatingVelocityNanos =
-      mDiagBodyStaticMaterialAllowedSeparatingVelocityNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialFiniteRemainingImpulseNanos =
-      mDiagBodyStaticMaterialFiniteRemainingImpulseNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetPreAlRawPenetrationNanos =
-      mDiagBodyStaticNormalOnsetPreAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetPreAlPenetrationNanos =
-      mDiagBodyStaticNormalOnsetPreAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetPostAlRawPenetrationNanos =
-      mDiagBodyStaticNormalOnsetPostAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetPostAlPenetrationNanos =
-      mDiagBodyStaticNormalOnsetPostAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetAlphaC0OffsetNanos =
-      mDiagBodyStaticNormalOnsetAlphaC0OffsetNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetAlOutwardDistanceNanos =
-      mDiagBodyStaticNormalOnsetAlOutwardDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportPreAlRawPenetrationNanos =
-      mDiagBodyStaticNormalSupportPreAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportPreAlPenetrationNanos =
-      mDiagBodyStaticNormalSupportPreAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportPostAlRawPenetrationNanos =
-      mDiagBodyStaticNormalSupportPostAlRawPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportPostAlPenetrationNanos =
-      mDiagBodyStaticNormalSupportPostAlPenetrationNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportAlphaC0OffsetNanos =
-      mDiagBodyStaticNormalSupportAlphaC0OffsetNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportAlOutwardDistanceNanos =
-      mDiagBodyStaticNormalSupportAlOutwardDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetPoseSeparatingVelocityNanos =
-      mDiagBodyStaticNormalOnsetPoseSeparatingVelocityNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportPoseSeparatingVelocityNanos =
-      mDiagBodyStaticNormalSupportPoseSeparatingVelocityNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetFinalizeDeltaNanos =
-      mDiagBodyStaticNormalOnsetFinalizeDeltaNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportFinalizeDeltaNanos =
-      mDiagBodyStaticNormalSupportFinalizeDeltaNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalOnsetDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalSupportDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetShallowDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalOnsetShallowDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalOnsetDeepDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalOnsetDeepDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportShallowDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalSupportShallowDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticNormalSupportDeepDepenetrationDistanceNanos =
-      mDiagBodyStaticNormalSupportDeepDepenetrationDistanceNanos.load(
-          std::memory_order_relaxed);
-    const PxU64 jointRequested =
-      mDiagJointRequestedIterations.load(std::memory_order_relaxed);
-    const PxU64 jointExecuted =
-      mDiagJointExecutedIterations.load(std::memory_order_relaxed);
-    const PxU64 jointBudgetHits =
-      mDiagJointBudgetHitIslands.load(std::memory_order_relaxed);
-    const PxU64 jointEarlyStops =
-      mDiagJointEarlyStopIslands.load(std::memory_order_relaxed);
-    const PxU64 jointContacts =
-      mDiagJointContactCount.load(std::memory_order_relaxed);
-    const PxU64 jointConstraints =
-      mDiagJointConstraintCount.load(std::memory_order_relaxed);
-      const PxU64 jointLockedLinearRows =
-        mDiagJointLockedLinearRows.load(std::memory_order_relaxed);
-      const PxU64 jointLimitedLinearRows =
-        mDiagJointLimitedLinearRows.load(std::memory_order_relaxed);
-      const PxU64 jointLockedAngularRows =
-        mDiagJointLockedAngularRows.load(std::memory_order_relaxed);
-      const PxU64 jointLimitedAngularRows =
-        mDiagJointLimitedAngularRows.load(std::memory_order_relaxed);
-      const PxU64 jointLinearDriveRows =
-        mDiagJointLinearDriveRows.load(std::memory_order_relaxed);
-      const PxU64 jointAngularDriveRows =
-        mDiagJointAngularDriveRows.load(std::memory_order_relaxed);
-      const PxU64 jointConeRows =
-        mDiagJointConeRows.load(std::memory_order_relaxed);
-  const PxU32 maxRequested =
-      mDiagMaxRequestedIterations.load(std::memory_order_relaxed);
-  const PxU32 maxExecuted =
-      mDiagMaxExecutedIterations.load(std::memory_order_relaxed);
-  const PxU64 bodyStaticDepenetrationMaxCorrectionNanos =
-      mDiagBodyStaticDepenetrationMaxCorrectionNanos.load(
-          std::memory_order_relaxed);
-  const PxU64 bodyStaticMaterialVelocityMaxDeltaNanos =
-      mDiagBodyStaticMaterialVelocityMaxDeltaNanos.load(
-          std::memory_order_relaxed);
-    const PxU32 jointMaxExecuted =
-      mDiagJointMaxExecutedIterations.load(std::memory_order_relaxed);
-      const PxU32 jointMaxLinearLambdaMilli =
-        mDiagJointMaxLinearLambdaMilli.load(std::memory_order_relaxed);
-      const PxU32 jointMaxAngularLambdaMilli =
-        mDiagJointMaxAngularLambdaMilli.load(std::memory_order_relaxed);
-      const PxU32 jointMaxLinearDriveLambdaMilli =
-        mDiagJointMaxLinearDriveLambdaMilli.load(std::memory_order_relaxed);
-      const PxU32 jointMaxAngularDriveLambdaMilli =
-        mDiagJointMaxAngularDriveLambdaMilli.load(std::memory_order_relaxed);
-      const PxU32 jointMaxConeLambdaMilli =
-        mDiagJointMaxConeLambdaMilli.load(std::memory_order_relaxed);
-
-  const double avgRequested = double(requested) / double(islandCount);
-  const double avgExecuted = double(executed) / double(islandCount);
-  const PxI64 savedIterations = PxI64(requested) - PxI64(executed);
-
-    double jointAvgRequested = 0.0;
-    double jointAvgExecuted = 0.0;
-    double jointAvgContacts = 0.0;
-    double jointAvgConstraints = 0.0;
-    if (jointIslands > 0) {
-    jointAvgRequested = double(jointRequested) / double(jointIslands);
-    jointAvgExecuted = double(jointExecuted) / double(jointIslands);
-    jointAvgContacts = double(jointContacts) / double(jointIslands);
-    jointAvgConstraints = double(jointConstraints) / double(jointIslands);
-    }
-
-    const PxU64 velocityObjectiveRows =
-        velocityObjectivePositionRows + velocityObjectivePointRows +
-        velocityObjectiveManifoldRows + velocityObjectiveComponentRows +
-        velocityObjectiveJointRows + velocityObjectiveUnsupportedRows +
-        velocityObjectiveLegacyRows + velocityObjectiveInvalidRows;
-    printf(
-        "[avbd:objective-ir] frame=%llu rows=%llu "
-        "objectivePositionRows=%llu objectivePointRows=%llu "
-        "objectiveManifoldRows=%llu objectiveComponentRows=%llu "
-        "objectiveJointRows=%llu objectiveUnsupportedRows=%llu "
-        "objectiveLegacyRows=%llu "
-        "objectiveInvalidRows=%llu objectiveFingerprint=%llu\n",
-        static_cast<unsigned long long>(frame),
-        static_cast<unsigned long long>(velocityObjectiveRows),
-        static_cast<unsigned long long>(velocityObjectivePositionRows),
-        static_cast<unsigned long long>(velocityObjectivePointRows),
-        static_cast<unsigned long long>(velocityObjectiveManifoldRows),
-        static_cast<unsigned long long>(velocityObjectiveComponentRows),
-        static_cast<unsigned long long>(velocityObjectiveJointRows),
-        static_cast<unsigned long long>(velocityObjectiveUnsupportedRows),
-        static_cast<unsigned long long>(velocityObjectiveLegacyRows),
-        static_cast<unsigned long long>(velocityObjectiveInvalidRows),
-        static_cast<unsigned long long>(velocityObjectiveFingerprint));
-    const PxU64 contactObjectiveSlots =
-        contactObjectivePositionSlots + contactObjectivePointSlots +
-        contactObjectiveManifoldSlots + contactObjectiveComponentSlots +
-        contactObjectiveJointSlots + contactObjectiveUnsupportedSlots +
-        contactObjectiveLegacySlots + contactObjectiveInvalidSlots;
-    printf(
-        "[avbd:contact-objective-ir] frame=%llu "
-        "contactObjectiveSlots=%llu "
-        "contactObjectivePositionSlots=%llu "
-        "contactObjectivePointSlots=%llu "
-        "contactObjectiveManifoldSlots=%llu "
-        "contactObjectiveComponentSlots=%llu "
-        "contactObjectiveJointSlots=%llu "
-        "contactObjectiveUnsupportedSlots=%llu "
-        "contactObjectiveLegacySlots=%llu "
-        "contactObjectiveInvalidSlots=%llu "
-        "contactObjectiveLegacyNormalSlots=%llu "
-        "contactObjectiveLegacyTangentSlots=%llu "
-        "contactObjectiveLegacyRigidStaticTangentSlots=%llu "
-        "contactObjectiveLegacyDynamicTangentSlots=%llu "
-        "contactObjectiveLegacyDeformableTangentSlots=%llu "
-        "contactObjectiveLegacyJointMixedTangentSlots=%llu "
-        "contactObjectiveLegacyOtherTangentSlots=%llu "
-        "contactObjectiveFingerprint=%llu\n",
-        static_cast<unsigned long long>(frame),
-        static_cast<unsigned long long>(contactObjectiveSlots),
-        static_cast<unsigned long long>(contactObjectivePositionSlots),
-        static_cast<unsigned long long>(contactObjectivePointSlots),
-        static_cast<unsigned long long>(contactObjectiveManifoldSlots),
-        static_cast<unsigned long long>(contactObjectiveComponentSlots),
-        static_cast<unsigned long long>(contactObjectiveJointSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveUnsupportedSlots),
-        static_cast<unsigned long long>(contactObjectiveLegacySlots),
-        static_cast<unsigned long long>(contactObjectiveInvalidSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyNormalSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyTangentSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyRigidStaticTangentSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyDynamicTangentSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyDeformableTangentSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyJointMixedTangentSlots),
-        static_cast<unsigned long long>(
-            contactObjectiveLegacyOtherTangentSlots),
-        static_cast<unsigned long long>(contactObjectiveFingerprint));
-    const PxU64 jointObjectiveRows =
-        jointObjectivePositionRows + jointObjectiveFinalizeRows +
-        jointObjectiveUnsupportedRows + jointObjectiveLegacyRows +
-        jointObjectiveInvalidRows;
-    printf(
-        "[avbd:joint-objective-ir] frame=%llu "
-        "jointObjectiveRows=%llu "
-        "jointObjectivePositionRows=%llu "
-        "jointObjectiveFinalizeRows=%llu "
-        "jointObjectiveUnsupportedRows=%llu "
-        "jointObjectiveLegacyRows=%llu "
-        "jointObjectiveInvalidRows=%llu "
-        "jointObjectiveFingerprint=%llu\n",
-        static_cast<unsigned long long>(frame),
-        static_cast<unsigned long long>(jointObjectiveRows),
-        static_cast<unsigned long long>(jointObjectivePositionRows),
-        static_cast<unsigned long long>(jointObjectiveFinalizeRows),
-        static_cast<unsigned long long>(jointObjectiveUnsupportedRows),
-        static_cast<unsigned long long>(jointObjectiveLegacyRows),
-        static_cast<unsigned long long>(jointObjectiveInvalidRows),
-        static_cast<unsigned long long>(jointObjectiveFingerprint));
-    printf("[avbd:iters] frame=%llu islands=%llu jointIslands=%llu avgExec=%.2f avgReq=%.2f maxExec=%u maxReq=%u saved=%lld earlyStopIslands=%llu normalOwnership(alRows=%llu alEvals=%llu depenEligibleRows=%llu depenCorrections=%llu finiteImpulseSkips=%llu authoredFiniteSkips=%llu depenDistance=%.9f depenMax=%.9f velocityCorrections=%llu restitutionCorrections=%llu velocityDelta=%.9f velocityMax=%.9f) jointAvgExec=%.2f jointAvgReq=%.2f jointMaxExec=%u jointBudgetHits=%llu jointEarlyStops=%llu jointAvgContacts=%.2f jointAvgConstraints=%.2f jointRows(lockLin=%llu limLin=%llu lockAng=%llu limAng=%llu linDrv=%llu angDrv=%llu cone=%llu) jointLambdaMax(lin=%.3f ang=%.3f linDrv=%.3f angDrv=%.3f cone=%.3f) jointMaxSource(lin=d6[%u]:%u-%u linDrv=d6[%u]:%u-%u)\n",
-         static_cast<unsigned long long>(frame),
-         static_cast<unsigned long long>(islandCount),
-         static_cast<unsigned long long>(jointIslands), avgExecuted,
-         avgRequested, maxExecuted, maxRequested,
-       static_cast<long long>(savedIterations),
-       static_cast<unsigned long long>(earlyStopIslands),
-       static_cast<unsigned long long>(bodyStaticNormalAlRows),
-       static_cast<unsigned long long>(bodyStaticNormalAlEvaluations),
-       static_cast<unsigned long long>(
-           bodyStaticDepenetrationEligibleRows),
-       static_cast<unsigned long long>(
-           bodyStaticDepenetrationCorrections),
-       static_cast<unsigned long long>(
-           bodyStaticDepenetrationFiniteImpulseSkips),
-       static_cast<unsigned long long>(
-           bodyStaticDepenetrationAuthoredFiniteImpulseSkips),
-       double(bodyStaticDepenetrationDistanceNanos) / 1000000000.0,
-       double(bodyStaticDepenetrationMaxCorrectionNanos) / 1000000000.0,
-       static_cast<unsigned long long>(
-           bodyStaticMaterialVelocityCorrections),
-       static_cast<unsigned long long>(
-           bodyStaticRestitutionCorrections),
-       double(bodyStaticMaterialVelocityDeltaNanos) / 1000000000.0,
-       double(bodyStaticMaterialVelocityMaxDeltaNanos) / 1000000000.0,
-       jointAvgExecuted, jointAvgRequested, jointMaxExecuted,
-       static_cast<unsigned long long>(jointBudgetHits),
-       static_cast<unsigned long long>(jointEarlyStops),
-         jointAvgContacts, jointAvgConstraints,
-         static_cast<unsigned long long>(jointLockedLinearRows),
-         static_cast<unsigned long long>(jointLimitedLinearRows),
-         static_cast<unsigned long long>(jointLockedAngularRows),
-         static_cast<unsigned long long>(jointLimitedAngularRows),
-         static_cast<unsigned long long>(jointLinearDriveRows),
-         static_cast<unsigned long long>(jointAngularDriveRows),
-         static_cast<unsigned long long>(jointConeRows),
-         double(jointMaxLinearLambdaMilli) / 1000.0,
-         double(jointMaxAngularLambdaMilli) / 1000.0,
-         double(jointMaxLinearDriveLambdaMilli) / 1000.0,
-         double(jointMaxAngularDriveLambdaMilli) / 1000.0,
-         double(jointMaxConeLambdaMilli) / 1000.0,
-         mDiagSeqMaxLinearJointIndex, mDiagSeqMaxLinearJointBodyA,
-         mDiagSeqMaxLinearJointBodyB, mDiagSeqMaxLinearDriveJointIndex,
-         mDiagSeqMaxLinearDriveJointBodyA,
-         mDiagSeqMaxLinearDriveJointBodyB);
-  printf(
-      "[avbd:friction-target] frame=%llu "
-      "positionAlTargetEvals=%llu "
-      "bodyStaticSweepTargetRows=%llu "
-      "bodyStaticSweepTargetCorrections=%llu "
-      "bodyStaticSweepTargetImpulse=%.9f "
-      "bodyStaticFallbackRows=%llu "
-      "bodyStaticFallbackCorrections=%llu "
-      "bodyStaticFallbackImpulse=%.9f "
-      "genericNormalRows=%llu genericNormalCorrections=%llu "
-      "genericNormalImpulse=%.9f "
-      "genericTangentRows=%llu genericTangentCorrections=%llu "
-      "genericTangentImpulse=%.9f\n",
-      static_cast<unsigned long long>(frame),
-      static_cast<unsigned long long>(
-          contactFrictionTargetAlEvaluations),
-      static_cast<unsigned long long>(
-          bodyStaticFrictionTargetRows),
-      static_cast<unsigned long long>(
-          bodyStaticFrictionTargetCorrections),
-      double(bodyStaticFrictionTargetImpulseNanos) / 1000000000.0,
-      static_cast<unsigned long long>(
-          bodyStaticFrictionFallbackRows),
-      static_cast<unsigned long long>(
-          bodyStaticFrictionFallbackCorrections),
-      double(bodyStaticFrictionFallbackImpulseNanos) / 1000000000.0,
-      static_cast<unsigned long long>(
-          contactTargetNormalProjectionRows),
-      static_cast<unsigned long long>(
-          contactTargetNormalCorrections),
-      double(contactTargetNormalImpulseNanos) / 1000000000.0,
-      static_cast<unsigned long long>(
-          contactTargetTangentRows),
-      static_cast<unsigned long long>(
-          contactTargetTangentCorrections),
-      double(contactTargetTangentImpulseNanos) / 1000000000.0);
-  printf(
-      "[avbd:surface-ownership] frame=%llu "
-      "deformAlRows=%llu deformAlEvals=%llu deformStrippedRows=%llu "
-      "deformPositionTangentCandidates=%llu "
-      "deformPositionTangentRows=%llu deformPositionTangentEvals=%llu "
-      "deformPositionTangentMixedRejectRows=%llu "
-      "deformPositionTangentShellRejectRows=%llu "
-      "deformPositionTangentTargetRejectRows=%llu "
-      "deformPositionTangentRestitutionRejectRows=%llu "
-      "deformPositionTangentFiniteRejectRows=%llu "
-      "deformPositionTangentScaleRejectRows=%llu "
-      "deformShellSuppressedPrimalRows=%llu "
-      "deformDepenCorrections=%llu deformDepenDistance=%.9f "
-      "deformFrictionRawRows=%llu deformFrictionDominantRows=%llu "
-      "deformFrictionFewRows=%llu deformFrictionMultiRows=%llu "
-      "deformFrictionCorrections=%llu deformFrictionImpulse=%.9f "
-      "deformFinalizeBodies=%llu deformFinalizeCorrections=%llu "
-      "deformFinalizeSpatialCorrections=%llu "
-      "deformFinalizeComFallbackCorrections=%llu "
-      "deformFinalizeSecondaryRows=%llu "
-      "deformFinalizeSecondaryResidualSeparationRows=%llu "
-      "deformFinalizeManifoldBodies=%llu "
-      "deformFinalizeManifoldOneRowBodies=%llu "
-      "deformFinalizeManifoldTwoRowBodies=%llu "
-      "deformFinalizeManifoldThreeRowBodies=%llu "
-      "deformFinalizeManifoldFourRowBodies=%llu "
-      "deformFinalizeManifoldOverFourRowBodies=%llu "
-      "deformFinalizeManifoldFiveToEightRowBodies=%llu "
-      "deformFinalizeManifoldNineToSixteenRowBodies=%llu "
-      "deformFinalizeManifoldOverSixteenRowBodies=%llu "
-      "deformFinalizeManifoldMixedScaleBodies=%llu "
-      "deformFinalizeManifoldRankDeficientBodies=%llu "
-      "deformFinalizeManifoldAliasRows=%llu "
-      "deformFinalizeManifoldDynamicIncidentBodies=%llu "
-      "deformFinalizeManifoldRigidStaticIncidentBodies=%llu "
-      "deformFinalizeManifoldNonOwnerDeformableIncidentBodies=%llu "
-      "deformFinalizeComponents=%llu "
-      "deformFinalizeComponentOneBody=%llu "
-      "deformFinalizeComponentTwoBodies=%llu "
-      "deformFinalizeComponentThreeToFourBodies=%llu "
-      "deformFinalizeComponentFiveToEightBodies=%llu "
-      "deformFinalizeComponentNineToSixteenBodies=%llu "
-      "deformFinalizeComponentSeventeenToThirtyTwoBodies=%llu "
-      "deformFinalizeComponentOverThirtyTwoBodies=%llu "
-      "deformFinalizeComponentOneToEightRows=%llu "
-      "deformFinalizeComponentNineToSixteenRows=%llu "
-      "deformFinalizeComponentSeventeenToThirtyTwoRows=%llu "
-      "deformFinalizeComponentThirtyThreeToSixtyFourRows=%llu "
-      "deformFinalizeComponentOverSixtyFourRows=%llu "
-      "deformFinalizeComponentRestitution=%llu "
-      "deformFinalizeComponentFiniteImpulse=%llu "
-      "deformFinalizeComponentTargetVelocity=%llu "
-      "deformFinalizeComponentMixedScale=%llu "
-      "deformFinalizeComponentRigidStatic=%llu "
-      "deformFinalizeComponentNonOwnerDeformable=%llu "
-      "deformFinalizeComponentJointIsland=%llu "
-      "deformFinalizeComponentLockedDof=%llu "
-      "deformFinalizeComponentNonDynamicBody=%llu "
-      "deformFinalizeBudgetDiagRows=%llu "
-      "deformFinalizeBudgetDiagNoCorrectionRows=%llu "
-      "deformFinalizeBudgetDiagZeroBudgetRequiredRows=%llu "
-      "deformFinalizeBudgetDiagWithinBudgetRows=%llu "
-      "deformFinalizeBudgetDiagOverBudgetRows=%llu "
-      "deformFinalizeBudgetDiagUnsupportedRows=%llu "
-      "deformFinalizeBudgetDiagComponentsWithinBudget=%llu "
-      "deformFinalizeBudgetDiagComponentsOverBudget=%llu "
-      "deformFinalizeBudgetDiagComponentsUnsupported=%llu "
-      "deformFinalizeShadowComponents=%llu "
-      "deformFinalizeShadowRows=%llu "
-      "deformFinalizeShadowNoCorrection=%llu "
-      "deformFinalizeShadowSolved=%llu "
-      "deformFinalizeShadowCommitCapable=%llu "
-      "deformFinalizeShadowBudgetExhausted=%llu "
-      "deformFinalizeShadowInfeasible=%llu "
-      "deformFinalizeShadowResidualUnclassified=%llu "
-      "deformFinalizeShadowNumericalFailure=%llu "
-      "deformFinalizeShadowIterationLimit=%llu "
-      "deformFinalizeShadowUnsupported=%llu "
-      "deformFinalizeShadowUnsupportedFastImpact=%llu "
-      "deformFinalizeShadowUnsupportedSnapshot=%llu "
-      "deformFinalizeShadowLowerRows=%llu "
-      "deformFinalizeShadowFreeRows=%llu "
-      "deformFinalizeShadowUpperRows=%llu "
-      "deformFinalizeShadowMatrixFreeComponents=%llu "
-      "deformFinalizeShadowMatrixFreeRows=%llu "
-      "deformFinalizeShadowMatrixFreeNoCorrection=%llu "
-      "deformFinalizeShadowMatrixFreeSolved=%llu "
-      "deformFinalizeShadowMatrixFreeBudgetExhausted=%llu "
-      "deformFinalizeShadowMatrixFreeInfeasible=%llu "
-      "deformFinalizeShadowMatrixFreeResidualUnclassified=%llu "
-      "deformFinalizeShadowMatrixFreeNumericalFailure=%llu "
-      "deformFinalizeShadowMatrixFreeIterationLimit=%llu "
-      "deformFinalizeShadowMatrixFreeIterations=%llu "
-      "deformFinalizeShadowMatrixFreeIterationLimitKktAtMost2x=%llu "
-      "deformFinalizeShadowMatrixFreeIterationLimitKktAtMost16x=%llu "
-      "deformFinalizeShadowMatrixFreeIterationLimitKktOver16x=%llu "
-      "deformFinalizeShadowMatrixFreeCommittedComponents=%llu "
-      "deformFinalizeShadowMatrixFreeOracleComponents=%llu "
-      "deformFinalizeShadowMatrixFreeOracleRows=%llu "
-      "deformFinalizeShadowMatrixFreeOracleMatched=%llu "
-      "deformFinalizeShadowMatrixFreeOracleMismatched=%llu "
-      "deformFinalizeShadowMatrixFreeOracleSkipped=%llu "
-      "deformFinalizePreOwnerBodies=%llu "
-      "deformFinalizeLegacyOwnerBodies=%llu "
-      "deformFinalizeOwnerDiscoveryMismatchBodies=%llu "
-      "deformFinalizeProbeEligibleComponents=%llu "
-      "deformFinalizeProbeCommittedComponents=%llu "
-      "deformFinalizeProbeCommittedRows=%llu "
-      "deformFinalizeProbeCommittedBodies=%llu "
-      "deformFinalizeProbeReplacedOwnerBodies=%llu "
-      "deformFinalizeDelta=%.9f "
-      "deformAlDepenRows=%llu deformAlFinalizeRows=%llu "
-      "deformDepenFinalizeRows=%llu deformAlDepenFinalizeRows=%llu "
-      "deformFinalizeContactFalsePositive=%llu "
-      "deformFinalizeContactResidualSeparation=%llu "
-      "deformFinalizeContactReversal=%llu "
-      "deformFinalizeContactPreSeparation=%.9f "
-      "deformFinalizeContactPostSeparation=%.9f "
-      "deformFinalizeContactPostApproach=%.9f "
-      "deformFinalizeSecondaryResidualSeparation=%.9f "
-      "shellContacts=%llu "
-      "shellDepenCorrections=%llu shellDepenDistance=%.9f "
-      "shellFrictionRows=%llu shellFrictionCorrections=%llu "
-      "shellFrictionImpulse=%.9f shellFinalizeBodies=%llu "
-      "shellFinalizeCorrections=%llu shellFinalizeDelta=%.9f\n",
-      static_cast<unsigned long long>(frame),
-      static_cast<unsigned long long>(surfaceDeformableAlRows),
-      static_cast<unsigned long long>(surfaceDeformableAlEvaluations),
-      static_cast<unsigned long long>(surfaceDeformableStrippedRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentCandidates),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentEvaluations),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentMixedRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentShellRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentTargetRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentRestitutionRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentFiniteRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformablePositionTangentScaleRejectRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableShellSuppressedPrimalRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableDepenetrationCorrections),
-      double(surfaceDeformableDepenetrationDistanceNanos) / 1000000000.0,
-      static_cast<unsigned long long>(surfaceDeformableFrictionRawRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFrictionDominantRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFrictionFewContactRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFrictionMultiCornerRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFrictionCorrections),
-      double(surfaceDeformableFrictionImpulseNanos) / 1000000000.0,
-      static_cast<unsigned long long>(surfaceDeformableFinalizeBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeCorrections),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeSpatialCorrections),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComFallbackCorrections),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeSecondaryRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeSecondaryResidualSeparationRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldOneRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldTwoRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldThreeRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldFourRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldOverFourRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldFiveToEightRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldNineToSixteenRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldOverSixteenRowBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldMixedScaleBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldRankDeficientBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldAliasRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldDynamicIncidentBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldRigidStaticIncidentBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeManifoldNonOwnerDeformableIncidentBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentOneBody),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentTwoBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentThreeToFourBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentFiveToEightBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentNineToSixteenBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentSeventeenToThirtyTwoBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentOverThirtyTwoBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentOneToEightRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentNineToSixteenRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentSeventeenToThirtyTwoRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentThirtyThreeToSixtyFourRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentOverSixtyFourRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentRestitution),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentFiniteImpulse),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentTargetVelocity),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentMixedScale),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentRigidStatic),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentNonOwnerDeformable),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentJointIsland),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentLockedDof),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeComponentNonDynamicBody),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagNoCorrectionRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagZeroBudgetRequiredRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagWithinBudgetRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagOverBudgetRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagUnsupportedRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagComponentsWithinBudget),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagComponentsOverBudget),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeBudgetDiagComponentsUnsupported),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowNoCorrection),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowSolved),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowCommitCapable),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowBudgetExhausted),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowInfeasible),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowResidualUnclassified),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowNumericalFailure),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowIterationLimit),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowUnsupported),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowUnsupportedFastImpact),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowUnsupportedSnapshot),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowLowerRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowFreeRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowUpperRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeNoCorrection),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeSolved),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeBudgetExhausted),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeInfeasible),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeResidualUnclassified),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeNumericalFailure),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeIterationLimit),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeIterations),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost2x),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktAtMost16x),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeIterationLimitKktOver16x),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeCommittedComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeOracleComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeOracleRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeOracleMatched),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeOracleMismatched),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeShadowMatrixFreeOracleSkipped),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizePreOwnerBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeLegacyOwnerBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeOwnerDiscoveryMismatchBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeProbeEligibleComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeProbeCommittedComponents),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeProbeCommittedRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeProbeCommittedBodies),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeProbeReplacedOwnerBodies),
-      double(surfaceDeformableFinalizeDeltaNanos) / 1000000000.0,
-      static_cast<unsigned long long>(
-          surfaceDeformableAlDepenetrationRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableAlFinalizeRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableDepenetrationFinalizeRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableAlDepenetrationFinalizeRows),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeContactFalsePositiveCorrections),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeContactResidualSeparationCorrections),
-      static_cast<unsigned long long>(
-          surfaceDeformableFinalizeContactReversalCorrections),
-      double(surfaceDeformableFinalizeContactPreSeparationNanos) /
-          1000000000.0,
-      double(surfaceDeformableFinalizeContactPostSeparationNanos) /
-          1000000000.0,
-      double(surfaceDeformableFinalizeContactPostApproachNanos) /
-          1000000000.0,
-      double(surfaceDeformableFinalizeSecondaryResidualSeparationNanos) /
-          1000000000.0,
-      static_cast<unsigned long long>(surfaceShellContacts),
-      static_cast<unsigned long long>(
-          surfaceShellDepenetrationCorrections),
-      double(surfaceShellDepenetrationDistanceNanos) / 1000000000.0,
-      static_cast<unsigned long long>(surfaceShellFrictionRows),
-      static_cast<unsigned long long>(surfaceShellFrictionCorrections),
-      double(surfaceShellFrictionImpulseNanos) / 1000000000.0,
-      static_cast<unsigned long long>(surfaceShellFinalizeBodies),
-      static_cast<unsigned long long>(surfaceShellFinalizeCorrections),
-      double(surfaceShellFinalizeDeltaNanos) / 1000000000.0);
-  if (mNormalRowDiagnosticsEnabled) {
-    printf("[avbd:normal-row] frame=%llu warmHits=%llu warmMisses=%llu restoredLambdaMax=%.9f restoredPenaltyMax=%.9f initialPenaltyMax=%.9f preAlRawPenetration=%.9f postAlRawPenetration=%.9f alphaC0Offset=%.9f preAlPenetration=%.9f postAlPenetration=%.9f postAlSeparation=%.9f alOutwardDistance=%.9f alInwardDistance=%.9f poseSeparatingVelocity=%.9f allowedSeparatingVelocity=%.9f finiteBudgetRows=%llu unlimitedBudgetRows=%llu finiteRemainingImpulse=%.9f finalizeCorrections=%llu finalizeDelta=%.9f\n",
-           static_cast<unsigned long long>(frame),
-           static_cast<unsigned long long>(bodyStaticNormalWarmstartHits),
-           static_cast<unsigned long long>(bodyStaticNormalWarmstartMisses),
-           double(bodyStaticNormalRestoredLambdaMaxNanos) / 1000000000.0,
-           double(bodyStaticNormalRestoredPenaltyMaxNanos) / 1000000000.0,
-           double(bodyStaticNormalInitialPenaltyMaxNanos) / 1000000000.0,
-           double(bodyStaticNormalPreAlRawPenetrationNanos) /
-               1000000000.0,
-           double(bodyStaticNormalPostAlRawPenetrationNanos) /
-               1000000000.0,
-           double(bodyStaticNormalAlphaC0OffsetNanos) / 1000000000.0,
-           double(bodyStaticNormalPreAlPenetrationNanos) / 1000000000.0,
-           double(bodyStaticNormalPostAlPenetrationNanos) / 1000000000.0,
-           double(bodyStaticNormalPostAlSeparationNanos) / 1000000000.0,
-           double(bodyStaticNormalAlOutwardDistanceNanos) / 1000000000.0,
-           double(bodyStaticNormalAlInwardDistanceNanos) / 1000000000.0,
-           double(bodyStaticMaterialPoseSeparatingVelocityNanos) /
-               1000000000.0,
-           double(bodyStaticMaterialAllowedSeparatingVelocityNanos) /
-               1000000000.0,
-           static_cast<unsigned long long>(
-               bodyStaticMaterialFiniteBudgetRows),
-           static_cast<unsigned long long>(
-               bodyStaticMaterialUnlimitedBudgetRows),
-           double(bodyStaticMaterialFiniteRemainingImpulseNanos) /
-               1000000000.0,
-           static_cast<unsigned long long>(
-               bodyStaticMaterialVelocityCorrections),
-           double(bodyStaticMaterialVelocityDeltaNanos) / 1000000000.0);
-    printf(
-        "[avbd:normal-class] frame=%llu onsetRows=%llu supportRows=%llu "
-        "rowAge0=%llu rowAge1=%llu rowAge2=%llu rowAge3=%llu "
-        "managerAge0=%llu managerAge1=%llu "
-        "managerAge2=%llu managerAge3=%llu "
-        "rowMissOnSupport=%llu "
-        "onsetPreRaw=%.9f onsetPreEffective=%.9f "
-        "onsetPostRaw=%.9f onsetPostEffective=%.9f "
-        "onsetAlphaC0=%.9f onsetAlOutward=%.9f "
-        "supportPreRaw=%.9f supportPreEffective=%.9f "
-        "supportPostRaw=%.9f supportPostEffective=%.9f "
-        "supportAlphaC0=%.9f supportAlOutward=%.9f "
-        "onsetFinalizeBodies=%llu supportFinalizeBodies=%llu "
-        "onsetPoseSeparatingVelocity=%.9f "
-        "supportPoseSeparatingVelocity=%.9f "
-        "onsetFinalizeCorrections=%llu "
-        "supportFinalizeCorrections=%llu "
-        "onsetFinalizeDelta=%.9f supportFinalizeDelta=%.9f "
-        "onsetDepenEligible=%llu supportDepenEligible=%llu "
-        "onsetDepenCorrections=%llu supportDepenCorrections=%llu "
-        "onsetDepenDistance=%.9f supportDepenDistance=%.9f "
-        "onsetShallowDepenCorrections=%llu "
-        "onsetDeepDepenCorrections=%llu "
-        "supportShallowDepenCorrections=%llu "
-        "supportDeepDepenCorrections=%llu "
-        "onsetShallowDepenDistance=%.9f onsetDeepDepenDistance=%.9f "
-        "supportShallowDepenDistance=%.9f "
-        "supportDeepDepenDistance=%.9f\n",
-        static_cast<unsigned long long>(frame),
-        static_cast<unsigned long long>(bodyStaticNormalManagerOnsetRows),
-        static_cast<unsigned long long>(bodyStaticNormalManagerSupportRows),
-        static_cast<unsigned long long>(bodyStaticNormalWarmstartAge0),
-        static_cast<unsigned long long>(bodyStaticNormalWarmstartAge1),
-        static_cast<unsigned long long>(bodyStaticNormalWarmstartAge2),
-        static_cast<unsigned long long>(bodyStaticNormalWarmstartAge3),
-        static_cast<unsigned long long>(bodyStaticNormalManagerAge0),
-        static_cast<unsigned long long>(bodyStaticNormalManagerAge1),
-        static_cast<unsigned long long>(bodyStaticNormalManagerAge2),
-        static_cast<unsigned long long>(bodyStaticNormalManagerAge3),
-        static_cast<unsigned long long>(
-            bodyStaticNormalRowMissOnManagerSupportRows),
-        double(bodyStaticNormalOnsetPreAlRawPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalOnsetPreAlPenetrationNanos) / 1000000000.0,
-        double(bodyStaticNormalOnsetPostAlRawPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalOnsetPostAlPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalOnsetAlphaC0OffsetNanos) / 1000000000.0,
-        double(bodyStaticNormalOnsetAlOutwardDistanceNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportPreAlRawPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportPreAlPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportPostAlRawPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportPostAlPenetrationNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportAlphaC0OffsetNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportAlOutwardDistanceNanos) /
-            1000000000.0,
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetFinalizeBodies),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportFinalizeBodies),
-        double(bodyStaticNormalOnsetPoseSeparatingVelocityNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportPoseSeparatingVelocityNanos) /
-            1000000000.0,
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetFinalizeCorrections),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportFinalizeCorrections),
-        double(bodyStaticNormalOnsetFinalizeDeltaNanos) / 1000000000.0,
-        double(bodyStaticNormalSupportFinalizeDeltaNanos) / 1000000000.0,
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetDepenetrationEligibleRows),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportDepenetrationEligibleRows),
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetDepenetrationCorrections),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportDepenetrationCorrections),
-        double(bodyStaticNormalOnsetDepenetrationDistanceNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportDepenetrationDistanceNanos) /
-            1000000000.0,
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetShallowDepenetrationCorrections),
-        static_cast<unsigned long long>(
-            bodyStaticNormalOnsetDeepDepenetrationCorrections),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportShallowDepenetrationCorrections),
-        static_cast<unsigned long long>(
-            bodyStaticNormalSupportDeepDepenetrationCorrections),
-        double(bodyStaticNormalOnsetShallowDepenetrationDistanceNanos) /
-            1000000000.0,
-        double(bodyStaticNormalOnsetDeepDepenetrationDistanceNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportShallowDepenetrationDistanceNanos) /
-            1000000000.0,
-        double(bodyStaticNormalSupportDeepDepenetrationDistanceNanos) /
-            1000000000.0);
-  }
-  fflush(stdout);
-}
-
 AvbdDynamicsContext::~AvbdDynamicsContext() {
+  flushKernelLabCapture();
+  delete mKernelLabCapture;
   delete mTaskFactory;
 
   if (mSolverInitialized) {
-    mConstraintColoring.release();
     mSolver.release();
   }
 }
@@ -3600,6 +360,41 @@ void AvbdDynamicsContext::destroyTask(AvbdTask *task) {
   }
 }
 
+PxU32 AvbdDynamicsContext::reserveKernelLabCapture(PxU32 islandIndex,
+                                                    PxU32 bodyCount,
+                                                    PxU32 contactCount) {
+  if (!mKernelLabCapture || mKernelLabCaptureReservationSubmitted)
+    return AvbdKernelLabCapture::eINVALID_TICKET;
+  const PxU32 ticket =
+      mKernelLabCapture->reserve(islandIndex, bodyCount, contactCount);
+  if (ticket != AvbdKernelLabCapture::eINVALID_TICKET)
+    mKernelLabCaptureReservationSubmitted = true;
+  return ticket;
+}
+
+void AvbdDynamicsContext::captureKernelLabCpuColorPreRange(
+    PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 islandIndex,
+    PxU32 colorIndex, const PxU32 *ownerOrder, PxU32 begin, PxU32 end,
+    PxU32 workerCount, PxU32 taskGrainBodies, PxU32 taskCount,
+    PxU32 taskChunkBodies) {
+  if (mKernelLabCapture && ticket != AvbdKernelLabCapture::eINVALID_TICKET)
+    mKernelLabCapture->capturePreRange(
+        ticket, context, mSolver.getConfig(), islandIndex, colorIndex,
+        ownerOrder, begin, end, workerCount, taskGrainBodies, taskCount,
+        taskChunkBodies);
+}
+
+void AvbdDynamicsContext::captureKernelLabCpuColorPostRange(
+    PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 colorIndex) {
+  if (mKernelLabCapture && ticket != AvbdKernelLabCapture::eINVALID_TICKET)
+    mKernelLabCapture->capturePostRange(ticket, context, colorIndex);
+}
+
+void AvbdDynamicsContext::flushKernelLabCapture() {
+  if (mKernelLabCapture)
+    mKernelLabCapture->flush();
+}
+
 //=============================================================================
 // Lambda Warm-Starting Cache Write-Back
 //=============================================================================
@@ -3615,6 +410,7 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
   }
 
   PxArray<AvbdDynamicsContext::CachedLambda> &cache = ctx.mLambdaCache;
+  const PxU16 cacheFrameStamp = ctx.getAvbdFrameStamp();
 
   for (PxU32 i = 0; i < numConstraints; ++i) {
     const AvbdContactConstraint &constraint = constraints[i];
@@ -3641,9 +437,9 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
       cached.tangentPenalty1 = 1000.0f;
       cached.stick = 0;
       cached.prevStaticWorldPoint = PxVec3(0.0f);
-      // Keep frameAge high so a non-deformable pair reusing this CM index
+      // Invalidate the stamp so a non-deformable pair reusing this CM index
       // does not inherit mesh dual garbage if the pair type changes.
-      cached.frameAge = 255;
+      cached.frameStamp = 0;
       continue;
     }
 
@@ -3656,7 +452,7 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
     cached.tangentPenalty0 = constraint.tangentPenalty0;
     cached.tangentPenalty1 = constraint.tangentPenalty1;
     cached.stick = hasFrictionStick(constraint) ? 1u : 0u;
-    cached.frameAge = 0;
+    cached.frameStamp = cacheFrameStamp;
   }
 }
 
@@ -3699,6 +495,66 @@ void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
   }
 }
 
+void writeContactImpulseToOutputTokens(
+    const AvbdContactConstraint *constraints,
+    const AvbdContactOutputToken *tokens,
+    AvbdContactOutputResult *results, PxU32 numConstraints, PxU32 numBodies,
+    PxReal dt) {
+  if (!constraints || !tokens || !results || numConstraints == 0 ||
+      dt <= 0.0f)
+    return;
+
+  for (PxU32 i = 0; i < numConstraints; ++i) {
+    const AvbdContactOutputToken &token = tokens[i];
+    if ((token.flags & (AvbdContactOutputToken::eNORMAL_IMPULSE |
+                       AvbdContactOutputToken::eFRICTION_IMPULSE)) == 0 ||
+        token.targetIndex == PX_MAX_U32)
+      continue;
+
+    const AvbdContactConstraint &constraint = constraints[i];
+    AvbdContactOutputResult &result = results[token.targetIndex];
+    if ((token.flags & AvbdContactOutputToken::eNORMAL_IMPULSE) != 0) {
+      result.normalImpulse =
+          constraint.velocityNormalImpulse >= 0.0f
+              ? constraint.velocityNormalImpulse
+              : PxMax(0.0f, -constraint.header.lambda) * dt;
+      result.flags |= AvbdContactOutputToken::eNORMAL_IMPULSE;
+    }
+
+    if ((token.flags & AvbdContactOutputToken::eFRICTION_IMPULSE) != 0) {
+      PxVec3 frictionImpulse = constraint.frictionSweepImpulse;
+      const bool dynamicDynamic =
+          constraint.header.bodyIndexA < numBodies &&
+          constraint.header.bodyIndexB < numBodies;
+      if (dynamicDynamic) {
+        frictionImpulse +=
+            (constraint.tangent0 * constraint.tangentLambda0 +
+             constraint.tangent1 * constraint.tangentLambda1) *
+            dt;
+      }
+      if (frictionImpulse.isFinite()) {
+        result.frictionImpulse += frictionImpulse;
+        result.flags |= AvbdContactOutputToken::eFRICTION_IMPULSE;
+      }
+    }
+  }
+}
+
+void commitContactOutputTokens(const AvbdContactOutputTarget *targets,
+                               AvbdContactOutputResult *results,
+                               PxU32 count) {
+  if (!targets || !results)
+    return;
+  for (PxU32 i = 0; i < count; ++i) {
+    if ((results[i].flags & AvbdContactOutputToken::eNORMAL_IMPULSE) != 0 &&
+        targets[i].normalImpulse)
+      *targets[i].normalImpulse = results[i].normalImpulse;
+    if ((results[i].flags & AvbdContactOutputToken::eFRICTION_IMPULSE) != 0 &&
+        targets[i].frictionImpulse)
+      *targets[i].frictionImpulse += results[i].frictionImpulse;
+  }
+}
+
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
                                  PxU64 cacheKey) {
@@ -3716,7 +572,11 @@ void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
 
   AvbdDynamicsContext::CachedJointLambda &cached =
       ctx.mJointLambdaCache[cacheIdx];
-  if (cached.key != cacheKey || cached.frameAge > AvbdDynamicsContext::LAMBDA_MAX_AGE) {
+  const PxU16 currentStamp = ctx.getAvbdFrameStamp();
+  const PxU16 frameAge =
+      static_cast<PxU16>(currentStamp - cached.frameStamp);
+  if (cached.key != cacheKey || cached.frameStamp == 0 ||
+      frameAge > AvbdDynamicsContext::LAMBDA_MAX_AGE) {
     return;
   }
 
@@ -3803,7 +663,7 @@ void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
     cached.lambdaDriveLinear = constraint.lambdaDriveLinear;
     cached.lambdaDriveAngular = constraint.lambdaDriveAngular;
     cached.coneLambda = constraint.coneLambda;
-    cached.frameAge = 0;
+    cached.frameStamp = ctx.getAvbdFrameStamp();
   }
 }
 
@@ -3925,8 +785,6 @@ void AvbdDynamicsContext::update(
 
   PX_PROFILE_ZONE("AVBD.update", mContextID);
 
-  beginIterationDiagnosticsFrame();
-
   // Increment global frame counter for motor deduplication
   gAvbdMotorFrameCounter++;
 
@@ -3941,23 +799,19 @@ void AvbdDynamicsContext::update(
     ++mBodyVelocityHistoryFrame;
   }
 
-  // Lambda warm-starting: age all cached entries at frame start
-  if (mEnableLambdaWarmStart) {
-    PX_PROFILE_ZONE("AVBD.ageLambdaCache", mContextID);
-    for (PxU32 i = 0; i < mLambdaCache.size(); ++i) {
-      if (mLambdaCache[i].frameAge < 255) {
-        mLambdaCache[i].frameAge++;
-      }
-    }
-    for (PxU32 i = 0; i < mJointLambdaCache.size(); ++i) {
-      if (mJointLambdaCache[i].frameAge < 255) {
-        mJointLambdaCache[i].frameAge++;
-      }
-    }
-  }
-  for (PxU32 i = 0; i < mContactManagerStateCache.size(); ++i) {
-    if (mContactManagerStateCache[i].frameAge < 255)
-      mContactManagerStateCache[i].frameAge++;
+  // Warm-start age is derived lazily from the per-context frame stamp at
+  // lookup time. The previous dense scans touched every cache slot every
+  // frame, including mostly empty direct-mapped contact capacity.
+  if (mBodyVelocityHistoryFrame > 1u &&
+      ((mBodyVelocityHistoryFrame - 1u) % 65535u) == 0u) {
+    // Clear stamps at the 16-bit epoch boundary so an entry older than 65535
+    // updates cannot alias a fresh stamp after wraparound.
+    for (PxU32 i = 0; i < mLambdaCache.size(); ++i)
+      mLambdaCache[i].frameStamp = 0;
+    for (PxU32 i = 0; i < mJointLambdaCache.size(); ++i)
+      mJointLambdaCache[i].frameStamp = 0;
+    for (PxU32 i = 0; i < mContactManagerStateCache.size(); ++i)
+      mContactManagerStateCache[i].frameStamp = 0;
   }
 
   PX_UNUSED(flushPool);
@@ -4058,7 +912,8 @@ void AvbdDynamicsContext::update(
   if (numArticulations > 0) {
     articulationFirstLinkIndex = reinterpret_cast<PxU32 *>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-        sizeof(PxU32) * (numArticulations + 1), "ArticulationFirstLinkIndex"));
+        sizeof(PxU32) * (numArticulations + 1),
+        "ArticulationFirstLinkIndex"));
     articulationByActiveIdx =
         reinterpret_cast<FeatherstoneArticulation **>(allocWithFallback(
             mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
@@ -4081,6 +936,18 @@ void AvbdDynamicsContext::update(
     PxU32 cmCount;
     PxU32 constraintCount;
     PxU32 articulationJointCount;
+    // Frozen preparation-table metadata. The first P35 slice only consumes
+    // these capacities on the serial path; offsets remain legacy compact
+    // cursors until a task-owned output plan is admitted.
+    PxU32 contactOutputOffset;
+    PxU32 contactOutputCapacity;
+    PxU32 d6OutputOffset;
+    PxU32 d6OutputCapacity;
+    PxU32 gearOutputOffset;
+    PxU32 gearOutputCapacity;
+    bool hasArticulationBodies;
+    bool deferredContactPrepEligible;
+    AvbdMapStorage mapStorage[3]; // contact, D6, gear
   };
 
   AvbdIslandInfo *islandInfos =
@@ -4104,7 +971,20 @@ void AvbdDynamicsContext::update(
     AvbdIslandInfo &info = islandInfos[i];
     info.bodyStart = bodyIndex;
     info.articulationJointCount = 0;
-
+    info.contactOutputOffset = 0;
+    info.contactOutputCapacity = 0;
+    info.d6OutputOffset = 0;
+    info.d6OutputCapacity = 0;
+    info.gearOutputOffset = 0;
+    info.gearOutputCapacity = 0;
+    info.hasArticulationBodies = false;
+    info.deferredContactPrepEligible = false;
+    for (PxU32 mapIndex = 0; mapIndex < 3; ++mapIndex) {
+      info.mapStorage[mapIndex].counts = nullptr;
+      info.mapStorage[mapIndex].offsets = nullptr;
+      info.mapStorage[mapIndex].indices = nullptr;
+      info.mapStorage[mapIndex].indexCapacity = 0;
+    }
     const IG::Island &island = islandSim.getIsland(islandIds[i]);
     PxNodeIndex currentIndex = island.mRootNode;
 
@@ -4121,6 +1001,7 @@ void AvbdDynamicsContext::update(
         }
         bodyIndex++;
       } else if (node.getNodeType() == IG::Node::eARTICULATION_TYPE) {
+        info.hasArticulationBodies = true;
         FeatherstoneArticulation *articulation =
             static_cast<FeatherstoneArticulation *>(islandSim.getObject(
                 currentIndex, IG::Node::eARTICULATION_TYPE));
@@ -4373,6 +1254,38 @@ void AvbdDynamicsContext::update(
     info.constraintCount = island.mEdges.getCount(IG::Edge::eCONSTRAINT);
   }
 
+  // Freeze the per-island contact response capacities before any preparation
+  // can be dispatched.  NP output is immutable for this update; response
+  // filtering may reduce the actual row count returned by prepareAvbdContacts.
+  // The first P35 slice keeps the legacy compact cursor for the actual pointer
+  // so this metadata is a serial differential with no layout change.
+  PxU32 contactOutputOffset = 0;
+  for (PxU32 i = 0; i < islandCount; ++i) {
+    AvbdIslandInfo &info = islandInfos[i];
+    info.contactOutputOffset = contactOutputOffset;
+    PxU32 capacity = 0;
+    for (PxU32 contactOrder = 0; contactOrder < info.cmCount;
+         ++contactOrder) {
+      const PxsIndexedContactManager &icm =
+          mContactList[info.cmStart + contactOrder];
+      if (!icm.contactManager)
+        continue;
+      const PxU32 npIndex = icm.contactManager->getWorkUnit().mNpIndex;
+      const PxsContactManagerOutput &output =
+          mOutputIterator.getContactManagerOutput(npIndex);
+      if (output.nbContacts > PX_MAX_U32 - capacity) {
+        capacity = PX_MAX_U32;
+        break;
+      }
+      capacity += output.nbContacts;
+    }
+    info.contactOutputCapacity = capacity;
+    contactOutputOffset =
+        capacity > PX_MAX_U32 - contactOutputOffset
+            ? PX_MAX_U32
+            : contactOutputOffset + capacity;
+  }
+
   // 3. Setup bodies (for rigid bodies only, articulation links already set up)
   if (avbdBodies && rigidBodies) {
     setupBodies(avbdBodies, rigidBodies, bodyIndex, dt, gravity);
@@ -4421,16 +1334,21 @@ void AvbdDynamicsContext::update(
     AvbdSolverConfig config;
     config.lengthScale = getLengthScale();
     config.positionTolerance *= config.lengthScale;
-    config.outerIterations = 1;
-    config.innerIterations = 4; // Default for contact-only islands; articulations use per-body overrides
+    config.iterations = mAvbdIterations;
+    config.jointIterationOverride = mAvbdJointIterationOverride;
+    config.enableEarlyStop = mAvbdEnableEarlyStop;
+    // Enhanced determinism selects the existing ordered AVBD authority.  Do
+    // not enable the dormant sort/Kahan experiment here: it changes the
+    // frozen trajectory and its contact ordering is not part of this backend
+    // selection contract.
+    if (isEnhancedDeterminismEnabled())
+      config.enableOrderedBackend();
     config.initialRho = AvbdConstants::AVBD_DEFAULT_PENALTY_RHO_HIGH;
     config.maxRho = AvbdConstants::AVBD_MAX_PENALTY_RHO;
     config.enableLocal6x6Solve = true;
-    config.enableStageOwnershipDiagnostics = mIterationDiagnosticsEnabled;
+    config.enableStageOwnershipDiagnostics = false;
     config.enableBoundedComponentProductionProbe =
         isEnvFlagEnabled("PHYSX_AVBD_BOUNDED_COMPONENT_PROBE");
-    config.enableMatrixFreeComponentOracle =
-        isEnvFlagEnabled("PHYSX_AVBD_MATRIX_FREE_COMPONENT_ORACLE");
     config.contactCompliance = 1e-2f;
     // AVBD reference parameters
     config.avbdAlpha = 0.95f;
@@ -4470,13 +1388,68 @@ void AvbdDynamicsContext::update(
     return;
   }
   const PxU32 maxConstraints = static_cast<PxU32>(maxConstraintCount64);
+  // The serial task-graph differential retains its full-frame snapshot table.
+  // The normal parallel path allocates a narrower, fail-closed table below
+  // only when at least two rigid contact-only islands can consume it.
+  const bool contactSnapshotMode = mTaskGraphSerialMode;
+  auto allocContactPrepStorage = [&](PxU32 size, const char *name) -> void * {
+    return allocWithFallback(mScratchAllocator, mAllocatorAdapter,
+                             mHeapFallbackAllocations, size, name);
+  };
   AvbdContactConstraint *avbdConstraints = nullptr;
   if (maxConstraints > 0) {
-    avbdConstraints =
-        reinterpret_cast<AvbdContactConstraint *>(allocWithFallback(
-            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-            sizeof(AvbdContactConstraint) * maxConstraints,
-            "AvbdContactConstraint"));
+    avbdConstraints = reinterpret_cast<AvbdContactConstraint *>(
+        allocContactPrepStorage(sizeof(AvbdContactConstraint) * maxConstraints,
+                                "AvbdContactConstraint"));
+  }
+
+  // Serial-only staging storage for deferred contact-force commits. The
+  // default task-graph path writes through the established direct outputs and
+  // never allocates these arrays.
+  AvbdContactOutputToken *contactOutputTokens = nullptr;
+  AvbdContactOutputTarget *contactOutputTargets = nullptr;
+  AvbdContactOutputResult *contactOutputResults = nullptr;
+  bool hasDeferredContactOutput = false;
+  if (contactSnapshotMode && maxConstraints > 0) {
+    for (PxU32 outputScanIndex = 0;
+         outputScanIndex < mContactList.size(); ++outputScanIndex) {
+      PxsContactManager *cm =
+          mContactList[outputScanIndex].contactManager;
+      if (!cm)
+        continue;
+      const PxsContactManagerOutput &output =
+          mOutputIterator.getContactManagerOutput(
+              cm->getWorkUnit().mNpIndex);
+      if (output.contactForces || output.frictionPatches) {
+        hasDeferredContactOutput = true;
+        break;
+      }
+    }
+  }
+  if (hasDeferredContactOutput) {
+    contactOutputTokens = reinterpret_cast<AvbdContactOutputToken *>(
+        allocContactPrepStorage(sizeof(AvbdContactOutputToken) * maxConstraints,
+                                "AvbdContactOutputTokens"));
+    contactOutputTargets = reinterpret_cast<AvbdContactOutputTarget *>(
+        allocContactPrepStorage(sizeof(AvbdContactOutputTarget) * maxConstraints,
+                                "AvbdContactOutputTargets"));
+    contactOutputResults = reinterpret_cast<AvbdContactOutputResult *>(
+        allocContactPrepStorage(sizeof(AvbdContactOutputResult) * maxConstraints,
+                                "AvbdContactOutputResults"));
+    if (contactOutputTokens && contactOutputTargets && contactOutputResults) {
+      for (PxU32 tokenIndex = 0; tokenIndex < maxConstraints; ++tokenIndex) {
+        PX_PLACEMENT_NEW(&contactOutputTokens[tokenIndex],
+                         AvbdContactOutputToken)();
+        PX_PLACEMENT_NEW(&contactOutputTargets[tokenIndex],
+                         AvbdContactOutputTarget)();
+        PX_PLACEMENT_NEW(&contactOutputResults[tokenIndex],
+                         AvbdContactOutputResult)();
+      }
+    } else {
+      contactOutputTokens = nullptr;
+      contactOutputTargets = nullptr;
+      contactOutputResults = nullptr;
+    }
   }
 
   // Reserve the complete contact-cache range before any island task is
@@ -4527,6 +1500,245 @@ void AvbdDynamicsContext::update(
     }
   }
 
+  // P44 serial differential: capture the complete narrow-phase byte ranges
+  // before contact preparation.  This path is intentionally fail-closed for
+  // kinematic/deformable endpoints; those still use the legacy builder until
+  // their commit ABI is explicit.  Contact-force and friction-report output
+  // is parent-owned through the token table below. The borrowed stream is not
+  // dispatched yet. It only proves that preparation can consume immutable
+  // bytes without changing the solver row contract.
+  AvbdContactPrepSnapshot *contactSnapshots = nullptr;
+  const PxU16 frameStamp = getAvbdFrameStamp();
+  if (contactSnapshotMode && !mContactList.empty()) {
+    contactSnapshots = reinterpret_cast<AvbdContactPrepSnapshot *>(
+        allocContactPrepStorage(
+            sizeof(AvbdContactPrepSnapshot) * mContactList.size(),
+            "AvbdContactPrepSnapshots"));
+    if (contactSnapshots) {
+      PxU32 outputTargetCursor = 0;
+      for (PxU32 snapshotIndex = 0; snapshotIndex < mContactList.size();
+           ++snapshotIndex) {
+        PX_PLACEMENT_NEW(&contactSnapshots[snapshotIndex],
+                         AvbdContactPrepSnapshot)();
+        const PxsIndexedContactManager &icm = mContactList[snapshotIndex];
+        PxsContactManager *cm = icm.contactManager;
+        if (!cm) {
+          contactSnapshots[snapshotIndex].eligible = 1;
+          continue;
+        }
+
+        AvbdContactPrepSnapshot &snapshot = contactSnapshots[snapshotIndex];
+        snapshot.contactManagerIndex = cm->getIndex();
+        snapshot.npIndex = cm->getWorkUnit().mNpIndex;
+        snapshot.solverBody0 = icm.solverBody0;
+        snapshot.solverBody1 = icm.solverBody1;
+        snapshot.indexType0 = icm.indexType0;
+        snapshot.indexType1 = icm.indexType1;
+
+        const PxsContactManagerOutput &output =
+            mOutputIterator.getContactManagerOutput(snapshot.npIndex);
+        snapshot.outputTargetBase = outputTargetCursor;
+        snapshot.outputTargetCount = output.nbContacts;
+        outputTargetCursor += output.nbContacts;
+        if (output.contactForces || output.frictionPatches) {
+          if (!contactOutputTargets)
+            continue;
+        }
+        if (output.contactForces) {
+          snapshot.outputTargetFlags =
+              AvbdContactOutputToken::eNORMAL_IMPULSE;
+          for (PxU32 contactOffset = 0; contactOffset < output.nbContacts;
+               ++contactOffset) {
+            contactOutputTargets[snapshot.outputTargetBase + contactOffset]
+                .normalImpulse = output.contactForces + contactOffset;
+          }
+        }
+
+        // The first worker-ready ABI supports rigid body/world endpoints only.
+        // Kinematic and deformable/shell rows retain the serial fallback.
+        if ((snapshot.indexType0 != PxsIndexedInteraction::eBODY &&
+             snapshot.indexType0 != PxsIndexedInteraction::eWORLD) ||
+            (snapshot.indexType1 != PxsIndexedInteraction::eBODY &&
+             snapshot.indexType1 != PxsIndexedInteraction::eWORLD))
+          continue;
+
+        const PxU32 globalBody0Idx =
+            snapshot.indexType0 == PxsIndexedInteraction::eBODY
+                ? static_cast<PxU32>(snapshot.solverBody0)
+                : PX_MAX_U32;
+        const PxU32 globalBody1Idx =
+            snapshot.indexType1 == PxsIndexedInteraction::eBODY
+                ? static_cast<PxU32>(snapshot.solverBody1)
+                : PX_MAX_U32;
+        snapshot.contactManagerKey = makeAvbdContactManagerKey(
+            cm, globalBody0Idx, globalBody1Idx);
+        snapshot.restDistance = cm->getRestDistance();
+        if (isDeformableStaticAnchorContact(
+                (globalBody0Idx != PX_MAX_U32) !=
+                    (globalBody1Idx != PX_MAX_U32),
+                snapshot.restDistance))
+          continue;
+
+        if (snapshot.contactManagerIndex < mContactManagerStateCache.size()) {
+          const CachedContactManagerState &state =
+              mContactManagerStateCache[snapshot.contactManagerIndex];
+          if (state.key == snapshot.contactManagerKey &&
+              state.frameStamp != 0) {
+            const PxU16 age = static_cast<PxU16>(frameStamp - state.frameStamp);
+            snapshot.contactManagerAge =
+                age >= 255u ? PxU8(255) : PxU8(age);
+          }
+        }
+
+        if (!output.contactPatches || !output.contactPoints ||
+            output.nbContacts == 0 || output.nbPatches == 0)
+          continue;
+
+        const PxContactStreamIterator stream(
+            output.contactPatches, output.contactPoints,
+            output.getInternalFaceIndice(), output.nbPatches,
+            output.nbContacts);
+        const PxU32 patchBytes =
+            static_cast<PxU32>(output.nbPatches) * sizeof(PxContactPatch);
+        const PxU32 pointBytes =
+            static_cast<PxU32>(output.nbContacts) * stream.contactPointSize;
+        if (stream.contactPointSize == 0 ||
+            patchBytes > PX_MAX_U32 || pointBytes > PX_MAX_U32)
+          continue;
+
+        // Capture the exact response-row cardinality from the immutable
+        // narrow-phase stream. The pure parser records its emitted count and
+        // the parent compares the two before committing snapshot state.
+        PxU32 expectedResponseRows = 0;
+        if (!stream.forceNoResponse) {
+          const bool hasExtendedContact =
+              stream.mStreamFormat != PxContactStreamIterator::eSIMPLE_STREAM;
+          for (PxU8 patchIdx = 0; patchIdx < output.nbPatches; ++patchIdx) {
+            const PxContactPatch *patch = reinterpret_cast<const PxContactPatch *>(
+                output.contactPatches + patchIdx * sizeof(PxContactPatch));
+            for (PxU16 contactIdx = 0; contactIdx < patch->nbContacts;
+                 ++contactIdx) {
+              if (!hasExtendedContact) {
+                ++expectedResponseRows;
+                continue;
+              }
+              const PxExtendedContact *contact =
+                  reinterpret_cast<const PxExtendedContact *>(
+                      output.contactPoints +
+                      (patch->startContactIndex + contactIdx) *
+                          stream.contactPointSize);
+              if (contact->maxImpulse > 0.0f)
+                ++expectedResponseRows;
+            }
+          }
+        }
+        snapshot.expectedResponseRows = expectedResponseRows > PX_MAX_U16
+                                            ? PX_MAX_U16
+                                            : static_cast<PxU16>(expectedResponseRows);
+
+        if (output.frictionPatches) {
+          PxFrictionPatch *frictionPatches =
+              reinterpret_cast<PxFrictionPatch *>(output.frictionPatches);
+          for (PxU8 patchIdx = 0; patchIdx < output.nbPatches; ++patchIdx) {
+            const PxContactPatch *patch = reinterpret_cast<const PxContactPatch *>(
+                output.contactPatches + patchIdx * sizeof(PxContactPatch));
+            PxFrictionPatch &frictionPatch = frictionPatches[patchIdx];
+            frictionPatch.anchorCount = 0;
+            frictionPatch.anchorPositions[0] = PxVec3(0.0f);
+            frictionPatch.anchorPositions[1] = PxVec3(0.0f);
+            frictionPatch.anchorImpulses[0] = PxVec3(0.0f);
+            frictionPatch.anchorImpulses[1] = PxVec3(0.0f);
+
+            PxU32 anchorCount = 0;
+            if (patch->nbContacts > 0 &&
+                (patch->dynamicFriction > 0.0f ||
+                 patch->staticFriction > 0.0f)) {
+              const PxContact *firstContact =
+                  reinterpret_cast<const PxContact *>(
+                      output.contactPoints +
+                      patch->startContactIndex * stream.contactPointSize);
+              frictionPatch.anchorPositions[0] = firstContact->contact;
+              anchorCount = 1;
+
+              PxReal farthestDistanceSq = 0.0f;
+              PxVec3 farthestPosition = firstContact->contact;
+              for (PxU16 contactIdx = 1; contactIdx < patch->nbContacts;
+                   ++contactIdx) {
+                const PxContact *candidate =
+                    reinterpret_cast<const PxContact *>(
+                        output.contactPoints +
+                        (patch->startContactIndex + contactIdx) *
+                            stream.contactPointSize);
+                const PxReal distanceSq =
+                    (candidate->contact - firstContact->contact)
+                        .magnitudeSquared();
+                if (distanceSq > farthestDistanceSq) {
+                  farthestDistanceSq = distanceSq;
+                  farthestPosition = candidate->contact;
+                }
+              }
+              if (farthestDistanceSq > 1.0e-12f) {
+                frictionPatch.anchorPositions[1] = farthestPosition;
+                anchorCount = 2;
+              }
+              frictionPatch.anchorCount = anchorCount;
+            }
+
+            if (anchorCount > 0) {
+              snapshot.outputTargetFlags |=
+                  AvbdContactOutputToken::eFRICTION_IMPULSE;
+              for (PxU16 contactIdx = 0; contactIdx < patch->nbContacts;
+                   ++contactIdx) {
+                const PxContact *contact = reinterpret_cast<const PxContact *>(
+                    output.contactPoints +
+                    (patch->startContactIndex + contactIdx) *
+                        stream.contactPointSize);
+                PxU32 anchorIndex = 0;
+                if (anchorCount > 1) {
+                  const PxReal distance0 =
+                      (contact->contact - frictionPatch.anchorPositions[0])
+                          .magnitudeSquared();
+                  const PxReal distance1 =
+                      (contact->contact - frictionPatch.anchorPositions[1])
+                          .magnitudeSquared();
+                  if (distance1 < distance0)
+                    anchorIndex = 1;
+                }
+                contactOutputTargets[snapshot.outputTargetBase +
+                                     patch->startContactIndex + contactIdx]
+                    .frictionImpulse =
+                    &frictionPatch.anchorImpulses[anchorIndex];
+              }
+            }
+          }
+        }
+
+        // The cache belongs to this contact manager's disjoint slot range.
+        // Borrow it read-only until the solve task writes the same range back;
+        // this avoids rebuilding per-contact compact cache payloads during
+        // the parent preparation prefix.
+        if (mEnableLambdaWarmStart) {
+          const PxU64 cacheBase = static_cast<PxU64>(
+              snapshot.contactManagerIndex) * CONTACT_CACHE_SLOTS_PER_CM;
+          const PxU64 cacheEnd = cacheBase + CONTACT_CACHE_SLOTS_PER_CM;
+          if (cacheEnd <= mLambdaCache.size())
+            snapshot.lambdaCacheDirect = &mLambdaCache[static_cast<PxU32>(cacheBase)];
+        }
+        // The narrow-phase output remains immutable until the post-solver
+        // continuation consumes it. Borrow the already frozen byte ranges
+        // instead of copying every patch/point into scratch storage; this is
+        // the same lifetime used by the legacy parent-side parser.
+        snapshot.contactPatches = output.contactPatches;
+        snapshot.contactPoints = output.contactPoints;
+        snapshot.nbPatches = output.nbPatches;
+        snapshot.nbContacts = output.nbContacts;
+        snapshot.contactPointSize =
+            static_cast<PxU16>(stream.contactPointSize);
+        snapshot.eligible = 1;
+      }
+    }
+  }
+
   PxU32 totalJoints = 0;
   PxU32 totalArticulationJoints = 0;
   for (PxU32 i = 0; i < islandCount; ++i) {
@@ -4551,6 +1763,44 @@ void AvbdDynamicsContext::update(
   if (totalGearCapacity == 0)
     totalGearCapacity = 1;
 
+  PxU32 d6OutputOffset = 0;
+  PxU32 gearOutputOffset = 0;
+  for (PxU32 i = 0; i < islandCount; ++i) {
+    AvbdIslandInfo &info = islandInfos[i];
+    const PxU64 d6Capacity64 =
+        static_cast<PxU64>(info.constraintCount) * MAX_CONSTRAINT_ROWS +
+        info.articulationJointCount;
+    const PxU64 gearCapacity64 =
+        static_cast<PxU64>(info.constraintCount) +
+        info.articulationJointCount;
+    info.d6OutputOffset = d6OutputOffset;
+    info.d6OutputCapacity =
+        d6Capacity64 > PX_MAX_U32 ? PX_MAX_U32
+                                  : static_cast<PxU32>(d6Capacity64);
+    info.gearOutputOffset = gearOutputOffset;
+    info.gearOutputCapacity =
+        gearCapacity64 > PX_MAX_U32 ? PX_MAX_U32
+                                    : static_cast<PxU32>(gearCapacity64);
+    d6OutputOffset =
+        info.d6OutputCapacity > PX_MAX_U32 - d6OutputOffset
+            ? PX_MAX_U32
+            : d6OutputOffset + info.d6OutputCapacity;
+    gearOutputOffset =
+        info.gearOutputCapacity > PX_MAX_U32 - gearOutputOffset
+            ? PX_MAX_U32
+            : gearOutputOffset + info.gearOutputCapacity;
+  }
+
+  // The capacity tables above are parent-owned and immutable for this update.
+  // When their aggregate fits the backing arrays, they form disjoint
+  // island-local output ranges used by the serial preparation pass without
+  // advancing a shared cursor. Keep the compact cursor fallback
+  // fail-closed for pathological overflow/allocator configurations.
+  const bool useFixedPreparationRanges =
+      contactOutputOffset <= maxConstraints &&
+      d6OutputOffset <= totalD6Capacity &&
+      gearOutputOffset <= totalGearCapacity;
+
   AvbdD6JointConstraint *d6Joints =
       reinterpret_cast<AvbdD6JointConstraint *>(allocWithFallback(
           mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
@@ -4560,11 +1810,345 @@ void AvbdDynamicsContext::update(
           mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdGearJointConstraint) * totalGearCapacity, "GearJoints"));
 
+  // Reserve one disjoint map slot per island before any solve task can be
+  // submitted.  A failed reservation is deliberately non-fatal: that island
+  // falls back to the legacy allocator-backed build() below.
+  PxAllocatorCallback &mapAllocator = mAllocatorAdapter;
+  auto releaseMapStorage = [&mapAllocator](AvbdMapStorage &storage) {
+    if (storage.counts)
+      mapAllocator.deallocate(storage.counts);
+    if (storage.offsets)
+      mapAllocator.deallocate(storage.offsets);
+    if (storage.indices)
+      mapAllocator.deallocate(storage.indices);
+    storage.counts = nullptr;
+    storage.offsets = nullptr;
+    storage.indices = nullptr;
+    storage.indexCapacity = 0;
+  };
+  auto clearMapStorage = [](AvbdMapStorage &storage) {
+    storage.counts = nullptr;
+    storage.offsets = nullptr;
+    storage.indices = nullptr;
+    storage.indexCapacity = 0;
+  };
+  auto reserveMapStorage = [&mapAllocator](AvbdMapStorage &storage,
+                                            PxU32 numBodies,
+                                            PxU32 indexCapacity,
+                                            const char *label) {
+    if (numBodies == 0 || indexCapacity == 0 ||
+        numBodies > PX_MAX_U32 / sizeof(PxU32) - 1u)
+      return false;
+    storage.counts = static_cast<PxU32 *>(mapAllocator.allocate(
+        sizeof(PxU32) * numBodies, label, __FILE__, __LINE__));
+    storage.offsets = static_cast<PxU32 *>(mapAllocator.allocate(
+        sizeof(PxU32) * (numBodies + 1u), label, __FILE__, __LINE__));
+    storage.indices = static_cast<PxU32 *>(mapAllocator.allocate(
+        sizeof(PxU32) * indexCapacity, label, __FILE__, __LINE__));
+    if (!storage.counts || !storage.offsets || !storage.indices) {
+      if (storage.counts)
+        mapAllocator.deallocate(storage.counts);
+      if (storage.offsets)
+        mapAllocator.deallocate(storage.offsets);
+      if (storage.indices)
+        mapAllocator.deallocate(storage.indices);
+      storage.counts = nullptr;
+      storage.offsets = nullptr;
+      storage.indices = nullptr;
+      storage.indexCapacity = 0;
+      return false;
+    }
+    storage.indexCapacity = indexCapacity;
+    return true;
+  };
+  for (PxU32 i = 0; i < islandCount; ++i) {
+    AvbdIslandInfo &info = islandInfos[i];
+    if (info.bodyCount > 0 && info.contactOutputCapacity <= PX_MAX_U32 / 2u)
+      reserveMapStorage(info.mapStorage[0], info.bodyCount,
+                        info.contactOutputCapacity * 2u,
+                        "AvbdContactMapStorage");
+    if (info.bodyCount > 0 && info.d6OutputCapacity <= PX_MAX_U32 / 2u)
+      reserveMapStorage(info.mapStorage[1], info.bodyCount,
+                        info.d6OutputCapacity * 2u,
+                        "AvbdD6MapStorage");
+    if (info.bodyCount > 0 && info.gearOutputCapacity <= PX_MAX_U32 / 2u)
+      reserveMapStorage(info.mapStorage[2], info.bodyCount,
+                        info.gearOutputCapacity * 2u,
+                        "AvbdGearMapStorage");
+  }
+
+  // Freeze the narrow-phase input for contact-only rigid islands before any
+  // solve task is submitted. The parent performs only an O(manager/patch)
+  // eligibility pass; row materialization then runs inside the already
+  // existing island tasks, with no extra task edge or global join.
+  AvbdContactPrepSnapshot *deferredContactSnapshots = nullptr;
+  auto islandOwnsCompleteSoftSelection = [&](PxU32 islandIndex) {
+    for (PxU32 selectionIndex = 0; selectionIndex < softSelections.size();
+         ++selectionIndex) {
+      if (softSelections[selectionIndex].islandIndex == islandIndex &&
+          softSelections[selectionIndex].isComplete())
+        return true;
+    }
+    return false;
+  };
+  PxTaskManager *taskManager =
+      mTaskFactory ? mTaskFactory->getTaskManager() : nullptr;
+  // Below this crossover the established parent-prep/worker-solve pipeline is
+  // faster than moving both phases into the same island task.
+  const PxU32 minDeferredContactPrepWorkers = 8;
+  const bool canDeferContactPreparation =
+      !mTaskGraphSerialMode && useFixedPreparationRanges && avbdConstraints &&
+      !mSolver.getConfig().requiresOrderedBackend() && taskManager &&
+      taskManager->getCpuDispatcher() &&
+      taskManager->getCpuDispatcher()->getWorkerCount() >=
+          minDeferredContactPrepWorkers;
+  PxU32 coarseDeferredIslandCount = 0;
+  if (canDeferContactPreparation) {
+    for (PxU32 islandIndex = 0; islandIndex < islandCount; ++islandIndex) {
+      const AvbdIslandInfo &info = islandInfos[islandIndex];
+      if (info.bodyCount > 0 && info.cmCount > 0 &&
+          info.constraintCount == 0 && info.articulationJointCount == 0 &&
+          !info.hasArticulationBodies &&
+          !islandOwnsCompleteSoftSelection(islandIndex))
+        ++coarseDeferredIslandCount;
+    }
+  }
+
+  if (coarseDeferredIslandCount >= 2 &&
+      mContactList.size() <=
+          PX_MAX_U32 / sizeof(AvbdContactPrepSnapshot)) {
+    deferredContactSnapshots =
+        reinterpret_cast<AvbdContactPrepSnapshot *>(allocContactPrepStorage(
+            sizeof(AvbdContactPrepSnapshot) * mContactList.size(),
+            "AvbdDeferredContactPrepSnapshots"));
+  }
+  if (deferredContactSnapshots) {
+    for (PxU32 snapshotIndex = 0; snapshotIndex < mContactList.size();
+         ++snapshotIndex)
+      PX_PLACEMENT_NEW(&deferredContactSnapshots[snapshotIndex],
+                       AvbdContactPrepSnapshot)();
+
+    const PxU16 unsupportedFlags = static_cast<PxU16>(
+        PxcNpWorkUnitFlag::eOUTPUT_CONTACTS |
+        PxcNpWorkUnitFlag::eFORCE_THRESHOLD |
+        PxcNpWorkUnitFlag::eMODIFIABLE_CONTACT |
+        PxcNpWorkUnitFlag::eARTICULATION_BODY0 |
+        PxcNpWorkUnitFlag::eARTICULATION_BODY1 |
+        PxcNpWorkUnitFlag::eSOFT_BODY |
+        PxcNpWorkUnitFlag::eHAS_KINEMATIC_ACTOR |
+        PxcNpWorkUnitFlag::eDISABLE_RESPONSE |
+        PxcNpWorkUnitFlag::eDETECT_CCD_CONTACTS);
+    PxU32 exactDeferredIslandCount = 0;
+
+    for (PxU32 islandIndex = 0; islandIndex < islandCount; ++islandIndex) {
+      AvbdIslandInfo &info = islandInfos[islandIndex];
+      if (info.bodyCount == 0 || info.cmCount == 0 ||
+          info.constraintCount != 0 || info.articulationJointCount != 0 ||
+          info.hasArticulationBodies ||
+          islandOwnsCompleteSoftSelection(islandIndex))
+        continue;
+
+      bool eligible = true;
+      PxU32 capturedRows = 0;
+      const PxU64 bodyEnd =
+          static_cast<PxU64>(info.bodyStart) + info.bodyCount;
+      for (PxU32 contactOrder = 0;
+           eligible && contactOrder < info.cmCount; ++contactOrder) {
+        const PxU32 snapshotIndex = info.cmStart + contactOrder;
+        const PxsIndexedContactManager &icm = mContactList[snapshotIndex];
+        PxsContactManager *cm = icm.contactManager;
+        if (!cm ||
+            (icm.indexType0 != PxsIndexedInteraction::eBODY &&
+             icm.indexType0 != PxsIndexedInteraction::eWORLD) ||
+            (icm.indexType1 != PxsIndexedInteraction::eBODY &&
+             icm.indexType1 != PxsIndexedInteraction::eWORLD)) {
+          eligible = false;
+          break;
+        }
+
+        const bool body0 = icm.indexType0 == PxsIndexedInteraction::eBODY;
+        const bool body1 = icm.indexType1 == PxsIndexedInteraction::eBODY;
+        const PxU64 globalBody0 = body0 ? icm.solverBody0 : PX_MAX_U32;
+        const PxU64 globalBody1 = body1 ? icm.solverBody1 : PX_MAX_U32;
+        if ((!body0 && !body1) ||
+            (body0 && (globalBody0 < info.bodyStart ||
+                       globalBody0 >= bodyEnd)) ||
+            (body1 && (globalBody1 < info.bodyStart ||
+                       globalBody1 >= bodyEnd))) {
+          eligible = false;
+          break;
+        }
+
+        const PxcNpWorkUnit &workUnit = cm->getWorkUnit();
+        const PxU16 requiredFlags = static_cast<PxU16>(
+            PxcNpWorkUnitFlag::eOUTPUT_CONSTRAINTS |
+            PxcNpWorkUnitFlag::eDETECT_DISCRETE_CONTACT);
+        if ((workUnit.mFlags & unsupportedFlags) != 0 ||
+            (workUnit.mFlags & requiredFlags) != requiredFlags ||
+            workUnit.mCCDContacts) {
+          eligible = false;
+          break;
+        }
+        const PxsContactManagerOutput &output =
+            mOutputIterator.getContactManagerOutput(workUnit.mNpIndex);
+        // Snapshot parsing deliberately has no mutable narrow-phase output.
+        // Require the direct path when an otherwise unreported stream still
+        // carries normal/friction writeback storage, so even internal output
+        // buffers retain byte-for-byte legacy ownership.
+        if (output.contactForces || output.frictionPatches ||
+            !output.contactPatches || !output.contactPoints ||
+            output.nbContacts == 0 || output.nbPatches == 0 ||
+            output.nbContacts > info.contactOutputCapacity - capturedRows) {
+          eligible = false;
+          break;
+        }
+
+        const PxContactStreamIterator stream(
+            output.contactPatches, output.contactPoints,
+            output.getInternalFaceIndice(), output.nbPatches,
+            output.nbContacts);
+        if (stream.forceNoResponse ||
+            stream.mStreamFormat != PxContactStreamIterator::eSIMPLE_STREAM ||
+            stream.contactPointSize != sizeof(PxContact)) {
+          eligible = false;
+          break;
+        }
+
+        PxU32 runningContact = 0;
+        for (PxU32 patchIndex = 0;
+             eligible && patchIndex < output.nbPatches; ++patchIndex) {
+          const PxContactPatch *patch =
+              reinterpret_cast<const PxContactPatch *>(
+                  output.contactPatches +
+                  patchIndex * sizeof(PxContactPatch));
+          const PxU64 patchEnd = static_cast<PxU64>(patch->startContactIndex) +
+                                 patch->nbContacts;
+          if (patch->nbContacts == 0 ||
+              patch->startContactIndex != runningContact ||
+              patchEnd > output.nbContacts) {
+            eligible = false;
+            break;
+          }
+          runningContact = static_cast<PxU32>(patchEnd);
+        }
+        if (!eligible || runningContact != output.nbContacts) {
+          eligible = false;
+          break;
+        }
+
+        AvbdContactPrepSnapshot &snapshot =
+            deferredContactSnapshots[snapshotIndex];
+        snapshot.contactManagerIndex = cm->getIndex();
+        snapshot.npIndex = workUnit.mNpIndex;
+        snapshot.solverBody0 = icm.solverBody0;
+        snapshot.solverBody1 = icm.solverBody1;
+        snapshot.indexType0 = icm.indexType0;
+        snapshot.indexType1 = icm.indexType1;
+        snapshot.contactManagerKey = makeAvbdContactManagerKey(
+            cm, body0 ? static_cast<PxU32>(globalBody0) : PX_MAX_U32,
+            body1 ? static_cast<PxU32>(globalBody1) : PX_MAX_U32);
+        snapshot.restDistance = cm->getRestDistance();
+        if (isDeformableStaticAnchorContact(body0 != body1,
+                                            snapshot.restDistance)) {
+          eligible = false;
+          break;
+        }
+
+        if (snapshot.contactManagerIndex <
+            mContactManagerStateCache.size()) {
+          const CachedContactManagerState &state =
+              mContactManagerStateCache[snapshot.contactManagerIndex];
+          if (state.key == snapshot.contactManagerKey &&
+              state.frameStamp != 0) {
+            const PxU16 age =
+                static_cast<PxU16>(frameStamp - state.frameStamp);
+            snapshot.contactManagerAge =
+                age >= 255u ? PxU8(255) : PxU8(age);
+          }
+        }
+        if (mEnableLambdaWarmStart) {
+          const PxU64 cacheBase =
+              static_cast<PxU64>(snapshot.contactManagerIndex) *
+              CONTACT_CACHE_SLOTS_PER_CM;
+          const PxU64 cacheEnd = cacheBase + CONTACT_CACHE_SLOTS_PER_CM;
+          if (cacheEnd <= mLambdaCache.size())
+            snapshot.lambdaCacheDirect =
+                &mLambdaCache[static_cast<PxU32>(cacheBase)];
+        }
+        snapshot.contactPatches = output.contactPatches;
+        snapshot.contactPoints = output.contactPoints;
+        snapshot.nbPatches = output.nbPatches;
+        snapshot.nbContacts = output.nbContacts;
+        snapshot.contactPointSize =
+            static_cast<PxU16>(stream.contactPointSize);
+        snapshot.expectedResponseRows = output.nbContacts;
+        snapshot.eligible = 1;
+        capturedRows += output.nbContacts;
+      }
+
+      if (eligible && capturedRows == info.contactOutputCapacity) {
+        info.deferredContactPrepEligible = true;
+        ++exactDeferredIslandCount;
+      }
+    }
+
+    // A single island would merely move serial work to another thread while
+    // retaining all capture cost. Require actual cross-island parallelism.
+    if (exactDeferredIslandCount < 2) {
+      for (PxU32 islandIndex = 0; islandIndex < islandCount; ++islandIndex)
+        islandInfos[islandIndex].deferredContactPrepEligible = false;
+    }
+  }
+
+  auto buildContactMap = [&](AvbdBodyConstraintMap &map,
+                             AvbdMapStorage &storage,
+                             const AvbdContactConstraint *constraints,
+                             PxU32 numBodies, PxU32 numConstraints) {
+    if (storage.counts && storage.offsets && storage.indices &&
+        map.buildInPlace(numBodies, constraints, numConstraints,
+                         storage.counts, storage.offsets, storage.indices,
+                         storage.indexCapacity)) {
+      clearMapStorage(storage);
+      return;
+    }
+    releaseMapStorage(storage);
+    map.build(numBodies, constraints, numConstraints, mapAllocator);
+  };
+  auto buildD6Map = [&](AvbdBodyConstraintMap &map,
+                        AvbdMapStorage &storage,
+                        const AvbdD6JointConstraint *constraints,
+                        PxU32 numBodies, PxU32 numConstraints) {
+    if (storage.counts && storage.offsets && storage.indices &&
+        map.buildInPlace(numBodies, constraints, numConstraints,
+                         storage.counts, storage.offsets, storage.indices,
+                         storage.indexCapacity)) {
+      clearMapStorage(storage);
+      return;
+    }
+    releaseMapStorage(storage);
+    map.build(numBodies, constraints, numConstraints, mapAllocator);
+  };
+  auto buildGearMap = [&](AvbdBodyConstraintMap &map,
+                          AvbdMapStorage &storage,
+                          const AvbdGearJointConstraint *constraints,
+                          PxU32 numBodies, PxU32 numConstraints) {
+    if (storage.counts && storage.offsets && storage.indices &&
+        map.buildInPlace(numBodies, constraints, numConstraints,
+                         storage.counts, storage.offsets, storage.indices,
+                         storage.indexCapacity)) {
+      clearMapStorage(storage);
+      return;
+    }
+    releaseMapStorage(storage);
+    map.build(numBodies, constraints, numConstraints, mapAllocator);
+  };
+
   // 6. Create Task Chain
   AvbdWriteBackTask *wbTask = mTaskFactory->createWriteBackTask(
       *this, avbdBodies, rigidBodies, staticTouchCounts, bodyIndex, dt,
       mEnableStabilization, isSleepingDisabled(), articulationForBody,
-      linkIndexForBody);
+      linkIndexForBody, contactOutputTargets, contactOutputResults,
+      maxConstraints);
   wbTask->setContinuation(continuation);
 
   AvbdCoordinatorTask *coordTask =
@@ -4575,23 +2159,80 @@ void AvbdDynamicsContext::update(
   PxU32 currD6Idx = 0;
   PxU32 currGearIdx = 0;
   PxU32 tasksSpawned = 0;
-
-  // Track color batch allocations for cleanup
-  PxArray<AvbdColorBatch *> colorBatchAllocations;
-
   // 7. Iterate Islands
   for (PxU32 i = 0; i < islandCount; ++i) {
     AvbdIslandInfo &info = islandInfos[i];
+    const PxU32 d6StorageOffset =
+        useFixedPreparationRanges ? info.d6OutputOffset : currD6Idx;
+    const PxU32 gearStorageOffset =
+        useFixedPreparationRanges ? info.gearOutputOffset : currGearIdx;
 
     // Prepare contact constraints
     PxU32 numConstraints = 0;
-    if (avbdConstraints && info.cmCount > 0) {
-      numConstraints =
-          prepareAvbdContacts(islandSim, dt,
-                              &avbdBodies[info.bodyStart], info.bodyCount,
-                              avbdConstraints + currentConstraintIdx,
-                              maxConstraints - currentConstraintIdx,
-                              info.cmStart, info.cmCount, info.bodyStart);
+    const bool deferContactPrep =
+        info.deferredContactPrepEligible && deferredContactSnapshots;
+    AvbdContactPrepSnapshot *snapshotsForIsland = nullptr;
+    if (mTaskGraphSerialMode && contactSnapshots && info.cmCount > 0) {
+      bool eligible = true;
+      for (PxU32 contactOrder = 0; contactOrder < info.cmCount;
+           ++contactOrder) {
+        if (!contactSnapshots[info.cmStart + contactOrder].eligible) {
+          eligible = false;
+          break;
+        }
+      }
+      if (eligible)
+        snapshotsForIsland = contactSnapshots;
+    }
+    const PxU32 contactStorageOffset =
+        useFixedPreparationRanges ? info.contactOutputOffset
+                                  : currentConstraintIdx;
+
+    bool ownsCompleteSoftSelection = false;
+    for (PxU32 selectionIndex = 0;
+         selectionIndex < softSelections.size(); ++selectionIndex) {
+      if (softSelections[selectionIndex].islandIndex == i &&
+          softSelections[selectionIndex].isComplete()) {
+        ownsCompleteSoftSelection = true;
+        break;
+      }
+    }
+    if (!deferContactPrep && avbdConstraints && info.cmCount > 0) {
+      numConstraints = prepareAvbdContacts(
+          islandSim, dt, &avbdBodies[info.bodyStart], info.bodyCount,
+          avbdConstraints + contactStorageOffset,
+          info.contactOutputCapacity, info.cmStart, info.cmCount,
+          info.bodyStart, snapshotsForIsland, contactOutputTokens,
+          contactStorageOffset);
+      if (snapshotsForIsland) {
+        bool rowCardinalityMatch = true;
+        for (PxU32 contactOrder = 0; contactOrder < info.cmCount;
+             ++contactOrder) {
+          const AvbdContactPrepSnapshot &snapshot =
+              contactSnapshots[info.cmStart + contactOrder];
+          if (snapshot.expectedResponseRows != snapshot.emittedResponseRows) {
+            rowCardinalityMatch = false;
+            break;
+          }
+        }
+        if (!rowCardinalityMatch) {
+          // The immutable payload did not satisfy the row contract. Rebuild
+          // this island through the direct context path instead of allowing a
+          // partial snapshot result to reach the solver.
+          snapshotsForIsland = nullptr;
+          numConstraints = prepareAvbdContacts(
+              islandSim, dt, &avbdBodies[info.bodyStart], info.bodyCount,
+              avbdConstraints + contactStorageOffset,
+              info.contactOutputCapacity, info.cmStart, info.cmCount,
+              info.bodyStart, nullptr, nullptr, 0);
+        } else {
+          // Persistent contact-manager state is a parent-owned commit. The
+          // snapshot parser only emits a token, so no worker can retain or
+          // mutate the context cache slot.
+          commitContactPrepSnapshots(contactSnapshots, info.cmStart,
+                                     info.cmCount, frameStamp);
+        }
+      }
     }
 
     PxU32 numD6 = 0;
@@ -4600,10 +2241,10 @@ void AvbdDynamicsContext::update(
     // Prepare external joint constraints
     if (info.constraintCount > 0) {
       prepareAvbdConstraints(
-          islandSim, dt, &avbdBodies[info.bodyStart], info.bodyCount,
-          info.bodyStart, d6Joints + currD6Idx, numD6,
-          totalD6Capacity - currD6Idx, gearJoints + currGearIdx, numGear,
-          totalGearCapacity - currGearIdx, i, bodyRemapTable,
+           islandSim, dt, &avbdBodies[info.bodyStart], info.bodyCount,
+           info.bodyStart, d6Joints + d6StorageOffset, numD6,
+           info.d6OutputCapacity, gearJoints + gearStorageOffset, numGear,
+           info.gearOutputCapacity, i, bodyRemapTable,
           articulationFirstLinkIndex, articulationByActiveIdx,
           numArticulations);
     }
@@ -4643,13 +2284,15 @@ void AvbdDynamicsContext::update(
 
               // Prepare articulation internal joints as unified D6
               PxU32 artD6 = 0, artGear = 0;
-              prepareArticulationInternalJoints(
-                  *this, articulation, localFirstBodyIdx,
-                  d6Joints + currD6Idx + numD6, artD6,
-                  totalD6Capacity - currD6Idx - numD6,
-                  gearJoints + currGearIdx + numGear, artGear,
-                  totalGearCapacity - currGearIdx - numGear,
-                  dt);
+               prepareArticulationInternalJoints(
+                   *this, articulation, localFirstBodyIdx,
+                   d6Joints + d6StorageOffset + numD6, artD6,
+                   info.d6OutputCapacity - PxMin(
+                       info.d6OutputCapacity, numD6),
+                   gearJoints + gearStorageOffset + numGear, artGear,
+                   info.gearOutputCapacity - PxMin(
+                       info.gearOutputCapacity, numGear),
+                   dt);
 
               numD6 += artD6;
               numGear += artGear;
@@ -4682,6 +2325,7 @@ void AvbdDynamicsContext::update(
     batch.bodies =
         info.bodyCount > 0 ? &avbdBodies[info.bodyStart] : nullptr;
     batch.numBodies = info.bodyCount;
+    batch.hasArticulationBodies = info.hasArticulationBodies;
     batch.articulationForBody =
         info.bodyCount > 0 && articulationForBody
             ? &articulationForBody[info.bodyStart]
@@ -4690,13 +2334,32 @@ void AvbdDynamicsContext::update(
         info.bodyCount > 0 && linkIndexForBody
             ? &linkIndexForBody[info.bodyStart]
             : nullptr;
-    batch.constraints =
-        avbdConstraints ? &avbdConstraints[currentConstraintIdx] : nullptr;
+    batch.constraints = avbdConstraints
+                            ? &avbdConstraints[contactStorageOffset]
+                            : nullptr;
     batch.numConstraints = numConstraints;
+    batch.contactOutputTokens =
+        snapshotsForIsland && contactOutputTokens
+            ? &contactOutputTokens[contactStorageOffset]
+            : nullptr;
+    batch.contactOutputResults =
+        batch.contactOutputTokens ? contactOutputResults : nullptr;
+    if (deferContactPrep) {
+      batch.deferredContactPrep.snapshots = deferredContactSnapshots;
+      batch.deferredContactPrep.lengthScale = getLengthScale();
+      batch.deferredContactPrep.startContactIdx = info.cmStart;
+      batch.deferredContactPrep.numContactManagers = info.cmCount;
+      batch.deferredContactPrep.bodyOffset = info.bodyStart;
+      batch.deferredContactPrep.constraintCapacity =
+          info.contactOutputCapacity;
+      batch.deferredContactPrep.frameStamp = frameStamp;
+      batch.deferredContactPrep.enableLambdaWarmStart =
+          mEnableLambdaWarmStart;
+    }
 
-    batch.d6Joints = &d6Joints[currD6Idx];
+    batch.d6Joints = &d6Joints[d6StorageOffset];
     batch.numD6 = numD6;
-    batch.gearJoints = &gearJoints[currGearIdx];
+    batch.gearJoints = &gearJoints[gearStorageOffset];
     batch.numGear = numGear;
 
     batch.softParticles =
@@ -4710,87 +2373,52 @@ void AvbdDynamicsContext::update(
         ownsSoftSelection ? softSelection->contacts : nullptr;
     batch.numSoftContacts =
         ownsSoftSelection ? softSelection->numContacts : 0;
+    batch.softExecutionPlan = ownsSoftSelection
+                                  ? softSelection->executionPlan
+                                  : AvbdSoftIslandExecutionPlan();
 
     batch.islandStart = i;
     batch.islandEnd = i + 1;
     batch.colorBatches = nullptr;
     batch.numColors = 0;
 
-    PxU32 contactOnlyIters = 0;
-    if (numD6 == 0 && numGear == 0 &&
-        (batch.numConstraints > 0 || batch.numSoftContacts > 0))
-      contactOnlyIters = AvbdConstants::AVBD_MIN_INNER_ITERS_BODY_VS_STATIC;
     const PxU32 softIterations =
         ownsSoftSelection ? softSelection->iterationOverride : 0;
     batch.iterationOverride =
-        PxMax(PxMax(islandArticIterations, contactOnlyIters),
-              softIterations);
+        PxMax(islandArticIterations, softIterations);
 
-    // Build constraint-to-body mappings for O(1) lookup in solver
-    // This eliminates O(N^2) complexity in the inner loop
-    if (batch.numBodies > 0) {
-      PxAllocatorCallback &allocator = mAllocatorAdapter;
-      if (batch.numConstraints > 0 && batch.constraints) {
-        batch.contactMap.build(batch.numBodies, batch.constraints,
-                               batch.numConstraints, allocator);
-      }
-      if (batch.numD6 > 0 && batch.d6Joints) {
-        batch.d6Map.build(batch.numBodies, batch.d6Joints, batch.numD6,
-                          allocator);
-      }
-      if (batch.numGear > 0 && batch.gearJoints) {
-        batch.gearMap.build(batch.numBodies, batch.gearJoints, batch.numGear,
-                            allocator);
+    // Build constraint-to-body mappings for the serial path.  Parallel solve
+    // tasks consume their disjoint preallocated map slots on workers instead,
+    // removing this preparation work from the update thread.
+    if (mTaskGraphSerialMode) {
+      if (batch.numBodies > 0) {
+        if (batch.numConstraints > 0 && batch.constraints) {
+          buildContactMap(batch.contactMap, info.mapStorage[0],
+                          batch.constraints, batch.numBodies,
+                          batch.numConstraints);
+        } else
+          releaseMapStorage(info.mapStorage[0]);
+        if (batch.numD6 > 0 && batch.d6Joints) {
+          buildD6Map(batch.d6Map, info.mapStorage[1], batch.d6Joints,
+                     batch.numBodies, batch.numD6);
+        } else
+          releaseMapStorage(info.mapStorage[1]);
+        if (batch.numGear > 0 && batch.gearJoints) {
+          buildGearMap(batch.gearMap, info.mapStorage[2], batch.gearJoints,
+                       batch.numBodies, batch.numGear);
+        } else
+          releaseMapStorage(info.mapStorage[2]);
+      } else {
+        releaseMapStorage(info.mapStorage[0]);
+        releaseMapStorage(info.mapStorage[1]);
+        releaseMapStorage(info.mapStorage[2]);
       }
     }
 
-    // Constraint coloring for large islands
-    const PxU32 largeIslandThreshold = mSolver.getConfig().largeIslandThreshold;
-    if (mSolver.getConfig().enableParallelization &&
-        numConstraints >= largeIslandThreshold) {
-      if (!mConstraintColoring.isInitialized()) {
-        mConstraintColoring.initialize(numConstraints, mScratchAdapter);
-      }
-
-      PxU32 numColors = mConstraintColoring.colorConstraints(
-          batch.constraints, numConstraints, batch.bodies, batch.numBodies);
-
-      if (numColors > 0) {
-        batch.colorBatches = static_cast<AvbdColorBatch *>(allocWithFallback(
-            mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
-            sizeof(AvbdColorBatch) * numColors, "ColorBatches"));
-
-        // Skip coloring if allocation failed
-        if (!batch.colorBatches) {
-          batch.numColors = 0;
-        } else {
-          batch.numColors = numColors;
-
-          for (PxU32 c = 0; c < numColors; ++c) {
-            const AvbdColorBatch &src = mConstraintColoring.getBatch(c);
-            AvbdColorBatch &dst = batch.colorBatches[c];
-
-            dst.numConstraints = src.numConstraints;
-            dst.capacity = src.numConstraints;
-
-            if (src.numConstraints > 0) {
-              dst.constraintIndices = static_cast<PxU32 *>(allocWithFallback(
-                  mScratchAllocator, mAllocatorAdapter,
-                  mHeapFallbackAllocations, sizeof(PxU32) * src.numConstraints,
-                  "ConstraintIndices"));
-
-              if (dst.constraintIndices) {
-                memcpy(dst.constraintIndices, src.constraintIndices,
-                       sizeof(PxU32) * src.numConstraints);
-              } else {
-                dst.numConstraints = 0;
-                dst.capacity = 0;
-              }
-            } else {
-              dst.constraintIndices = nullptr;
-            }
-          }
-        }
+    if (!mTaskGraphSerialMode) {
+      for (PxU32 mapIndex = 0; mapIndex < 3; ++mapIndex) {
+        batch.mapStorage[mapIndex] = info.mapStorage[mapIndex];
+        clearMapStorage(info.mapStorage[mapIndex]);
       }
     }
 
@@ -4807,9 +2435,7 @@ void AvbdDynamicsContext::update(
       batch.bodies[j].nodeIndex = j;
     }
 
-    // Spawn Solve Task
-    if (AVBD_DEBUG_SEQUENTIAL || mIterationDiagnosticsSequential) {
-      const bool hasJoints = (batch.numD6 > 0 || batch.numGear > 0);
+    if (mTaskGraphSerialMode) {
       AvbdSolverStats stats = {};
       // Single island entry: classification + shared post-AL inside solveIsland.
       mSolver.solveIsland(
@@ -4820,22 +2446,21 @@ void AvbdDynamicsContext::update(
           batch.iterationOverride, batch.softParticles,
           batch.numSoftParticles, batch.softBodies, batch.numSoftBodies,
           batch.softContacts, batch.numSoftContacts,
+          &batch.softExecutionPlan,
           batch.articulationForBody, batch.linkIndexForBody, stats);
-
-      const PxU32 baseIterations =
-          batch.iterationOverride > 0 ? batch.iterationOverride
-                                      : mSolver.getConfig().innerIterations;
-      const PxU32 requestedIterations = hasJoints
-          ? PxMax(baseIterations, PxU32(8))
-          : baseIterations;
-      recordIterationDiagnostics(requestedIterations, stats,
-                     hasJoints, batch.d6Joints, batch.numD6);
 
       // Write back lambda cache inline
       writeLambdaToCache(*this, batch.constraints, batch.numConstraints,
                          batch.numBodies);
-      writeContactImpulseToOutput(batch.constraints, batch.numConstraints,
-                                  batch.numBodies, dt);
+      if (batch.contactOutputTokens && batch.contactOutputResults) {
+        writeContactImpulseToOutputTokens(
+            batch.constraints, batch.contactOutputTokens,
+            batch.contactOutputResults, batch.numConstraints, batch.numBodies,
+            dt);
+      } else {
+        writeContactImpulseToOutput(batch.constraints, batch.numConstraints,
+                                    batch.numBodies, dt);
+      }
       writeJointLambdaToCache(*this, batch.d6Joints, batch.numD6);
       writeJointConstraintWriteback(*this, batch.d6Joints, batch.numD6, dt);
       // Release constraint maps
@@ -4844,8 +2469,45 @@ void AvbdDynamicsContext::update(
       batch.d6Map.release(alloc);
       batch.gearMap.release(alloc);
     } else {
+      // Reservation is serial and precedes task submission.  It must also
+      // mirror the coarse CPU-color admission below: a wildcard capture must
+      // not claim the one global sink for a small/joint/ordered island which
+      // can never visit submitRigidColor().  The 512-body threshold mirrors
+      // AvbdRigidExecutionPolicy::eMIN_PARALLEL_ISLAND_BODIES in
+      // DyAvbdTasks.cpp; that policy is task-local, whereas reservation has
+      // to happen here before the task exists.
+      const AvbdSolverConfig &kernelLabConfig = mSolver.getConfig();
+      AvbdRigidGpuWaveBackend *kernelLabGpuBackend =
+          getRigidGpuWaveBackend();
+      // Deferred contact preparation materializes its rows inside the island
+      // task.  Its frozen capacity is nevertheless known on this serial
+      // thread, and is the only safe bound available for pre-reserving the
+      // capture arrays before workers begin.
+      const PxU32 kernelLabContactCapacity = batch.numConstraints > 0
+          ? batch.numConstraints
+          : batch.deferredContactPrep.constraintCapacity;
+      const bool kernelLabCpuCandidate =
+          !mTaskGraphSerialMode && batch.numBodies >= 512u &&
+          kernelLabContactCapacity > 0 && !batch.hasArticulationBodies &&
+          batch.numD6 == 0 && batch.numGear == 0 &&
+          batch.numSoftParticles == 0 && batch.numSoftBodies == 0 &&
+          batch.numSoftContacts == 0 && mTaskManager &&
+          mTaskManager->getCpuDispatcher() &&
+          mTaskManager->getCpuDispatcher()->getWorkerCount() >= 2 &&
+          kernelLabConfig.enableParallelization &&
+          kernelLabConfig.enableLocal6x6Solve &&
+          !kernelLabConfig.requiresOrderedBackend() &&
+          !(kernelLabGpuBackend && kernelLabGpuBackend->isAvailable());
+      // The selected task later copies into this fixed-capacity sink at its
+      // color barrier; no allocation or file I/O is permitted in the solve
+      // range itself.
+      const PxU32 kernelLabCaptureTicket = kernelLabCpuCandidate
+          ? reserveKernelLabCapture(batch.islandStart, batch.numBodies,
+                                    kernelLabContactCapacity)
+          : AvbdKernelLabCapture::eINVALID_TICKET;
       AvbdSolveIslandTask *solveTask =
-          mTaskFactory->createSolveTask(*this, mSolver, batch, dt, gravity);
+          mTaskFactory->createSolveTask(
+              *this, mSolver, batch, dt, gravity, kernelLabCaptureTicket);
       solveTask->setContinuation(coordTask);
       solveTask->removeReference();
     }
@@ -4864,6 +2526,25 @@ void AvbdDynamicsContext::update(
   // The scratch allocator uses a stack-based approach and will be reset via
   // setBlock() at the beginning of the next frame, which handles both
   // scratch memory and any heap fallback allocations.
+}
+
+void AvbdDynamicsContext::commitContactPrepSnapshots(
+    AvbdContactPrepSnapshot *snapshots, PxU32 startContactIdx,
+    PxU32 numContacts, PxU16 frameStamp) {
+  if (!snapshots)
+    return;
+  for (PxU32 contactOrder = 0; contactOrder < numContacts; ++contactOrder) {
+    AvbdContactPrepSnapshot &snapshot = snapshots[startContactIdx + contactOrder];
+    if (!snapshot.managerStateCommit)
+      continue;
+    snapshot.managerStateCommit = 0;
+    if (snapshot.contactManagerIndex >= mContactManagerStateCache.size())
+      continue;
+    CachedContactManagerState &state =
+        mContactManagerStateCache[snapshot.contactManagerIndex];
+    state.key = snapshot.contactManagerKey;
+    state.frameStamp = frameStamp;
+  }
 }
 
 //=============================================================================
@@ -5876,6 +3557,10 @@ void AvbdDynamicsContext::prepareContacts(const IG::IslandSim &islandSim) {
 }
 
 void AvbdDynamicsContext::mergeResults() {
+  // The opt-in kernel-lab capture only writes after every task has joined.
+  // Its worker-side hook has already deep-copied the selected prepared range.
+  flushKernelLabCapture();
+
   // Clean up any heap fallback allocations from this frame
   // No mutex needed since mergeResults() is called from a single thread
   // context
@@ -5900,11 +3585,13 @@ Dy::Context *Dy::createAVBDDynamicsContext(
     Cm::VirtualAllocatorCallback &allocator,
     PxsMaterialManager *materialManager, IG::SimpleIslandManager &islandManager,
     PxU64 contextID, PxReal maxBiasCoefficient, PxReal lengthScale,
-    PxSceneFlags sceneFlags) {
+    PxU32 avbdIterations, PxU32 avbdJointIterationOverride,
+    bool avbdEnableEarlyStop, PxSceneFlags sceneFlags) {
   return PX_PLACEMENT_NEW(
       PX_ALLOC(sizeof(Dy::AvbdDynamicsContext), "AvbdDynamicsContext"),
       Dy::AvbdDynamicsContext)(
       memBlockPool, scratchAllocator, taskPool, simStats, taskManager,
       allocator, materialManager, islandManager, contextID, maxBiasCoefficient,
-      lengthScale, sceneFlags);
+      lengthScale, avbdIterations, avbdJointIterationOverride,
+      avbdEnableEarlyStop, sceneFlags);
 }

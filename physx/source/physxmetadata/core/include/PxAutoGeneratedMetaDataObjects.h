@@ -3316,6 +3316,9 @@ template<> struct PxEnumTraits< physx::PxBVHBuildStrategy::Enum > { PxEnumTraits
 		PxSceneLimits Limits;
 		PxFrictionType::Enum FrictionType;
 		PxSolverType::Enum SolverType;
+		PxU32 AvbdIterations;
+		PxU32 AvbdJointIterationOverride;
+		_Bool AvbdEnableEarlyStop;
 		PxReal BounceThresholdVelocity;
 		PxReal FrictionOffsetThreshold;
 		PxReal FrictionCorrelationDistance;
@@ -3356,6 +3359,9 @@ template<> struct PxEnumTraits< physx::PxBVHBuildStrategy::Enum > { PxEnumTraits
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, Limits, PxSceneDescGeneratedValues)
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, FrictionType, PxSceneDescGeneratedValues)
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, SolverType, PxSceneDescGeneratedValues)
+	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, AvbdIterations, PxSceneDescGeneratedValues)
+	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, AvbdJointIterationOverride, PxSceneDescGeneratedValues)
+	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, AvbdEnableEarlyStop, PxSceneDescGeneratedValues)
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, BounceThresholdVelocity, PxSceneDescGeneratedValues)
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, FrictionOffsetThreshold, PxSceneDescGeneratedValues)
 	DEFINE_PROPERTY_TO_VALUE_STRUCT_MAP( PxSceneDesc, FrictionCorrelationDistance, PxSceneDescGeneratedValues)
@@ -3399,6 +3405,9 @@ template<> struct PxEnumTraits< physx::PxBVHBuildStrategy::Enum > { PxEnumTraits
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_Limits, PxSceneDesc, PxSceneLimits, PxSceneLimits > Limits;
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_FrictionType, PxSceneDesc, PxFrictionType::Enum, PxFrictionType::Enum > FrictionType;
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_SolverType, PxSceneDesc, PxSolverType::Enum, PxSolverType::Enum > SolverType;
+		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_AvbdIterations, PxSceneDesc, PxU32, PxU32 > AvbdIterations;
+		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_AvbdJointIterationOverride, PxSceneDesc, PxU32, PxU32 > AvbdJointIterationOverride;
+		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_AvbdEnableEarlyStop, PxSceneDesc, _Bool, _Bool > AvbdEnableEarlyStop;
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_BounceThresholdVelocity, PxSceneDesc, PxReal, PxReal > BounceThresholdVelocity;
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_FrictionOffsetThreshold, PxSceneDesc, PxReal, PxReal > FrictionOffsetThreshold;
 		PxPropertyInfo<PX_PROPERTY_INFO_NAME::PxSceneDesc_FrictionCorrelationDistance, PxSceneDesc, PxReal, PxReal > FrictionCorrelationDistance;
@@ -3444,7 +3453,7 @@ template<> struct PxEnumTraits< physx::PxBVHBuildStrategy::Enum > { PxEnumTraits
 			inStartIndex = PxSceneQueryDescGeneratedInfo::visitInstanceProperties( inOperator, inStartIndex );
 			return inStartIndex;
 		}
-		static PxU32 instancePropertyCount() { return 39; }
+		static PxU32 instancePropertyCount() { return 42; }
 		static PxU32 totalPropertyCount() { return instancePropertyCount()
 				+ PxSceneQueryDescGeneratedInfo::totalPropertyCount(); }
 		template<typename TOperator>
@@ -3468,30 +3477,33 @@ template<> struct PxEnumTraits< physx::PxBVHBuildStrategy::Enum > { PxEnumTraits
 			inOperator( Limits, inStartIndex + 13 );; 
 			inOperator( FrictionType, inStartIndex + 14 );; 
 			inOperator( SolverType, inStartIndex + 15 );; 
-			inOperator( BounceThresholdVelocity, inStartIndex + 16 );; 
-			inOperator( FrictionOffsetThreshold, inStartIndex + 17 );; 
-			inOperator( FrictionCorrelationDistance, inStartIndex + 18 );; 
-			inOperator( Flags, inStartIndex + 19 );; 
-			inOperator( CpuDispatcher, inStartIndex + 20 );; 
-			inOperator( CudaContextManager, inStartIndex + 21 );; 
-			inOperator( UserData, inStartIndex + 22 );; 
-			inOperator( SolverBatchSize, inStartIndex + 23 );; 
-			inOperator( SolverArticulationBatchSize, inStartIndex + 24 );; 
-			inOperator( NbContactDataBlocks, inStartIndex + 25 );; 
-			inOperator( MaxNbContactDataBlocks, inStartIndex + 26 );; 
-			inOperator( MaxBiasCoefficient, inStartIndex + 27 );; 
-			inOperator( ContactReportStreamBufferSize, inStartIndex + 28 );; 
-			inOperator( CcdMaxPasses, inStartIndex + 29 );; 
-			inOperator( CcdThreshold, inStartIndex + 30 );; 
-			inOperator( CcdMaxSeparation, inStartIndex + 31 );; 
-			inOperator( WakeCounterResetValue, inStartIndex + 32 );; 
-			inOperator( SanityBounds, inStartIndex + 33 );; 
-			inOperator( GpuDynamicsConfig, inStartIndex + 34 );; 
-			inOperator( GpuMaxNumPartitions, inStartIndex + 35 );; 
-			inOperator( GpuMaxNumStaticPartitions, inStartIndex + 36 );; 
-			inOperator( GpuComputeVersion, inStartIndex + 37 );; 
-			inOperator( ContactPairSlabSize, inStartIndex + 38 );; 
-			return 39 + inStartIndex;
+			inOperator( AvbdIterations, inStartIndex + 16 );;
+			inOperator( AvbdJointIterationOverride, inStartIndex + 17 );;
+			inOperator( AvbdEnableEarlyStop, inStartIndex + 18 );;
+			inOperator( BounceThresholdVelocity, inStartIndex + 19 );;
+			inOperator( FrictionOffsetThreshold, inStartIndex + 20 );;
+			inOperator( FrictionCorrelationDistance, inStartIndex + 21 );;
+			inOperator( Flags, inStartIndex + 22 );;
+			inOperator( CpuDispatcher, inStartIndex + 23 );;
+			inOperator( CudaContextManager, inStartIndex + 24 );;
+			inOperator( UserData, inStartIndex + 25 );;
+			inOperator( SolverBatchSize, inStartIndex + 26 );;
+			inOperator( SolverArticulationBatchSize, inStartIndex + 27 );;
+			inOperator( NbContactDataBlocks, inStartIndex + 28 );;
+			inOperator( MaxNbContactDataBlocks, inStartIndex + 29 );;
+			inOperator( MaxBiasCoefficient, inStartIndex + 30 );;
+			inOperator( ContactReportStreamBufferSize, inStartIndex + 31 );;
+			inOperator( CcdMaxPasses, inStartIndex + 32 );;
+			inOperator( CcdThreshold, inStartIndex + 33 );;
+			inOperator( CcdMaxSeparation, inStartIndex + 34 );;
+			inOperator( WakeCounterResetValue, inStartIndex + 35 );;
+			inOperator( SanityBounds, inStartIndex + 36 );;
+			inOperator( GpuDynamicsConfig, inStartIndex + 37 );;
+			inOperator( GpuMaxNumPartitions, inStartIndex + 38 );;
+			inOperator( GpuMaxNumStaticPartitions, inStartIndex + 39 );;
+			inOperator( GpuComputeVersion, inStartIndex + 40 );;
+			inOperator( ContactPairSlabSize, inStartIndex + 41 );;
+			return 42 + inStartIndex;
 		}
 	};
 	template<> struct PxClassInfoTraits<PxSceneDesc>

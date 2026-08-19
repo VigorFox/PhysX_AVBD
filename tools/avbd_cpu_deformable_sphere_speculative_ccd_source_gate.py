@@ -78,8 +78,8 @@ def main() -> int:
 
     discrete = section(
         soft,
+        "inline void avbdDetectSoftRigidSphereSDFRange(",
         "inline void avbdDetectSoftRigidSphereSDF(",
-        "PX_FORCE_INLINE bool avbdSegmentEnterExpandedSphere(",
     )
     target = section(
         soft,
@@ -129,8 +129,8 @@ def main() -> int:
 
     swept = section(
         soft,
+        "inline void avbdDetectSoftRigidSphereSweptSDFRange(",
         "inline void avbdDetectSoftRigidSphereSweptSDF(",
-        "inline void avbdDetectSoftRigidOGCFeatures(",
     )
     require_all(
         errors,

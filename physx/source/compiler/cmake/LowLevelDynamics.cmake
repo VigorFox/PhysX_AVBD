@@ -66,6 +66,8 @@ SET(LLDYNAMICS_SHARED
 	${LLDYNAMICS_BASE_DIR}/shared/DyCpuGpuArticulation.h
 	${LLDYNAMICS_BASE_DIR}/shared/DyCpuGpu1dConstraint.h
     ${LLDYNAMICS_BASE_DIR}/shared/DyCpuGpuBiasCoefficient.h
+	${LLDYNAMICS_BASE_DIR}/shared/DyAvbdOwnerWaveContract.h
+	${LLDYNAMICS_BASE_DIR}/shared/DyAvbdKernelLabTraceContract.h
 )
 SOURCE_GROUP("shared" FILES ${LLDYNAMICS_SHARED})
 
@@ -78,22 +80,34 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdConstraint.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdContactPrep.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdContactPrep.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuDispatch.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuIsa.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuProducer.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuProducer.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelLabCapture.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelLabCapture.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdGpuWaveBridge.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamicsPrep.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKinematicShell.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKinematicShell.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelsSse2.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointProjection.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdJointProjection.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdParallel.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolver.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSoftBody.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSoftBodyScalar.cpp
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSoftBodyStepState.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverJointPath.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdSolverBody.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTasks.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTasks.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdGpuWaveBackend.h
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdGpuWaveCallbacks.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdTypes.h
 	${LLDYNAMICS_BASE_DIR}/src/DyFeatherstoneArticulation.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyFeatherstoneForwardDynamic.cpp
@@ -150,6 +164,27 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DySleep.h
 	${LLDYNAMICS_BASE_DIR}/src/DySleep.cpp
 )
+
+# P6: AVX2+FMA code lives in its own translation unit.  No target-wide AVX
+# switch is permitted: the baseline code must remain executable on every x64
+# CPU with SSE2, while runtime dispatch admits this TU only after CPUID/XGETBV.
+SET(LLDYNAMICS_AVX2_FMA_SOURCE
+	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelsAvx2Fma.cpp
+)
+SET(LLDYNAMICS_AVX2_FMA_COMPILED OFF)
+IF(CMAKE_SIZEOF_VOID_P EQUAL 8)
+	IF(MSVC)
+		SET_SOURCE_FILES_PROPERTIES(${LLDYNAMICS_AVX2_FMA_SOURCE}
+			PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+		LIST(APPEND LLDYNAMICS_SOURCE ${LLDYNAMICS_AVX2_FMA_SOURCE})
+		SET(LLDYNAMICS_AVX2_FMA_COMPILED ON)
+	ELSEIF(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		SET_SOURCE_FILES_PROPERTIES(${LLDYNAMICS_AVX2_FMA_SOURCE}
+			PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+		LIST(APPEND LLDYNAMICS_SOURCE ${LLDYNAMICS_AVX2_FMA_SOURCE})
+		SET(LLDYNAMICS_AVX2_FMA_COMPILED ON)
+	ENDIF()
+ENDIF()
 SOURCE_GROUP("src" FILES ${LLDYNAMICS_SOURCE})
 
 ADD_LIBRARY(LowLevelDynamics ${LOWLEVELDYNAMICS_LIBTYPE}
@@ -191,7 +226,14 @@ TARGET_COMPILE_DEFINITIONS(LowLevelDynamics
 
 	# Common to all configurations
 	PRIVATE ${LOWLEVELDYNAMICS_COMPILE_DEFS}
+	PRIVATE PX_AVBD_EXCLUDE_EXPERIMENTAL_RIGID_SIMD=1
 )
+
+IF(LLDYNAMICS_AVX2_FMA_COMPILED)
+	TARGET_COMPILE_DEFINITIONS(LowLevelDynamics
+		PRIVATE PX_AVBD_CPU_AVX2_FMA_COMPILED=1
+	)
+ENDIF()
 
 SET_TARGET_PROPERTIES(LowLevelDynamics PROPERTIES 
     ARCHIVE_OUTPUT_NAME_DEBUG "LowLevelDynamics_static"

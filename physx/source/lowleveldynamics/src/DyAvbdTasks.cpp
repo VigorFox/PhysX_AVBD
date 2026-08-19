@@ -27,27 +27,26 @@
 #include "DyAvbdTasks.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdDynamics.h"
-#include "DyAvbdKinematicShell.h"
+#include "DyAvbdOwnerWaveContract.h"
 #include "DyFeatherstoneArticulation.h"
 #include "DyFeatherstoneArticulationUtils.h"
 #include "DySleep.h"
 #include "DyVArticulation.h"
 #include "PxsRigidBody.h"
-#include <cstdio>
-
-// Debug logging macro
-#if defined(AVBD_ENABLE_LOG)
-#define AVBD_LOG(fmt, ...)                                                     \
-  printf("[AVBD] " fmt "\n", ##__VA_ARGS__);                                   \
-  fflush(stdout)
-#else
-#define AVBD_LOG(...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
+#include "common/PxProfileZone.h"
 namespace physx {
 namespace Dy {
+
+struct AvbdRigidExecutionPolicy {
+  enum : PxU32 {
+    eMIN_PARALLEL_ISLAND_BODIES = 512u,
+    eTASK_GRAIN_BODIES = 256u,
+    eCOLOR_TASK_GRAIN_BODIES = 64u,
+    eDUAL_TASK_GRAIN_CONTACTS = 256u,
+    eGPU_MIN_WAVE_BODIES = 32u,
+    eGPU_MAX_WAVE_BODIES = PXG_AVBD_OWNER_WAVE_MAX_OWNERS
+  };
+};
 
 static void syncSingleDofArticulationJointState(
     ArticulationData &artData, PxU32 linkIndex) {
@@ -129,8 +128,485 @@ static void syncSingleDofArticulationJointState(
   joint.jointVel[axis] = velocity;
 }
 
+void AvbdRigidBodyRangeTask::run() {
+  AvbdRigidSolveIterationState &state = mSolveContext.iteration;
+  mSolver.solveRigidBodyRange(
+      state.bodies, state.numBodies, state.contacts, state.numContacts,
+      state.dt, mSolveContext.invDt2, state.contactMap,
+      mBodyOrder, mBegin, mEnd);
+}
+
+void AvbdRigidDualRangeTask::run() {
+  PX_PROFILE_ZONE("AVBD.updateLambdaRange", 0);
+  mSolver.solveRigidDualRange(mSolveContext.iteration, mBegin, mEnd);
+}
+
+static void releaseAvbdMapStorage(AvbdMapStorage &storage,
+                                  PxAllocatorCallback &allocator) {
+  if (storage.counts)
+    allocator.deallocate(storage.counts);
+  if (storage.offsets)
+    allocator.deallocate(storage.offsets);
+  if (storage.indices)
+    allocator.deallocate(storage.indices);
+  storage = AvbdMapStorage();
+}
+
+void AvbdSolveIslandTask::materializeDeferredContacts() {
+  AvbdDeferredContactPrep &prep = mBatch.deferredContactPrep;
+  if (!prep.snapshots)
+    return;
+
+  const PxU32 emitted = prepareAvbdContactSnapshots(
+      mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+      prep.constraintCapacity, prep.startContactIdx, prep.numContactManagers,
+      prep.bodyOffset, prep.snapshots, nullptr, 0, prep.lengthScale,
+      prep.enableLambdaWarmStart, prep.frameStamp);
+
+  bool cardinalityMatch = emitted == prep.constraintCapacity;
+  for (PxU32 contactOrder = 0;
+       cardinalityMatch && contactOrder < prep.numContactManagers;
+       ++contactOrder) {
+    const AvbdContactPrepSnapshot &snapshot =
+        prep.snapshots[prep.startContactIdx + contactOrder];
+    cardinalityMatch =
+        snapshot.expectedResponseRows == snapshot.emittedResponseRows;
+  }
+
+  if (!cardinalityMatch) {
+    for (PxU32 contactOrder = 0; contactOrder < prep.numContactManagers;
+         ++contactOrder)
+      prep.snapshots[prep.startContactIdx + contactOrder].managerStateCommit =
+          0;
+    mBatch.numConstraints = 0;
+    prep.snapshots = nullptr;
+    PxGetFoundation().error(
+        PxErrorCode::eINTERNAL_ERROR, PX_FL,
+        "AVBD deferred contact preparation violated its frozen row contract");
+    PX_ALWAYS_ASSERT_MESSAGE(
+        "AVBD deferred contact preparation violated its frozen row contract");
+    return;
+  }
+
+  mBatch.numConstraints = emitted;
+  mContext.commitContactPrepSnapshots(prep.snapshots, prep.startContactIdx,
+                                      prep.numContactManagers,
+                                      prep.frameStamp);
+  prep.snapshots = nullptr;
+}
+
+template <typename ConstraintType>
+static void buildDeferredMap(AvbdBodyConstraintMap &map,
+                             AvbdMapStorage &storage,
+                             const ConstraintType *constraints,
+                             PxU32 numBodies, PxU32 numConstraints,
+                             PxAllocatorCallback &allocator) {
+  if (numBodies == 0 || numConstraints == 0 || !constraints) {
+    releaseAvbdMapStorage(storage, allocator);
+    return;
+  }
+  if (storage.counts && storage.offsets && storage.indices &&
+      map.buildInPlace(numBodies, constraints, numConstraints, storage.counts,
+                       storage.offsets, storage.indices,
+                       storage.indexCapacity)) {
+    storage = AvbdMapStorage();
+    return;
+  }
+  releaseAvbdMapStorage(storage, allocator);
+  map.build(numBodies, constraints, numConstraints, allocator);
+}
+
+void AvbdSolveIslandTask::buildDeferredMaps() {
+  PxAllocatorCallback &allocator = mContext.getAllocator();
+  buildDeferredMap(mBatch.contactMap, mBatch.mapStorage[0],
+                   mBatch.constraints, mBatch.numBodies,
+                   mBatch.numConstraints, allocator);
+  buildDeferredMap(mBatch.d6Map, mBatch.mapStorage[1], mBatch.d6Joints,
+                   mBatch.numBodies, mBatch.numD6, allocator);
+  buildDeferredMap(mBatch.gearMap, mBatch.mapStorage[2], mBatch.gearJoints,
+                   mBatch.numBodies, mBatch.numGear, allocator);
+}
+
+void AvbdSolveIslandTask::releaseDeferredMapStorage() {
+  PxAllocatorCallback &allocator = mContext.getAllocator();
+  for (PxU32 mapIndex = 0; mapIndex < 3; ++mapIndex)
+    releaseAvbdMapStorage(mBatch.mapStorage[mapIndex], allocator);
+}
+
+bool AvbdSolveIslandTask::canUseRigidWaveTasks() const {
+  // Keep wave fan-out for genuinely large islands. The pressure fixture has
+  // many independent medium islands, where island-level task parallelism is
+  // cheaper and exact than nested wave barriers.
+  if (mBatch.numBodies <
+          AvbdRigidExecutionPolicy::eMIN_PARALLEL_ISLAND_BODIES ||
+      mBatch.numConstraints == 0 ||
+      mBatch.hasArticulationBodies ||
+      mBatch.numD6 != 0 || mBatch.numGear != 0 ||
+      mBatch.numSoftParticles != 0 || mBatch.numSoftBodies != 0 ||
+      mBatch.numSoftContacts != 0 ||
+      !mBatch.contactMap.constraintOffsets || !getTaskManager() ||
+      !getTaskManager()->getCpuDispatcher() ||
+      getTaskManager()->getCpuDispatcher()->getWorkerCount() < 2)
+    return false;
+
+  // The dependency planner can preserve the configured order, but the
+  // deterministic body sort historically used an unspecified tie order.
+  // Keep the first dispatcher promotion fail-closed for that mode.
+  const AvbdSolverConfig &config = mSolver.getConfig();
+  return config.enableParallelization && !config.requiresOrderedBackend();
+}
+
+void AvbdSolveIslandTask::submitRigidWave() {
+  const AvbdRigidSolveContext &context = mRigidContext;
+  const PxU32 begin = context.dependencyWaveOffsets[mCurrentWave];
+  const PxU32 end = context.dependencyWaveOffsets[mCurrentWave + 1u];
+  const PxU32 count = end - begin;
+  if (count == 0) {
+    mRigidWaiting = false;
+    return;
+  }
+
+  // The optional backend receives the already-prepared real island context
+  // and the complete disjoint dependency wave. It may batch fixed-width
+  // packets internally, but the call remains synchronous: false is
+  // transactional and leaves the wave untouched, so the exact scalar owner
+  // range can take over without changing wave order.
+  AvbdRigidGpuWaveBackend *gpuBackend =
+      mContext.getRigidGpuWaveBackend();
+  // A device transaction has a fixed upload/launch/readback cost. Keep narrow
+  // waves on the scalar authority. The upper bound is also fail-closed: GPU
+  // writeback has only been proven exact through the current 64-owner wave
+  // boundary; wider waves remain scalar until their ordering contract is
+  // independently reproduced.
+  if (gpuBackend && gpuBackend->isAvailable() &&
+      count >= AvbdRigidExecutionPolicy::eGPU_MIN_WAVE_BODIES &&
+      count <= AvbdRigidExecutionPolicy::eGPU_MAX_WAVE_BODIES) {
+    PxU32 epoch = ++mGpuWaveEpoch;
+    if (epoch == 0)
+      epoch = ++mGpuWaveEpoch;
+    if (!gpuBackend->solveRigidOwnerWave(
+            mSolver, mRigidContext, mCurrentWave, 0u, epoch,
+            mSolver.getConfig().avbdAlpha)) {
+      mSolver.solveRigidBodyRange(
+          mRigidContext.iteration.bodies,
+          mRigidContext.iteration.numBodies,
+          mRigidContext.iteration.contacts,
+          mRigidContext.iteration.numContacts,
+          mRigidContext.iteration.dt,
+          mRigidContext.invDt2,
+          mRigidContext.iteration.contactMap,
+          mRigidContext.dependencyWaveBodies.begin(), begin, end);
+    }
+    mRigidWaiting = false;
+    return;
+  }
+
+  const PxU32 workers = PxMax(
+      1u, getTaskManager()->getCpuDispatcher()->getWorkerCount());
+  // Islands are already dispatched independently. Keep the dependency-wave
+  // fan-out coarse enough that medium stack islands do not pay a child-task
+  // and continuation barrier for every 64 bodies.
+  const PxU32 targetBodiesPerTask =
+      AvbdRigidExecutionPolicy::eTASK_GRAIN_BODIES;
+  // A narrow wave already has no useful fan-out: the existing partitioning
+  // would create one child and pay a full parent/continuation round trip for
+  // work that still runs on one worker.  Execute that wave in the parent so
+  // the dependency barrier remains exact without turning every narrow layer
+  // into a task-graph barrier.  Wider waves retain the normal disjoint range
+  // fan-in and therefore the multi-worker path is unchanged.
+  if (count <= targetBodiesPerTask) {
+    mSolver.solveRigidBodyRange(
+        mRigidContext.iteration.bodies, mRigidContext.iteration.numBodies,
+        mRigidContext.iteration.contacts,
+        mRigidContext.iteration.numContacts, mRigidContext.iteration.dt,
+        mRigidContext.invDt2, mRigidContext.iteration.contactMap,
+        mRigidContext.dependencyWaveBodies.begin(), begin, end);
+    mRigidWaiting = false;
+    return;
+  }
+  const PxU32 desiredTasks = (count + targetBodiesPerTask - 1u) /
+                             targetBodiesPerTask;
+  const PxU32 taskCount = PxMin(workers, PxMax(1u, desiredTasks));
+  const PxU32 chunk = (count + taskCount - 1u) / taskCount;
+  // Keep one parent reference while the fan-in children are being created.
+  // A child may finish inline on the submitting worker; without this hold,
+  // the last early child could resubmit the parent before this run returns.
+  addReference();
+  mRigidSubmitHold = true;
+  mRigidWaiting = false;
+  for (PxU32 taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
+    const PxU32 taskBegin = begin + PxMin(count, taskIndex * chunk);
+    const PxU32 taskEnd = begin + PxMin(count, (taskIndex + 1u) * chunk);
+    if (taskBegin >= taskEnd)
+      continue;
+    AvbdRigidBodyRangeTask *task =
+        mContext.getTaskFactory().createRigidBodyRangeTask(
+            mContext, mSolver, mRigidContext,
+            mRigidContext.dependencyWaveBodies.begin(), taskBegin, taskEnd);
+    task->setContinuation(this);
+    task->removeReference();
+    mRigidWaiting = true;
+  }
+}
+
+void AvbdSolveIslandTask::submitRigidColor() {
+  PX_PROFILE_ZONE("AVBD.submitRigidColor", 0);
+  const AvbdRigidSolveContext &context = mRigidContext;
+  const PxU32 begin = context.bodyColorOffsets[mCurrentColor];
+  const PxU32 end = context.bodyColorOffsets[mCurrentColor + 1u];
+  const PxU32 count = end - begin;
+  if (count == 0) {
+    mRigidWaiting = false;
+    return;
+  }
+
+  // Unlike the exact dependency waves, a strict body color normally exposes
+  // hundreds or thousands of independent owners behind only a few barriers.
+  // Use a smaller grain to feed modern CPU dispatchers without recreating the
+  // old many-wave tiny-task failure mode.
+  const PxU32 targetBodiesPerTask =
+      AvbdRigidExecutionPolicy::eCOLOR_TASK_GRAIN_BODIES;
+  const PxU32 workers = PxMax(
+      1u, getTaskManager()->getCpuDispatcher()->getWorkerCount());
+  const PxU32 desiredTasks =
+      (count + targetBodiesPerTask - 1u) / targetBodiesPerTask;
+  const PxU32 taskCount = count <= targetBodiesPerTask
+      ? 1u
+      : PxMin(workers, PxMax(1u, desiredTasks));
+  const PxU32 chunk = count <= targetBodiesPerTask
+      ? count
+      : (count + taskCount - 1u) / taskCount;
+
+  // This is a lab-only, opt-in parent-side capture point.  The color plan and
+  // prepared CSR are real production data, while no body in this color has
+  // begun solving yet.  The context reserved all storage before task
+  // submission; this call only validates and copies, and is unreachable from
+  // the GPU owner-wave path.
+  mContext.captureKernelLabCpuColorPreRange(
+      mKernelLabCaptureTicket, mRigidContext, mBatch.islandStart,
+      mCurrentColor, mRigidContext.bodyColorBodies.begin(), begin, end,
+      workers, targetBodiesPerTask, taskCount, chunk);
+  if (count <= targetBodiesPerTask) {
+    AvbdRigidSolveIterationState &state = mRigidContext.iteration;
+    mSolver.solveRigidBodyRange(
+        state.bodies, state.numBodies, state.contacts, state.numContacts,
+        state.dt, mRigidContext.invDt2, state.contactMap,
+        mRigidContext.bodyColorBodies.begin(), begin, end);
+    mContext.captureKernelLabCpuColorPostRange(mKernelLabCaptureTicket,
+                                               mRigidContext, mCurrentColor);
+    mRigidWaiting = false;
+    return;
+  }
+
+  addReference();
+  mRigidSubmitHold = true;
+  mRigidWaiting = false;
+  for (PxU32 taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
+    const PxU32 taskBegin = begin + PxMin(count, taskIndex * chunk);
+    const PxU32 taskEnd =
+        begin + PxMin(count, (taskIndex + 1u) * chunk);
+    if (taskBegin >= taskEnd)
+      continue;
+    AvbdRigidBodyRangeTask *task =
+        mContext.getTaskFactory().createRigidBodyRangeTask(
+            mContext, mSolver, mRigidContext,
+            mRigidContext.bodyColorBodies.begin(), taskBegin, taskEnd);
+    task->setContinuation(this);
+    task->removeReference();
+    mRigidWaiting = true;
+  }
+}
+
+bool AvbdSolveIslandTask::submitRigidDual() {
+#if PX_AVBD_ENABLE_SOLVER_PROFILE
+  // The profile payload includes a global RMS constraint error. Keep that
+  // uncommon diagnostic build on the scalar reduction until it has a
+  // task-slot reduction contract of its own.
+  return false;
+#else
+  const PxU32 count = mRigidContext.iteration.numContacts;
+  const PxU32 workers = PxMax(
+      1u, getTaskManager()->getCpuDispatcher()->getWorkerCount());
+  // Use a floor here so every balanced range retains at least the grain. In
+  // particular, every range remains wider than four contacts and therefore
+  // preserves the scalar dual pass's numContacts>4 penalty-growth branch.
+  const PxU32 taskCount = PxMin(
+      workers, count / AvbdRigidExecutionPolicy::eDUAL_TASK_GRAIN_CONTACTS);
+  if (taskCount < 2u)
+    return false;
+
+  PX_PROFILE_ZONE("AVBD.submitRigidDual", 0);
+  mRigidPhase = eRIGID_DUAL;
+  addReference();
+  mRigidSubmitHold = true;
+  mRigidWaiting = false;
+  for (PxU32 taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
+    const PxU32 begin = static_cast<PxU32>(
+        (static_cast<PxU64>(count) * taskIndex) / taskCount);
+    const PxU32 end = static_cast<PxU32>(
+        (static_cast<PxU64>(count) * (taskIndex + 1u)) / taskCount);
+    PX_ASSERT(end > begin);
+    PX_ASSERT(end - begin >=
+              AvbdRigidExecutionPolicy::eDUAL_TASK_GRAIN_CONTACTS);
+    AvbdRigidDualRangeTask *task =
+        mContext.getTaskFactory().createRigidDualRangeTask(
+            mContext, mSolver, mRigidContext, begin, end);
+    task->setContinuation(this);
+    task->removeReference();
+    mRigidWaiting = true;
+  }
+  return mRigidWaiting;
+#endif
+}
+
+void AvbdSolveIslandTask::finishPreparedRigidSolveSynchronously() {
+  while (mSolver.advanceRigidSolveIterations(mRigidContext.iteration)) {
+  }
+  mSolver.finishRigidSolve(mRigidContext);
+  mRigidAsync = false;
+}
+
+void AvbdSolveIslandTask::run() {
+  if (!mRigidStarted) {
+    materializeDeferredContacts();
+    buildDeferredMaps();
+  }
+  if (!mRigidStarted) {
+    mRigidStarted = true;
+    if (!canUseRigidWaveTasks()) {
+      // Single island schedule (classification + shared post-AL inside
+      // solver).  This is the authoritative fallback for joints, soft data,
+      // small islands, deterministic mode and single-worker scenes.
+      mSolver.solveIsland(
+          mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+          mBatch.numConstraints, mGravity, mBatch.d6Joints, mBatch.numD6,
+          mBatch.gearJoints, mBatch.numGear, &mBatch.contactMap,
+          &mBatch.d6Map, &mBatch.gearMap, mBatch.colorBatches,
+          mBatch.numColors, mBatch.iterationOverride, mBatch.softParticles,
+          mBatch.numSoftParticles, mBatch.softBodies, mBatch.numSoftBodies,
+          mBatch.softContacts, mBatch.numSoftContacts,
+          &mBatch.softExecutionPlan,
+          mBatch.articulationForBody, mBatch.linkIndexForBody, mStats);
+      return;
+    }
+
+    mRigidAsync = true;
+    // Run the full objective classification, then stop at the prepared rigid
+    // state instead of entering the serial body loop.
+    mSolver.solveIsland(
+        mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
+        mBatch.numConstraints, mGravity, mBatch.d6Joints, mBatch.numD6,
+        mBatch.gearJoints, mBatch.numGear, &mBatch.contactMap, &mBatch.d6Map,
+        &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors,
+        mBatch.iterationOverride, mBatch.softParticles,
+        mBatch.numSoftParticles, mBatch.softBodies, mBatch.numSoftBodies,
+        mBatch.softContacts, mBatch.numSoftContacts,
+        &mBatch.softExecutionPlan,
+        mBatch.articulationForBody, mBatch.linkIndexForBody, mStats,
+        &mRigidContext);
+    if (!mRigidContext.iteration.bodies) {
+      mRigidAsync = false;
+      return;
+    }
+    // Keep the explicitly-installed GPU owner-wave backend on its proven
+    // exact schedule.  The normal CPU product path uses a strict compact body
+    // coloring and never passes through the GPU interception in
+    // submitRigidWave().
+    AvbdRigidGpuWaveBackend *gpuBackend =
+        mContext.getRigidGpuWaveBackend();
+    mRigidUsesBodyColors = !(gpuBackend && gpuBackend->isAvailable());
+    if (mRigidUsesBodyColors) {
+      if (!mSolver.buildRigidBodyColorPlan(mRigidContext) ||
+          mRigidContext.maxBodyColorWidth <=
+              AvbdRigidExecutionPolicy::eCOLOR_TASK_GRAIN_BODIES) {
+        finishPreparedRigidSolveSynchronously();
+        return;
+      }
+    } else {
+      mSolver.buildRigidDependencyWaves(mRigidContext);
+    }
+    if (!mSolver.beginRigidSolveIteration(mRigidContext.iteration)) {
+      mSolver.finishRigidSolve(mRigidContext);
+      mRigidAsync = false;
+      return;
+    }
+    mCurrentWave = 0;
+    mCurrentColor = 0;
+    mRigidPhase = eRIGID_PRIMAL;
+  } else if (mRigidWaiting) {
+    // The last child in the current wave/color resubmitted this parent through
+    // its PxLightCpuTask continuation.
+    mRigidWaiting = false;
+    if (mRigidPhase == eRIGID_DUAL) {
+      mRigidContext.iteration.parallelDualComplete = true;
+      mRigidPhase = eRIGID_POST_DUAL;
+    } else if (mRigidUsesBodyColors) {
+      mContext.captureKernelLabCpuColorPostRange(mKernelLabCaptureTicket,
+                                                 mRigidContext,
+                                                 mCurrentColor);
+      ++mCurrentColor;
+    } else {
+      ++mCurrentWave;
+    }
+  }
+
+  while (mRigidAsync) {
+    if (mRigidPhase == eRIGID_PRIMAL) {
+      if (mRigidUsesBodyColors &&
+          mCurrentColor < mRigidContext.bodyColorCount) {
+        submitRigidColor();
+        if (mRigidWaiting)
+          return;
+        ++mCurrentColor;
+        continue;
+      }
+      if (!mRigidUsesBodyColors &&
+          mCurrentWave < mRigidContext.dependencyWaveCount) {
+        submitRigidWave();
+        if (mRigidWaiting)
+          return;
+        ++mCurrentWave;
+        continue;
+      }
+
+      // Dual rows read the final primal poses, so lock projection remains
+      // behind the last color/wave fan-in and ahead of contact fan-out.
+      for (PxU32 i = 0; i < mBatch.numBodies; ++i) {
+        if (mBatch.bodies[i].invMass > 0.0f)
+          mBatch.bodies[i].projectLockedPose(mBatch.bodies[i].prevPosition,
+                                             mBatch.bodies[i].prevRotation);
+      }
+      if (mRigidUsesBodyColors && submitRigidDual())
+        return;
+      mRigidPhase = eRIGID_POST_DUAL;
+    }
+
+    PX_ASSERT(mRigidPhase == eRIGID_POST_DUAL);
+    const bool moreIterations =
+        mSolver.completeRigidSolveIteration(mRigidContext.iteration);
+    if (!moreIterations) {
+      mSolver.finishRigidSolve(mRigidContext);
+      mRigidAsync = false;
+      return;
+    }
+    if (!mSolver.beginRigidSolveIteration(mRigidContext.iteration)) {
+      mSolver.finishRigidSolve(mRigidContext);
+      mRigidAsync = false;
+      return;
+    }
+    mCurrentWave = 0;
+    mCurrentColor = 0;
+    mRigidPhase = eRIGID_PRIMAL;
+  }
+}
+
+void AvbdCoordinatorTask::run() {
+  // The continuation is the join between all submitted island solve tasks
+  // and AVBD writeback. Profile reduction, when enabled, belongs here and
+  // uses task-local records rather than shared atomics.
+}
+
 void AvbdTask::release() {
-  AVBD_LOG("Task release: %s", getName());
   // CRITICAL: Must call base class release() which calls
   // mCont->removeReference() to notify the continuation that this task is done.
   PxLightCpuTask::release();
@@ -139,22 +615,13 @@ void AvbdTask::release() {
 }
 
 void AvbdSolveIslandTask::release() {
-  const bool hasJointConstraints = (mBatch.numD6 > 0 || mBatch.numGear > 0);
-  const bool usesJointPath =
-      hasJointConstraints ||
-      (mBatch.numSoftParticles > 0 && mBatch.numSoftBodies > 0 &&
-       mBatch.softContacts && mBatch.numSoftContacts > 0);
-  const PxU32 baseIterations =
-      (mBatch.iterationOverride > 0)
-          ? mBatch.iterationOverride
-          : mSolver.getConfig().innerIterations;
-  const PxU32 requestedIterations =
-      (usesJointPath && hasJointConstraints)
-        ? PxMax(baseIterations, PxU32(10))
-          : baseIterations;
-  mContext.recordIterationDiagnostics(requestedIterations, mStats,
-                      hasJointConstraints, mBatch.d6Joints,
-                      mBatch.numD6);
+  if (mRigidAsync && mRigidWaiting) {
+    if (mRigidSubmitHold) {
+      mRigidSubmitHold = false;
+      removeReference();
+    }
+    return;
+  }
 
   // Write back lambda values to the cache for warm-starting next frame
   // This is thread-safe because each island writes to disjoint cache indices
@@ -164,8 +631,14 @@ void AvbdSolveIslandTask::release() {
 
     // Function declared as friend in AvbdDynamicsContext class
     writeLambdaToCache(mContext, constraints, numConstraints, mBatch.numBodies);
-    writeContactImpulseToOutput(constraints, numConstraints, mBatch.numBodies,
-                                mDt);
+    if (mBatch.contactOutputTokens && mBatch.contactOutputResults) {
+      writeContactImpulseToOutputTokens(
+          constraints, mBatch.contactOutputTokens,
+          mBatch.contactOutputResults, numConstraints, mBatch.numBodies, mDt);
+    } else {
+      writeContactImpulseToOutput(constraints, numConstraints, mBatch.numBodies,
+                                  mDt);
+    }
     writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 
@@ -183,13 +656,17 @@ void AvbdSolveIslandTask::release() {
   mBatch.contactMap.release(allocator);
   mBatch.d6Map.release(allocator);
   mBatch.gearMap.release(allocator);
+  releaseDeferredMapStorage();
 
   // Call base class release
   AvbdTask::release();
 }
 
 void AvbdWriteBackTask::run() {
-  AVBD_LOG("AvbdWriteBackTask::run() START - numBodies=%u", mNumBodies);
+  // Contact report targets are committed only after every island solve has
+  // released its worker-owned result tokens.
+  commitContactOutputTokens(mContactOutputTargets, mContactOutputResults,
+                            mContactOutputCount);
 
   for (PxU32 i = 0; i < mNumBodies; ++i) {
     if (mRigidBodies[i]) {
@@ -276,9 +753,6 @@ void AvbdWriteBackTask::run() {
       syncSingleDofArticulationJointState(artData, linkIndex);
   }
 
-  mContext.flushIterationDiagnosticsFrame();
-
-  AVBD_LOG("AvbdWriteBackTask::run() END");
 }
 
 } // namespace Dy

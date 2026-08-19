@@ -52,6 +52,7 @@
 #include "NpScene.h"
 #include "NpArticulationJointReducedCoordinate.h"
 #include "NpArticulationReducedCoordinate.h"
+#include "foundation/PxHashMap.h"
 
 using namespace physx;
 using namespace physx::Vd;
@@ -255,6 +256,169 @@ namespace
 		PvdDataStream* mStream;
 	};
 
+	struct PvdTetFaceKey
+	{
+		PxU32 a, b, c;
+		bool operator==(const PvdTetFaceKey& other) const
+		{
+			return a == other.a && b == other.b && c == other.c;
+		}
+	};
+
+	struct PvdTetFaceKeyHash
+	{
+		PxU32 operator()(const PvdTetFaceKey& key) const
+		{
+			const PxU32 h0 = PxHash<PxU32>()(key.a);
+			const PxU32 h1 = PxHash<PxU32>()(key.b);
+			const PxU32 h2 = PxHash<PxU32>()(key.c);
+			return h0 ^ (h1 << 11 | h1 >> 21) ^
+				(h2 << 22 | h2 >> 10);
+		}
+		bool equal(
+			const PvdTetFaceKey& lhs,
+			const PvdTetFaceKey& rhs) const
+		{
+			return lhs == rhs;
+		}
+	};
+
+	struct PvdTetFaceValue
+	{
+		PxU32 indices[3];
+		PxU32 count;
+		PvdTetFaceValue() : count(0)
+		{
+			indices[0] = indices[1] = indices[2] = 0;
+		}
+	};
+
+	static PX_FORCE_INLINE PvdTetFaceKey makePvdTetFaceKey(
+		PxU32 i0, PxU32 i1, PxU32 i2)
+	{
+		if(i0 > i1)
+			PxSwap(i0, i1);
+		if(i1 > i2)
+			PxSwap(i1, i2);
+		if(i0 > i1)
+			PxSwap(i0, i1);
+		PvdTetFaceKey key = { i0, i1, i2 };
+		return key;
+	}
+
+	static void buildPvdTetBoundaryTriangles(
+		const PxTetrahedronMesh& mesh,
+		PxArray<PxU32>& surfaceTriangles)
+	{
+		typedef PxHashMap<PvdTetFaceKey, PvdTetFaceValue,
+			PvdTetFaceKeyHash> FaceMap;
+		FaceMap faces(PxMax(64u, mesh.getNbTetrahedrons() * 6));
+		const bool indices16 = mesh.getTetrahedronMeshFlags() &
+			PxTetrahedronMeshFlag::e16_BIT_INDICES;
+		const PxU16* tets16 = indices16
+			? static_cast<const PxU16*>(mesh.getTetrahedrons()) : NULL;
+		const PxU32* tets32 = indices16
+			? NULL : static_cast<const PxU32*>(mesh.getTetrahedrons());
+		static const PxU32 faceVertices[4][3] =
+		{
+			{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}
+		};
+		for(PxU32 tetIndex = 0;
+			tetIndex < mesh.getNbTetrahedrons(); ++tetIndex)
+		{
+			PxU32 tet[4];
+			for(PxU32 i = 0; i < 4; ++i)
+				tet[i] = indices16 ? PxU32(tets16[4 * tetIndex + i])
+					: tets32[4 * tetIndex + i];
+			for(PxU32 faceIndex = 0; faceIndex < 4; ++faceIndex)
+			{
+				const PxU32 i0 = tet[faceVertices[faceIndex][0]];
+				const PxU32 i1 = tet[faceVertices[faceIndex][1]];
+				const PxU32 i2 = tet[faceVertices[faceIndex][2]];
+				const PvdTetFaceKey key = makePvdTetFaceKey(i0, i1, i2);
+				PvdTetFaceValue& value = faces[key];
+				if(value.count)
+				{
+					++value.count;
+				}
+				else
+				{
+					value.indices[0] = i0;
+					value.indices[1] = i1;
+					value.indices[2] = i2;
+					value.count = 1;
+				}
+			}
+		}
+		surfaceTriangles.clear();
+		for(FaceMap::Iterator iter = faces.getIterator();
+			!iter.done(); ++iter)
+		{
+			if(iter->second.count != 1)
+				continue;
+			surfaceTriangles.pushBack(iter->second.indices[0]);
+			surfaceTriangles.pushBack(iter->second.indices[1]);
+			surfaceTriangles.pushBack(iter->second.indices[2]);
+		}
+	}
+
+	static void visualizeCpuDeformableVolume(
+		PvdUserRenderer& renderer,
+		PxDeformableVolume& volume)
+	{
+		if(volume.getDeformableVolumeBackend() !=
+			PxDeformableVolumeBackend::eCPU_AVBD)
+			return;
+		const PxTetrahedronMesh* collisionMesh = volume.getCollisionMesh();
+		const PxTetrahedronMesh* simulationMesh = volume.getSimulationMesh();
+		const PxVec4* collisionPositions =
+			volume.getPositionInvMassBufferH();
+		const PxVec4* simulationPositions =
+			volume.getSimPositionInvMassBufferH();
+		if(!collisionMesh || !simulationMesh || !collisionPositions ||
+			!simulationPositions)
+			return;
+
+		renderer.setInstanceId(&volume);
+		PxArray<PxU32> boundary;
+		buildPvdTetBoundaryTriangles(*collisionMesh, boundary);
+		PxArray<PxDebugTriangle> triangles;
+		triangles.reserve(boundary.size() / 3);
+		for(PxU32 i = 0; i + 2 < boundary.size(); i += 3)
+		{
+			triangles.pushBack(PxDebugTriangle(
+				collisionPositions[boundary[i]].getXYZ(),
+				collisionPositions[boundary[i + 1]].getXYZ(),
+				collisionPositions[boundary[i + 2]].getXYZ(),
+				0xffe07a24));
+		}
+		if(!triangles.empty())
+			renderer.drawTriangles(triangles.begin(), triangles.size());
+
+		// The cyan wire overlay is the actual simulation-tet boundary. It is
+		// intentionally separate from the orange authoritative collision shell.
+		buildPvdTetBoundaryTriangles(*simulationMesh, boundary);
+		PxArray<PxDebugLine> lines;
+		lines.reserve(boundary.size());
+		for(PxU32 i = 0; i + 2 < boundary.size(); i += 3)
+		{
+			const PxU32 i0 = boundary[i];
+			const PxU32 i1 = boundary[i + 1];
+			const PxU32 i2 = boundary[i + 2];
+			lines.pushBack(PxDebugLine(
+				simulationPositions[i0].getXYZ(),
+				simulationPositions[i1].getXYZ(), 0xff35d4ff));
+			lines.pushBack(PxDebugLine(
+				simulationPositions[i1].getXYZ(),
+				simulationPositions[i2].getXYZ(), 0xff35d4ff));
+			lines.pushBack(PxDebugLine(
+				simulationPositions[i2].getXYZ(),
+				simulationPositions[i0].getXYZ(), 0xff35d4ff));
+		}
+		if(!lines.empty())
+			renderer.drawLines(lines.begin(), lines.size());
+	}
+
 } // namespace
 
 PvdSceneClient::PvdSceneClient(NpScene& scene) :
@@ -415,6 +579,17 @@ void PvdSceneClient::sendEntireScene()
 			npScene->getArticulations(articulations.begin(), articulations.size());
 			for(PxU32 i = 0; i < numArticulations; i++)
 				mMetaDataBinding.createInstance(*mPvdDataStream, *articulations[i], *npScene, physics, mPvd);
+		}
+		// Deformable volumes are not returned by getActors(). Publish them
+		// explicitly when PVD connects to a scene that is already running.
+		{
+			PxArray<PxDeformableVolume*> volumes;
+			const PxU32 volumeCount = npScene->getNbDeformableVolumes();
+			volumes.resize(volumeCount);
+			npScene->getDeformableVolumes(volumes.begin(), volumeCount);
+			for(PxU32 i = 0; i < volumeCount; ++i)
+				mMetaDataBinding.createInstance(
+					*mPvdDataStream, *volumes[i], *npScene, physics, mPvd);
 		}
 
 		// joints
@@ -900,6 +1075,19 @@ void PvdSceneClient::frameEnd()
 			vizualizer = this;
 
 		mMetaDataBinding.updateDynamicActorsAndArticulations(*mPvdDataStream, theScene, vizualizer);
+
+		PxArray<PxDeformableVolume*> volumes;
+		const PxU32 volumeCount = mScene.getNbDeformableVolumes();
+		volumes.resize(volumeCount);
+		mScene.getDeformableVolumes(volumes.begin(), volumeCount);
+		for(PxU32 i = 0; i < volumeCount; ++i)
+		{
+			mMetaDataBinding.sendAllProperties(
+				*mPvdDataStream, *volumes[i]);
+			visualizeCpuDeformableVolume(*mUserRender, *volumes[i]);
+		}
+		if(volumeCount)
+			mUserRender->flushRenderEvents();
 	}
 
 	// frame end moved to update contacts to have them in the previous frame.
@@ -947,34 +1135,39 @@ void PvdSceneClient::releasePvdInstance(const NpAggregate* npAggregate)
 
 void PvdSceneClient::createPvdInstance(const NpDeformableVolume* deformableVolume)
 {
-	PX_UNUSED(deformableVolume);
-	//Todo
+	if(checkPvdDebugFlag())
+		mMetaDataBinding.createInstance(
+			*mPvdDataStream, *deformableVolume, mScene,
+			PxGetPhysics(), mPvd);
 }
 
 void PvdSceneClient::updatePvdProperties(const NpDeformableVolume* deformableVolume)
 {
-	PX_UNUSED(deformableVolume);
-	//Todo
+	if(checkPvdDebugFlag())
+		mMetaDataBinding.sendAllProperties(
+			*mPvdDataStream, *deformableVolume);
 }
 
 void PvdSceneClient::attachAggregateActor(const NpDeformableVolume* deformableVolume, NpActor* actor)
 {
 	PX_UNUSED(deformableVolume);
 	PX_UNUSED(actor);
-	//Todo
+	// Deformable-volume attachments are represented by their own SDK objects;
+	// this overload is not an aggregate relationship.
 }
 
 void PvdSceneClient::detachAggregateActor(const NpDeformableVolume* deformableVolume, NpActor* actor)
 {
 	PX_UNUSED(deformableVolume);
 	PX_UNUSED(actor);
-	//Todo
+	// See attachAggregateActor above.
 }
 
 void PvdSceneClient::releasePvdInstance(const NpDeformableVolume* deformableVolume)
 {
-	PX_UNUSED(deformableVolume);
-	//Todo
+	if(checkPvdDebugFlag())
+		mMetaDataBinding.destroyInstance(
+			*mPvdDataStream, *deformableVolume, mScene);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

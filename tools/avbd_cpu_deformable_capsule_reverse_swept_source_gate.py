@@ -85,6 +85,24 @@ def main() -> int:
         "inline void avbdDetectSoftRigidCapsuleSweptOGCFeatures(",
         "inline void avbdDetectSoftRigidCapsuleOGCFeatures(",
     )
+    forward_owner = section(
+        soft,
+        "PX_NOINLINE inline bool "
+        "avbdRigidCapsuleForwardVertexOwnsSweptFeature(",
+        "inline void avbdDetectSoftRigidCapsuleSweptOGCFeatures(",
+    )
+    require_all(
+        errors,
+        "capsule forward swept owner predicate",
+        forward_owner,
+        (
+            "particle.initialPosition",
+            "particle.predictedPosition",
+            "avbdSegmentEnterExpandedCapsule(",
+            "avbdSegmentEnterExpandedRotatingCapsule(",
+            "currentSdf < margin",
+        ),
+    )
     require_all(
         errors,
         "capsule reverse swept detector",
@@ -101,10 +119,12 @@ def main() -> int:
             "translationToleranceSq",
             "(displacement1 - displacement0)",
             "(displacement2 - displacement0)",
-            "bool forwardVertexOwns = false;",
-            "currentSdf < margin ||",
-            "avbdSegmentEnterExpandedCapsule(",
-            "avbdSegmentEnterExpandedRotatingCapsule(",
+            "PxArray<PxU8>* persistentForwardOwnerScratch = NULL",
+            "body.compiled.surfaceVertices.size()",
+            "avbdRigidCapsuleForwardVertexOwnsSweptFeature(",
+            "forwardOwnerScratch[v0] != 0",
+            "forwardOwnerScratch[v1] != 0",
+            "forwardOwnerScratch[v2] != 0",
             "if(forwardVertexOwns)",
             "centerEnd - centerStart - displacement0",
             "const PxVec3 relativeCenterEnd =",

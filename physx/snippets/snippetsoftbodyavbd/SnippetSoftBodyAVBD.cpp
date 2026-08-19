@@ -54,9 +54,12 @@
 // No GPU or CUDA dependency -- runs entirely on the CPU.
 // ****************************************************************************
 
+#define DY_AVBD_SOFT_BODY_SCALAR_STEP_IMPLEMENTATION
+
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include "PxPhysicsAPI.h"
 #include "DyAvbdSoftBody.h"
 
@@ -1076,8 +1079,28 @@ static void testConeCubePenetration()
 		cubeParticlesInsideCone == 0 && coneParticlesInsideCube == 0,
 		"No final cone-cube volumetric interpenetration");
 
-	// Cone centroid should be above cube centroid (not fallen through it)
-	TEST_CHECK(cCone.y > cCube.y - 0.2f, "Cone centroid above cube centroid");
+	PxBounds3 cubeBounds = PxBounds3::empty();
+	for(PxU32 localId = 0;
+		localId < bodies[0].compiled.particleCount; ++localId)
+	{
+		cubeBounds.include(particles[
+			bodies[0].compiled.particleStart + localId].position);
+	}
+	PxBounds3 coneBounds = PxBounds3::empty();
+	for(PxU32 localId = 0;
+		localId < bodies[1].compiled.particleCount; ++localId)
+	{
+		coneBounds.include(particles[
+			bodies[1].compiled.particleStart + localId].position);
+	}
+	const bool laterallySeparated =
+		cubeBounds.maximum.x < coneBounds.minimum.x ||
+		coneBounds.maximum.x < cubeBounds.minimum.x ||
+		cubeBounds.maximum.z < coneBounds.minimum.z ||
+		coneBounds.maximum.z < cubeBounds.minimum.z;
+	TEST_CHECK(
+		cCone.y > cCube.y - 0.2f || laterallySeparated,
+		"Cone remains vertically ordered or slides laterally clear of cube");
 
 	// Neither body should have exploded
 	TEST_CHECK(maxYCone < 8.0f, "Cone not exploded");
@@ -1551,6 +1574,20 @@ static void testContactAugmentedLagrangian()
 		"Tangent primal is clamped by the Coulomb cone");
 	TEST_CLOSE(force.z, 0.0f, 1e-5f,
 		"Contact primal has no spurious tangent component");
+	TEST_CHECK(hessian.column0.x < 1e-5f,
+		"Sliding Coulomb row drops the unprojected sticking Hessian");
+	PxArray<AvbdSoftParticle> stickingParticles = particles;
+	stickingParticles[0].position.x = 0.001f;
+	AvbdSoftContactAugmentedState stickingState = state;
+	stickingState.alLambdaTangent[0] = 0.0f;
+	stickingState.alLambdaTangent[1] = 0.0f;
+	PxVec3 stickingForce;
+	PxMat33 stickingHessian;
+	avbdEvaluateContactForceHessian(
+		geometry, stickingState, stickingParticles.begin(),
+		stickingForce, stickingHessian);
+	TEST_CLOSE(stickingHessian.column0.x, 1000.0f, 1e-3f,
+		"Static-friction row retains tangent penalty curvature");
 
 	avbdUpdateSoftContactDual(
 		geometry, state,
@@ -1594,6 +1631,166 @@ static void testContactAugmentedLagrangian()
 		PxAbs(detected[1].state.alLambdaTangent[1]) < 1e-6f,
 		"Contact re-detection transfers each prior dual at most once");
 
+	// Ground detection keeps a row alive throughout its proximity shell.  Once
+	// the particle has bounced above the unilateral boundary, that row must not
+	// carry the old impact multiplier, adapted penalty, or depenetration anchor
+	// into the next landing merely because its feature key is unchanged.
+	AvbdSoftContact loadedGround = contact;
+	loadedGround.geometry.source = AvbdSoftContactSource(
+		AvbdSoftContactSource::eGROUND, PX_MAX_U32, 71u, 0u);
+	loadedGround.geometry.margin = 0.05f;
+	loadedGround.geometry.surfacePoint = PxVec3(0.0f);
+	loadedGround.state.alLambda = -120.0f;
+	loadedGround.state.k = 400000.0f;
+	loadedGround.state.depenetrationConstraintOffset = -0.02f;
+	loadedGround.state.depenetrationLimitInitialized = true;
+	AvbdSoftContact separatedGround = loadedGround;
+	separatedGround.state = AvbdSoftContactAugmentedState();
+	PxArray<AvbdSoftParticle> separatedParticles = particles;
+	separatedParticles[0].position.y = 0.02f;
+	previous.clear();
+	previous.pushBack(loadedGround);
+	detected.clear();
+	detected.pushBack(separatedGround);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(),
+		separatedParticles.begin(), detected);
+	TEST_CHECK(
+		PxAbs(detected[0].state.alLambda) < 1e-6f &&
+		PxAbs(detected[0].state.k - 10000.0f) < 1e-3f &&
+		!detected[0].state.depenetrationLimitInitialized &&
+		PxAbs(detected[0].state.depenetrationConstraintOffset) < 1e-6f,
+		"Separated ground shell row starts the next impact without stale normal load");
+
+	AvbdSoftContact activeGround = separatedGround;
+	activeGround.state = AvbdSoftContactAugmentedState();
+	detected.clear();
+	detected.pushBack(activeGround);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(), particles.begin(), detected);
+	TEST_CHECK(
+		detected[0].state.alLambda < -100.0f &&
+		detected[0].state.k > 300000.0f &&
+		detected[0].state.depenetrationLimitInitialized,
+		"Active ground row retains its normal warm-start within one contact episode");
+
+	AvbdSoftBody groundBody;
+	groundBody.compiled.particleStart = 0;
+	groundBody.compiled.particleCount = 1;
+	AvbdSoftContact groundSafetyContact = separatedGround;
+	groundSafetyContact.geometry.queryBodyIndex = 0;
+	groundSafetyContact.geometry.particleIdx = 0;
+	groundSafetyContact.geometry.targetKind =
+		AvbdSoftContactTargetKind::eWORLD_STATIC;
+	groundSafetyContact.geometry.targetIndex = 0;
+	groundSafetyContact.geometry.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	groundSafetyContact.geometry.surfacePoint = PxVec3(0.0f);
+	groundSafetyContact.geometry.margin = 0.05f;
+	AvbdSoftBodyWorkspace groundSafetyWorkspace;
+	PxReal groundSafetyBound = PX_MAX_F32;
+	PxArray<AvbdSoftParticle> touchingParticles = particles;
+	touchingParticles[0].position.y = 0.0f;
+	const bool touchingEpochLimited =
+		avbdApplyComponentOgcEpochSafetyBounds(
+			&groundSafetyContact, 1, &groundBody, 1,
+			touchingParticles.begin(), 0.05f, 0.5f,
+			&groundSafetyBound, 1, groundSafetyWorkspace);
+	TEST_CHECK(
+		!touchingEpochLimited && groundSafetyBound == PX_MAX_F32,
+		"Active ground manifold does not isotropically freeze the soft body");
+
+	PxArray<AvbdSoftParticle> approachingParticles = touchingParticles;
+	approachingParticles[0].position.y = 0.02f;
+	groundSafetyBound = PX_MAX_F32;
+	const bool approachingEpochLimited =
+		avbdApplyComponentOgcEpochSafetyBounds(
+			&groundSafetyContact, 1, &groundBody, 1,
+			approachingParticles.begin(), 0.05f, 0.5f,
+			&groundSafetyBound, 1, groundSafetyWorkspace);
+	TEST_CHECK(
+		approachingEpochLimited &&
+		groundSafetyBound > 0.009f && groundSafetyBound < 0.011f,
+		"Separated ground shell retains a conservative OGC approach bound");
+
+	// The terminal world-static tangent owner must turn sliding momentum into
+	// the physically correct rolling direction instead of pinning the complete
+	// component or injecting kinetic energy.  Two bottom samples receive the
+	// local Coulomb impulses while the two upper samples retain their velocity;
+	// the resulting negative Z angular momentum is the expected response for a
+	// body translating along +X above a +Y ground normal.
+	PxArray<AvbdSoftParticle> rollingParticles(4);
+	rollingParticles[0].position = PxVec3(-1.0f, -1.0f, 0.0f);
+	rollingParticles[1].position = PxVec3(1.0f, -1.0f, 0.0f);
+	rollingParticles[2].position = PxVec3(-1.0f, 1.0f, 0.0f);
+	rollingParticles[3].position = PxVec3(1.0f, 1.0f, 0.0f);
+	for(PxU32 i = 0; i < rollingParticles.size(); ++i)
+	{
+		rollingParticles[i].initialPosition = rollingParticles[i].position;
+		rollingParticles[i].predictedPosition = rollingParticles[i].position;
+		rollingParticles[i].velocity = PxVec3(1.0f, 0.0f, 0.0f);
+		rollingParticles[i].prevVelocity = rollingParticles[i].velocity;
+		rollingParticles[i].mass = 1.0f;
+		rollingParticles[i].invMass = 1.0f;
+	}
+	AvbdSoftBody rollingBody;
+	rollingBody.compiled.particleStart = 0;
+	rollingBody.compiled.particleCount = rollingParticles.size();
+	rollingBody.compiled.maxDepenetrationVelocity = 1.0e32f;
+	rollingBody.compiled.speculativeCCDEnabled = false;
+	PxArray<AvbdSoftContact> rollingContacts(2);
+	for(PxU32 i = 0; i < rollingContacts.size(); ++i)
+	{
+		AvbdSoftContact& rollingContact = rollingContacts[i];
+		rollingContact.geometry.source = AvbdSoftContactSource(
+			AvbdSoftContactSource::eGROUND, PX_MAX_U32, 91u, 0u);
+		rollingContact.geometry.particleIdx = i;
+		rollingContact.geometry.queryBodyIndex = 0;
+		rollingContact.geometry.targetKind =
+			AvbdSoftContactTargetKind::eWORLD_STATIC;
+		rollingContact.geometry.velocityOwner =
+			AvbdVelocityObjectiveOwner::PositionAL;
+		rollingContact.geometry.tangentOwner =
+			AvbdSoftContactTangentOwner::eVELOCITY;
+		rollingContact.geometry.targetIndex = 0;
+		rollingContact.geometry.normal = PxVec3(0.0f, 1.0f, 0.0f);
+		rollingContact.geometry.tangent1 = PxVec3(1.0f, 0.0f, 0.0f);
+		rollingContact.geometry.tangent2 = PxVec3(0.0f, 0.0f, 1.0f);
+		rollingContact.geometry.surfacePoint = PxVec3(
+			rollingParticles[i].position.x, -1.0f, 0.0f);
+		rollingContact.geometry.friction = 1.0f;
+		rollingContact.state.alLambda = -120.0f;
+	}
+	AvbdSoftBodyStepStats rollingStats;
+	avbdProjectSoftContactVelocityTangents(
+		rollingParticles.begin(), rollingParticles.size(),
+		&rollingBody, 1, rollingContacts.begin(), rollingContacts.size(),
+		1.0f / 60.0f, &rollingStats);
+	PxVec3 rollingLinearMomentum(0.0f);
+	PxVec3 rollingAngularMomentum(0.0f);
+	PxReal rollingKineticEnergy = 0.0f;
+	for(PxU32 i = 0; i < rollingParticles.size(); ++i)
+	{
+		rollingLinearMomentum += rollingParticles[i].velocity;
+		rollingAngularMomentum += rollingParticles[i].position.cross(
+			rollingParticles[i].velocity);
+		rollingKineticEnergy += 0.5f *
+			rollingParticles[i].velocity.magnitudeSquared();
+	}
+	TEST_CLOSE(rollingParticles[0].velocity.x, 0.0f, 1e-6f,
+		"Ground tangent owner removes slip at the first contact sample");
+	TEST_CLOSE(rollingParticles[1].velocity.x, 0.0f, 1e-6f,
+		"Ground tangent owner removes slip at the second contact sample");
+	TEST_CLOSE(rollingLinearMomentum.x, 2.0f, 1e-6f,
+		"Ground friction changes only the admitted sliding momentum");
+	TEST_CLOSE(rollingAngularMomentum.z, -2.0f, 1e-6f,
+		"Ground friction generates the correct rolling direction");
+	TEST_CHECK(rollingKineticEnergy <= 1.0f + 1e-6f,
+		"Ground tangent projection is non-energy-injecting");
+	TEST_CHECK(
+		rollingStats.worldStaticVelocityTangentOwnerRows == 2u &&
+		rollingStats.worldStaticVelocityTangentAppliedRows == 2u,
+		"Ground tangent owner accounts for each active manifold row once");
+
 	AvbdSoftContact stablePrevious = contact;
 	stablePrevious.geometry.targetKind =
 		AvbdSoftContactTargetKind::eDEFORMABLE_SURFACE;
@@ -1628,6 +1825,116 @@ static void testContactAugmentedLagrangian()
 	TEST_CHECK(PxAbs(detected[1].state.alLambda) < 1e-6f,
 		"Different contact source cannot inherit another objective's dual");
 
+	// A stable feature key does not imply a stable material contact patch.
+	// Edge-edge and vertex-face closest points can migrate along the same
+	// feature while retaining the same source identity.  Normal warm-start is
+	// still useful in that case, but carrying the old static-friction anchor
+	// would turn it into an artificial tangential tether.
+	PxArray<AvbdSoftParticle> migrationParticles(4);
+	migrationParticles[0].position = PxVec3(0.0f, 0.02f, 0.0f);
+	migrationParticles[1].position = PxVec3(1.0f, 0.02f, 0.0f);
+	migrationParticles[2].position = PxVec3(0.0f, 0.0f, 0.0f);
+	migrationParticles[3].position = PxVec3(1.0f, 0.0f, 0.0f);
+	for(PxU32 particleIndex = 0;
+		particleIndex < migrationParticles.size(); ++particleIndex)
+		migrationParticles[particleIndex].initialPosition =
+			migrationParticles[particleIndex].position;
+
+	AvbdSoftContact migratingPrevious;
+	migratingPrevious.geometry.source = AvbdSoftContactSource(
+		AvbdSoftContactSource::eSOFT_SURFACE, 1, 31, 41);
+	migratingPrevious.geometry.particleIdx = 0;
+	migratingPrevious.geometry.targetKind =
+		AvbdSoftContactTargetKind::eDEFORMABLE_SURFACE;
+	migratingPrevious.geometry.targetIndex = 1;
+	migratingPrevious.geometry.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	migratingPrevious.geometry.margin = 0.05f;
+	migratingPrevious.geometry.queryParticleIndices[0] = 0;
+	migratingPrevious.geometry.queryParticleIndices[1] = 1;
+	migratingPrevious.geometry.queryWeights[0] = 0.95f;
+	migratingPrevious.geometry.queryWeights[1] = 0.05f;
+	migratingPrevious.geometry.surfaceParticleIndices[0] = 2;
+	migratingPrevious.geometry.surfaceParticleIndices[1] = 3;
+	migratingPrevious.geometry.surfaceWeights[0] = 0.95f;
+	migratingPrevious.geometry.surfaceWeights[1] = 0.05f;
+	migratingPrevious.state.alLambda = -8.0f;
+	migratingPrevious.state.alLambdaTangent[0] = 3.0f;
+	migratingPrevious.state.alLambdaTangent[1] = -2.0f;
+	migratingPrevious.state.penTangent[0] = 8000.0f;
+	migratingPrevious.state.penTangent[1] = 9000.0f;
+	migratingPrevious.state.frictionStick = true;
+	migratingPrevious.state.particlePointPrev =
+		PxVec3(0.05f, 0.02f, 0.0f);
+	migratingPrevious.state.surfacePointPrev =
+		PxVec3(0.05f, 0.0f, 0.0f);
+
+	AvbdSoftContact migratedContact = migratingPrevious;
+	migratedContact.geometry.queryWeights[0] = 0.05f;
+	migratedContact.geometry.queryWeights[1] = 0.95f;
+	migratedContact.geometry.surfaceWeights[0] = 0.05f;
+	migratedContact.geometry.surfaceWeights[1] = 0.95f;
+	migratedContact.state = AvbdSoftContactAugmentedState();
+	previous.clear();
+	previous.pushBack(migratingPrevious);
+	detected.clear();
+	detected.pushBack(migratedContact);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(),
+		migrationParticles.begin(), detected);
+	TEST_CHECK(detected[0].state.alLambda < -7.0f,
+		"Migrated contact patch retains normal warm-start");
+	TEST_CHECK(
+		PxAbs(detected[0].state.alLambdaTangent[0]) < 1e-6f &&
+		PxAbs(detected[0].state.alLambdaTangent[1]) < 1e-6f &&
+		detected[0].state.penTangent[0] == 1000.0f &&
+		detected[0].state.penTangent[1] == 1000.0f &&
+		!detected[0].state.frictionStick,
+		"Migrated contact patch starts a fresh friction anchor");
+
+	AvbdSoftContact localPrevious = migratingPrevious;
+	localPrevious.geometry.queryWeights[0] = 0.50f;
+	localPrevious.geometry.queryWeights[1] = 0.50f;
+	localPrevious.geometry.surfaceWeights[0] = 0.50f;
+	localPrevious.geometry.surfaceWeights[1] = 0.50f;
+	localPrevious.state.particlePointPrev =
+		PxVec3(0.50f, 0.02f, 0.0f);
+	localPrevious.state.surfacePointPrev =
+		PxVec3(0.50f, 0.0f, 0.0f);
+	AvbdSoftContact localContact = localPrevious;
+	localContact.geometry.queryWeights[0] = 0.52f;
+	localContact.geometry.queryWeights[1] = 0.48f;
+	localContact.geometry.surfaceWeights[0] = 0.52f;
+	localContact.geometry.surfaceWeights[1] = 0.48f;
+	localContact.state = AvbdSoftContactAugmentedState();
+	previous.clear();
+	previous.pushBack(localPrevious);
+	detected.clear();
+	detected.pushBack(localContact);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(),
+		migrationParticles.begin(), detected);
+	TEST_CHECK(
+		detected[0].state.alLambda < -7.0f &&
+		PxAbs(detected[0].state.alLambdaTangent[0]) > 2.0f &&
+		detected[0].state.penTangent[0] > 7000.0f &&
+		detected[0].state.frictionStick,
+		"Local contact patch retains static-friction warm-start");
+
+	AvbdSoftContact slidingPrevious = migratingPrevious;
+	slidingPrevious.state.frictionStick = false;
+	previous.clear();
+	previous.pushBack(slidingPrevious);
+	detected.clear();
+	detected.pushBack(migratedContact);
+	avbdTransferSoftContactState(
+		previous.begin(), previous.size(),
+		migrationParticles.begin(), detected);
+	TEST_CHECK(
+		PxAbs(detected[0].state.alLambdaTangent[0]) > 2.0f &&
+		detected[0].state.penTangent[0] > 7000.0f &&
+		!detected[0].state.frictionStick,
+		"Sliding contact migration retains tangent warm-start without an anchor");
+
 	const PxU32 previousUsedCapacity =
 		transferWorkspace.previousUsed.capacity();
 	avbdTransferSoftContactState(
@@ -1636,6 +1943,53 @@ static void testContactAugmentedLagrangian()
 	TEST_CHECK(
 		transferWorkspace.previousUsed.capacity() == previousUsedCapacity,
 		"Persistent contact transfer workspace reuses scratch capacity");
+
+	// Edge-edge rows represent geometric creases. A diagonal introduced only
+	// to triangulate a planar collision patch must not become another contact
+	// row, otherwise contact/friction strength scales with surface subdivision.
+	PxArray<AvbdSoftParticle> seamParticles(4);
+	seamParticles[0].position = PxVec3(0.0f, 0.0f, 0.0f);
+	seamParticles[1].position = PxVec3(1.0f, 0.0f, 0.0f);
+	seamParticles[2].position = PxVec3(1.0f, 0.0f, 1.0f);
+	seamParticles[3].position = PxVec3(0.0f, 0.0f, 1.0f);
+	AvbdSoftBody seamBody;
+	seamBody.compiled.particleStart = 0;
+	seamBody.compiled.particleCount = seamParticles.size();
+	const PxU32 seamTriangles[6] = {0, 1, 2, 0, 2, 3};
+	for(PxU32 index = 0; index < 6; ++index)
+		seamBody.compiled.triangles.pushBack(seamTriangles[index]);
+	seamBody.compiled.buildSurfaceTriangles(seamParticles);
+	auto diagonalIsCollisionFeature = [&seamBody]()
+	{
+		for(PxU32 edgeIndex = 0;
+			edgeIndex < seamBody.compiled.surfaceEdges.size(); ++edgeIndex)
+		{
+			const AvbdEdgeInfo& edge =
+				seamBody.compiled.surfaceEdges[edgeIndex];
+			if(edge.p0 == 0 && edge.p1 == 2)
+				return edge.collisionFeature;
+		}
+		return true;
+	};
+	TEST_CHECK(
+		seamBody.compiled.surfaceEdges.size() == 5 &&
+		!diagonalIsCollisionFeature(),
+		"Planar collision tessellation seam is excluded from edge-edge contact");
+	const PxVec3 faceNormalX(1.0f, 0.0f, 0.0f);
+	const PxVec3 faceNormalY(0.0f, 1.0f, 0.0f);
+	TEST_CHECK(
+		avbdIsDirectionInSurfaceEdgeNormalCone(
+			PxVec3(1.0f, 1.0f, 0.0f), faceNormalX, faceNormalY) &&
+		avbdIsDirectionInSurfaceEdgeNormalCone(
+			faceNormalX, faceNormalX, faceNormalY) &&
+		!avbdIsDirectionInSurfaceEdgeNormalCone(
+			PxVec3(1.0f, -1.0f, 0.0f), faceNormalX, faceNormalY),
+		"Edge contact direction must belong to the exterior face-normal cone");
+	seamParticles[3].position.y = 0.25f;
+	seamBody.compiled.buildSurfaceTriangles(seamParticles);
+	TEST_CHECK(
+		diagonalIsCollisionFeature(),
+		"A genuine collision-surface crease remains an edge-edge feature");
 
 	PxArray<AvbdSoftParticle> selfParticles(4);
 	selfParticles[0].position = PxVec3(0.0f, 0.0f, 0.0f);
@@ -2294,6 +2648,64 @@ static void testDynamicRigidSoftContactTwoSidedObjective()
 		"Off-center rigid-soft contact preserves linear-angular coupling");
 	particles[0].position = PxVec3(0.0f, -0.1f, 0.0f);
 
+	// A cooked collision vertex may be embedded in a simulation tet.  Its
+	// legacy representative is the first support point, but that point alone
+	// must not decide whether the dynamic rigid endpoint receives an impulse.
+	// Keep the first point pinned and the second movable to lock the complete
+	// weighted-query ownership contract.
+	PxArray<AvbdSoftParticle> mixedSupportParticles(2);
+	mixedSupportParticles[0].position = PxVec3(0.2f, -0.1f, 0.0f);
+	mixedSupportParticles[0].initialPosition =
+		mixedSupportParticles[0].position;
+	mixedSupportParticles[0].invMass = 0.0f;
+	mixedSupportParticles[0].mass = 0.0f;
+	mixedSupportParticles[1].position = PxVec3(0.2f, -0.1f, 0.0f);
+	mixedSupportParticles[1].initialPosition =
+		mixedSupportParticles[1].position;
+	mixedSupportParticles[1].invMass = 1.0f;
+	mixedSupportParticles[1].mass = 1.0f;
+	AvbdSoftContact mixedSupportContact = offCenterContact;
+	mixedSupportContact.geometry.particleIdx = 0;
+	mixedSupportContact.geometry.queryPoint.clear();
+	const bool mixedSupportQueryBuilt =
+		mixedSupportContact.geometry.queryPoint.appendMerged(0, 0.5f) &&
+		mixedSupportContact.geometry.queryPoint.appendMerged(1, 0.5f);
+	PxVec3 mixedSupportSoftForce;
+	PxMat33 mixedSupportSoftHessian;
+	avbdEvaluateContactParticleBlockAtSurfacePoint(
+		mixedSupportContact.geometry, mixedSupportContact.state,
+		mixedSupportParticles.begin(),
+		avbdGetRigidContactSurfacePoint(
+			mixedSupportContact.geometry, rigidBody),
+		1.0f, mixedSupportSoftForce, mixedSupportSoftHessian);
+	AvbdBlock6x6 mixedSupportRigidHessian;
+	mixedSupportRigidHessian.setZero();
+	AvbdVec6 mixedSupportRigidGradient;
+	const PxU32 mixedSupportContributionCount =
+		avbdAddDynamicSoftRigidContactContributions_rigid(
+			&mixedSupportContact, 1, 0,
+			mixedSupportParticles.begin(), mixedSupportParticles.size(),
+			rigidBody, mixedSupportRigidHessian,
+			mixedSupportRigidGradient);
+	const PxVec3 mixedSupportWorldOffset = rigidBody.rotation.rotate(
+		mixedSupportContact.geometry.rigidLocalPoint);
+	TEST_CHECK(
+		mixedSupportQueryBuilt &&
+		!avbdIsSoftContactQueryFullyKinematic(
+			mixedSupportContact.geometry, mixedSupportParticles.begin(),
+			mixedSupportParticles.size()) &&
+		avbdHasSoftContactDynamicQuerySupport(
+			mixedSupportContact.geometry, mixedSupportParticles.begin(),
+			mixedSupportParticles.size()) &&
+		mixedSupportContributionCount == 1 &&
+		mixedSupportSoftForce.magnitudeSquared() > 1e-8f &&
+		(mixedSupportRigidGradient.linear - mixedSupportSoftForce).
+			magnitude() < 1e-6f &&
+		(mixedSupportRigidGradient.angular -
+		 mixedSupportWorldOffset.cross(mixedSupportSoftForce)).
+			magnitude() < 1e-6f,
+		"Pinned representative with movable weighted support keeps the dynamic rigid torque");
+
 	AvbdSoftContact frictionContact = contact;
 	frictionContact.geometry.friction = 0.5f;
 	frictionContact.geometry.tangent1 =
@@ -2501,6 +2913,23 @@ static void testDynamicRigidSoftContactTwoSidedObjective()
 		churnPreserved &&
 		PxAbs(detectedContacts[0].state.alLambda) < 1e-6f,
 		"Rigid contact churn preserves one state but remove/re-add starts fresh");
+
+	// The mixed OGC scheduler carries endpoint work in one pair record.  A
+	// manifold must distribute that load once across its prepared rows; this
+	// catches the old per-row duplication that made a broad contact launch the
+	// rigid while the soft side received almost no compressive work.
+	AvbdOgcPairState pressurePair;
+	pressurePair.active = true;
+	pressurePair.admittedAtBoundary = true;
+	pressurePair.contactCount = 4u;
+	pressurePair.admittedNormalLoad = 800.0f;
+	TEST_CLOSE(
+		avbdGetOgcPairNormalLoadPerContact(pressurePair), 200.0f, 1e-5f,
+		"Shared OGC pair load is distributed once across its manifold");
+	pressurePair.admittedAtBoundary = false;
+	TEST_CLOSE(
+		avbdGetOgcPairNormalLoadPerContact(pressurePair), 0.0f, 1e-5f,
+		"Inactive OGC pair load cannot leak into the soft solve");
 }
 
 // ============================================================================
@@ -3933,25 +4362,39 @@ static void testCpuAvbdDeformableSurfaceSceneLifecycle()
 			queriedSurface == surface,
 			"CPU AVBD Scene reports its deformable-surface actor");
 
+		bool finiteState = true;
+		PxReal maximumPinnedDrift = 0.0f;
+		PxReal maximumFreeDrop = 0.0f;
 		for(PxU32 frame = 0; frame < 60; frame++)
 		{
 			scene->simulate(1.0f / 60.0f);
 			scene->fetchResults(true);
+			for(PxU32 i = 0; i < 4; i++)
+				finiteState = finiteState &&
+					positions[i].isFinite() &&
+					velocities[i].isFinite();
+			maximumPinnedDrift = PxMax(
+				maximumPinnedDrift,
+				PxMax(
+					(positions[0].getXYZ() - vertices[0]).magnitude(),
+					(positions[1].getXYZ() - vertices[1]).magnitude()));
+			maximumFreeDrop = PxMax(
+				maximumFreeDrop,
+				3.0f - 0.5f * (positions[2].y + positions[3].y));
 		}
 
-		bool finiteState = true;
-		for(PxU32 i = 0; i < 4; i++)
-			finiteState = finiteState &&
-				positions[i].isFinite() &&
-				velocities[i].isFinite();
-		const PxReal pinnedDrift = PxMax(
-			(positions[0].getXYZ() - vertices[0]).magnitude(),
-			(positions[1].getXYZ() - vertices[1]).magnitude());
-		const PxReal freeDrop = 3.0f -
-			0.5f * (positions[2].y + positions[3].y);
+		if(!finiteState || maximumPinnedDrift >= 1.0e-4f ||
+			maximumFreeDrop <= 0.02f)
+		{
+			printf(
+				"  surface lifecycle diagnostics: finite=%d "
+				"maximumPinnedDrift=%.9g maximumFreeDrop=%.9g\n",
+				finiteState ? 1 : 0, double(maximumPinnedDrift),
+				double(maximumFreeDrop));
+		}
 		TEST_CHECK(
-			finiteState && pinnedDrift < 1.0e-4f &&
-				freeDrop > 0.02f,
+			finiteState && maximumPinnedDrift < 1.0e-4f &&
+				maximumFreeDrop > 0.02f,
 			"CPU AVBD surface solves pinned cloth and writes finite host state");
 
 		const PxBounds3 bounds = surface->getWorldBounds();
@@ -4494,6 +4937,165 @@ static void testDeformableMaterialSemantics()
 		maxRigidRotationForce < 1.0e-2f,
 		"Co-rotational volume energy is invariant under a proper rigid rotation");
 
+	// Freeze the first real wide material-kernel envelope before it is allowed
+	// to participate in a trajectory.  FMA is not bitwise-equivalent to the
+	// SSE2 scalar authority, so compare every force/Hessian component against
+	// a fixed absolute+relative envelope and separately prove exceptional-lane
+	// rejection.  The selected SSE2 backend deliberately exposes no wide
+	// function and continues to use the scalar evaluator above.
+	AvbdCpuIsaCorotationalTetPacket8Fn packetKernel =
+		PxAvbdCpuIsaCorotationalTetPacket8FunctionInternal();
+	if(packetKernel)
+	{
+		const PxMat33 rotationMatrix(rotation);
+		const PxMat33 packetDeformations[
+			eAVBD_COROTATIONAL_TET_PACKET_WIDTH] =
+		{
+			PxMat33(PxIdentity),
+			PxMat33::createDiagonal(PxVec3(1.2f, 0.9f, 1.1f)),
+			PxMat33(
+				PxVec3(1.0f, 0.1f, 0.0f),
+				PxVec3(0.2f, 1.0f, 0.05f),
+				PxVec3(0.0f, 0.15f, 0.95f)),
+			rotationMatrix,
+			rotationMatrix * PxMat33::createDiagonal(
+				PxVec3(1.3f, 0.75f, 1.05f)),
+			PxMat33::createDiagonal(PxVec3(0.55f, 0.8f, 1.2f)),
+			PxMat33::createDiagonal(PxVec3(-0.6f, 1.1f, 0.9f)),
+			PxMat33(
+				PxVec3(0.85f, -0.12f, 0.18f),
+				PxVec3(0.16f, 1.25f, -0.09f),
+				PxVec3(-0.11f, 0.07f, 0.72f))
+		};
+		AvbdCorotationalTetPacket8Input packetInput = {};
+		AvbdCorotationalTetPacket8Output packetOutput = {};
+		PxVec3 referenceForces[eAVBD_COROTATIONAL_TET_PACKET_WIDTH];
+		PxMat33 referenceHessians[eAVBD_COROTATIONAL_TET_PACKET_WIDTH];
+		for(PxU32 lane = 0;
+			lane < eAVBD_COROTATIONAL_TET_PACKET_WIDTH; lane++)
+		{
+			const PxMat33& deformation = packetDeformations[lane];
+			const PxU32 vertexOrder = lane & 3u;
+			PxArray<AvbdSoftParticle> laneParticles(4);
+			laneParticles[0].position = PxVec3(0.0f);
+			laneParticles[1].position = deformation.column0;
+			laneParticles[2].position = deformation.column1;
+			laneParticles[3].position = deformation.column2;
+			avbdEvaluateCorotationalForceHessianPrepared(
+				tet, int(vertexOrder), 1000.0f, 1500.0f,
+				laneParticles.begin(), referenceForces[lane],
+				referenceHessians[lane]);
+
+			packetInput.e1X[lane] = deformation.column0.x;
+			packetInput.e1Y[lane] = deformation.column0.y;
+			packetInput.e1Z[lane] = deformation.column0.z;
+			packetInput.e2X[lane] = deformation.column1.x;
+			packetInput.e2Y[lane] = deformation.column1.y;
+			packetInput.e2Z[lane] = deformation.column1.z;
+			packetInput.e3X[lane] = deformation.column2.x;
+			packetInput.e3Y[lane] = deformation.column2.y;
+			packetInput.e3Z[lane] = deformation.column2.z;
+			packetInput.dm0X[lane] = tet.DmInv.column0.x;
+			packetInput.dm0Y[lane] = tet.DmInv.column0.y;
+			packetInput.dm0Z[lane] = tet.DmInv.column0.z;
+			packetInput.dm1X[lane] = tet.DmInv.column1.x;
+			packetInput.dm1Y[lane] = tet.DmInv.column1.y;
+			packetInput.dm1Z[lane] = tet.DmInv.column1.z;
+			packetInput.dm2X[lane] = tet.DmInv.column2.x;
+			packetInput.dm2Y[lane] = tet.DmInv.column2.y;
+			packetInput.dm2Z[lane] = tet.DmInv.column2.z;
+			packetInput.shapeX[lane] =
+				tet.shapeGradients[vertexOrder].x;
+			packetInput.shapeY[lane] =
+				tet.shapeGradients[vertexOrder].y;
+			packetInput.shapeZ[lane] =
+				tet.shapeGradients[vertexOrder].z;
+			packetInput.shapeNormSq[lane] =
+				tet.shapeGradientNormSq[vertexOrder];
+			packetInput.restVolume[lane] = tet.restVolume;
+		}
+		packetKernel(packetInput, 1000.0f, 1500.0f, packetOutput);
+
+		const PxReal forceAbsTolerance = 2.0e-3f;
+		const PxReal forceRelativeTolerance = 2.0e-4f;
+		const PxReal hessianAbsTolerance = 1.0e-3f;
+		const PxReal hessianRelativeTolerance = 2.0e-5f;
+		const auto withinEnvelope = [](
+			PxReal reference, PxReal candidate,
+			PxReal absoluteTolerance, PxReal relativeTolerance)
+		{
+			return PxIsFinite(reference) && PxIsFinite(candidate) &&
+				PxAbs(reference - candidate) <= absoluteTolerance +
+					relativeTolerance * PxMax(PxAbs(reference), 1.0f);
+		};
+		bool packetDifferentialPassed = packetOutput.validMask == 0xffu;
+		for(PxU32 lane = 0;
+			packetDifferentialPassed &&
+			lane < eAVBD_COROTATIONAL_TET_PACKET_WIDTH; lane++)
+		{
+			const PxVec3 candidateForce(
+				packetOutput.forceX[lane],
+				packetOutput.forceY[lane],
+				packetOutput.forceZ[lane]);
+			const PxMat33 candidateHessian(
+				PxVec3(packetOutput.hessianXX[lane],
+					packetOutput.hessianXY[lane],
+					packetOutput.hessianXZ[lane]),
+				PxVec3(packetOutput.hessianXY[lane],
+					packetOutput.hessianYY[lane],
+					packetOutput.hessianYZ[lane]),
+				PxVec3(packetOutput.hessianXZ[lane],
+					packetOutput.hessianYZ[lane],
+					packetOutput.hessianZZ[lane]));
+			for(PxU32 axis = 0; axis < 3; axis++)
+			{
+				packetDifferentialPassed =
+					packetDifferentialPassed && withinEnvelope(
+						referenceForces[lane][axis],
+						candidateForce[axis], forceAbsTolerance,
+						forceRelativeTolerance);
+				for(PxU32 column = 0; column < 3; column++)
+					packetDifferentialPassed =
+						packetDifferentialPassed && withinEnvelope(
+							referenceHessians[lane][column][axis],
+							candidateHessian[column][axis],
+							hessianAbsTolerance,
+							hessianRelativeTolerance);
+			}
+		}
+		TEST_CHECK(
+			packetDifferentialPassed,
+			"AVX2+FMA co-rotational packet stays inside the frozen scalar component envelope");
+
+		for(PxU32 fieldLane = 0;
+			fieldLane < eAVBD_COROTATIONAL_TET_PACKET_WIDTH; fieldLane++)
+		{
+			if(fieldLane == 7)
+			{
+				packetInput.e1X[fieldLane] = 0.0f;
+				packetInput.e1Y[fieldLane] = 0.0f;
+				packetInput.e1Z[fieldLane] = 0.0f;
+				packetInput.e2X[fieldLane] = 0.0f;
+				packetInput.e2Y[fieldLane] = 0.0f;
+				packetInput.e2Z[fieldLane] = 0.0f;
+				packetInput.e3X[fieldLane] = 0.0f;
+				packetInput.e3Y[fieldLane] = 0.0f;
+				packetInput.e3Z[fieldLane] = 0.0f;
+			}
+		}
+		packetKernel(packetInput, 1000.0f, 1500.0f, packetOutput);
+		TEST_CHECK(
+			(packetOutput.validMask & 0x7fu) == 0x7fu &&
+			(packetOutput.validMask & 0x80u) == 0u,
+			"AVX2+FMA co-rotational packet rejects only its degenerate lane for scalar fallback");
+	}
+	else
+	{
+		TEST_CHECK(
+			true,
+			"SSE2 authority selects no AVX2+FMA co-rotational packet kernel");
+	}
+
 	for(PxU32 i = 0; i < 4; ++i)
 		particles[i].position = rest[i];
 	particles[1].position.x = 1.5f;
@@ -4550,6 +5152,7 @@ static void testDeformableMaterialSemantics()
 	stressBody.compiled.surfaceTriangles.pushBack(1);
 	stressBody.compiled.surfaceTriangles.pushBack(2);
 	stressBody.compiled.surfaceTriangleElementIndices.pushBack(0);
+	stressBody.compiled.buildSurfaceTriangleTetElementIndices();
 	stressBody.compiled.surfaceVertices.pushBack(4);
 	stressParticles[1].position.x = 1.5f;
 	stressParticles[1].initialPosition =
@@ -4630,6 +5233,1991 @@ static void testDeformableMaterialSemantics()
 		PxAbs(angularVelocity1 - angularVelocity0) <
 			angularDifferenceBefore,
 		"Surface bending damping independently reduces hinge angular velocity");
+}
+
+// ============================================================================
+// Test 37: P5 private world-plane range output must stable-merge exactly
+// ============================================================================
+
+static void testWorldPlaneRangePrivateOutput()
+{
+	printf("\n--- Test 37: World-Plane Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.20f, -0.10f, 0.0f),
+		PxVec3(-0.60f,  0.10f, 0.0f),
+		PxVec3( 0.20f, -0.20f, 0.0f),
+		PxVec3( 0.10f,  0.20f, 0.0f),
+		PxVec3(-0.01f, -0.01f, 0.0f),
+		PxVec3(-1.00f, -1.00f, 0.0f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		particleIndex++)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = particleIndex == 5 ? 0.0f : 1.0f;
+	}
+	AvbdWorldPlane planes[2];
+	planes[0].normal = PxVec3(0.0f, 2.0f, 0.0f);
+	planes[0].offset = 0.0f;
+	planes[0].primitiveKey = 0xA11CE001ull;
+	planes[1].normal = PxVec3(3.0f, 0.0f, 0.0f);
+	planes[1].offset = 0.0f;
+	planes[1].primitiveKey = 0xA11CE002ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftWorldPlaneContacts(
+		particles.begin(), particles.size(), planes, 2,
+		referenceContacts, 0.05f);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftWorldPlaneContactsRange(
+		particles.begin(), particles.size(), 0, 2, planes, 2,
+		rangeContacts[0], 0.05f);
+	avbdDetectSoftWorldPlaneContactsRange(
+		particles.begin(), particles.size(), 2, 4, planes, 2,
+		rangeContacts[1], 0.05f);
+	avbdDetectSoftWorldPlaneContactsRange(
+		particles.begin(), particles.size(), 4, 6, planes, 2,
+		rangeContacts[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; rangeIndex++)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); contactIndex++)
+		{
+			mergedContacts.pushBack(
+				rangeContacts[rangeIndex][contactIndex]);
+		}
+	}
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		contactIndex++)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local world-plane contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"World-plane range fixture covers more than an empty merge");
+}
+
+// ============================================================================
+// Test 38: P5.4a private rigid-box SDF range output must preserve the stream
+// ============================================================================
+
+static void testRigidBoxSdfRangePrivateOutput()
+{
+	printf("\n--- Test 38: Rigid-Box SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.45f, 0.00f, 0.00f),
+		PxVec3( 0.00f, 0.00f, 0.00f),
+		PxVec3( 0.48f, 0.00f, 0.00f),
+		PxVec3( 1.08f, 0.00f, 0.00f),
+		PxVec3( 1.42f, 0.00f, 0.00f),
+		PxVec3( 3.00f, 0.00f, 0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		++particleIndex)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdRigidBox boxes[2];
+	boxes[0].center = PxVec3(0.0f);
+	boxes[0].halfExtent = PxVec3(0.5f);
+	boxes[0].primitiveKey = 0xA11CE101ull;
+	boxes[1].center = PxVec3(1.1f, 0.0f, 0.0f);
+	boxes[1].halfExtent = PxVec3(0.3f, 0.4f, 0.5f);
+	boxes[1].primitiveKey = 0xA11CE102ull;
+
+	PxArray<AvbdSoftContact> previousContacts;
+	avbdDetectSoftRigidSDF(
+		particles.begin(), particles.size(), boxes, 2,
+		previousContacts, 0.05f);
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidSDF(
+		particles.begin(), particles.size(), boxes, 2,
+		referenceContacts, 0.05f,
+		previousContacts.begin(), previousContacts.size());
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidSDFRange(
+		particles.begin(), particles.size(), 0, 2, boxes, 2,
+		rangeContacts[0], 0.05f,
+		previousContacts.begin(), previousContacts.size());
+	avbdDetectSoftRigidSDFRange(
+		particles.begin(), particles.size(), 2, 4, boxes, 2,
+		rangeContacts[1], 0.05f,
+		previousContacts.begin(), previousContacts.size());
+	avbdDetectSoftRigidSDFRange(
+		particles.begin(), particles.size(), 4, 6, boxes, 2,
+		rangeContacts[2], 0.05f,
+		previousContacts.begin(), previousContacts.size());
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	}
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local rigid-box SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Rigid-box SDF range fixture covers previous-contact face continuity");
+}
+
+// ============================================================================
+// Test 47: P5.12a swept rigid-box SDF ranges preserve their own phase stream
+// ============================================================================
+
+static void testRigidBoxSweptSdfRangePrivateOutput()
+{
+	printf("\n--- Test 47: Rigid-Box Swept-SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 starts[6] =
+	{
+		PxVec3(-2.0f, 0.0f, 0.0f),
+		PxVec3( 2.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 2.0f, 0.0f),
+		PxVec3( 0.0f,-2.0f, 0.0f),
+		PxVec3( 3.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 0.0f, 3.0f)
+	};
+	const PxVec3 ends[6] =
+	{
+		PxVec3(0.0f), PxVec3(0.0f), PxVec3(0.0f),
+		PxVec3(0.0f), PxVec3(4.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, 4.0f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+	{
+		particles[particleIndex].position = starts[particleIndex];
+		particles[particleIndex].initialPosition = starts[particleIndex];
+		particles[particleIndex].predictedPosition = ends[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdRigidBox box;
+	box.center = PxVec3(0.0f);
+	box.halfExtent = PxVec3(0.5f);
+	box.primitiveKey = 0xA11CE701ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidSweptSDF(
+		particles.begin(), particles.size(), &box, 1,
+		referenceContacts, 0.05f);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidSweptSDFRange(
+		particles.begin(), particles.size(), 0, 2, &box, 1,
+		rangeContacts[0], 0.05f);
+	avbdDetectSoftRigidSweptSDFRange(
+		particles.begin(), particles.size(), 2, 4, &box, 1,
+		rangeContacts[1], 0.05f);
+	avbdDetectSoftRigidSweptSDFRange(
+		particles.begin(), particles.size(), 4, 6, &box, 1,
+		rangeContacts[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent; ++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local swept rigid-box SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Swept rigid-box range fixture covers crossing contacts");
+}
+
+// ============================================================================
+// Test 48: P5.13a swept rigid-sphere SDF ranges preserve their phase stream
+// ============================================================================
+
+static void testRigidSphereSweptSdfRangePrivateOutput()
+{
+	printf("\n--- Test 48: Rigid-Sphere Swept-SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 starts[6] =
+	{
+		PxVec3(-2.0f, 0.0f, 0.0f),
+		PxVec3( 2.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 2.0f, 0.0f),
+		PxVec3( 0.0f,-2.0f, 0.0f),
+		PxVec3( 3.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 0.0f, 3.0f)
+	};
+	const PxVec3 ends[6] =
+	{
+		PxVec3(0.0f), PxVec3(0.0f), PxVec3(0.0f),
+		PxVec3(0.0f), PxVec3(4.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, 4.0f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+	{
+		particles[particleIndex].position = starts[particleIndex];
+		particles[particleIndex].initialPosition = starts[particleIndex];
+		particles[particleIndex].predictedPosition = ends[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+		body.compiled.surfaceVertices.pushBack(particleIndex);
+	AvbdRigidSphere sphere;
+	sphere.center = PxVec3(0.0f);
+	sphere.radius = 0.5f;
+	sphere.primitiveKey = 0xA11CE801ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidSphereSweptSDF(
+		particles.begin(), particles.size(), &sphere, 1,
+		referenceContacts, 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidSphereSweptSDFRange(
+		particles.begin(), particles.size(), 0, 2, &sphere, 1,
+		rangeContacts[0], 0.05f, &body, 1);
+	avbdDetectSoftRigidSphereSweptSDFRange(
+		particles.begin(), particles.size(), 2, 4, &sphere, 1,
+		rangeContacts[1], 0.05f, &body, 1);
+	avbdDetectSoftRigidSphereSweptSDFRange(
+		particles.begin(), particles.size(), 4, 6, &sphere, 1,
+		rangeContacts[2], 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent; ++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local swept rigid-sphere SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Swept rigid-sphere range fixture covers crossing contacts");
+}
+
+// ============================================================================
+// Test 49: P5.14a swept rigid-capsule SDF ranges preserve their phase stream
+// ============================================================================
+
+static void testRigidCapsuleSweptSdfRangePrivateOutput()
+{
+	printf("\n--- Test 49: Rigid-Capsule Swept-SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 starts[6] =
+	{
+		PxVec3(-2.0f, 0.0f, 0.0f),
+		PxVec3( 2.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 2.0f, 0.0f),
+		PxVec3( 0.0f,-2.0f, 0.0f),
+		PxVec3( 3.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 0.0f, 3.0f)
+	};
+	const PxVec3 ends[6] =
+	{
+		PxVec3(0.0f), PxVec3(0.0f), PxVec3(0.0f),
+		PxVec3(0.0f), PxVec3(4.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, 4.0f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+	{
+		particles[particleIndex].position = starts[particleIndex];
+		particles[particleIndex].initialPosition = starts[particleIndex];
+		particles[particleIndex].predictedPosition = ends[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+		body.compiled.surfaceVertices.pushBack(particleIndex);
+	AvbdRigidCapsule capsule;
+	capsule.center = PxVec3(0.0f);
+	capsule.rotation = PxQuat(PxIdentity);
+	capsule.radius = 0.5f;
+	capsule.halfHeight = 0.5f;
+	capsule.primitiveKey = 0xA11CE901ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidCapsuleSweptSDF(
+		particles.begin(), particles.size(), &capsule, 1,
+		referenceContacts, 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidCapsuleSweptSDFRange(
+		particles.begin(), particles.size(), 0, 2, &capsule, 1,
+		rangeContacts[0], 0.05f, &body, 1);
+	avbdDetectSoftRigidCapsuleSweptSDFRange(
+		particles.begin(), particles.size(), 2, 4, &capsule, 1,
+		rangeContacts[1], 0.05f, &body, 1);
+	avbdDetectSoftRigidCapsuleSweptSDFRange(
+		particles.begin(), particles.size(), 4, 6, &capsule, 1,
+		rangeContacts[2], 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent; ++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local swept rigid-capsule SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Swept rigid-capsule range fixture covers crossing contacts");
+}
+
+// ============================================================================
+// Test 50: P5.15a swept rigid-convex SDF ranges preserve their phase stream
+// ============================================================================
+
+static void testRigidConvexSweptSdfRangePrivateOutput()
+{
+	printf("\n--- Test 50: Rigid-Convex Swept-SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 starts[6] =
+	{
+		PxVec3(-2.0f, 0.0f, 0.0f),
+		PxVec3( 2.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 2.0f, 0.0f),
+		PxVec3( 0.0f,-2.0f, 0.0f),
+		PxVec3( 3.0f, 0.0f, 0.0f),
+		PxVec3( 0.0f, 0.0f, 3.0f)
+	};
+	const PxVec3 ends[6] =
+	{
+		PxVec3(0.0f), PxVec3(0.0f), PxVec3(0.0f),
+		PxVec3(0.0f), PxVec3(4.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, 4.0f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+	{
+		particles[particleIndex].position = starts[particleIndex];
+		particles[particleIndex].initialPosition = starts[particleIndex];
+		particles[particleIndex].predictedPosition = ends[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+		body.compiled.surfaceVertices.pushBack(particleIndex);
+	AvbdRigidConvex convex;
+	convex.center = PxVec3(0.0f);
+	convex.rotation = PxQuat(PxIdentity);
+	convex.localRadius = 1.0f;
+	convex.primitiveKey = 0xA11CEA01ull;
+	const PxVec3 vertices[8] =
+	{
+		PxVec3(-0.5f, -0.5f, -0.5f),
+		PxVec3( 0.5f, -0.5f, -0.5f),
+		PxVec3( 0.5f,  0.5f, -0.5f),
+		PxVec3(-0.5f,  0.5f, -0.5f),
+		PxVec3(-0.5f, -0.5f,  0.5f),
+		PxVec3( 0.5f, -0.5f,  0.5f),
+		PxVec3( 0.5f,  0.5f,  0.5f),
+		PxVec3(-0.5f,  0.5f,  0.5f)
+	};
+	for(PxU32 vertexIndex = 0; vertexIndex < 8; ++vertexIndex)
+		convex.vertices.pushBack(vertices[vertexIndex]);
+	const PxVec3 normals[6] =
+	{
+		PxVec3(-1.0f, 0.0f, 0.0f), PxVec3(1.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, -1.0f, 0.0f), PxVec3(0.0f, 1.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, -1.0f), PxVec3(0.0f, 0.0f, 1.0f)
+	};
+	for(PxU32 faceIndex = 0; faceIndex < 6; ++faceIndex)
+	{
+		AvbdRigidConvexFace face;
+		face.normal = normals[faceIndex];
+		face.offset = 0.5f;
+		convex.faces.pushBack(face);
+	}
+	const PxU32 triangleIndices[12][4] =
+	{
+		{0, 3, 7, 0}, {0, 7, 4, 0}, {1, 5, 6, 1}, {1, 6, 2, 1},
+		{0, 4, 5, 2}, {0, 5, 1, 2}, {3, 2, 6, 3}, {3, 6, 7, 3},
+		{0, 1, 2, 4}, {0, 2, 3, 4}, {4, 7, 6, 5}, {4, 6, 5, 5}
+	};
+	for(PxU32 triangleIndex = 0; triangleIndex < 12; ++triangleIndex)
+	{
+		AvbdRigidConvexTriangle triangle;
+		triangle.p0 = triangleIndices[triangleIndex][0];
+		triangle.p1 = triangleIndices[triangleIndex][1];
+		triangle.p2 = triangleIndices[triangleIndex][2];
+		triangle.faceIndex = triangleIndices[triangleIndex][3];
+		convex.triangles.pushBack(triangle);
+	}
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidConvexSweptSDF(
+		particles.begin(), particles.size(), &convex, 1,
+		referenceContacts, 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidConvexSweptSDFRange(
+		particles.begin(), particles.size(), 0, 2, &convex, 1,
+		rangeContacts[0], 0.05f, &body, 1);
+	avbdDetectSoftRigidConvexSweptSDFRange(
+		particles.begin(), particles.size(), 2, 4, &convex, 1,
+		rangeContacts[1], 0.05f, &body, 1);
+	avbdDetectSoftRigidConvexSweptSDFRange(
+		particles.begin(), particles.size(), 4, 6, &convex, 1,
+		rangeContacts[2], 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent; ++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local swept rigid-convex SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Swept rigid-convex range fixture covers crossing contacts");
+}
+
+// ============================================================================
+// Test 51: P5.16a swept rigid-triangle surface range-private scratch/output
+// ============================================================================
+
+static void testRigidTriangleSurfaceSweptRangePrivateOutput()
+{
+	printf("\n--- Test 51: Rigid-Triangle Swept-SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 starts[6] =
+	{
+		PxVec3(-0.25f, 0.50f, -0.25f),
+		PxVec3( 0.25f, 0.50f, -0.25f),
+		PxVec3( 0.00f, 0.50f,  0.25f),
+		PxVec3( 0.00f, 0.50f,  0.00f),
+		PxVec3( 0.00f, 0.50f,  0.00f),
+		PxVec3( 2.00f, 0.50f,  0.00f)
+	};
+	const PxVec3 ends[6] =
+	{
+		PxVec3(-0.25f, 0.00f, -0.25f),
+		PxVec3( 0.25f, 0.00f, -0.25f),
+		PxVec3( 0.00f, 0.00f,  0.25f),
+		PxVec3( 0.00f, 0.00f,  0.00f),
+		PxVec3( 0.00f, 1.00f,  0.00f),
+		PxVec3( 2.00f, 0.00f,  0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+	{
+		particles[particleIndex].position = starts[particleIndex];
+		particles[particleIndex].initialPosition = starts[particleIndex];
+		particles[particleIndex].predictedPosition = ends[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	for(PxU32 particleIndex = 0; particleIndex < particles.size(); ++particleIndex)
+		body.compiled.surfaceVertices.pushBack(particleIndex);
+	AvbdRigidTriangleSurface surface;
+	surface.center = PxVec3(0.0f);
+	surface.rotation = PxQuat(PxIdentity);
+	surface.localBounds = PxBounds3(
+		PxVec3(-1.0f, 0.0f, -1.0f),
+		PxVec3( 1.0f, 0.0f,  1.0f));
+	surface.localRadius = 1.5f;
+	surface.primitiveKey = 0xA11CEB01ull;
+	const PxVec3 vertices[3] =
+	{
+		PxVec3(-1.0f, 0.0f, -1.0f),
+		PxVec3( 1.0f, 0.0f, -1.0f),
+		PxVec3( 0.0f, 0.0f,  1.0f)
+	};
+	for(PxU32 vertexIndex = 0; vertexIndex < 3; ++vertexIndex)
+	{
+		AvbdRigidTriangleSurfaceVertex vertex;
+		vertex.point = vertices[vertexIndex];
+		vertex.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		vertex.active = true;
+		surface.vertices.pushBack(vertex);
+	}
+	const PxU32 edgeVertices[3][2] = {{0, 1}, {1, 2}, {2, 0}};
+	for(PxU32 edgeIndex = 0; edgeIndex < 3; ++edgeIndex)
+	{
+		AvbdRigidTriangleSurfaceEdge edge;
+		edge.p0 = edgeVertices[edgeIndex][0];
+		edge.p1 = edgeVertices[edgeIndex][1];
+		edge.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		edge.active = true;
+		surface.edges.pushBack(edge);
+	}
+	AvbdRigidTriangleSurfaceTriangle triangle;
+	triangle.p0 = 0;
+	triangle.p1 = 1;
+	triangle.p2 = 2;
+	triangle.edge0 = 0;
+	triangle.edge1 = 1;
+	triangle.edge2 = 2;
+	triangle.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	surface.triangles.pushBack(triangle);
+	surface.triangleBvhTriangleIndices.pushBack(0);
+	AvbdRigidTriangleSurfaceBvhNode node;
+	node.minimum = surface.localBounds.minimum;
+	node.maximum = surface.localBounds.maximum;
+	node.leftChild = PX_MAX_U32;
+	node.rightChild = PX_MAX_U32;
+	node.firstPrimitive = 0;
+	node.primitiveCount = 1;
+	surface.triangleBvhNodes.pushBack(node);
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidTriangleSurfaceSwept(
+		particles.begin(), particles.size(), &surface, 1,
+		referenceContacts, 0.05f, &body, 1);
+	// Sentinels cover every descriptor-owned candidate/stamp channel that the
+	// legacy swept path used. Range calls must leave all of them untouched.
+	surface.triangleBvhQueryCandidates.clear();
+	surface.edgeBvhQueryCandidates.clear();
+	surface.vertexBvhQueryCandidates.clear();
+	surface.triangleBvhQueryCandidates.pushBack(101u);
+	surface.edgeBvhQueryCandidates.pushBack(102u);
+	surface.vertexBvhQueryCandidates.pushBack(103u);
+	surface.edgeBvhCandidateStamps.resize(3);
+	surface.vertexBvhCandidateStamps.resize(3);
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		surface.edgeBvhCandidateStamps[index] = 104u + index;
+		surface.vertexBvhCandidateStamps[index] = 107u + index;
+	}
+	surface.featureBvhCandidateStamp = 110u;
+
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	AvbdRigidTriangleSurfaceQueryScratch rangeScratch[3];
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		rangeScratch[rangeIndex].reserve(1, 3, 3);
+	avbdDetectSoftRigidTriangleSurfaceSweptRange(
+		particles.begin(), particles.size(), 0, 2, &surface, 1,
+		rangeContacts[0], rangeScratch[0], 0.05f, &body, 1);
+	avbdDetectSoftRigidTriangleSurfaceSweptRange(
+		particles.begin(), particles.size(), 2, 4, &surface, 1,
+		rangeContacts[1], rangeScratch[1], 0.05f, &body, 1);
+	avbdDetectSoftRigidTriangleSurfaceSweptRange(
+		particles.begin(), particles.size(), 4, 6, &surface, 1,
+		rangeContacts[2], rangeScratch[2], 0.05f, &body, 1);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent; ++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f;
+	}
+	const bool descriptorScratchUnchanged =
+		surface.triangleBvhQueryCandidates.size() == 1 &&
+		surface.triangleBvhQueryCandidates[0] == 101u &&
+		surface.edgeBvhQueryCandidates.size() == 1 &&
+		surface.edgeBvhQueryCandidates[0] == 102u &&
+		surface.vertexBvhQueryCandidates.size() == 1 &&
+		surface.vertexBvhQueryCandidates[0] == 103u &&
+		surface.edgeBvhCandidateStamps.size() == 3 &&
+		surface.edgeBvhCandidateStamps[0] == 104u &&
+		surface.edgeBvhCandidateStamps[1] == 105u &&
+		surface.edgeBvhCandidateStamps[2] == 106u &&
+		surface.vertexBvhCandidateStamps.size() == 3 &&
+		surface.vertexBvhCandidateStamps[0] == 107u &&
+		surface.vertexBvhCandidateStamps[1] == 108u &&
+		surface.vertexBvhCandidateStamps[2] == 109u &&
+		surface.featureBvhCandidateStamp == 110u;
+	TEST_CHECK(
+		equivalent,
+		"Range-local swept rigid-triangle contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		descriptorScratchUnchanged && !referenceContacts.empty(),
+		"Swept rigid-triangle range fixture keeps every BVH scratch channel private");
+}
+
+// ============================================================================
+// Test 52: P5.17a triangle OGC-feature private query-scratch override
+// ============================================================================
+
+static void testRigidTriangleSurfaceFeaturePrivateQueryScratch()
+{
+	printf("\n--- Test 52: Rigid-Triangle OGC Feature Private Query Scratch ---\n");
+	PxArray<AvbdSoftParticle> particles(5);
+	const PxVec3 starts[5] =
+	{
+		PxVec3(-2.0f, 0.20f, -1.0f), PxVec3(2.0f, 0.20f, -1.0f),
+		PxVec3(-0.30f, 0.20f, 0.80f), PxVec3(0.00f, 0.20f, 1.30f),
+		PxVec3(0.30f, 0.20f, 0.80f)
+	};
+	for(PxU32 index = 0; index < particles.size(); ++index)
+	{
+		particles[index].position = starts[index];
+		particles[index].initialPosition = starts[index];
+		particles[index].predictedPosition =
+			starts[index] - PxVec3(0.0f, 0.40f, 0.0f);
+		particles[index].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	for(PxU32 index = 0; index < particles.size(); ++index)
+		body.compiled.surfaceVertices.pushBack(index);
+	AvbdEdgeInfo softEdge;
+	softEdge.p0 = 0;
+	softEdge.p1 = 1;
+	softEdge.restLength = 4.0f;
+	body.compiled.surfaceEdges.pushBack(softEdge);
+	body.compiled.surfaceTriangles.pushBack(2);
+	body.compiled.surfaceTriangles.pushBack(3);
+	body.compiled.surfaceTriangles.pushBack(4);
+
+	AvbdRigidTriangleSurface surface;
+	surface.center = PxVec3(0.0f);
+	surface.rotation = PxQuat(PxIdentity);
+	surface.localBounds = PxBounds3(
+		PxVec3(-1.0f, 0.0f, -1.0f), PxVec3(1.0f, 0.0f, 1.0f));
+	surface.localRadius = 1.5f;
+	surface.primitiveKey = 0xA11CEB02ull;
+	const PxVec3 rigidVertices[3] =
+	{
+		PxVec3(-1.0f, 0.0f, -1.0f), PxVec3(1.0f, 0.0f, -1.0f),
+		PxVec3(0.0f, 0.0f, 1.0f)
+	};
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		AvbdRigidTriangleSurfaceVertex vertex;
+		vertex.point = rigidVertices[index];
+		vertex.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		vertex.active = true;
+		surface.vertices.pushBack(vertex);
+	}
+	const PxU32 edgeVertices[3][2] = {{0, 1}, {1, 2}, {2, 0}};
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		AvbdRigidTriangleSurfaceEdge edge;
+		edge.p0 = edgeVertices[index][0];
+		edge.p1 = edgeVertices[index][1];
+		edge.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		edge.active = true;
+		surface.edges.pushBack(edge);
+	}
+	AvbdRigidTriangleSurfaceTriangle triangle;
+	triangle.p0 = 0;
+	triangle.p1 = 1;
+	triangle.p2 = 2;
+	triangle.edge0 = 0;
+	triangle.edge1 = 1;
+	triangle.edge2 = 2;
+	triangle.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	surface.triangles.pushBack(triangle);
+	surface.triangleBvhTriangleIndices.pushBack(0);
+	AvbdRigidTriangleSurfaceBvhNode node;
+	node.minimum = surface.localBounds.minimum;
+	node.maximum = surface.localBounds.maximum;
+	node.leftChild = PX_MAX_U32;
+	node.rightChild = PX_MAX_U32;
+	node.firstPrimitive = 0;
+	node.primitiveCount = 1;
+	surface.triangleBvhNodes.pushBack(node);
+
+	auto setSentinels = [&surface]()
+	{
+		surface.triangleBvhQueryCandidates.clear();
+		surface.edgeBvhQueryCandidates.clear();
+		surface.vertexBvhQueryCandidates.clear();
+		surface.triangleBvhQueryCandidates.pushBack(201u);
+		surface.edgeBvhQueryCandidates.pushBack(202u);
+		surface.vertexBvhQueryCandidates.pushBack(203u);
+		surface.edgeBvhCandidateStamps.resize(3);
+		surface.vertexBvhCandidateStamps.resize(3);
+		for(PxU32 index = 0; index < 3; ++index)
+		{
+			surface.edgeBvhCandidateStamps[index] = 204u + index;
+			surface.vertexBvhCandidateStamps[index] = 207u + index;
+		}
+		surface.featureBvhCandidateStamp = 210u;
+	};
+	auto descriptorUnchanged = [&surface]()
+	{
+		return surface.triangleBvhQueryCandidates.size() == 1 &&
+			surface.triangleBvhQueryCandidates[0] == 201u &&
+			surface.edgeBvhQueryCandidates.size() == 1 &&
+			surface.edgeBvhQueryCandidates[0] == 202u &&
+			surface.vertexBvhQueryCandidates.size() == 1 &&
+			surface.vertexBvhQueryCandidates[0] == 203u &&
+			surface.edgeBvhCandidateStamps.size() == 3 &&
+			surface.edgeBvhCandidateStamps[0] == 204u &&
+			surface.edgeBvhCandidateStamps[1] == 205u &&
+			surface.edgeBvhCandidateStamps[2] == 206u &&
+			surface.vertexBvhCandidateStamps.size() == 3 &&
+			surface.vertexBvhCandidateStamps[0] == 207u &&
+			surface.vertexBvhCandidateStamps[1] == 208u &&
+			surface.vertexBvhCandidateStamps[2] == 209u &&
+			surface.featureBvhCandidateStamp == 210u;
+	};
+	auto equivalent = [](const PxArray<AvbdSoftContact>& lhs,
+		const PxArray<AvbdSoftContact>& rhs)
+	{
+		if(lhs.size() != rhs.size()) return false;
+		for(PxU32 index = 0; index < lhs.size(); ++index)
+		{
+			const AvbdSoftContactGeometry& a = lhs[index].geometry;
+			const AvbdSoftContactGeometry& b = rhs[index].geometry;
+			if(!(a.source == b.source) || a.particleIdx != b.particleIdx ||
+				a.targetKind != b.targetKind || a.velocityOwner != b.velocityOwner ||
+				a.targetIndex != b.targetIndex ||
+				(a.normal - b.normal).magnitudeSquared() >= 1e-12f ||
+				(a.projNormal - b.projNormal).magnitudeSquared() >= 1e-12f ||
+				(a.surfacePoint - b.surfacePoint).magnitudeSquared() >= 1e-12f ||
+				PxAbs(a.depth - b.depth) >= 1e-7f ||
+				PxAbs(a.margin - b.margin) >= 1e-7f ||
+				PxAbs(a.friction - b.friction) >= 1e-7f)
+				return false;
+		}
+		return true;
+	};
+
+	PxArray<AvbdSoftContact> sweptReference;
+	avbdDetectSoftRigidTriangleSurfaceSweptOGCFeatures(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		sweptReference, 0.05f);
+	setSentinels();
+	AvbdRigidTriangleSurfaceQueryScratch sweptScratch;
+	sweptScratch.reserve(1, 3, 3);
+	PxArray<AvbdSoftContact> sweptOverride;
+	avbdDetectSoftRigidTriangleSurfaceSweptOGCFeatures(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		sweptOverride, 0.05f, NULL, &sweptScratch);
+	const bool sweptPrivate = descriptorUnchanged();
+
+	PxArray<AvbdSoftParticle> discreteParticles = particles;
+	for(PxU32 index = 0; index < discreteParticles.size(); ++index)
+		discreteParticles[index].position =
+			starts[index] - PxVec3(0.0f, 0.18f, 0.0f);
+	PxArray<AvbdSoftContact> discreteReference;
+	avbdDetectSoftRigidTriangleSurfaceOGCFeatures(
+		discreteParticles.begin(), discreteParticles.size(), &surface, 1,
+		&body, 1, discreteReference, 0.05f);
+	setSentinels();
+	AvbdRigidTriangleSurfaceQueryScratch discreteScratch;
+	discreteScratch.reserve(1, 3, 3);
+	PxArray<AvbdSoftContact> discreteOverride;
+	avbdDetectSoftRigidTriangleSurfaceOGCFeatures(
+		discreteParticles.begin(), discreteParticles.size(), &surface, 1,
+		&body, 1, discreteOverride, 0.05f, NULL, &discreteScratch);
+	const bool discretePrivate = descriptorUnchanged();
+
+	TEST_CHECK(equivalent(sweptReference, sweptOverride) &&
+		equivalent(discreteReference, discreteOverride),
+		"Triangle OGC feature private scratch override matches serial feature streams");
+	TEST_CHECK(sweptPrivate && discretePrivate && !sweptReference.empty() &&
+		!discreteReference.empty(),
+		"Triangle OGC feature override keeps every descriptor BVH channel private");
+}
+
+// ============================================================================
+// Test 53: P5.17b triangle OGC-feature canonical parent plan
+// ============================================================================
+
+static void testRigidTriangleSurfaceFeatureCanonicalPlan()
+{
+	printf("\n--- Test 53: Rigid-Triangle OGC Feature Canonical Plan ---\n");
+	AvbdSoftBody bodies[2];
+	bodies[0].compiled.speculativeCCDEnabled = true;
+	bodies[1].compiled.speculativeCCDEnabled = false;
+	for(PxU32 index = 0; index < 2; ++index)
+	{
+		AvbdEdgeInfo edge;
+		edge.p0 = index;
+		edge.p1 = index + 1;
+		bodies[0].compiled.surfaceEdges.pushBack(edge);
+	}
+	AvbdEdgeInfo secondBodyEdge;
+	secondBodyEdge.p0 = 4;
+	secondBodyEdge.p1 = 5;
+	bodies[1].compiled.surfaceEdges.pushBack(secondBodyEdge);
+	for(PxU32 triangleIndex = 0; triangleIndex < 2; ++triangleIndex)
+	{
+		bodies[0].compiled.surfaceTriangles.pushBack(triangleIndex * 3);
+		bodies[0].compiled.surfaceTriangles.pushBack(triangleIndex * 3 + 1);
+		bodies[0].compiled.surfaceTriangles.pushBack(triangleIndex * 3 + 2);
+	}
+	bodies[1].compiled.surfaceTriangles.pushBack(4);
+	bodies[1].compiled.surfaceTriangles.pushBack(5);
+	bodies[1].compiled.surfaceTriangles.pushBack(6);
+
+	AvbdRigidTriangleSurfaceFeaturePlan plan;
+	avbdBuildRigidTriangleSurfaceOGCFeaturePlan(
+		bodies, 2, 2, plan);
+
+	using Work = AvbdRigidTriangleSurfaceFeatureWorkItem;
+	struct Expected
+	{
+		Work::Phase phase;
+		Work::Family family;
+		PxU32 bodyIndex;
+		PxU32 surfaceIndex;
+		PxU32 primitiveEnd;
+	};
+	const Expected expected[] =
+	{
+		{Work::eSWEPT, Work::eSOFT_EDGE, 0, 0, 2},
+		{Work::eSWEPT, Work::eSOFT_TRIANGLE, 0, 0, 2},
+		{Work::eSWEPT, Work::eSOFT_EDGE, 0, 1, 2},
+		{Work::eSWEPT, Work::eSOFT_TRIANGLE, 0, 1, 2},
+		{Work::eDISCRETE, Work::eSOFT_EDGE, 0, 0, 2},
+		{Work::eDISCRETE, Work::eSOFT_TRIANGLE, 0, 0, 2},
+		{Work::eDISCRETE, Work::eSOFT_EDGE, 0, 1, 2},
+		{Work::eDISCRETE, Work::eSOFT_TRIANGLE, 0, 1, 2},
+		{Work::eDISCRETE, Work::eSOFT_EDGE, 1, 0, 1},
+		{Work::eDISCRETE, Work::eSOFT_TRIANGLE, 1, 0, 1},
+		{Work::eDISCRETE, Work::eSOFT_EDGE, 1, 1, 1},
+		{Work::eDISCRETE, Work::eSOFT_TRIANGLE, 1, 1, 1}
+	};
+	bool canonicalIdentity = plan.items.size() == PX_ARRAY_SIZE(expected);
+	for(PxU32 index = 0;
+		index < plan.items.size() && canonicalIdentity; ++index)
+	{
+		const Work& actual = plan.items[index];
+		const Expected& row = expected[index];
+		canonicalIdentity = actual.phase == row.phase &&
+			actual.family == row.family &&
+			actual.bodyIndex == row.bodyIndex &&
+			actual.surfaceIndex == row.surfaceIndex &&
+			actual.primitiveBegin == 0 &&
+			actual.primitiveEnd == row.primitiveEnd;
+	}
+	bool phaseSeparated = true;
+	bool sawDiscrete = false;
+	for(PxU32 index = 0; index < plan.items.size(); ++index)
+	{
+		const Work& work = plan.items[index];
+		if(work.phase == Work::eDISCRETE)
+			sawDiscrete = true;
+		else if(sawDiscrete)
+			phaseSeparated = false;
+		if(index > 0 && work.phase == plan.items[index - 1].phase &&
+			work.bodyIndex == plan.items[index - 1].bodyIndex &&
+			work.surfaceIndex == plan.items[index - 1].surfaceIndex &&
+			work.family != Work::eSOFT_TRIANGLE)
+			phaseSeparated = false;
+	}
+
+	TEST_CHECK(canonicalIdentity,
+		"Triangle OGC feature plan preserves body-surface-edge-triangle identity");
+	TEST_CHECK(phaseSeparated && sawDiscrete,
+		"Triangle OGC feature plan keeps swept and discrete suffixes phase-separated");
+}
+
+// ============================================================================
+// Test 54: P5.17c triangle OGC-feature planned-row range output
+// ============================================================================
+
+static void testRigidTriangleSurfaceFeaturePlanRangePrivateOutput()
+{
+	printf("\n--- Test 54: Rigid-Triangle OGC Feature Plan-Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(5);
+	const PxVec3 starts[5] =
+	{
+		PxVec3(-2.0f, 0.20f, -1.0f), PxVec3(2.0f, 0.20f, -1.0f),
+		PxVec3(-0.30f, 0.20f, 0.80f), PxVec3(0.00f, 0.20f, 1.30f),
+		PxVec3(0.30f, 0.20f, 0.80f)
+	};
+	for(PxU32 index = 0; index < particles.size(); ++index)
+	{
+		particles[index].initialPosition = starts[index];
+		particles[index].predictedPosition =
+			starts[index] - PxVec3(0.0f, 0.40f, 0.0f);
+		particles[index].position =
+			starts[index] - PxVec3(0.0f, 0.18f, 0.0f);
+		particles[index].invMass = 1.0f;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.speculativeCCDEnabled = true;
+	AvbdEdgeInfo softEdge;
+	softEdge.p0 = 0;
+	softEdge.p1 = 1;
+	softEdge.restLength = 4.0f;
+	body.compiled.surfaceEdges.pushBack(softEdge);
+	body.compiled.surfaceTriangles.pushBack(2);
+	body.compiled.surfaceTriangles.pushBack(3);
+	body.compiled.surfaceTriangles.pushBack(4);
+
+	AvbdRigidTriangleSurface surface;
+	surface.center = PxVec3(0.0f);
+	surface.rotation = PxQuat(PxIdentity);
+	surface.localBounds = PxBounds3(
+		PxVec3(-1.0f, 0.0f, -1.0f), PxVec3(1.0f, 0.0f, 1.0f));
+	surface.localRadius = 1.5f;
+	surface.primitiveKey = 0xA11CEB03ull;
+	const PxVec3 rigidVertices[3] =
+	{
+		PxVec3(-1.0f, 0.0f, -1.0f), PxVec3(1.0f, 0.0f, -1.0f),
+		PxVec3(0.0f, 0.0f, 1.0f)
+	};
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		AvbdRigidTriangleSurfaceVertex vertex;
+		vertex.point = rigidVertices[index];
+		vertex.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		vertex.active = true;
+		surface.vertices.pushBack(vertex);
+	}
+	const PxU32 edgeVertices[3][2] = {{0, 1}, {1, 2}, {2, 0}};
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		AvbdRigidTriangleSurfaceEdge edge;
+		edge.p0 = edgeVertices[index][0];
+		edge.p1 = edgeVertices[index][1];
+		edge.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		edge.active = true;
+		surface.edges.pushBack(edge);
+	}
+	AvbdRigidTriangleSurfaceTriangle triangle;
+	triangle.p0 = 0;
+	triangle.p1 = 1;
+	triangle.p2 = 2;
+	triangle.edge0 = 0;
+	triangle.edge1 = 1;
+	triangle.edge2 = 2;
+	triangle.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	surface.triangles.pushBack(triangle);
+	surface.triangleBvhTriangleIndices.pushBack(0);
+	AvbdRigidTriangleSurfaceBvhNode node;
+	node.minimum = surface.localBounds.minimum;
+	node.maximum = surface.localBounds.maximum;
+	node.leftChild = PX_MAX_U32;
+	node.rightChild = PX_MAX_U32;
+	node.firstPrimitive = 0;
+	node.primitiveCount = 1;
+	surface.triangleBvhNodes.pushBack(node);
+
+	auto equivalent = [](const PxArray<AvbdSoftContact>& lhs,
+		const PxArray<AvbdSoftContact>& rhs)
+	{
+		if(lhs.size() != rhs.size()) return false;
+		for(PxU32 index = 0; index < lhs.size(); ++index)
+		{
+			const AvbdSoftContactGeometry& a = lhs[index].geometry;
+			const AvbdSoftContactGeometry& b = rhs[index].geometry;
+			if(!(a.source == b.source) || a.particleIdx != b.particleIdx ||
+				a.targetKind != b.targetKind || a.velocityOwner != b.velocityOwner ||
+				a.targetIndex != b.targetIndex ||
+				(a.normal - b.normal).magnitudeSquared() >= 1e-12f ||
+				(a.projNormal - b.projNormal).magnitudeSquared() >= 1e-12f ||
+				(a.surfacePoint - b.surfacePoint).magnitudeSquared() >= 1e-12f ||
+				PxAbs(a.depth - b.depth) >= 1e-7f ||
+				PxAbs(a.margin - b.margin) >= 1e-7f ||
+				PxAbs(a.friction - b.friction) >= 1e-7f)
+				return false;
+		}
+		return true;
+	};
+
+	PxArray<AvbdSoftContact> reference;
+	avbdDetectSoftRigidTriangleSurfaceSweptOGCFeatures(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		reference, 0.05f);
+	avbdDetectSoftRigidTriangleSurfaceOGCFeatures(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		reference, 0.05f);
+
+	AvbdRigidTriangleSurfaceFeaturePlan plan;
+	avbdBuildRigidTriangleSurfaceOGCFeaturePlan(&body, 1, 1, plan);
+	surface.triangleBvhQueryCandidates.clear();
+	surface.edgeBvhQueryCandidates.clear();
+	surface.vertexBvhQueryCandidates.clear();
+	surface.triangleBvhQueryCandidates.pushBack(301u);
+	surface.edgeBvhQueryCandidates.pushBack(302u);
+	surface.vertexBvhQueryCandidates.pushBack(303u);
+	surface.edgeBvhCandidateStamps.resize(3);
+	surface.vertexBvhCandidateStamps.resize(3);
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		surface.edgeBvhCandidateStamps[index] = 304u + index;
+		surface.vertexBvhCandidateStamps[index] = 307u + index;
+	}
+	surface.featureBvhCandidateStamp = 310u;
+	AvbdRigidTriangleSurfaceQueryScratch scratches[3];
+	for(PxU32 index = 0; index < 3; ++index)
+		scratches[index].reserve(1, 3, 3);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidTriangleSurfaceOGCFeaturePlanRange(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		plan, 0, 1, rangeContacts[0], scratches[0], 0.05f);
+	avbdDetectSoftRigidTriangleSurfaceOGCFeaturePlanRange(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		plan, 1, 3, rangeContacts[1], scratches[1], 0.05f);
+	avbdDetectSoftRigidTriangleSurfaceOGCFeaturePlanRange(
+		particles.begin(), particles.size(), &surface, 1, &body, 1,
+		plan, 3, 4, rangeContacts[2], scratches[2], 0.05f);
+	PxArray<AvbdSoftContact> merged;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			merged.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	}
+	const bool descriptorPrivate =
+		surface.triangleBvhQueryCandidates.size() == 1 &&
+		surface.triangleBvhQueryCandidates[0] == 301u &&
+		surface.edgeBvhQueryCandidates.size() == 1 &&
+		surface.edgeBvhQueryCandidates[0] == 302u &&
+		surface.vertexBvhQueryCandidates.size() == 1 &&
+		surface.vertexBvhQueryCandidates[0] == 303u &&
+		surface.edgeBvhCandidateStamps.size() == 3 &&
+		surface.edgeBvhCandidateStamps[0] == 304u &&
+		surface.edgeBvhCandidateStamps[1] == 305u &&
+		surface.edgeBvhCandidateStamps[2] == 306u &&
+		surface.vertexBvhCandidateStamps.size() == 3 &&
+		surface.vertexBvhCandidateStamps[0] == 307u &&
+		surface.vertexBvhCandidateStamps[1] == 308u &&
+		surface.vertexBvhCandidateStamps[2] == 309u &&
+		surface.featureBvhCandidateStamp == 310u;
+
+	TEST_CHECK(plan.items.size() == 4 && equivalent(reference, merged),
+		"Plan-range triangle OGC features stable-merge to the serial feature stream");
+	TEST_CHECK(descriptorPrivate && !reference.empty(),
+		"Plan-range triangle OGC feature leaf keeps output and BVH scratch private");
+}
+
+// ============================================================================
+// Test 39: P5.5a private rigid-sphere SDF range output preserves the stream
+// ============================================================================
+
+static void testRigidSphereSdfRangePrivateOutput()
+{
+	printf("\n--- Test 39: Rigid-Sphere SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.45f, 0.00f, 0.00f),
+		PxVec3( 0.00f, 0.00f, 0.00f),
+		PxVec3( 0.49f, 0.00f, 0.00f),
+		PxVec3( 1.10f, 0.00f, 0.00f),
+		PxVec3( 1.34f, 0.00f, 0.00f),
+		PxVec3( 3.00f, 0.00f, 0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		++particleIndex)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdRigidSphere spheres[2];
+	spheres[0].center = PxVec3(0.0f);
+	spheres[0].radius = 0.5f;
+	spheres[0].primitiveKey = 0xA11CE201ull;
+	spheres[1].center = PxVec3(1.1f, 0.0f, 0.0f);
+	spheres[1].radius = 0.3f;
+	spheres[1].primitiveKey = 0xA11CE202ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidSphereSDF(
+		particles.begin(), particles.size(), spheres, 2,
+		referenceContacts, 0.05f);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidSphereSDFRange(
+		particles.begin(), particles.size(), 0, 2, spheres, 2,
+		rangeContacts[0], 0.05f);
+	avbdDetectSoftRigidSphereSDFRange(
+		particles.begin(), particles.size(), 2, 4, spheres, 2,
+		rangeContacts[1], 0.05f);
+	avbdDetectSoftRigidSphereSDFRange(
+		particles.begin(), particles.size(), 4, 6, spheres, 2,
+		rangeContacts[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	}
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local rigid-sphere SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Rigid-sphere SDF range fixture covers particle-major sphere ordering");
+}
+
+// ============================================================================
+// Test 40: P5.6a private rigid-capsule SDF range output preserves the stream
+// ============================================================================
+
+static void testRigidCapsuleSdfRangePrivateOutput()
+{
+	printf("\n--- Test 40: Rigid-Capsule SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.72f, 0.00f, 0.00f),
+		PxVec3(-0.28f, 0.00f, 0.00f),
+		PxVec3( 0.00f, 0.27f, 0.00f),
+		PxVec3( 0.66f, 0.00f, 0.00f),
+		PxVec3( 1.08f, 0.16f, 0.00f),
+		PxVec3( 3.00f, 0.00f, 0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		++particleIndex)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdRigidCapsule capsules[2];
+	capsules[0].center = PxVec3(0.0f);
+	capsules[0].rotation = PxQuat(PxIdentity);
+	capsules[0].radius = 0.30f;
+	capsules[0].halfHeight = 0.40f;
+	capsules[0].primitiveKey = 0xA11CE301ull;
+	capsules[1].center = PxVec3(1.1f, 0.0f, 0.0f);
+	capsules[1].rotation = PxQuat(PxIdentity);
+	capsules[1].radius = 0.25f;
+	capsules[1].halfHeight = 0.20f;
+	capsules[1].primitiveKey = 0xA11CE302ull;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidCapsuleSDF(
+		particles.begin(), particles.size(), capsules, 2,
+		referenceContacts, 0.05f);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidCapsuleSDFRange(
+		particles.begin(), particles.size(), 0, 2, capsules, 2,
+		rangeContacts[0], 0.05f);
+	avbdDetectSoftRigidCapsuleSDFRange(
+		particles.begin(), particles.size(), 2, 4, capsules, 2,
+		rangeContacts[1], 0.05f);
+	avbdDetectSoftRigidCapsuleSDFRange(
+		particles.begin(), particles.size(), 4, 6, capsules, 2,
+		rangeContacts[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	}
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local rigid-capsule SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Rigid-capsule SDF range fixture covers particle-major capsule ordering");
+}
+
+// ============================================================================
+// Test 41: P5.7a private rigid-convex SDF range output preserves the stream
+// ============================================================================
+
+static void testRigidConvexSdfRangePrivateOutput()
+{
+	printf("\n--- Test 41: Rigid-Convex SDF Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.40f, 0.00f, 0.00f),
+		PxVec3( 0.00f, 0.00f, 0.00f),
+		PxVec3( 0.40f, 0.00f, 0.00f),
+		PxVec3( 0.82f, 0.00f, 0.00f),
+		PxVec3( 1.10f, 0.20f, 0.00f),
+		PxVec3( 3.00f, 0.00f, 0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		++particleIndex)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	auto makeCubeConvex = [](AvbdRigidConvex& convex,
+		const PxVec3& center, PxU64 primitiveKey)
+	{
+		convex.center = center;
+		convex.rotation = PxQuat(PxIdentity);
+		convex.localRadius = 1.0f;
+		convex.primitiveKey = primitiveKey;
+		const PxVec3 vertices[8] =
+		{
+			PxVec3(-0.5f, -0.5f, -0.5f),
+			PxVec3( 0.5f, -0.5f, -0.5f),
+			PxVec3( 0.5f,  0.5f, -0.5f),
+			PxVec3(-0.5f,  0.5f, -0.5f),
+			PxVec3(-0.5f, -0.5f,  0.5f),
+			PxVec3( 0.5f, -0.5f,  0.5f),
+			PxVec3( 0.5f,  0.5f,  0.5f),
+			PxVec3(-0.5f,  0.5f,  0.5f)
+		};
+		for(PxU32 index = 0; index < 8; ++index)
+			convex.vertices.pushBack(vertices[index]);
+		const PxVec3 normals[6] =
+		{
+			PxVec3(-1.0f, 0.0f, 0.0f), PxVec3(1.0f, 0.0f, 0.0f),
+			PxVec3(0.0f, -1.0f, 0.0f), PxVec3(0.0f, 1.0f, 0.0f),
+			PxVec3(0.0f, 0.0f, -1.0f), PxVec3(0.0f, 0.0f, 1.0f)
+		};
+		for(PxU32 index = 0; index < 6; ++index)
+		{
+			AvbdRigidConvexFace face;
+			face.normal = normals[index];
+			face.offset = 0.5f;
+			convex.faces.pushBack(face);
+		}
+		const PxU32 triangleIndices[12][4] =
+		{
+			{0, 3, 7, 0}, {0, 7, 4, 0}, {1, 5, 6, 1}, {1, 6, 2, 1},
+			{0, 4, 5, 2}, {0, 5, 1, 2}, {3, 2, 6, 3}, {3, 6, 7, 3},
+			{0, 1, 2, 4}, {0, 2, 3, 4}, {4, 7, 6, 5}, {4, 6, 5, 5}
+		};
+		for(PxU32 index = 0; index < 12; ++index)
+		{
+			AvbdRigidConvexTriangle triangle;
+			triangle.p0 = triangleIndices[index][0];
+			triangle.p1 = triangleIndices[index][1];
+			triangle.p2 = triangleIndices[index][2];
+			triangle.faceIndex = triangleIndices[index][3];
+			convex.triangles.pushBack(triangle);
+		}
+	};
+	AvbdRigidConvex convexes[2];
+	makeCubeConvex(convexes[0], PxVec3(0.0f), 0xA11CE401ull);
+	makeCubeConvex(convexes[1], PxVec3(1.1f, 0.0f, 0.0f), 0xA11CE402ull);
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidConvexSDF(
+		particles.begin(), particles.size(), convexes, 2,
+		referenceContacts, 0.05f);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	avbdDetectSoftRigidConvexSDFRange(
+		particles.begin(), particles.size(), 0, 2, convexes, 2,
+		rangeContacts[0], 0.05f);
+	avbdDetectSoftRigidConvexSDFRange(
+		particles.begin(), particles.size(), 2, 4, convexes, 2,
+		rangeContacts[1], 0.05f);
+	avbdDetectSoftRigidConvexSDFRange(
+		particles.begin(), particles.size(), 4, 6, convexes, 2,
+		rangeContacts[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+	{
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	}
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent,
+		"Range-local rigid-convex SDF contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		!referenceContacts.empty(),
+		"Rigid-convex SDF range fixture covers baked-hull particle-major ordering");
+}
+
+// ============================================================================
+// Test 42: P5.8a private rigid-triangle-surface range scratch/output
+// ============================================================================
+
+static void testRigidTriangleSurfaceRangePrivateOutput()
+{
+	printf("\n--- Test 42: Rigid-Triangle Surface Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(6);
+	const PxVec3 positions[6] =
+	{
+		PxVec3(-0.40f, 0.01f, -0.30f),
+		PxVec3( 0.00f, 0.02f,  0.00f),
+		PxVec3( 0.30f, 0.03f, -0.20f),
+		PxVec3( 0.60f, 0.01f,  0.20f),
+		PxVec3( 0.90f, 0.02f,  0.00f),
+		PxVec3( 2.00f, 0.01f,  0.00f)
+	};
+	for(PxU32 particleIndex = 0; particleIndex < particles.size();
+		++particleIndex)
+	{
+		particles[particleIndex].position = positions[particleIndex];
+		particles[particleIndex].initialPosition = positions[particleIndex];
+		particles[particleIndex].predictedPosition = positions[particleIndex];
+		particles[particleIndex].invMass = 1.0f;
+	}
+	AvbdRigidTriangleSurface surface;
+	surface.center = PxVec3(0.0f);
+	surface.rotation = PxQuat(PxIdentity);
+	surface.localBounds = PxBounds3(
+		PxVec3(-1.0f, 0.0f, -1.0f),
+		PxVec3( 1.0f, 0.0f,  1.0f));
+	surface.localRadius = 1.5f;
+	surface.primitiveKey = 0xA11CE501ull;
+	const PxVec3 vertices[3] =
+	{
+		PxVec3(-1.0f, 0.0f, -1.0f),
+		PxVec3( 1.0f, 0.0f, -1.0f),
+		PxVec3( 0.0f, 0.0f,  1.0f)
+	};
+	for(PxU32 index = 0; index < 3; ++index)
+	{
+		AvbdRigidTriangleSurfaceVertex vertex;
+		vertex.point = vertices[index];
+		vertex.outward = PxVec3(0.0f, 1.0f, 0.0f);
+		vertex.active = true;
+		surface.vertices.pushBack(vertex);
+	}
+	AvbdRigidTriangleSurfaceTriangle triangle;
+	triangle.p0 = 0;
+	triangle.p1 = 1;
+	triangle.p2 = 2;
+	triangle.normal = PxVec3(0.0f, 1.0f, 0.0f);
+	surface.triangles.pushBack(triangle);
+	surface.triangleBvhTriangleIndices.pushBack(0);
+	AvbdRigidTriangleSurfaceBvhNode node;
+	node.minimum = surface.localBounds.minimum;
+	node.maximum = surface.localBounds.maximum;
+	node.leftChild = PX_MAX_U32;
+	node.rightChild = PX_MAX_U32;
+	node.firstPrimitive = 0;
+	node.primitiveCount = 1;
+	surface.triangleBvhNodes.pushBack(node);
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftRigidTriangleSurface(
+		particles.begin(), particles.size(), &surface, 1,
+		referenceContacts, 0.05f);
+	// A sentinel proves that the range leaf does not touch legacy surface-owned
+	// BVH scratch even when the immutable triangle hierarchy is enabled.
+	surface.triangleBvhQueryCandidates.clear();
+	surface.triangleBvhQueryCandidates.pushBack(123u);
+	PxArray<AvbdSoftContact> rangeContacts[3];
+	PxArray<PxU32> rangeScratch[3];
+	avbdDetectSoftRigidTriangleSurfaceRange(
+		particles.begin(), particles.size(), 0, 2, &surface, 1,
+		rangeContacts[0], rangeScratch[0], 0.05f);
+	avbdDetectSoftRigidTriangleSurfaceRange(
+		particles.begin(), particles.size(), 2, 4, &surface, 1,
+		rangeContacts[1], rangeScratch[1], 0.05f);
+	avbdDetectSoftRigidTriangleSurfaceRange(
+		particles.begin(), particles.size(), 4, 6, &surface, 1,
+		rangeContacts[2], rangeScratch[2], 0.05f);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 3; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent = reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			PxAbs(reference.friction - merged.friction) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f;
+	}
+	TEST_CHECK(equivalent,
+		"Range-local rigid-triangle contacts stable-merge to the legacy stream");
+	TEST_CHECK(
+		surface.triangleBvhQueryCandidates.size() == 1 &&
+			surface.triangleBvhQueryCandidates[0] == 123u &&
+			!referenceContacts.empty(),
+		"Rigid-triangle range fixture keeps BVH scratch task-private");
+}
+
+// ============================================================================
+// Test 43: P5.9a soft-pair/self candidate scratch ownership split
+// ============================================================================
+
+static void testSoftPairSelfCandidateScratchSeparation()
+{
+	printf("\n--- Test 43: Soft-Pair/Self Candidate Scratch Separation ---\n");
+	AvbdSoftContactWorkspace workspace;
+	workspace.softPairQueryScratch.triangleCandidates.pushBack(17u);
+	workspace.selfTriangleCandidates.pushBack(29u);
+	// Reserve only the self path.  The pair candidate sentinel must not be
+	// reachable through that capacity-management path.
+	workspace.reserveSelfCollisionSweep(0, 11, 0, 0);
+	TEST_CHECK(
+		workspace.softPairQueryScratch.triangleCandidates.size() == 1 &&
+			workspace.softPairQueryScratch.triangleCandidates[0] == 17u &&
+		workspace.selfTriangleCandidates.size() == 1 &&
+			workspace.selfTriangleCandidates[0] == 29u,
+		"Self sweep reservation does not alias soft-pair triangle candidates");
+	workspace.selfTriangleCandidates.clear();
+	TEST_CHECK(
+		workspace.softPairQueryScratch.triangleCandidates.size() == 1 &&
+			workspace.softPairQueryScratch.triangleCandidates[0] == 17u,
+		"Self candidate reset leaves soft-pair scratch private");
+}
+
+// ============================================================================
+// Test 44: P5.9b soft-pair private query-scratch override
+// ============================================================================
+
+static void testSoftPairPrivateQueryScratchOverride()
+{
+	printf("\n--- Test 44: Soft-Pair Private Query Scratch Override ---\n");
+	// Reuse the canonical two-sided one-point/one-triangle contact shape.
+	// It guarantees a nonempty pair stream while avoiding a separate topology
+	// concern in this scratch-ownership proof.
+	PxArray<AvbdSoftParticle> particles(4);
+	particles[0].position = PxVec3(0.25f, 0.05f, 0.25f);
+	particles[1].position = PxVec3(0.0f, 0.0f, 0.0f);
+	particles[2].position = PxVec3(0.0f, 0.0f, 1.0f);
+	particles[3].position = PxVec3(1.0f, 0.0f, 0.0f);
+	for(PxU32 index = 0; index < particles.size(); ++index)
+		particles[index].initialPosition = particles[index].position;
+	PxArray<AvbdSoftBody> bodies(2);
+	bodies[0].compiled.particleStart = 0;
+	bodies[0].compiled.particleCount = 1;
+	bodies[0].compiled.surfaceVertices.pushBack(0);
+	bodies[0].compiled.elementAdjacency.resize(1);
+	bodies[1].compiled.particleStart = 1;
+	bodies[1].compiled.particleCount = 3;
+	bodies[1].compiled.surfaceVertices.pushBack(1);
+	bodies[1].compiled.surfaceVertices.pushBack(2);
+	bodies[1].compiled.surfaceVertices.pushBack(3);
+	bodies[1].compiled.elementAdjacency.resize(3);
+	bodies[1].compiled.surfaceTriangles.pushBack(1);
+	bodies[1].compiled.surfaceTriangles.pushBack(2);
+	bodies[1].compiled.surfaceTriangles.pushBack(3);
+	AvbdOGCParams params;
+	params.contactRadius = 0.1f;
+	PxArray<AvbdSoftContact> referenceContacts;
+	AvbdSoftContactWorkspace referenceWorkspace;
+	avbdDetectSoftSoftOGC(
+		particles.begin(), particles.size(), bodies.begin(), bodies.size(),
+		referenceContacts, params, NULL, &referenceWorkspace);
+
+	PxArray<AvbdSoftContact> privateScratchContacts;
+	AvbdSoftContactWorkspace parentWorkspace;
+	parentWorkspace.softPairQueryScratch.triangleCandidates.pushBack(97u);
+	AvbdSoftSoftPairQueryScratch privateScratch;
+	avbdDetectSoftSoftOGC(
+		particles.begin(), particles.size(), bodies.begin(), bodies.size(),
+		privateScratchContacts, params, NULL, &parentWorkspace,
+		&privateScratch);
+	bool equivalent = referenceContacts.size() == privateScratchContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& privateOutput =
+			privateScratchContacts[contactIndex].geometry;
+		equivalent = reference.source == privateOutput.source &&
+			reference.particleIdx == privateOutput.particleIdx &&
+			reference.targetKind == privateOutput.targetKind &&
+			reference.targetIndex == privateOutput.targetIndex &&
+			(reference.normal - privateOutput.normal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - privateOutput.depth) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent && !referenceContacts.empty(),
+		"Private soft-pair query scratch preserves the canonical contact stream");
+	TEST_CHECK(
+		parentWorkspace.softPairQueryScratch.triangleCandidates.size() == 1 &&
+			parentWorkspace.softPairQueryScratch.triangleCandidates[0] == 97u,
+		"Soft-pair private query scratch leaves parent candidates untouched");
+}
+
+// ============================================================================
+// Test 45: P5.9c post-refit soft-pair plan-range private output
+// ============================================================================
+
+static void testSoftPairPlanRangePrivateOutput()
+{
+	printf("\n--- Test 45: Soft-Pair Plan-Range Private Output ---\n");
+	PxArray<AvbdSoftParticle> particles(7);
+	particles[0].position = PxVec3(0.25f, 0.05f, 0.25f);
+	particles[0].initialPosition = particles[0].position;
+	const PxVec3 triangle[3] =
+	{
+		PxVec3(0.0f, 0.0f, 0.0f),
+		PxVec3(0.0f, 0.0f, 1.0f),
+		PxVec3(1.0f, 0.0f, 0.0f)
+	};
+	for(PxU32 triangleIndex = 0; triangleIndex < 3; ++triangleIndex)
+	{
+		particles[triangleIndex + 1].position = triangle[triangleIndex];
+		particles[triangleIndex + 1].initialPosition = triangle[triangleIndex];
+		particles[triangleIndex + 4].position = triangle[triangleIndex];
+		particles[triangleIndex + 4].initialPosition = triangle[triangleIndex];
+	}
+	PxArray<AvbdSoftBody> bodies(3);
+	bodies[0].compiled.particleStart = 0;
+	bodies[0].compiled.particleCount = 1;
+	bodies[0].compiled.surfaceVertices.pushBack(0);
+	for(PxU32 bodyIndex = 1; bodyIndex < 3; ++bodyIndex)
+	{
+		const PxU32 particleStart = bodyIndex == 1 ? 1u : 4u;
+		bodies[bodyIndex].compiled.particleStart = particleStart;
+		bodies[bodyIndex].compiled.particleCount = 3;
+		for(PxU32 triangleIndex = 0; triangleIndex < 3; ++triangleIndex)
+		{
+			bodies[bodyIndex].compiled.surfaceVertices.pushBack(
+				particleStart + triangleIndex);
+			bodies[bodyIndex].compiled.surfaceTriangles.pushBack(
+				particleStart + triangleIndex);
+		}
+	}
+	AvbdOGCParams params;
+	params.contactRadius = 0.1f;
+	PxArray<AvbdSoftContact> referenceContacts;
+	avbdDetectSoftSoftOGC(
+		particles.begin(), particles.size(), bodies.begin(), bodies.size(),
+		referenceContacts, params);
+
+	AvbdSoftContactWorkspace parentWorkspace;
+	avbdBuildSoftSoftOGCDetectionPlan(
+		particles.begin(), bodies.begin(), bodies.size(), params, NULL,
+		parentWorkspace);
+	const bool useSurfaceTriangleBvh = avbdRefitSoftSoftOGCDetectionPlan(
+		particles.begin(), bodies.begin(), bodies.size(), NULL,
+		parentWorkspace);
+	parentWorkspace.softPairQueryScratch.triangleCandidates.pushBack(131u);
+	PxArray<AvbdSoftContact> rangeContacts[2];
+	AvbdSoftSoftPairQueryScratch rangeScratch[2];
+	avbdDetectSoftSoftOGCPlanRange(
+		particles.begin(), particles.size(), bodies.begin(), bodies.size(),
+		parentWorkspace, NULL, rangeScratch[0], useSurfaceTriangleBvh,
+		0, 1, rangeContacts[0], params);
+	avbdDetectSoftSoftOGCPlanRange(
+		particles.begin(), particles.size(), bodies.begin(), bodies.size(),
+		parentWorkspace, NULL, rangeScratch[1], useSurfaceTriangleBvh,
+		1, parentWorkspace.softPairDetectionPlan.size(), rangeContacts[1],
+		params);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 2; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	bool equivalent = referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent = reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f;
+	}
+	TEST_CHECK(
+		parentWorkspace.softPairDetectionPlan.size() == 3 && equivalent &&
+			!referenceContacts.empty(),
+		"Post-refit soft-pair plan ranges stable-merge to the serial stream");
+	TEST_CHECK(
+		parentWorkspace.softPairQueryScratch.triangleCandidates.size() == 1 &&
+			parentWorkspace.softPairQueryScratch.triangleCandidates[0] == 131u,
+		"Soft-pair plan ranges keep parent query scratch private");
+}
+
+// ============================================================================
+// Test 46: P5.10a parent-refit self-BVH ranges preserve the self stream
+// ============================================================================
+
+static void testSelfCollisionBvhRangePrivateOutput()
+{
+	printf("\n--- Test 46: Self-Collision BVH Range Private Output ---\n");
+	// A point just above one triangle produces a real VF self-contact.  The
+	// triangle boundary also supplies an EE hierarchy, so this exercises the
+	// parent-owned refit contract for both self feature families.
+	PxArray<AvbdSoftParticle> particles(4);
+	particles[0].position = PxVec3(0.0f, 0.0f, 0.0f);
+	particles[1].position = PxVec3(1.0f, 0.0f, 0.0f);
+	particles[2].position = PxVec3(0.0f, 0.0f, 1.0f);
+	particles[3].position = PxVec3(0.2f, 0.01f, 0.2f);
+	for(PxU32 index = 0; index < particles.size(); ++index)
+	{
+		particles[index].initialPosition = particles[index].position;
+		particles[index].predictedPosition = particles[index].position;
+	}
+	AvbdSoftBody body;
+	body.compiled.particleStart = 0;
+	body.compiled.particleCount = particles.size();
+	body.compiled.surfaceTriangles.pushBack(0);
+	body.compiled.surfaceTriangles.pushBack(1);
+	body.compiled.surfaceTriangles.pushBack(2);
+	for(PxU32 index = 0; index < particles.size(); ++index)
+	{
+		body.compiled.surfaceVertices.pushBack(index);
+		body.compiled.selfCollisionRestPositions.pushBack(
+			particles[index].initialPosition);
+	}
+	AvbdEdgeInfo edges[3];
+	edges[0].p0 = 0; edges[0].p1 = 1; edges[0].restLength = 1.0f;
+	edges[1].p0 = 1; edges[1].p1 = 2; edges[1].restLength = PxSqrt(2.0f);
+	edges[2].p0 = 2; edges[2].p1 = 0; edges[2].restLength = 1.0f;
+	for(PxU32 edgeIndex = 0; edgeIndex < 3; ++edgeIndex)
+		body.compiled.surfaceEdges.pushBack(edges[edgeIndex]);
+	body.compiled.buildSurfaceTriangleBvh();
+	body.compiled.buildSurfaceEdgeBvh();
+	AvbdSelfCollisionAdjacency adjacency;
+	adjacency.resize(particles.size());
+	AvbdOGCParams params;
+	params.contactRadius = 0.05f;
+
+	PxArray<AvbdSoftContact> referenceContacts;
+	AvbdSoftContactWorkspace referenceWorkspace;
+	avbdDetectSelfCollisionOGC(
+		particles.begin(), body, 11, adjacency, referenceContacts, params,
+		NULL, &referenceWorkspace);
+
+	AvbdSoftContactWorkspace parentWorkspace;
+	const bool prepared = avbdPrepareSelfCollisionOGCBvhRanges(
+		particles.begin(), body, 11, adjacency, params, parentWorkspace);
+	// These sentinels distinguish parent-owned immutable refit data from the
+	// mutable candidate/query arrays that every worker must own privately.
+	parentWorkspace.selfTriangleCandidates.pushBack(701u);
+	parentWorkspace.selfEdgeCandidates.pushBack(702u);
+	parentWorkspace.selfEmittedFeatureKeys.pushBack(703u);
+	PxArray<AvbdSoftContact> rangeContacts[4];
+	AvbdSoftContactWorkspace rangeWorkspaces[4];
+	const PxU32 vertexCount = body.compiled.surfaceVertices.size();
+	const PxU32 edgeCount = body.compiled.surfaceEdges.size();
+	avbdDetectSelfCollisionOGCBvhRange(
+		particles.begin(), body, 11, adjacency, parentWorkspace,
+		rangeWorkspaces[0], 0, vertexCount / 2, 0, 0,
+		rangeContacts[0], params);
+	avbdDetectSelfCollisionOGCBvhRange(
+		particles.begin(), body, 11, adjacency, parentWorkspace,
+		rangeWorkspaces[1], vertexCount / 2, vertexCount, 0, 0,
+		rangeContacts[1], params);
+	// Preserve the serial detector's canonical feature ordering: all VF rows
+	// precede every EE row, even though each family may be fanned-in separately.
+	avbdDetectSelfCollisionOGCBvhRange(
+		particles.begin(), body, 11, adjacency, parentWorkspace,
+		rangeWorkspaces[2], 0, 0, 0, edgeCount / 2,
+		rangeContacts[2], params);
+	avbdDetectSelfCollisionOGCBvhRange(
+		particles.begin(), body, 11, adjacency, parentWorkspace,
+		rangeWorkspaces[3], 0, 0, edgeCount / 2, edgeCount,
+		rangeContacts[3], params);
+	PxArray<AvbdSoftContact> mergedContacts;
+	for(PxU32 rangeIndex = 0; rangeIndex < 4; ++rangeIndex)
+		for(PxU32 contactIndex = 0;
+			contactIndex < rangeContacts[rangeIndex].size(); ++contactIndex)
+			mergedContacts.pushBack(rangeContacts[rangeIndex][contactIndex]);
+	bool equivalent = prepared &&
+		referenceContacts.size() == mergedContacts.size();
+	for(PxU32 contactIndex = 0;
+		contactIndex < referenceContacts.size() && equivalent;
+		++contactIndex)
+	{
+		const AvbdSoftContactGeometry& reference =
+			referenceContacts[contactIndex].geometry;
+		const AvbdSoftContactGeometry& merged =
+			mergedContacts[contactIndex].geometry;
+		equivalent =
+			reference.source == merged.source &&
+			reference.particleIdx == merged.particleIdx &&
+			reference.targetKind == merged.targetKind &&
+			reference.velocityOwner == merged.velocityOwner &&
+			reference.targetIndex == merged.targetIndex &&
+			(reference.normal - merged.normal).magnitudeSquared() < 1e-12f &&
+			(reference.projNormal - merged.projNormal).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(reference.depth - merged.depth) < 1e-7f &&
+			PxAbs(reference.margin - merged.margin) < 1e-7f &&
+			(reference.surfacePoint - merged.surfacePoint).magnitudeSquared() <
+				1e-12f &&
+			PxAbs(referenceContacts[contactIndex].state.k -
+				mergedContacts[contactIndex].state.k) < 1e-7f &&
+			PxAbs(referenceContacts[contactIndex].state.ke -
+				mergedContacts[contactIndex].state.ke) < 1e-7f;
+	}
+	TEST_CHECK(
+		equivalent && !referenceContacts.empty(),
+		"Parent-refit self BVH VF/EE ranges stable-merge to the serial stream");
+	TEST_CHECK(
+		parentWorkspace.selfTriangleCandidates.size() == 1 &&
+			parentWorkspace.selfTriangleCandidates[0] == 701u &&
+		parentWorkspace.selfEdgeCandidates.size() == 1 &&
+			parentWorkspace.selfEdgeCandidates[0] == 702u &&
+		parentWorkspace.selfEmittedFeatureKeys.size() == 1 &&
+			parentWorkspace.selfEmittedFeatureKeys[0] == 703u,
+		"Self BVH range leaves keep parent query scratch private");
 }
 
 // ===========================================================================
@@ -5085,12 +7673,27 @@ static bool isVisualMode()
 	return v && v[0] && v[0] != '0';
 }
 
-int snippetMain(int, const char*const*)
+static bool isExplicitHeadlessMode(int argc, const char*const* argv)
+{
+	const char* environment = std::getenv("PHYSX_SNIPPET_HEADLESS");
+	if(environment && environment[0] && environment[0] != '0')
+		return true;
+
+	for(int argId = 1; argId < argc; ++argId)
+	{
+		if(argv[argId] && std::strcmp(argv[argId], "--headless") == 0)
+			return true;
+	}
+	return false;
+}
+
+int snippetMain(int argc, const char*const* argv)
 {
 	const int selectedId = getSelectedTestId();
+	const bool headless = isExplicitHeadlessMode(argc, argv);
 
 #ifdef RENDER_SNIPPET
-	if (isVisualMode())
+	if (isVisualMode() && !headless)
 	{
 		// Create PhysX scene (ground plane for rendering)
 		initPhysics(true);
@@ -5115,6 +7718,9 @@ int snippetMain(int, const char*const*)
 		return 0;
 	}
 #endif
+
+	if(headless)
+		printf("[AVBD_HEADLESS_CONFIG] mode=unit visual=disabled\n");
 
 	// PxArray uses the foundation allocator -- must create PxFoundation first
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
@@ -5172,6 +7778,42 @@ int snippetMain(int, const char*const*)
 		testSelfSweptOgcFeatures();
 	if (shouldRunTest(selectedId, 36))
 		testDeformableMaterialSemantics();
+	if (shouldRunTest(selectedId, 37))
+		testWorldPlaneRangePrivateOutput();
+	if (shouldRunTest(selectedId, 38))
+		testRigidBoxSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 39))
+		testRigidSphereSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 40))
+		testRigidCapsuleSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 41))
+		testRigidConvexSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 42))
+		testRigidTriangleSurfaceRangePrivateOutput();
+	if (shouldRunTest(selectedId, 43))
+		testSoftPairSelfCandidateScratchSeparation();
+	if (shouldRunTest(selectedId, 44))
+		testSoftPairPrivateQueryScratchOverride();
+	if (shouldRunTest(selectedId, 45))
+		testSoftPairPlanRangePrivateOutput();
+	if (shouldRunTest(selectedId, 46))
+		testSelfCollisionBvhRangePrivateOutput();
+	if (shouldRunTest(selectedId, 47))
+		testRigidBoxSweptSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 48))
+		testRigidSphereSweptSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 49))
+		testRigidCapsuleSweptSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 50))
+		testRigidConvexSweptSdfRangePrivateOutput();
+	if (shouldRunTest(selectedId, 51))
+		testRigidTriangleSurfaceSweptRangePrivateOutput();
+	if (shouldRunTest(selectedId, 52))
+		testRigidTriangleSurfaceFeaturePrivateQueryScratch();
+	if (shouldRunTest(selectedId, 53))
+		testRigidTriangleSurfaceFeatureCanonicalPlan();
+	if (shouldRunTest(selectedId, 54))
+		testRigidTriangleSurfaceFeaturePlanRangePrivateOutput();
 
 	printf("\n=== Results: %d PASSED, %d FAILED (out of %d) ===\n",
 	       gTestsPassed, gTestsFailed, gTestsPassed + gTestsFailed);

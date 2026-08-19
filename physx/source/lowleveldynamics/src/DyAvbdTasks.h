@@ -28,18 +28,23 @@
 #define DY_AVBD_TASKS_H
 
 #include "DyAvbdConstraint.h"
+#include "DyAvbdGpuWaveBackend.h"
 #include "DyAvbdSolver.h"
 #include "DyAvbdSolverBody.h"
 #include "DyAvbdTypes.h"
 #include "DyFeatherstoneArticulation.h"
 #include "foundation/PxSimpleTypes.h"
 #include "task/PxTask.h"
-#include <cstdio>
 
 namespace physx {
 
 class PxTaskManager;
 class PxsRigidBody;
+struct AvbdContactPrepSnapshot;
+
+namespace IG {
+class IslandSim;
+}
 
 namespace Dy {
 
@@ -50,14 +55,86 @@ class FeatherstoneArticulation;
 // Task Data Structures
 //=============================================================================
 
+// Per-island caller-owned map buffers.  The update thread reserves these
+// before dispatch; the solve task consumes exactly one disjoint slot and then
+// transfers ownership to AvbdBodyConstraintMap (or falls back to build()).
+struct AvbdMapStorage {
+  PxU32 *counts;
+  PxU32 *offsets;
+  PxU32 *indices;
+  PxU32 indexCapacity;
+
+  AvbdMapStorage()
+      : counts(nullptr), offsets(nullptr), indices(nullptr), indexCapacity(0) {}
+};
+
+// Immutable contact-preparation input owned by the parent update and consumed
+// once by the island task before it builds its contact map. A null snapshot
+// pointer keeps the established parent-preparation path unchanged.
+struct AvbdDeferredContactPrep {
+  AvbdContactPrepSnapshot *snapshots;
+  PxReal lengthScale;
+  PxU32 startContactIdx;
+  PxU32 numContactManagers;
+  PxU32 bodyOffset;
+  PxU32 constraintCapacity;
+  PxU16 frameStamp;
+  bool enableLambdaWarmStart;
+
+  AvbdDeferredContactPrep()
+      : snapshots(nullptr), lengthScale(1.0f), startContactIdx(0),
+        numContactManagers(0), bodyOffset(0), constraintCapacity(0),
+        frameStamp(0), enableLambdaWarmStart(false) {}
+};
+
+// Contact report writeback is split into a worker result and a parent-owned
+// target. Workers receive only target indices; the parent/writeback owner is
+// the sole code that dereferences PhysX output addresses.
+struct AvbdContactOutputToken {
+  enum : PxU8 {
+    eNORMAL_IMPULSE = 1u << 0,
+    eFRICTION_IMPULSE = 1u << 1
+  };
+
+  PxU32 targetIndex;
+  PxU8 flags;
+  PxU8 padding[3];
+
+  AvbdContactOutputToken()
+      : targetIndex(PX_MAX_U32), flags(0), padding{0, 0, 0} {}
+};
+
+struct AvbdContactOutputTarget {
+  PxReal *normalImpulse;
+  PxVec3 *frictionImpulse;
+
+  AvbdContactOutputTarget()
+      : normalImpulse(nullptr), frictionImpulse(nullptr) {}
+};
+
+struct AvbdContactOutputResult {
+  PxReal normalImpulse;
+  PxVec3 frictionImpulse;
+  PxU8 flags;
+  PxU8 padding[3];
+
+  AvbdContactOutputResult()
+      : normalImpulse(0.0f), frictionImpulse(PxVec3(0.0f)), flags(0),
+        padding{0, 0, 0} {}
+};
+
 struct AvbdIslandBatch {
   AvbdSolverBody *bodies;
   PxU32 numBodies;
+  bool hasArticulationBodies;
   FeatherstoneArticulation **articulationForBody;
   PxU32 *linkIndexForBody;
 
   AvbdContactConstraint *constraints;
   PxU32 numConstraints;
+  AvbdContactOutputToken *contactOutputTokens;
+  AvbdContactOutputResult *contactOutputResults;
+  AvbdDeferredContactPrep deferredContactPrep;
 
   // Joint Constraints
   AvbdD6JointConstraint *d6Joints;
@@ -76,14 +153,14 @@ struct AvbdIslandBatch {
 
   AvbdSoftContact *softContacts;
   PxU32 numSoftContacts;
+  AvbdSoftIslandExecutionPlan softExecutionPlan;
 
   PxU32 islandStart;
   PxU32 islandEnd;
 
-  // Per-island iteration budget (0 = use solver config default).
-  // Set from the articulation's setSolverIterationCounts() when present,
-  // so articulations can request more iterations without penalising
-  // contact-only islands that converge quickly.
+  // Per-island requested iteration budget (0 = use the Scene-wide default).
+  // Articulations and soft bodies may raise, but never lower, the Scene-wide
+  // budget. Convergence may still end the solve before exhausting it.
   PxU32 iterationOverride;
 
   // Pre-computed constraint coloring (for large islands)
@@ -98,6 +175,7 @@ struct AvbdIslandBatch {
   AvbdBodyConstraintMap contactMap;
   AvbdBodyConstraintMap d6Map;
   AvbdBodyConstraintMap gearMap;
+  AvbdMapStorage mapStorage[3]; // contact, D6, gear
 };
 
 //=============================================================================
@@ -116,41 +194,112 @@ protected:
   AvbdDynamicsContext &mContext;
 };
 
+
+// One disjoint body slice of the contact-only rigid primal sweep. The parent
+// island task owns the context and remains alive through the child
+// continuation fan-in; the order may name either an exact wave or a strict
+// independent-set color.
+class AvbdRigidBodyRangeTask : public AvbdTask {
+public:
+  AvbdRigidBodyRangeTask(AvbdDynamicsContext &context, AvbdSolver &solver,
+                         AvbdRigidSolveContext &solveContext,
+                         const PxU32 *bodyOrder, PxU32 begin, PxU32 end)
+      : AvbdTask(context), mSolver(solver), mSolveContext(solveContext),
+        mBodyOrder(bodyOrder), mBegin(begin), mEnd(end) {}
+
+  virtual void run() override;
+
+  virtual const char *getName() const override {
+    return "AvbdRigidBodyRangeTask";
+  }
+
+private:
+  AvbdSolver &mSolver;
+  AvbdRigidSolveContext &mSolveContext;
+  const PxU32 *mBodyOrder;
+  PxU32 mBegin;
+  PxU32 mEnd;
+};
+
+// One disjoint contact slice of the fast CPU dual/penalty pass. Body poses are
+// read-only after the final primal color barrier and each task writes only its
+// own contact rows.
+class AvbdRigidDualRangeTask : public AvbdTask {
+public:
+  AvbdRigidDualRangeTask(AvbdDynamicsContext &context, AvbdSolver &solver,
+                         AvbdRigidSolveContext &solveContext, PxU32 begin,
+                         PxU32 end)
+      : AvbdTask(context), mSolver(solver), mSolveContext(solveContext),
+        mBegin(begin), mEnd(end) {}
+
+  virtual void run() override;
+
+  virtual const char *getName() const override {
+    return "AvbdRigidDualRangeTask";
+  }
+
+private:
+  AvbdSolver &mSolver;
+  AvbdRigidSolveContext &mSolveContext;
+  PxU32 mBegin;
+  PxU32 mEnd;
+};
+
 //=============================================================================
 // Island Solve Task
 //=============================================================================
 
 class AvbdSolveIslandTask : public AvbdTask {
 public:
+  enum RigidAsyncPhase {
+    eRIGID_PRIMAL,
+    eRIGID_DUAL,
+    eRIGID_POST_DUAL
+  };
+
   AvbdSolveIslandTask(AvbdDynamicsContext &context, AvbdSolver &solver,
                       const AvbdIslandBatch &batch, PxReal dt,
-                      const PxVec3 &gravity)
+                      const PxVec3 &gravity, PxU32 kernelLabCaptureTicket)
       : AvbdTask(context), mSolver(solver), mBatch(batch), mDt(dt),
-        mGravity(gravity), mStats() {}
+        mGravity(gravity), mCurrentWave(0), mCurrentColor(0),
+        mGpuWaveEpoch(0), mKernelLabCaptureTicket(kernelLabCaptureTicket),
+        mRigidPhase(eRIGID_PRIMAL),
+        mRigidStarted(false),
+        mRigidAsync(false), mRigidWaiting(false), mRigidSubmitHold(false),
+        mRigidUsesBodyColors(false) {}
 
-  virtual void run() override {
-    // Single island schedule (classification + shared post-AL inside solver).
-    mSolver.solveIsland(
-        mDt, mBatch.bodies, mBatch.numBodies, mBatch.constraints,
-        mBatch.numConstraints, mGravity, mBatch.d6Joints, mBatch.numD6,
-        mBatch.gearJoints, mBatch.numGear, &mBatch.contactMap, &mBatch.d6Map,
-        &mBatch.gearMap, mBatch.colorBatches, mBatch.numColors,
-        mBatch.iterationOverride, mBatch.softParticles,
-        mBatch.numSoftParticles, mBatch.softBodies, mBatch.numSoftBodies,
-        mBatch.softContacts, mBatch.numSoftContacts,
-        mBatch.articulationForBody, mBatch.linkIndexForBody, mStats);
-  }
+  virtual void run() override;
 
   virtual void release() override;
 
   virtual const char *getName() const override { return "AvbdSolveIslandTask"; }
 
 private:
+  void materializeDeferredContacts();
+  void buildDeferredMaps();
+  void releaseDeferredMapStorage();
+  bool canUseRigidWaveTasks() const;
+  void submitRigidWave();
+  void submitRigidColor();
+  bool submitRigidDual();
+  void finishPreparedRigidSolveSynchronously();
+
   AvbdSolver &mSolver;
   AvbdIslandBatch mBatch;
   PxReal mDt;
   PxVec3 mGravity;
+  AvbdRigidSolveContext mRigidContext;
   AvbdSolverStats mStats;
+  PxU32 mCurrentWave;
+  PxU32 mCurrentColor;
+  PxU32 mGpuWaveEpoch;
+  PxU32 mKernelLabCaptureTicket;
+  RigidAsyncPhase mRigidPhase;
+  bool mRigidStarted;
+  bool mRigidAsync;
+  bool mRigidWaiting;
+  bool mRigidSubmitHold;
+  bool mRigidUsesBodyColors;
 };
 
 //=============================================================================
@@ -164,13 +313,19 @@ public:
                     const PxU32 *staticTouchCounts, PxU32 numBodies, PxReal dt,
                     bool enableStabilization, bool sleepingDisabled,
                     FeatherstoneArticulation **articulationForBody = nullptr,
-                    PxU32 *linkIndexForBody = nullptr)
+                    PxU32 *linkIndexForBody = nullptr,
+                    AvbdContactOutputTarget *contactOutputTargets = nullptr,
+                    AvbdContactOutputResult *contactOutputResults = nullptr,
+                    PxU32 contactOutputCount = 0)
       : AvbdTask(context), mAvbdBodies(avbdBodies), mRigidBodies(rigidBodies),
         mStaticTouchCounts(staticTouchCounts), mNumBodies(numBodies), mDt(dt),
         mEnableStabilization(enableStabilization),
         mSleepingDisabled(sleepingDisabled),
         mArticulationForBody(articulationForBody),
-        mLinkIndexForBody(linkIndexForBody) {}
+        mLinkIndexForBody(linkIndexForBody),
+        mContactOutputTargets(contactOutputTargets),
+        mContactOutputResults(contactOutputResults),
+        mContactOutputCount(contactOutputCount) {}
 
   virtual void run() override; // Implemented in cpp
 
@@ -186,6 +341,9 @@ private:
   bool mSleepingDisabled;
   FeatherstoneArticulation **mArticulationForBody;
   PxU32 *mLinkIndexForBody;
+  AvbdContactOutputTarget *mContactOutputTargets;
+  AvbdContactOutputResult *mContactOutputResults;
+  PxU32 mContactOutputCount;
 };
 
 //=============================================================================
@@ -197,7 +355,7 @@ public:
   AvbdCoordinatorTask(AvbdDynamicsContext &context, PxBaseTask *continuation)
       : AvbdTask(context), mContinuation(continuation) {}
 
-  virtual void run() override {}
+  virtual void run() override;
 
   virtual const char *getName() const override { return "AvbdCoordinatorTask"; }
 
@@ -219,11 +377,33 @@ public:
   AvbdSolveIslandTask *createSolveTask(AvbdDynamicsContext &context,
                                        AvbdSolver &solver,
                                        const AvbdIslandBatch &batch, PxReal dt,
-                                       const PxVec3 &gravity) {
+                                       const PxVec3 &gravity,
+                                       PxU32 kernelLabCaptureTicket) {
     void *mem = mAllocator.allocate(sizeof(AvbdSolveIslandTask),
                                     "AvbdSolveIslandTask", __FILE__, __LINE__);
-    return PX_PLACEMENT_NEW(mem, AvbdSolveIslandTask)(context, solver, batch,
-                                                      dt, gravity);
+    return PX_PLACEMENT_NEW(mem, AvbdSolveIslandTask)(
+        context, solver, batch, dt, gravity, kernelLabCaptureTicket);
+  }
+
+  AvbdRigidBodyRangeTask *createRigidBodyRangeTask(
+      AvbdDynamicsContext &context, AvbdSolver &solver,
+      AvbdRigidSolveContext &solveContext, const PxU32 *bodyOrder,
+      PxU32 begin, PxU32 end) {
+    void *mem = mAllocator.allocate(sizeof(AvbdRigidBodyRangeTask),
+                                    "AvbdRigidBodyRangeTask", __FILE__,
+                                    __LINE__);
+    return PX_PLACEMENT_NEW(mem, AvbdRigidBodyRangeTask)(
+        context, solver, solveContext, bodyOrder, begin, end);
+  }
+
+  AvbdRigidDualRangeTask *createRigidDualRangeTask(
+      AvbdDynamicsContext &context, AvbdSolver &solver,
+      AvbdRigidSolveContext &solveContext, PxU32 begin, PxU32 end) {
+    void *mem = mAllocator.allocate(sizeof(AvbdRigidDualRangeTask),
+                                    "AvbdRigidDualRangeTask", __FILE__,
+                                    __LINE__);
+    return PX_PLACEMENT_NEW(mem, AvbdRigidDualRangeTask)(
+        context, solver, solveContext, begin, end);
   }
 
   AvbdWriteBackTask *
@@ -233,13 +413,17 @@ public:
                       PxReal dt, bool enableStabilization,
                       bool sleepingDisabled,
                       FeatherstoneArticulation **articulationForBody = nullptr,
-                      PxU32 *linkIndexForBody = nullptr) {
+                      PxU32 *linkIndexForBody = nullptr,
+                      AvbdContactOutputTarget *contactOutputTargets = nullptr,
+                      AvbdContactOutputResult *contactOutputResults = nullptr,
+                      PxU32 contactOutputCount = 0) {
     void *mem = mAllocator.allocate(sizeof(AvbdWriteBackTask),
                                     "AvbdWriteBackTask", __FILE__, __LINE__);
     return PX_PLACEMENT_NEW(mem, AvbdWriteBackTask)(
         context, avbdBodies, rigidBodies, staticTouchCounts, numBodies, dt,
         enableStabilization, sleepingDisabled, articulationForBody,
-        linkIndexForBody);
+        linkIndexForBody, contactOutputTargets, contactOutputResults,
+        contactOutputCount);
   }
 
   AvbdCoordinatorTask *createCoordinatorTask(AvbdDynamicsContext &context,

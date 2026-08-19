@@ -143,6 +143,29 @@ def main() -> int:
         ),
     )
 
+    swept_reverse_features = section(
+        soft,
+        "inline void avbdDetectSoftRigidTriangleSurfaceSweptOGCFeatures(",
+        "// Reverse OGC completeness for an open triangle surface:",
+    )
+    require_all(
+        errors,
+        "triangle-surface swept reverse-feature candidates",
+        swept_reverse_features,
+        (
+            "const bool softEdgeTranslationOnly =",
+            "if(softEdgeTranslationOnly && rotationsEquivalent)",
+            "avbdCollectRigidTriangleSurfaceEdgeBvhCandidates(",
+            "Rotation or a deforming soft edge has no independently",
+            "bool useRigidEdgeBvh = false;",
+            "avbdCollectRigidTriangleSurfaceVertexBvhCandidates(",
+            "Rotation or soft-face deformation retains the exact legacy",
+            "bool useRigidVertexBvh = false;",
+            "stats->rigidTriangleSurfaceEdgeCandidates++",
+            "stats->rigidTriangleSurfaceVertexCandidates++",
+        ),
+    )
+
     aggregate = section(
         soft,
         "inline void avbdDetectAllOGCContacts(",
@@ -298,6 +321,16 @@ def main() -> int:
             "minimumVertexSweepSeparation",
             "positiveAngularTravel",
             "SCENE_KINEMATIC_COUPLING_GATED",
+            "scene-volume-rigid-triangle-steady-contact",
+            "[AVBD_RIGID_TRIANGLE_STEADY_CONTACT]",
+            "PHYSX_AVBD_RIGID_TRIANGLE_GRID_DIM",
+            "topologyRigidTriangleMeshTriangles",
+            "rigidTriangleFaceCandidates",
+            "rigidTriangleEdgeCandidates",
+            "rigidTriangleVertexCandidates",
+            "--rigid-triangle-bvh",
+            "--rigid-triangle-grid-dim",
+            "rigidTriangleGridDim",
         ),
     )
     if "Dy::" in surface or "Dy::" in volume:

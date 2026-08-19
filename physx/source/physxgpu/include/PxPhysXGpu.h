@@ -77,7 +77,21 @@ namespace Bp
 namespace Dy
 {
 	class Context;
+	class AvbdRigidGpuWaveBackend;
+	class AvbdRigidGpuWaveCallbackSink;
 }
+
+struct PxAvbdGpuDynamicsContext
+{
+	Dy::Context* context;
+	Dy::AvbdRigidGpuWaveBackend* waveBackend;
+	Dy::AvbdRigidGpuWaveCallbackSink* callbackSink;
+
+	PxAvbdGpuDynamicsContext()
+		: context(NULL), waveBackend(NULL), callbackSink(NULL)
+	{
+	}
+};
 
 namespace IG
 {
@@ -192,6 +206,17 @@ public:
 		const PxGpuDynamicsMemoryConfig& config, IG::SimpleIslandManager& islandManager, PxU32 maxNumPartitions, PxU32 maxNumStaticPartitions, PxReal maxBiasCoefficient,
 		PxU32 gpuComputeVersion, PxvSimStats& simStats, PxsHeapMemoryAllocatorManager& heapMemoryManager, PxSolverType::Enum solverType,
 		PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags) = 0;
+
+	/** Create the dedicated AVBD owner-wave hybrid context. */
+	virtual bool createGpuAvbdDynamicsContext(
+		PxsKernelWranglerManager* gpuKernelWrangler,
+		PxCudaContextManager* cudaContextManager,
+		IG::SimpleIslandManager& islandManager,
+		Cm::VirtualAllocatorCallback& allocator,
+		Cm::VirtualAllocatorCallback& mappedAllocator,
+		PxReal maxBiasCoefficient, PxvSimStats& simStats,
+		PxReal lengthScale, PxU64 contextID, PxSceneFlags sceneFlags,
+		PxAvbdGpuDynamicsContext& context) = 0;
 };
 
 }

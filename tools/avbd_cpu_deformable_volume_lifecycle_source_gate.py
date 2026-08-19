@@ -323,8 +323,9 @@ def main() -> int:
             "mRigidActorFilters",
             "filterAllElements",
             "addVolumeRigidActorFilter(",
-            "mTetsAccumulatedRemapColToSim",
-            "mTetsRemapColToSim",
+            "mCollisionBodies",
+            "queryCollisionElementIndex",
+            "entry.collisionMesh->getNbTetrahedrons()",
             "simulationElements",
             "elementAdjacency",
             "tetRefs",
@@ -559,7 +560,7 @@ def main() -> int:
             "AvbdSoftContactTargetKind::eKINEMATIC_RIGID",
             "AvbdVelocityObjectiveOwner::ComponentFinalize",
             "struct AvbdCompiledSoftVelocityObjective",
-            "compileVelocityObjectives",
+            "avbdCompileSoftVelocityObjectives(",
             "avbdFinalizeSoftComponentVelocities(",
             "PxTransform shapeToRigidBody;",
             "geometry.rigidLocalPoint =",
@@ -900,14 +901,14 @@ def main() -> int:
             '"sceneSecondDynamicInitiallySleeping": "1"',
             '"sceneSecondDynamicWokeBySoft": "1"',
             '"sceneSecondDynamicFirstWakeFrame"',
-            '"multi-dynamic targets did not wake in one island pass"',
+            '"multi-dynamic targets did not wake within "',
             '"sceneSecondVolumeActorCreated": "1"',
             '"sceneSecondVolumeActorRemoved": "1"',
             '"sceneSecondVolumeActorReleased": "1"',
             '"sceneSecondVolumeBoundsFinite": "1"',
             'float(fields["sceneSecondVolumeMaxCentroidDrop"]) <= 0.5',
             'float(fields["finalMaxParticleSpeed"]) >= 1.0e-4',
-            'float(fields["sceneDynamicMaxDrop"]) <= 0.05',
+            'float(fields["sceneDynamicMaxDrop"]) <= minimum_rigid_drop',
             'case_name\n                not in (',
             '"scene-volume-dynamic-capsule",',
             '"scene-volume-dynamic-convex",',
@@ -935,9 +936,9 @@ def main() -> int:
     )
     require(
         errors,
-        "tuple(range(1, 37))" in unit_runner
-        and "choices=range(1, 37)" in unit_runner,
-        "soft-body runner no longer requires Tests 1..36",
+        "tuple(range(1, 55))" in unit_runner
+        and "choices=range(1, 55)" in unit_runner,
+        "soft-body runner no longer requires Tests 1..54",
     )
 
     if errors:

@@ -202,6 +202,37 @@ cudaError_t CUDARTAPI cudaLaunchKernel( const void* , dim3 , dim3 , void** , siz
 	return cudaSuccess;
 }
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
+// CUDA 13 emits these internal entry points for the non-legacy <<< >>> host
+// stub even when the CUDA runtime is disabled.  PhysX does not use that host
+// launch path (kernels are submitted through PxCudaContext/driver API), but
+// the symbols still have to resolve in the no-cudart GPU DLL.  Preserve the
+// long-standing no-op runtime stubs above rather than pulling cudart back into
+// the shared target and reintroducing duplicate registration symbols.
+extern "C"
+cudaError_t CUDARTAPI __cudaGetKernel(cudaKernel_t* kernel, const void* entry)
+{
+	PX_UNUSED(entry);
+	if (kernel)
+		*kernel = NULL;
+	return cudaSuccess;
+}
+
+extern "C"
+cudaError_t CUDARTAPI __cudaLaunchKernel(
+	cudaKernel_t, dim3, dim3, void**, size_t, cudaStream_t)
+{
+	return cudaSuccess;
+}
+
+extern "C"
+cudaError_t CUDARTAPI __cudaLaunchKernel_ptsz(
+	cudaKernel_t, dim3, dim3, void**, size_t, cudaStream_t)
+{
+	return cudaSuccess;
+}
+#endif
+
 extern "C"
 cudaError_t CUDARTAPI cudaSetupArgument(const void*, size_t, size_t)
 {

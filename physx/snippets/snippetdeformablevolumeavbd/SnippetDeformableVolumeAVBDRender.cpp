@@ -27,6 +27,7 @@
 #ifdef RENDER_SNIPPET
 
 #include "PxPhysicsAPI.h"
+#include "extensions/PxTetrahedronMeshExt.h"
 #include "DyAvbdSoftBodyComponent.h"
 
 #include "../snippetrender/SnippetRender.h"
@@ -49,6 +50,42 @@ extern void keyPress(unsigned char key, const PxTransform& camera);
 namespace
 {
 Snippets::Camera* sCamera;
+static const PxU32 PUBLIC_VOLUME_SURFACE_CACHE_CAPACITY = 8;
+static const PxTetrahedronMesh*
+	sPublicVolumeSurfaceMeshes[PUBLIC_VOLUME_SURFACE_CACHE_CAPACITY] = {};
+static PxArray<PxU32>
+	sPublicVolumeSurfaceTriangles[PUBLIC_VOLUME_SURFACE_CACHE_CAPACITY];
+static PxU32 sPublicVolumeSurfaceCacheSize = 0;
+
+static const PxArray<PxU32>* getPublicVolumeSurfaceTriangles(
+	const PxTetrahedronMesh& mesh)
+{
+	for(PxU32 cacheIndex = 0;
+		cacheIndex < sPublicVolumeSurfaceCacheSize; ++cacheIndex)
+	{
+		if(sPublicVolumeSurfaceMeshes[cacheIndex] == &mesh)
+			return &sPublicVolumeSurfaceTriangles[cacheIndex];
+	}
+	if(sPublicVolumeSurfaceCacheSize >=
+		PUBLIC_VOLUME_SURFACE_CACHE_CAPACITY)
+		return NULL;
+	const PxU32 cacheIndex = sPublicVolumeSurfaceCacheSize++;
+	sPublicVolumeSurfaceMeshes[cacheIndex] = &mesh;
+	PxTetrahedronMeshExt::extractTetMeshSurface(
+		&mesh, sPublicVolumeSurfaceTriangles[cacheIndex], NULL, false);
+	return &sPublicVolumeSurfaceTriangles[cacheIndex];
+}
+
+static void clearPublicVolumeSurfaceCache()
+{
+	for(PxU32 cacheIndex = 0;
+		cacheIndex < sPublicVolumeSurfaceCacheSize; ++cacheIndex)
+	{
+		sPublicVolumeSurfaceMeshes[cacheIndex] = NULL;
+		sPublicVolumeSurfaceTriangles[cacheIndex].reset();
+	}
+	sPublicVolumeSurfaceCacheSize = 0;
+}
 
 static void buildSurfaceMesh(
 	const AvbdSoftParticle* particles,
@@ -93,53 +130,44 @@ static void buildPublicVolumeSurfaceMesh(
 	outVerts.clear();
 	outTris.clear();
 	outNormals.clear();
+	// The visible surface must stay identical to the public collision surface.
+	// Simulation-tet detail is diagnostic data (and is sent to PVD separately),
+	// never a substitute for the authoritative collision boundary.
 	const PxTetrahedronMesh* mesh = volume.getCollisionMesh();
 	const PxVec4* positions = volume.getPositionInvMassBufferH();
 	if(!mesh || !positions)
 		return;
-	const bool has16BitIndices =
-		mesh->getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	const PxU16* tets16 = has16BitIndices
-		? static_cast<const PxU16*>(mesh->getTetrahedrons())
-		: NULL;
-	const PxU32* tets32 = has16BitIndices
-		? NULL
-		: static_cast<const PxU32*>(mesh->getTetrahedrons());
-	static const PxU32 faces[4][3] =
+	// The selected tetrahedralization contains interior faces. Extract its
+	// boundary once and cache the immutable topology; only vertex positions
+	// change per frame.
+	const PxArray<PxU32>* surfaceTriangles =
+		getPublicVolumeSurfaceTriangles(*mesh);
+	if(!surfaceTriangles)
+		return;
+	for(PxU32 triangle = 0;
+		triangle < surfaceTriangles->size() / 3; ++triangle)
 	{
-		{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}
-	};
-	for(PxU32 tet = 0; tet < mesh->getNbTetrahedrons(); ++tet)
-	{
-		PxU32 indices[4];
-		for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
-			indices[endpoint] = has16BitIndices
-				? PxU32(tets16[4 * tet + endpoint])
-				: tets32[4 * tet + endpoint];
-		for(PxU32 face = 0; face < 4; ++face)
-		{
-			const PxVec3 p0 =
-				positions[indices[faces[face][0]]].getXYZ();
-			const PxVec3 p1 =
-				positions[indices[faces[face][1]]].getXYZ();
-			const PxVec3 p2 =
-				positions[indices[faces[face][2]]].getXYZ();
-			PxVec3 normal = (p1 - p0).cross(p2 - p0);
-			const PxReal magnitude = normal.magnitude();
-			if(magnitude > 1.0e-12f)
-				normal *= 1.0f / magnitude;
-			const PxU32 base = outVerts.size();
-			outVerts.pushBack(p0);
-			outVerts.pushBack(p1);
-			outVerts.pushBack(p2);
-			outNormals.pushBack(normal);
-			outNormals.pushBack(normal);
-			outNormals.pushBack(normal);
-			outTris.pushBack(base);
-			outTris.pushBack(base + 1);
-			outTris.pushBack(base + 2);
-		}
+		const PxVec3 p0 =
+			positions[(*surfaceTriangles)[3 * triangle]].getXYZ();
+		const PxVec3 p1 =
+			positions[(*surfaceTriangles)[3 * triangle + 1]].getXYZ();
+		const PxVec3 p2 =
+			positions[(*surfaceTriangles)[3 * triangle + 2]].getXYZ();
+		PxVec3 normal = (p1 - p0).cross(p2 - p0);
+		const PxReal magnitude = normal.magnitude();
+		if(magnitude <= 1.0e-12f)
+			continue;
+		normal *= 1.0f / magnitude;
+		const PxU32 base = outVerts.size();
+		outVerts.pushBack(p0);
+		outVerts.pushBack(p1);
+		outVerts.pushBack(p2);
+		outNormals.pushBack(normal);
+		outNormals.pushBack(normal);
+		outNormals.pushBack(normal);
+		outTris.pushBack(base);
+		outTris.pushBack(base + 1);
+		outTris.pushBack(base + 2);
 	}
 }
 
@@ -202,19 +230,29 @@ void renderCallback()
 	}
 	else
 	{
-		PxDeformableVolume* publicVolume =
-			getPrimaryCpuAvbdVolume();
-		if(publicVolume)
+		const PxU32 publicVolumeCount =
+			gScene->getNbDeformableVolumes();
+		if(publicVolumeCount)
 		{
-			buildPublicVolumeSurfaceMesh(
-				*publicVolume, triVerts, triIndices, triNormals);
-			if(!triVerts.empty())
+			PxArray<PxDeformableVolume*> publicVolumes(publicVolumeCount);
+			const PxU32 queriedVolumeCount = gScene->getDeformableVolumes(
+				publicVolumes.begin(), publicVolumeCount);
+			for(PxU32 volumeIndex = 0;
+				volumeIndex < queriedVolumeCount; ++volumeIndex)
 			{
-				Snippets::renderMesh(
-					triVerts.size(), triVerts.begin(),
-					triIndices.size() / 3, triIndices.begin(),
-					PxVec3(0.95f, 0.34f, 0.16f),
-					triNormals.begin());
+				PxDeformableVolume* publicVolume =
+					publicVolumes[volumeIndex];
+				if(!publicVolume)
+					continue;
+				buildPublicVolumeSurfaceMesh(
+					*publicVolume, triVerts, triIndices, triNormals);
+				if(!triVerts.empty())
+				{
+					Snippets::renderMesh(
+						triVerts.size(), triVerts.begin(),
+						triIndices.size() / 3, triIndices.begin(),
+						colors[volumeIndex % 5], triNormals.begin());
+				}
 			}
 		}
 	}
@@ -225,13 +263,18 @@ void renderCallback()
 void exitCallback()
 {
 	delete sCamera;
+	clearPublicVolumeSurfaceCache();
 	cleanupPhysics(true);
 }
 }
 
 void renderLoop()
 {
-	sCamera = new Snippets::Camera(PxVec3(10.0f, 10.0f, 10.0f), PxVec3(-0.6f, -0.2f, -0.7f));
+	// Frame both the original low cube/sphere lane and the higher free
+	// rigid/follower OGC interaction in the visual showcase.
+	sCamera = new Snippets::Camera(
+		PxVec3(20.0f, 26.0f, 24.0f),
+		PxVec3(-0.52f, -0.45f, -0.73f));
 
 	Snippets::setupDefault(
 		AVBD_VOLUME_RENDER_TITLE, sCamera, keyPress,

@@ -67,6 +67,14 @@ SET(PHYXGPU_SOLVER_HEADERS
 	${PHYSX_SOURCE_DIR}/gpusolver/include/PxgSolverKernelIndices.h
 	${PHYSX_SOURCE_DIR}/gpusolver/include/PxgSolver.h
 )
+IF(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	LIST(APPEND PHYXGPU_SOLVER_HEADERS
+		${PHYSX_SOURCE_DIR}/lowleveldynamics/shared/DyAvbdOwnerWaveContract.h
+		${PHYSX_SOURCE_DIR}/gpusolver/include/PxgAvbdDynamicsContext.h
+		${PHYSX_SOURCE_DIR}/gpusolver/include/PxgAvbdDynamicsContextImpl.h
+		${PHYSX_SOURCE_DIR}/gpusolver/include/PxgAvbdOwnerWaveSolverCore.h
+	)
+ENDIF()
 SOURCE_GROUP("solver include" FILES ${PHYXGPU_SOLVER_HEADERS})
 
 SET(PHYXGPU_SOLVER_CUDA_KERNELS
@@ -83,6 +91,11 @@ SET(PHYXGPU_SOLVER_CUDA_KERNELS
 	${GPUSOLVER_SOURCE_DIR}/CUDA/solver.cu
 	${GPUSOLVER_SOURCE_DIR}/CUDA/constraintBlockPrepTGS.cu
 )
+IF(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	LIST(APPEND PHYXGPU_SOLVER_CUDA_KERNELS
+		${GPUSOLVER_SOURCE_DIR}/CUDA/avbdOwnerWave.cu
+	)
+ENDIF()
 SOURCE_GROUP("solver kernels/CUDA" FILES ${PHYXGPU_SOLVER_CUDA_KERNELS})
 
 SET(PHYXGPU_SOLVER_CUDA_INCLUDE
@@ -97,8 +110,12 @@ SET(PHYXGPU_SOLVER_CUDA_INCLUDE
 	${GPUSOLVER_SOURCE_DIR}/CUDA/solver.cuh
 	${GPUSOLVER_SOURCE_DIR}/CUDA/preIntegration.cuh
 	${GPUSOLVER_SOURCE_DIR}/CUDA/integration.cuh
-
 )
+IF(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	LIST(APPEND PHYXGPU_SOLVER_CUDA_INCLUDE
+		${GPUSOLVER_SOURCE_DIR}/CUDA/avbdOwnerWave.cuh
+	)
+ENDIF()
 SOURCE_GROUP("solver kernels cuda include" FILES ${PHYXGPU_SOLVER_CUDA_INCLUDE})
 
 SET(PHYXGPU_SOLVER_SOURCE
@@ -111,7 +128,19 @@ SET(PHYXGPU_SOLVER_SOURCE
 	${GPUSOLVER_SOURCE_DIR}/PxgContext.cpp
 	${GPUSOLVER_SOURCE_DIR}/PxgSolver.cpp
 )
+IF(PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE)
+	LIST(APPEND PHYXGPU_SOLVER_SOURCE
+		${GPUSOLVER_SOURCE_DIR}/PxgAvbdBackendContract.cpp
+		${GPUSOLVER_SOURCE_DIR}/PxgAvbdOwnerWaveSolverCore.cpp
+		${GPUSOLVER_SOURCE_DIR}/PxgAvbdDynamicsContextImpl.cpp
+	)
+ENDIF()
 SOURCE_GROUP("solver src" FILES ${PHYXGPU_SOLVER_SOURCE})
+
+# The AVBD owner-wave component is intentionally absent from normal GPU builds.
+# PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE opts into the callback-only hybrid
+# implementation without changing the CPU-authoritative packet producer,
+# scalar fallback, or writeback provider.
 
 ADD_LIBRARY(PhysXSolverGpu ${PHYSXSOLVERGPU_LIBTYPE}
 	# Solver
@@ -180,6 +209,7 @@ ENDIF()
 
 TARGET_COMPILE_DEFINITIONS(PhysXSolverGpu
 	PRIVATE ${PHYSXSOLVERGPU_COMPILE_DEFS}
+	PRIVATE $<$<BOOL:${PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE}>:PX_ENABLE_EXPERIMENTAL_AVBD_GPU_OWNER_WAVE=1>
 )
 
 # Since we are setting the C++ standard explicitly for Linux
@@ -189,6 +219,14 @@ IF(TARGET_BUILD_PLATFORM STREQUAL "linux")
 ENDIF()
 
 TARGET_COMPILE_OPTIONS(PhysXSolverGpu PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${ARCH_CODE_LIST}>)
+
+# CUDA 13 ships headers containing characters that trigger MSVC C4819 under
+# the workspace's code page.  Keep the warning-as-error policy for all other
+# host diagnostics, but suppress this external-header encoding warning for
+# the GPU host translation units only.
+IF(TARGET_BUILD_PLATFORM STREQUAL "windows")
+	TARGET_COMPILE_OPTIONS(PhysXSolverGpu PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd4819>)
+ENDIF()
 
 IF(PX_GENERATE_SOURCE_DISTRO)
 	LIST(APPEND SOURCE_DISTRO_FILE_LIST ${PHYXGPU_SOLVER_HEADERS})
@@ -201,4 +239,3 @@ ENDIF()
 SET_TARGET_PROPERTIES(PhysXSolverGpu PROPERTIES
 	POSITION_INDEPENDENT_CODE TRUE
 )
-

@@ -56,4 +56,10 @@ void stepVisualPhysics();
 void cleanupVisualPhysics();
 void keyPress(unsigned char key, const physx::PxTransform& camera);
 
+#ifdef RENDER_SNIPPET
+// Emits post-fetch CPU AVBD scheduler telemetry for a bounded visual smoke
+// run.  This is diagnostic only and never participates in simulation.
+void printVisualParallelismTelemetry(physx::PxU32 expectedFrames);
+#endif
+
 #endif // PHYSX_SNIPPET_DEFORMABLE_SURFACE_AVBD_H

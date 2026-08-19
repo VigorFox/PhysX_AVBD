@@ -32,8 +32,6 @@
 #include "foundation/PxArray.h"
 #include "foundation/PxAssert.h"
 #include "PxConstraintDesc.h"
-#include "PxAvbdParallelFor.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -99,13 +97,1062 @@ static bool computeEllipticalConeConstraint(
   return PxIsFinite(violation);
 }
 
-static physx::PxReal computeRotationDeltaMagnitude(const physx::PxQuat& current,
-                                                   const physx::PxQuat& previous) {
+static physx::PxReal computeRotationDeltaMagnitude(
+    const physx::PxQuat &current, const physx::PxQuat &previous) {
   physx::PxQuat deltaQ = current * previous.getConjugate();
   if (deltaQ.w < 0.0f)
     deltaQ = -deltaQ;
-  return 2.0f * physx::PxSqrt(deltaQ.x * deltaQ.x + deltaQ.y * deltaQ.y +
+  return 2.0f * physx::PxSqrt(deltaQ.x * deltaQ.x +
+                              deltaQ.y * deltaQ.y +
                               deltaQ.z * deltaQ.z);
+}
+
+static bool queryCurrentPairSignedDistance(
+    const AvbdSoftContactGeometry &geometry, const AvbdSolverBody &body,
+    const physx::PxVec3 &queryPoint, physx::PxReal &signedDistance);
+static bool queryCurrentPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry, const AvbdSolverBody &body,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxU32 movedParticleIndex,
+    const physx::PxVec3 &movedParticleDisplacement,
+    physx::PxReal &faceGap);
+static bool queryCurrentWorldStaticPairSignedDistance(
+    const AvbdSoftContactGeometry &geometry,
+    const physx::PxVec3 &queryPoint, physx::PxReal &signedDistance);
+static bool queryCurrentWorldStaticPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxU32 movedParticleIndex,
+    const physx::PxVec3 &movedParticleDisplacement,
+    physx::PxReal &faceGap);
+static bool queryInterpolatedPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry,
+    const AvbdSolverBody &initialBody, const AvbdSolverBody &endpointBody,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxReal alpha, physx::PxReal &faceGap);
+
+// Conservative single-particle part of the shared OGC trust region.  The
+// rigid endpoint has already been updated for this nonlinear GS iteration, so
+// evaluate the soft candidate against that *current* pose.  Every incident
+// dynamic pair votes for one common alpha; the particle may still deform in
+// any tangent direction, but it cannot spend more normal clearance than the
+// pair owns.  This is a candidate filter, not a post-solve depenetration.
+static physx::PxReal limitSoftParticleOgcCandidate(
+    const AvbdOgcPairTrustRegionContext *context,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    const AvbdSoftContactParticleRef *contactRefs,
+    physx::PxU32 contactRefBegin, physx::PxU32 contactRefEnd,
+    physx::PxU32 particleIndex,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    const AvbdSolverBody *rigidBodies, physx::PxU32 numRigidBodies,
+    const physx::PxVec3 &candidateDisplacement) {
+  if (!context || !context->isComplete(numSoftContacts) ||
+      !contactRefs || !softParticles ||
+      !candidateDisplacement.isFinite())
+    return 1.0f;
+
+  physx::PxReal alpha = 1.0f;
+  const physx::PxReal tolerance = 1.0e-6f;
+  for (physx::PxU32 refIndex = contactRefBegin;
+       refIndex < contactRefEnd; ++refIndex) {
+    const AvbdSoftContactParticleRef &ref = contactRefs[refIndex];
+    if (ref.contactIndex >= numSoftContacts)
+      continue;
+    const physx::PxU32 pairIndex =
+        context->contactPairIndices[ref.contactIndex];
+    if (pairIndex >= context->numPairStates ||
+        !context->pairStates[pairIndex].active)
+      continue;
+    AvbdOgcPairState &pair = context->pairStates[pairIndex];
+    const AvbdSoftContactGeometry &geometry =
+        softContacts[ref.contactIndex].geometry;
+    const bool hasDynamicRigid = geometry.hasRigidBodyTarget() &&
+        rigidBodies && geometry.targetIndex < numRigidBodies;
+    const bool hasWorldStatic = geometry.hasWorldStaticTarget();
+    if ((!hasDynamicRigid && !hasWorldStatic) ||
+        pair.sourceType != geometry.source.type ||
+        pair.targetKind != geometry.targetKind ||
+        pair.sourceBodyIndex != geometry.queryBodyIndex ||
+        pair.targetBodyIndex != geometry.targetIndex ||
+        pair.primitiveKey != geometry.source.primitiveKey)
+      continue;
+    if (!physx::PxIsFinite(ref.jacobianScale))
+      continue;
+    const physx::PxVec3 queryPoint =
+        avbdGetSoftContactQueryPoint(geometry, softParticles);
+    physx::PxReal gap = 0.0f;
+    physx::PxReal candidateGap = 0.0f;
+    const physx::PxVec3 candidateQuery =
+        queryPoint + candidateDisplacement * ref.jacobianScale;
+    const bool querySucceeded = hasDynamicRigid
+        ? queryCurrentPairSignedDistance(
+              geometry, rigidBodies[geometry.targetIndex], queryPoint, gap) &&
+              queryCurrentPairSignedDistance(
+                  geometry, rigidBodies[geometry.targetIndex], candidateQuery,
+                  candidateGap)
+        : queryCurrentWorldStaticPairSignedDistance(geometry, queryPoint, gap) &&
+              queryCurrentWorldStaticPairSignedDistance(
+                  geometry, candidateQuery, candidateGap);
+    if (!querySucceeded)
+      continue;
+    // A clipped OGC support commonly begins the next nonlinear update exactly
+    // on its current-pose boundary.  It is still a live trust-region
+    // constraint: tangent and separating candidates are valid, but an inward
+    // candidate must be rejected.  Treating `gap <= tolerance` as a reason to
+    // skip the row re-opens the boundary after the first clip and lets a later
+    // material/rigid GS update tunnel through it in the same dt.
+    if (candidateGap >= gap - tolerance)
+      continue;
+    physx::PxReal localAlpha = 0.0f;
+    if (gap > tolerance) {
+      const physx::PxReal denominator = gap - candidateGap;
+      if (denominator <= tolerance)
+        continue;
+      // Keep a tiny positive residual to avoid repeatedly landing on the
+      // unilateral boundary through round-off.
+      localAlpha =
+          physx::PxClamp((gap - tolerance) / denominator, 0.0f, 1.0f);
+    }
+    // Reaching the pair trust-region boundary is a real OGC epoch event.
+    // Preserve it until post-AL consumes it with a current-pose DCD refresh;
+    // otherwise a triangle interior can cross the OBB while every cached
+    // point witness remains just outside.  This is not a swept/CCD request:
+    // the candidate and boundary are both evaluated at this same solve time.
+    if (localAlpha < 1.0f - 1.0e-6f) {
+      pair.refreshRequested = true;
+      pair.remainingSafeDisplacement = 0.0f;
+      const physx::PxReal admittedGap =
+          gap + (candidateGap - gap) * localAlpha;
+      pair.minimumGap = physx::PxMin(pair.minimumGap, admittedGap);
+      pair.accumulatedRelativeDisplacement = physx::PxMax(
+          pair.accumulatedRelativeDisplacement,
+          physx::PxMax(0.0f, gap - admittedGap));
+    }
+    alpha = physx::PxMin(alpha, localAlpha);
+  }
+
+  // The ordinary contact CSR above contains only the compact AL query.  A
+  // triangle-core row additionally publishes all three proxy-vertex
+  // embeddings in this companion CSR, so a material update cannot move an
+  // unreferenced triangle corner across an otherwise positive OGC boundary.
+  // It is intentionally an admission-only pass: these refs do not duplicate
+  // the AL force/Hessian row.
+  if (!context->hasTriangleCoreSafetyPlan(numSoftParticles))
+    return physx::PxIsFinite(alpha) ? alpha : 0.0f;
+  const physx::PxU32 coreBegin =
+      context->triangleCoreSafetyStarts[particleIndex];
+  const physx::PxU32 coreEnd =
+      context->triangleCoreSafetyStarts[particleIndex + 1u];
+  for (physx::PxU32 refIndex = coreBegin; refIndex < coreEnd; ++refIndex) {
+    const AvbdSoftContactParticleRef &ref =
+        context->triangleCoreSafetyRefs[refIndex];
+    if (ref.contactIndex >= numSoftContacts)
+      continue;
+    const physx::PxU32 pairIndex =
+        context->contactPairIndices[ref.contactIndex];
+    if (pairIndex >= context->numPairStates ||
+        !context->pairStates[pairIndex].active)
+      continue;
+    AvbdOgcPairState &pair = context->pairStates[pairIndex];
+    const AvbdSoftContactGeometry &geometry =
+        softContacts[ref.contactIndex].geometry;
+    const bool hasDynamicRigid = geometry.hasRigidBodyTarget() &&
+        rigidBodies && geometry.targetIndex < numRigidBodies;
+    const bool hasWorldStatic = geometry.hasWorldStaticTarget();
+    if ((!hasDynamicRigid && !hasWorldStatic) ||
+        pair.sourceType != geometry.source.type ||
+        pair.targetKind != geometry.targetKind ||
+        pair.sourceBodyIndex != geometry.queryBodyIndex ||
+        pair.targetBodyIndex != geometry.targetIndex ||
+        pair.primitiveKey != geometry.source.primitiveKey)
+      continue;
+
+    physx::PxReal gap = 0.0f;
+    physx::PxReal candidateGap = 0.0f;
+    const bool querySucceeded = hasDynamicRigid
+        ? queryCurrentPairTriangleCoreFaceGap(
+              geometry, rigidBodies[geometry.targetIndex], softParticles,
+              numSoftParticles, PX_MAX_U32, physx::PxVec3(0.0f), gap) &&
+              queryCurrentPairTriangleCoreFaceGap(
+                  geometry, rigidBodies[geometry.targetIndex], softParticles,
+                  numSoftParticles, particleIndex, candidateDisplacement,
+                  candidateGap)
+        : queryCurrentWorldStaticPairTriangleCoreFaceGap(
+              geometry, softParticles, numSoftParticles, PX_MAX_U32,
+              physx::PxVec3(0.0f), gap) &&
+              queryCurrentWorldStaticPairTriangleCoreFaceGap(
+                  geometry, softParticles, numSoftParticles, particleIndex,
+                  candidateDisplacement, candidateGap);
+    if (!querySucceeded)
+      continue;
+    // Keep the complete collision triangle on its fresh OGC face once that
+    // face has been reached.  Otherwise an unreferenced corner can spend a
+    // new inward displacement during the same material iteration.
+    if (candidateGap >= gap - tolerance)
+      continue;
+    physx::PxReal localAlpha = 0.0f;
+    if (gap > tolerance) {
+      const physx::PxReal denominator = gap - candidateGap;
+      if (denominator <= tolerance)
+        continue;
+      localAlpha =
+          physx::PxClamp((gap - tolerance) / denominator, 0.0f, 1.0f);
+    }
+    if (localAlpha < 1.0f - 1.0e-6f) {
+      pair.refreshRequested = true;
+      pair.remainingSafeDisplacement = 0.0f;
+      const physx::PxReal admittedGap =
+          gap + (candidateGap - gap) * localAlpha;
+      pair.minimumGap = physx::PxMin(pair.minimumGap, admittedGap);
+      pair.accumulatedRelativeDisplacement = physx::PxMax(
+          pair.accumulatedRelativeDisplacement,
+          physx::PxMax(0.0f, gap - admittedGap));
+    }
+    alpha = physx::PxMin(alpha, localAlpha);
+  }
+  return physx::PxIsFinite(alpha) ? alpha : 0.0f;
+}
+
+// A deferred inertial target is intentionally released only through the
+// contact-admitted soft body.  Unlike the ordinary material path, it can
+// increase an already-large compressive load after the boundary clip.  Keep
+// that release from degrading an incident tet: if the tet is healthy retain
+// the existing 5% determinant floor; if it was already below the floor,
+// accept only a non-worsening candidate so the regular material/contact
+// equations still have a route to repair it.
+// Exact point-to-current-OBB signed distance for the candidate trust region.
+// The regular contact row still owns AL normal/penalty state; this query is
+// only the geometric admission test and therefore must not reuse its cached
+// detector normal when the rigid has already rotated in the same GS sweep.
+static bool queryCurrentPairSignedDistance(
+    const AvbdSoftContactGeometry &geometry, const AvbdSolverBody &body,
+    const physx::PxVec3 &queryPoint, physx::PxReal &signedDistance) {
+  if (!queryPoint.isFinite())
+    return false;
+  if (!geometry.hasRigidBoxSdf) {
+    const physx::PxReal normalLengthSq = geometry.normal.magnitudeSquared();
+    if (!physx::PxIsFinite(normalLengthSq) || normalLengthSq <= 1.0e-12f)
+      return false;
+    const physx::PxVec3 normal =
+        geometry.normal * physx::PxRecipSqrt(normalLengthSq);
+    signedDistance =
+        (queryPoint - avbdGetRigidContactSurfacePoint(geometry, body)).dot(normal);
+    return physx::PxIsFinite(signedDistance);
+  }
+  if (!body.position.isFinite() || !body.rotation.isFinite() ||
+      !geometry.rigidBoxPose.p.isFinite() ||
+      !geometry.rigidBoxPose.q.isFinite() ||
+      !geometry.rigidBoxHalfExtent.isFinite())
+    return false;
+  const physx::PxQuat shapeRotation =
+      body.rotation * geometry.rigidBoxPose.q;
+  const physx::PxVec3 shapePosition =
+      body.position + body.rotation.rotate(geometry.rigidBoxPose.p);
+  const physx::PxVec3 halfExtent = geometry.rigidBoxHalfExtent;
+  if (!shapeRotation.isFinite() || !shapePosition.isFinite() ||
+      halfExtent.x <= 0.0f || halfExtent.y <= 0.0f || halfExtent.z <= 0.0f)
+    return false;
+  const physx::PxVec3 localPoint =
+      shapeRotation.getConjugate().rotate(queryPoint - shapePosition);
+  const physx::PxVec3 delta(
+      physx::PxAbs(localPoint.x) - halfExtent.x,
+      physx::PxAbs(localPoint.y) - halfExtent.y,
+      physx::PxAbs(localPoint.z) - halfExtent.z);
+  const physx::PxVec3 outside(
+      physx::PxMax(delta.x, 0.0f), physx::PxMax(delta.y, 0.0f),
+      physx::PxMax(delta.z, 0.0f));
+  const physx::PxReal inside = physx::PxMin(
+      physx::PxMax(delta.x, physx::PxMax(delta.y, delta.z)), 0.0f);
+  signedDistance = outside.magnitude() + inside;
+  return physx::PxIsFinite(signedDistance);
+}
+
+// Return the signed clearance of the complete expanded collision triangle to
+// the OBB support plane selected by its discrete core certificate.  Moving one
+// simulation particle is optional; this makes the same function usable for
+// the soft candidate admission and the rigid candidate admission.  It is a
+// static current-pose query -- no segment interpolation, TOI, or CCD state is
+// involved.
+static bool queryCurrentPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry, const AvbdSolverBody &body,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxU32 movedParticleIndex,
+    const physx::PxVec3 &movedParticleDisplacement,
+    physx::PxReal &faceGap) {
+  if (!geometry.hasRigidBoxSdf ||
+      !geometry.hasRigidBoxTriangleCoreExit || !softParticles ||
+      !movedParticleDisplacement.isFinite() || !body.position.isFinite() ||
+      !body.rotation.isFinite() || !geometry.rigidBoxPose.p.isFinite() ||
+      !geometry.rigidBoxPose.q.isFinite() ||
+      !geometry.rigidBoxHalfExtent.isFinite() ||
+      !geometry.rigidBoxTriangleCoreExitNormalLocal.isFinite())
+    return false;
+
+  const physx::PxVec3 rawNormalLocal =
+      geometry.rigidBoxTriangleCoreExitNormalLocal;
+  const physx::PxReal normalLengthSq = rawNormalLocal.magnitudeSquared();
+  if (!physx::PxIsFinite(normalLengthSq) || normalLengthSq <= 1.0e-12f)
+    return false;
+  const physx::PxVec3 normalLocal =
+      rawNormalLocal * physx::PxRecipSqrt(normalLengthSq);
+  const physx::PxVec3 halfExtent = geometry.rigidBoxHalfExtent;
+  if (halfExtent.x <= 0.0f || halfExtent.y <= 0.0f || halfExtent.z <= 0.0f)
+    return false;
+
+  const physx::PxQuat shapeRotation = body.rotation * geometry.rigidBoxPose.q;
+  const physx::PxVec3 shapePosition =
+      body.position + body.rotation.rotate(geometry.rigidBoxPose.p);
+  const physx::PxVec3 rawNormalWorld = shapeRotation.rotate(normalLocal);
+  const physx::PxReal worldNormalLengthSq = rawNormalWorld.magnitudeSquared();
+  if (!shapeRotation.isFinite() || !shapePosition.isFinite() ||
+      !rawNormalWorld.isFinite() || !physx::PxIsFinite(worldNormalLengthSq) ||
+      worldNormalLengthSq <= 1.0e-12f)
+    return false;
+  const physx::PxVec3 normalWorld =
+      rawNormalWorld * physx::PxRecipSqrt(worldNormalLengthSq);
+  const physx::PxVec3 surfaceLocal(normalLocal.x * halfExtent.x,
+                                    normalLocal.y * halfExtent.y,
+                                    normalLocal.z * halfExtent.z);
+  const physx::PxVec3 surfaceWorld =
+      shapePosition + shapeRotation.rotate(surfaceLocal);
+
+  faceGap = PX_MAX_F32;
+  for (physx::PxU32 vertex = 0; vertex < 3; ++vertex) {
+    const AvbdWeightedContactPoint &mapping =
+        geometry.rigidBoxTriangleCorePoints[vertex];
+    if (mapping.count == 0 || mapping.count > AVBD_CONTACT_POINT_MAX_SUPPORT)
+      return false;
+    physx::PxVec3 point(0.0f);
+    physx::PxReal weightSum = 0.0f;
+    for (physx::PxU32 support = 0; support < mapping.count; ++support) {
+      const physx::PxU32 particleIndex = mapping.particleIndices[support];
+      const physx::PxReal weight = mapping.weights[support];
+      if (particleIndex >= numSoftParticles || !physx::PxIsFinite(weight) ||
+          !softParticles[particleIndex].position.isFinite())
+        return false;
+      point += softParticles[particleIndex].position * weight;
+      if (particleIndex == movedParticleIndex)
+        point += movedParticleDisplacement * weight;
+      weightSum += weight;
+    }
+    if (!point.isFinite() || !physx::PxIsFinite(weightSum) ||
+        physx::PxAbs(weightSum - 1.0f) > 1.0e-3f)
+      return false;
+    const physx::PxReal gap = (point - surfaceWorld).dot(normalWorld);
+    if (!physx::PxIsFinite(gap))
+      return false;
+    faceGap = physx::PxMin(faceGap, gap);
+  }
+  return physx::PxIsFinite(faceGap);
+}
+
+// Static targets participate in the same OGC epoch as a dynamic rigid, but
+// their shape pose is already world-space and has no 6DOF endpoint.  These
+// queries intentionally use only the current pose; they are not swept tests.
+static bool queryCurrentWorldStaticPairSignedDistance(
+    const AvbdSoftContactGeometry &geometry,
+    const physx::PxVec3 &queryPoint, physx::PxReal &signedDistance) {
+  if (!geometry.hasWorldStaticTarget() || !queryPoint.isFinite())
+    return false;
+  if (!geometry.hasRigidBoxSdf) {
+    const physx::PxReal normalLengthSq = geometry.normal.magnitudeSquared();
+    if (!physx::PxIsFinite(normalLengthSq) || normalLengthSq <= 1.0e-12f ||
+        !geometry.surfacePoint.isFinite())
+      return false;
+    signedDistance = (queryPoint - geometry.surfacePoint).dot(
+        geometry.normal * physx::PxRecipSqrt(normalLengthSq));
+    return physx::PxIsFinite(signedDistance);
+  }
+  if (!geometry.rigidBoxPose.isValid() ||
+      !geometry.rigidBoxHalfExtent.isFinite() ||
+      geometry.rigidBoxHalfExtent.x <= 0.0f ||
+      geometry.rigidBoxHalfExtent.y <= 0.0f ||
+      geometry.rigidBoxHalfExtent.z <= 0.0f)
+    return false;
+  const physx::PxVec3 localPoint =
+      geometry.rigidBoxPose.transformInv(queryPoint);
+  const physx::PxVec3 delta(
+      physx::PxAbs(localPoint.x) - geometry.rigidBoxHalfExtent.x,
+      physx::PxAbs(localPoint.y) - geometry.rigidBoxHalfExtent.y,
+      physx::PxAbs(localPoint.z) - geometry.rigidBoxHalfExtent.z);
+  const physx::PxVec3 outside(
+      physx::PxMax(delta.x, 0.0f), physx::PxMax(delta.y, 0.0f),
+      physx::PxMax(delta.z, 0.0f));
+  signedDistance = outside.magnitude() + physx::PxMin(
+      physx::PxMax(delta.x, physx::PxMax(delta.y, delta.z)), 0.0f);
+  return physx::PxIsFinite(signedDistance);
+}
+
+static bool queryCurrentWorldStaticPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxU32 movedParticleIndex,
+    const physx::PxVec3 &movedParticleDisplacement,
+    physx::PxReal &faceGap) {
+  if (!geometry.hasWorldStaticTarget() || !geometry.hasRigidBoxSdf ||
+      !geometry.hasRigidBoxTriangleCoreExit || !softParticles ||
+      !movedParticleDisplacement.isFinite() || !geometry.rigidBoxPose.isValid() ||
+      !geometry.rigidBoxHalfExtent.isFinite() ||
+      !geometry.rigidBoxTriangleCoreExitNormalLocal.isFinite())
+    return false;
+  const physx::PxReal normalLengthSq =
+      geometry.rigidBoxTriangleCoreExitNormalLocal.magnitudeSquared();
+  if (!physx::PxIsFinite(normalLengthSq) || normalLengthSq <= 1.0e-12f)
+    return false;
+  const physx::PxVec3 normalLocal =
+      geometry.rigidBoxTriangleCoreExitNormalLocal *
+      physx::PxRecipSqrt(normalLengthSq);
+  const physx::PxVec3 normalWorld =
+      geometry.rigidBoxPose.q.rotate(normalLocal).getNormalized();
+  const physx::PxU32 axis = normalLocal.x != 0.0f ? 0u :
+                             (normalLocal.y != 0.0f ? 1u : 2u);
+  const physx::PxVec3 surfaceWorld = geometry.rigidBoxPose.transform(
+      normalLocal * geometry.rigidBoxHalfExtent[axis]);
+  if (!normalWorld.isFinite() || !surfaceWorld.isFinite())
+    return false;
+  faceGap = PX_MAX_F32;
+  for (physx::PxU32 vertex = 0; vertex < 3u; ++vertex) {
+    const AvbdWeightedContactPoint &mapping =
+        geometry.rigidBoxTriangleCorePoints[vertex];
+    if (mapping.count == 0 || mapping.count > AVBD_CONTACT_POINT_MAX_SUPPORT)
+      return false;
+    physx::PxVec3 point(0.0f);
+    physx::PxReal weightSum = 0.0f;
+    for (physx::PxU32 support = 0; support < mapping.count; ++support) {
+      const physx::PxU32 index = mapping.particleIndices[support];
+      const physx::PxReal weight = mapping.weights[support];
+      if (index >= numSoftParticles || !physx::PxIsFinite(weight) ||
+          !softParticles[index].position.isFinite())
+        return false;
+      point += softParticles[index].position * weight;
+      if (index == movedParticleIndex)
+        point += movedParticleDisplacement * weight;
+      weightSum += weight;
+    }
+    if (!point.isFinite() || !physx::PxIsFinite(weightSum) ||
+        physx::PxAbs(weightSum - 1.0f) > 1.0e-3f)
+      return false;
+    faceGap = physx::PxMin(faceGap, (point - surfaceWorld).dot(normalWorld));
+  }
+  return physx::PxIsFinite(faceGap);
+}
+
+// Evaluate the complete collision triangle on the same frame-start ->
+// endpoint interpolation used by OGC warmstart admission.  This is a
+// trust-region query, not swept CCD: it only finds the largest admissible
+// position update within the already selected simulation dt.  Keeping the
+// triangle here (rather than its detector centroid) makes the warmstart
+// invariant match the terminal triangle-core manifold.
+static bool queryInterpolatedPairTriangleCoreFaceGap(
+    const AvbdSoftContactGeometry &geometry,
+    const AvbdSolverBody &initialBody, const AvbdSolverBody &endpointBody,
+    const AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    physx::PxReal alpha, physx::PxReal &faceGap) {
+  if (!softParticles || !physx::PxIsFinite(alpha) || alpha < 0.0f ||
+      alpha > 1.0f || !initialBody.position.isFinite() ||
+      !initialBody.rotation.isFinite() || !endpointBody.position.isFinite() ||
+      !endpointBody.rotation.isFinite() || !geometry.hasRigidBoxSdf ||
+      !geometry.hasRigidBoxTriangleCoreExit ||
+      !geometry.rigidBoxPose.p.isFinite() ||
+      !geometry.rigidBoxPose.q.isFinite() ||
+      !geometry.rigidBoxHalfExtent.isFinite() ||
+      !geometry.rigidBoxTriangleCoreExitNormalLocal.isFinite())
+    return false;
+
+  const physx::PxVec3 rawNormalLocal =
+      geometry.rigidBoxTriangleCoreExitNormalLocal;
+  const physx::PxReal normalLengthSq = rawNormalLocal.magnitudeSquared();
+  const physx::PxVec3 halfExtent = geometry.rigidBoxHalfExtent;
+  if (!physx::PxIsFinite(normalLengthSq) || normalLengthSq <= 1.0e-12f ||
+      halfExtent.x <= 0.0f || halfExtent.y <= 0.0f || halfExtent.z <= 0.0f)
+    return false;
+
+  const physx::PxVec3 normalLocal =
+      rawNormalLocal * physx::PxRecipSqrt(normalLengthSq);
+  AvbdSolverBody body = endpointBody;
+  body.position = initialBody.position +
+      (endpointBody.position - initialBody.position) * alpha;
+  body.rotation =
+      physx::PxSlerp(alpha, initialBody.rotation, endpointBody.rotation);
+  body.projectLockedPose(initialBody.position, initialBody.rotation);
+  if (!body.position.isFinite() || !body.rotation.isFinite())
+    return false;
+
+  const physx::PxQuat shapeRotation = body.rotation * geometry.rigidBoxPose.q;
+  const physx::PxVec3 shapePosition =
+      body.position + body.rotation.rotate(geometry.rigidBoxPose.p);
+  const physx::PxVec3 rawNormalWorld = shapeRotation.rotate(normalLocal);
+  const physx::PxReal worldNormalLengthSq = rawNormalWorld.magnitudeSquared();
+  if (!shapeRotation.isFinite() || !shapePosition.isFinite() ||
+      !rawNormalWorld.isFinite() || !physx::PxIsFinite(worldNormalLengthSq) ||
+      worldNormalLengthSq <= 1.0e-12f)
+    return false;
+  const physx::PxVec3 normalWorld =
+      rawNormalWorld * physx::PxRecipSqrt(worldNormalLengthSq);
+  const physx::PxVec3 surfaceLocal(normalLocal.x * halfExtent.x,
+                                    normalLocal.y * halfExtent.y,
+                                    normalLocal.z * halfExtent.z);
+  const physx::PxVec3 surfaceWorld =
+      shapePosition + shapeRotation.rotate(surfaceLocal);
+
+  faceGap = PX_MAX_F32;
+  for (physx::PxU32 vertex = 0; vertex < 3; ++vertex) {
+    const AvbdWeightedContactPoint &mapping =
+        geometry.rigidBoxTriangleCorePoints[vertex];
+    if (mapping.count == 0 || mapping.count > AVBD_CONTACT_POINT_MAX_SUPPORT)
+      return false;
+    physx::PxVec3 point(0.0f);
+    physx::PxReal weightSum = 0.0f;
+    for (physx::PxU32 support = 0; support < mapping.count; ++support) {
+      const physx::PxU32 particleIndex = mapping.particleIndices[support];
+      const physx::PxReal weight = mapping.weights[support];
+      if (particleIndex >= numSoftParticles || !physx::PxIsFinite(weight) ||
+          !softParticles[particleIndex].initialPosition.isFinite() ||
+          !softParticles[particleIndex].position.isFinite())
+        return false;
+      const physx::PxVec3 position =
+          softParticles[particleIndex].initialPosition +
+          (softParticles[particleIndex].position -
+           softParticles[particleIndex].initialPosition) * alpha;
+      point += position * weight;
+      weightSum += weight;
+    }
+    if (!point.isFinite() || !physx::PxIsFinite(weightSum) ||
+        physx::PxAbs(weightSum - 1.0f) > 1.0e-3f)
+      return false;
+    const physx::PxReal gap = (point - surfaceWorld).dot(normalWorld);
+    if (!physx::PxIsFinite(gap))
+      return false;
+    faceGap = physx::PxMin(faceGap, gap);
+  }
+  return physx::PxIsFinite(faceGap);
+}
+
+// OGC's admission point is the pair prediction, not a post-penetration
+// ejection.  Restricting only a rigid (or only the four simulation vertices
+// behind one collision vertex) transfers the load into the wrong endpoint:
+// the former launches the rigid and the latter shears/inverts the tet mesh.
+//
+// This one-time same-dt line search instead advances every endpoint of the
+// active mixed island to one common feasible DCD epoch.  A source volume is
+// moved coherently from its accepted frame-start state to its warmstarted
+// candidate, and its paired 6DOF rigid uses the same alpha.  The regular
+// coupled AVBD/OGC rows then distribute subsequent pressure locally through
+// the soft support.  It is neither a sweep/TOI query nor a physics substep.
+//
+// World-static targets use the companion routine below.  They have no rigid
+// endpoint to interpolate, so their admissible initial guess must be clipped
+// at the *collision support* level.  Scaling an entire falling volume here
+// makes gravity look disabled; scaling just the weighted query/core supports
+// is the OGC vertex trust-region operation that lets the material block form
+// the visible landing deformation.
+static void applyWorldStaticOgcInitialAdmission(
+    AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts) {
+  if (!softParticles || !softBodies || !softContacts || numSoftParticles == 0)
+    return;
+  const physx::PxReal clearance = 1.0e-5f;
+  physx::PxArray<physx::PxReal> admissionAlphas(numSoftParticles, 1.0f);
+  auto evaluatePoint = [&](const AvbdWeightedContactPoint &mapping,
+                           physx::PxReal alpha,
+                           physx::PxVec3 &point) -> bool {
+    if (mapping.count == 0 || mapping.count > AVBD_CONTACT_POINT_MAX_SUPPORT)
+      return false;
+    point = physx::PxVec3(0.0f);
+    physx::PxReal weightSum = 0.0f;
+    for (physx::PxU32 i = 0; i < mapping.count; ++i) {
+      const physx::PxU32 index = mapping.particleIndices[i];
+      const physx::PxReal weight = mapping.weights[i];
+      if (index >= numSoftParticles || !physx::PxIsFinite(weight) ||
+          !softParticles[index].initialPosition.isFinite() ||
+          !softParticles[index].position.isFinite())
+        return false;
+      point += (softParticles[index].initialPosition +
+                (softParticles[index].position -
+                 softParticles[index].initialPosition) * alpha) * weight;
+      weightSum += weight;
+    }
+    return point.isFinite() && physx::PxIsFinite(weightSum) &&
+        physx::PxAbs(weightSum - 1.0f) <= 1.0e-3f;
+  };
+  auto limitPoint = [&](const AvbdWeightedContactPoint &mapping,
+                        physx::PxReal alpha) {
+    for (physx::PxU32 i = 0; i < mapping.count; ++i) {
+      const physx::PxU32 index = mapping.particleIndices[i];
+      if (index >= numSoftParticles)
+        continue;
+      admissionAlphas[index] = physx::PxMin(admissionAlphas[index], alpha);
+    }
+  };
+  auto sourceIsDynamic = [&](const AvbdSoftContactGeometry &geometry) {
+    return geometry.queryBodyIndex < numSoftBodies &&
+        !softBodies[geometry.queryBodyIndex].compiled.speculativeCCDEnabled &&
+        avbdHasSoftContactDynamicQuerySupport(
+            geometry, softParticles, numSoftParticles);
+  };
+  for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
+    const AvbdSoftContactGeometry &geometry = softContacts[sci].geometry;
+    if (!geometry.hasWorldStaticTarget() || !sourceIsDynamic(geometry))
+      continue;
+
+    auto admitPoint = [&](const AvbdWeightedContactPoint &mapping) {
+      physx::PxVec3 initialPoint(0.0f), endpointPoint(0.0f);
+      physx::PxReal initialGap = 0.0f, endpointGap = 0.0f;
+      if (!evaluatePoint(mapping, 0.0f, initialPoint) ||
+          !evaluatePoint(mapping, 1.0f, endpointPoint) ||
+          !queryCurrentWorldStaticPairSignedDistance(
+              geometry, initialPoint, initialGap) ||
+          !queryCurrentWorldStaticPairSignedDistance(
+              geometry, endpointPoint, endpointGap) ||
+          initialGap <= clearance || endpointGap >= clearance)
+        return;
+      physx::PxReal lower = 0.0f;
+      physx::PxReal upper = 1.0f;
+      for (physx::PxU32 iteration = 0; iteration < 10u; ++iteration) {
+        const physx::PxReal middle = 0.5f * (lower + upper);
+        physx::PxVec3 point(0.0f);
+        physx::PxReal gap = 0.0f;
+        if (evaluatePoint(mapping, middle, point) &&
+            queryCurrentWorldStaticPairSignedDistance(geometry, point, gap) &&
+            gap >= clearance)
+          lower = middle;
+        else
+          upper = middle;
+      }
+      limitPoint(mapping, lower);
+    };
+
+    // A TBIX certificate owns its complete collision triangle.  Clip all
+    // three embedded vertices together on its selected support plane, which
+    // prevents an all-outside triangle interior from crossing a static OBB.
+    if (geometry.hasRigidBoxTriangleCoreExit && geometry.hasRigidBoxSdf) {
+      auto coreGap = [&](physx::PxReal alpha, physx::PxReal &gap) -> bool {
+        if (!geometry.rigidBoxPose.isValid() ||
+            !geometry.rigidBoxTriangleCoreExitNormalLocal.isFinite())
+          return false;
+        const physx::PxReal normalLengthSq =
+            geometry.rigidBoxTriangleCoreExitNormalLocal.magnitudeSquared();
+        if (normalLengthSq <= 1.0e-12f || !physx::PxIsFinite(normalLengthSq))
+          return false;
+        const physx::PxVec3 normal = geometry.rigidBoxPose.q.rotate(
+            geometry.rigidBoxTriangleCoreExitNormalLocal *
+            physx::PxRecipSqrt(normalLengthSq));
+        const physx::PxU32 axis =
+            geometry.rigidBoxTriangleCoreExitNormalLocal.x != 0.0f ? 0u :
+            (geometry.rigidBoxTriangleCoreExitNormalLocal.y != 0.0f ? 1u : 2u);
+        const physx::PxVec3 surface = geometry.rigidBoxPose.transform(
+            (geometry.rigidBoxTriangleCoreExitNormalLocal *
+             physx::PxRecipSqrt(normalLengthSq)) *
+            geometry.rigidBoxHalfExtent[axis]);
+        gap = PX_MAX_F32;
+        for (physx::PxU32 vertex = 0; vertex < 3u; ++vertex) {
+          physx::PxVec3 point(0.0f);
+          if (!evaluatePoint(geometry.rigidBoxTriangleCorePoints[vertex],
+                             alpha, point))
+            return false;
+          gap = physx::PxMin(gap, (point - surface).dot(normal));
+        }
+        return physx::PxIsFinite(gap);
+      };
+      physx::PxReal initialGap = 0.0f, endpointGap = 0.0f;
+      if (coreGap(0.0f, initialGap) && coreGap(1.0f, endpointGap) &&
+          initialGap > clearance && endpointGap < clearance) {
+        physx::PxReal lower = 0.0f, upper = 1.0f;
+        for (physx::PxU32 iteration = 0; iteration < 10u; ++iteration) {
+          const physx::PxReal middle = 0.5f * (lower + upper);
+          physx::PxReal gap = 0.0f;
+          if (coreGap(middle, gap) && gap >= clearance)
+            lower = middle;
+          else
+            upper = middle;
+        }
+        for (physx::PxU32 vertex = 0; vertex < 3u; ++vertex)
+          limitPoint(geometry.rigidBoxTriangleCorePoints[vertex], lower);
+      }
+    }
+
+    AvbdWeightedContactPoint query;
+    if (geometry.hasWeightedQueryPoint())
+      query = geometry.queryPoint;
+    else if (geometry.hasBarycentricQueryPoint()) {
+      for (physx::PxU32 i = 0; i < 3u; ++i) {
+        if (geometry.queryParticleIndices[i] == PX_MAX_U32)
+          break;
+        if (!query.appendMerged(geometry.queryParticleIndices[i],
+                                geometry.queryWeights[i])) {
+          query.clear();
+          break;
+        }
+      }
+    } else
+      query.appendMerged(geometry.particleIdx, 1.0f);
+    if (query.count > 0)
+      admitPoint(query);
+  }
+  // Commit each collision support once. Multiple feature rows may share an
+  // embedded simulation vertex; their minimum admissible alpha is its OGC
+  // trust-region bound for this epoch, independent of contact enumeration.
+  for (physx::PxU32 index = 0; index < numSoftParticles; ++index) {
+    const physx::PxReal alpha = admissionAlphas[index];
+    if (!physx::PxIsFinite(alpha) || alpha >= 1.0f)
+      continue;
+    AvbdSoftParticle &particle = softParticles[index];
+    const physx::PxVec3 initial = particle.initialPosition;
+    particle.position = initial + (particle.position - initial) * alpha;
+    particle.predictedPosition = initial +
+        (particle.predictedPosition - initial) * alpha;
+    particle.outerPosition = initial +
+        (particle.outerPosition - initial) * alpha;
+  }
+}
+
+static void applyOgcMixedWarmstartAdmission(
+    AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
+    const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    physx::PxArray<physx::PxU8> *admittedContacts,
+    physx::PxArray<physx::PxReal> *admittedNormalDisplacements) {
+  if (admittedContacts) {
+    admittedContacts->resize(numSoftContacts);
+    for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci)
+      (*admittedContacts)[sci] = 0u;
+  }
+  if (admittedNormalDisplacements) {
+    admittedNormalDisplacements->resize(numSoftContacts);
+    for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci)
+      (*admittedNormalDisplacements)[sci] = 0.0f;
+  }
+  if (!bodies || !softParticles || !softBodies || !softContacts ||
+      numBodies == 0 || numSoftBodies == 0 || numSoftContacts == 0)
+    return;
+
+  // Boundary admission is a time-domain trust-region operation, not a
+  // global scene rewind.  Build the bipartite soft/rigid pair graph first;
+  // only endpoints connected through an actual mixed OGC pair may share an
+  // alpha.  The former single alpha coupled unrelated islands and could
+  // suppress a volume's gravity/material response merely because a different
+  // free rigid crossed its own contact boundary.
+  const physx::PxU32 nodeCount = numSoftBodies + numBodies;
+  physx::PxArray<physx::PxU32> parent(nodeCount);
+  physx::PxArray<physx::PxU8> participating(nodeCount, 0u);
+  physx::PxArray<physx::PxReal> contactAlphas(numSoftContacts, 1.0f);
+  for (physx::PxU32 node = 0; node < nodeCount; ++node)
+    parent[node] = node;
+  auto findRoot = [&parent](physx::PxU32 node) {
+    physx::PxU32 root = node;
+    while (parent[root] != root)
+      root = parent[root];
+    while (parent[node] != node) {
+      const physx::PxU32 next = parent[node];
+      parent[node] = root;
+      node = next;
+    }
+    return root;
+  };
+  auto unite = [&findRoot, &parent](physx::PxU32 a, physx::PxU32 b) {
+    const physx::PxU32 rootA = findRoot(a);
+    const physx::PxU32 rootB = findRoot(b);
+    if (rootA != rootB)
+      parent[rootB] = rootA;
+  };
+  bool hasMixedPair = false;
+  const physx::PxReal clearance = 1.0e-5f;
+
+  for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
+    const AvbdSoftContactGeometry &geometry = softContacts[sci].geometry;
+    if (geometry.source.type != AvbdSoftContactSource::eRIGID_SDF ||
+        !geometry.hasRigidBodyTarget() ||
+        geometry.targetIndex >= numBodies ||
+        geometry.queryBodyIndex >= numSoftBodies ||
+        softBodies[geometry.queryBodyIndex].compiled.speculativeCCDEnabled ||
+        !avbdHasSoftContactDynamicQuerySupport(
+            geometry, softParticles, numSoftParticles))
+      continue;
+
+    const AvbdSolverBody &body = bodies[geometry.targetIndex];
+    if (body.invMass <= 0.0f || !body.position.isFinite() ||
+        !body.rotation.isFinite() || !body.prevPosition.isFinite() ||
+        !body.prevRotation.isFinite())
+      continue;
+
+    const physx::PxU32 softNode = geometry.queryBodyIndex;
+    const physx::PxU32 rigidNode = numSoftBodies + geometry.targetIndex;
+    participating[softNode] = 1u;
+    participating[rigidNode] = 1u;
+    unite(softNode, rigidNode);
+    hasMixedPair = true;
+
+    const physx::PxVec3 initialQuery =
+        avbdGetSoftContactInitialQueryPoint(geometry, softParticles);
+    const physx::PxVec3 endpointQuery =
+        avbdGetSoftContactQueryPoint(geometry, softParticles);
+
+    AvbdSolverBody initialBody = body;
+    initialBody.position = body.prevPosition;
+    initialBody.rotation = body.prevRotation;
+    physx::PxReal initialGap = 0.0f;
+    physx::PxReal endpointGap = 0.0f;
+    const bool hasPointGaps = initialQuery.isFinite() &&
+        endpointQuery.isFinite() &&
+        queryCurrentPairSignedDistance(geometry, initialBody, initialQuery,
+                                       initialGap) &&
+        queryCurrentPairSignedDistance(geometry, body, endpointQuery,
+                                       endpointGap) &&
+        physx::PxIsFinite(initialGap) && physx::PxIsFinite(endpointGap);
+    const bool requiresPointAdmission = hasPointGaps &&
+        ((initialGap > clearance && endpointGap < clearance) ||
+         (initialGap <= clearance && endpointGap < initialGap - clearance));
+
+    // The detector's triangle-core witness is not merely another centroid
+    // row.  When the full face crosses a box while its compact AL query stays
+    // outside, the old admission path accepted the illegal endpoint and paid
+    // for a terminal full-proxy rebuild every frame.  Carry the complete
+    // triangle through the same DCD trust region so the solve begins from a
+    // valid OGC epoch for both endpoints.
+    physx::PxReal initialCoreGap = 0.0f;
+    physx::PxReal endpointCoreGap = 0.0f;
+    const bool hasCoreGaps = geometry.hasRigidBoxTriangleCoreExit &&
+        queryInterpolatedPairTriangleCoreFaceGap(
+            geometry, initialBody, body, softParticles, numSoftParticles,
+            0.0f, initialCoreGap) &&
+        queryInterpolatedPairTriangleCoreFaceGap(
+            geometry, initialBody, body, softParticles, numSoftParticles,
+            1.0f, endpointCoreGap) &&
+        physx::PxIsFinite(initialCoreGap) &&
+        physx::PxIsFinite(endpointCoreGap);
+    const bool requiresCoreAdmission = hasCoreGaps &&
+        ((initialCoreGap > clearance && endpointCoreGap < clearance) ||
+         (initialCoreGap <= clearance &&
+          endpointCoreGap < initialCoreGap - clearance));
+    if (!requiresPointAdmission && !requiresCoreAdmission)
+      continue;
+
+    auto hasClearance = [&](physx::PxReal alpha) {
+      if (requiresPointAdmission) {
+        AvbdSolverBody candidate = body;
+        candidate.position = body.prevPosition +
+            (body.position - body.prevPosition) * alpha;
+        candidate.rotation = PxSlerp(alpha, body.prevRotation, body.rotation);
+        candidate.projectLockedPose(body.prevPosition, body.prevRotation);
+        const physx::PxVec3 query = initialQuery +
+            (endpointQuery - initialQuery) * alpha;
+        physx::PxReal gap = 0.0f;
+        if (!queryCurrentPairSignedDistance(geometry, candidate, query, gap) ||
+            !physx::PxIsFinite(gap) || gap < clearance)
+          return false;
+      }
+      if (requiresCoreAdmission) {
+        physx::PxReal coreGap = 0.0f;
+        if (!queryInterpolatedPairTriangleCoreFaceGap(
+                geometry, initialBody, body, softParticles, numSoftParticles,
+                alpha, coreGap) || !physx::PxIsFinite(coreGap) ||
+            coreGap < clearance)
+          return false;
+      }
+      return true;
+    };
+
+    physx::PxReal lower = 0.0f;
+    physx::PxReal upper = 1.0f;
+    for (physx::PxU32 iteration = 0; iteration < 10u; ++iteration) {
+      const physx::PxReal middle = 0.5f * (lower + upper);
+      if (hasClearance(middle))
+        lower = middle;
+      else
+        upper = middle;
+    }
+    contactAlphas[sci] = lower;
+    // This row alone is eligible to own the e=0 impact response after the
+    // position solve.  The marker records a real same-dt DCD boundary
+    // crossing; it is not a generic OGC-shell or CCD flag.
+    if (admittedContacts)
+      (*admittedContacts)[sci] = 1u;
+    if (admittedNormalDisplacements) {
+      // Keep only the inward endpoint motion that was clipped by this DCD
+      // boundary.  The value is a geometric work request; it is converted
+      // to a bounded force by the pair-major soft solve below.
+      physx::PxReal displacement = 0.0f;
+      if (requiresPointAdmission && hasPointGaps)
+        displacement = physx::PxMax(displacement,
+                                    clearance - endpointGap);
+      if (requiresCoreAdmission && hasCoreGaps)
+        displacement = physx::PxMax(displacement,
+                                    clearance - endpointCoreGap);
+      (*admittedNormalDisplacements)[sci] =
+          physx::PxClamp(displacement, 0.0f, 0.05f);
+    }
+  }
+
+  if (!hasMixedPair)
+    return;
+
+  physx::PxArray<physx::PxReal> componentAlpha(nodeCount, 1.0f);
+  for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
+    const physx::PxReal contactAlpha = contactAlphas[sci];
+    if (!physx::PxIsFinite(contactAlpha) || contactAlpha >= 1.0f)
+      continue;
+    const AvbdSoftContactGeometry &geometry = softContacts[sci].geometry;
+    if (geometry.source.type != AvbdSoftContactSource::eRIGID_SDF ||
+        !geometry.hasRigidBodyTarget() ||
+        geometry.queryBodyIndex >= numSoftBodies ||
+        geometry.targetIndex >= numBodies)
+      continue;
+    const physx::PxU32 root = findRoot(geometry.queryBodyIndex);
+    componentAlpha[root] = physx::PxMin(componentAlpha[root],
+                                         physx::PxMax(contactAlpha, 0.0f));
+  }
+
+  for (physx::PxU32 bodyIndex = 0; bodyIndex < numBodies; ++bodyIndex) {
+    const physx::PxU32 node = numSoftBodies + bodyIndex;
+    if (!participating[node])
+      continue;
+    const physx::PxReal commonAlpha = componentAlpha[findRoot(node)];
+    if (!physx::PxIsFinite(commonAlpha) || commonAlpha >= 1.0f)
+      continue;
+    AvbdSolverBody &body = bodies[bodyIndex];
+    const physx::PxVec3 inertialPosition = body.inertialPosition;
+    const physx::PxQuat inertialRotation = body.inertialRotation;
+    body.position = body.prevPosition +
+        (body.position - body.prevPosition) * commonAlpha;
+    body.rotation = PxSlerp(commonAlpha, body.prevRotation, body.rotation);
+    body.inertialPosition = body.prevPosition +
+        (inertialPosition - body.prevPosition) * commonAlpha;
+    body.inertialRotation = PxSlerp(commonAlpha, body.prevRotation,
+                                    inertialRotation);
+    body.projectLockedPose(body.prevPosition, body.prevRotation);
+  }
+
+  for (physx::PxU32 sourceBodyIndex = 0;
+       sourceBodyIndex < numSoftBodies; ++sourceBodyIndex) {
+    if (!participating[sourceBodyIndex])
+      continue;
+    const physx::PxReal commonAlpha =
+        componentAlpha[findRoot(sourceBodyIndex)];
+    if (!physx::PxIsFinite(commonAlpha) || commonAlpha >= 1.0f)
+      continue;
+    const AvbdSoftBody &sourceBody = softBodies[sourceBodyIndex];
+    const physx::PxU32 particleStart = sourceBody.compiled.particleStart;
+    const physx::PxU32 particleCount = sourceBody.compiled.particleCount;
+    if (particleStart > numSoftParticles ||
+        particleCount > numSoftParticles - particleStart)
+      continue;
+    for (physx::PxU32 localIndex = 0; localIndex < particleCount;
+         ++localIndex) {
+      AvbdSoftParticle &particle = softParticles[particleStart + localIndex];
+      const physx::PxVec3 initial = particle.initialPosition;
+      particle.position = initial + (particle.position - initial) * commonAlpha;
+      particle.predictedPosition =
+          initial + (particle.predictedPosition - initial) * commonAlpha;
+      particle.outerPosition =
+          initial + (particle.outerPosition - initial) * commonAlpha;
+    }
+  }
+}
+
+static physx::PxReal limitRigidOgcCandidate(
+    const AvbdOgcPairTrustRegionContext *context,
+    physx::PxU32 bodyIndex, const AvbdSolverBody &body,
+    const physx::PxVec3 &deltaPosition,
+    const physx::PxVec3 &deltaTheta,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    const physx::PxU32 *rigidTargetContactStarts,
+    const physx::PxU32 *rigidTargetContactRefs,
+    const AvbdSoftParticle *softParticles) {
+  if (!context || !context->isComplete(numSoftContacts) ||
+      !rigidTargetContactStarts || !rigidTargetContactRefs ||
+      !softParticles || !deltaPosition.isFinite() || !deltaTheta.isFinite())
+    return 1.0f;
+
+  const physx::PxU32 begin = rigidTargetContactStarts[bodyIndex];
+  const physx::PxU32 end = rigidTargetContactStarts[bodyIndex + 1u];
+  if (begin >= end)
+    return 1.0f;
+
+  const physx::PxReal tolerance = 1.0e-6f;
+  physx::PxReal alpha = 1.0f;
+  for (physx::PxU32 refIndex = begin; refIndex < end; ++refIndex) {
+    const physx::PxU32 contactIndex = rigidTargetContactRefs[refIndex];
+    if (contactIndex >= numSoftContacts)
+      continue;
+    const physx::PxU32 pairIndex = context->contactPairIndices[contactIndex];
+    if (pairIndex >= context->numPairStates ||
+        !context->pairStates[pairIndex].active)
+      continue;
+    AvbdOgcPairState &pair = context->pairStates[pairIndex];
+    const AvbdSoftContactGeometry &geometry =
+        softContacts[contactIndex].geometry;
+    if (!geometry.hasRigidBodyTarget() || geometry.targetIndex != bodyIndex ||
+        pair.sourceType != geometry.source.type ||
+        pair.targetKind != geometry.targetKind ||
+        pair.targetBodyIndex != geometry.targetIndex ||
+        pair.primitiveKey != geometry.source.primitiveKey)
+      continue;
+    const physx::PxVec3 queryPoint =
+        avbdGetSoftContactQueryPoint(geometry, softParticles);
+    physx::PxReal currentGap = 0.0f;
+    if (!queryCurrentPairSignedDistance(geometry, body, queryPoint,
+                                        currentGap))
+      continue;
+
+    // Candidate rotations are evaluated directly (rather than through the
+    // linearized r x n term), then a short monotone bisection finds the
+    // largest coupled 6DOF step which retains positive clearance.
+    auto candidateHasClearance = [&](physx::PxReal candidateAlpha) {
+      AvbdSolverBody candidate = body;
+      candidate.position -= deltaPosition * candidateAlpha;
+      const physx::PxVec3 theta = deltaTheta * candidateAlpha;
+      if (theta.magnitudeSquared() > 1.0e-12f) {
+        const physx::PxQuat dq(theta.x, theta.y, theta.z, 0.0f);
+        candidate.rotation =
+            (candidate.rotation - dq * candidate.rotation * 0.5f)
+                .getNormalized();
+      }
+      candidate.projectLockedPose(body.prevPosition, body.prevRotation);
+      physx::PxReal candidateGap = 0.0f;
+      return queryCurrentPairSignedDistance(geometry, candidate, queryPoint,
+                                            candidateGap) &&
+             candidateGap >= tolerance;
+    };
+    // A body already held on an OGC boundary must still reject an inward GS
+    // update.  The ordinary bisection assumes alpha=0 has positive clearance;
+    // when a previous row left a tiny negative round-off residual that premise
+    // is false, so retain only a fully separating candidate and otherwise
+    // hold this positional update.  Terminal current-pose recovery remains
+    // responsible for repairing an already-invalid state.
+    if (currentGap < tolerance) {
+      if (!candidateHasClearance(alpha)) {
+        pair.refreshRequested = true;
+        pair.remainingSafeDisplacement = 0.0f;
+        pair.minimumGap = physx::PxMin(pair.minimumGap, currentGap);
+        pair.accumulatedRelativeDisplacement = physx::PxMax(
+            pair.accumulatedRelativeDisplacement, deltaPosition.magnitude());
+        alpha = 0.0f;
+      }
+      continue;
+    }
+    if (candidateHasClearance(alpha))
+      continue;
+    physx::PxReal lo = 0.0f;
+    physx::PxReal hi = alpha;
+    for (physx::PxU32 iteration = 0; iteration < 8u; ++iteration) {
+      const physx::PxReal mid = 0.5f * (lo + hi);
+      if (candidateHasClearance(mid))
+        lo = mid;
+      else
+        hi = mid;
+    }
+    if (lo < 1.0f - 1.0e-6f) {
+      pair.refreshRequested = true;
+      pair.remainingSafeDisplacement = 0.0f;
+      pair.minimumGap = physx::PxMin(pair.minimumGap, tolerance);
+      pair.accumulatedRelativeDisplacement = physx::PxMax(
+          pair.accumulatedRelativeDisplacement, deltaPosition.magnitude());
+    }
+    alpha = lo;
+  }
+  return physx::PxIsFinite(alpha) ? alpha : 0.0f;
 }
 
 static physx::PxVec3 computeGeneric1DRotationDelta(
@@ -169,22 +1216,22 @@ static physx::PxReal computeGeneric1DEffectiveMass(
   return unitResponse > 1e-10f ? 1.0f / unitResponse : 0.0f;
 }
 
-static void computeMaxPoseDeltas(const AvbdSolverBody* bodies,
-                                 physx::PxU32 numBodies,
-                                 const physx::PxArray<physx::PxVec3>& prevPos,
-                                 const physx::PxArray<physx::PxQuat>& prevRot,
-                                 physx::PxReal& maxPositionDelta,
-                                 physx::PxReal& maxRotationDelta) {
+static void computeMaxPoseDeltas(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const physx::PxArray<physx::PxVec3> &prevPos,
+    const physx::PxArray<physx::PxQuat> &prevRot,
+    physx::PxReal &maxPositionDelta, physx::PxReal &maxRotationDelta) {
   maxPositionDelta = 0.0f;
   maxRotationDelta = 0.0f;
   for (physx::PxU32 i = 0; i < numBodies; ++i) {
     if (bodies[i].invMass <= 0.0f)
       continue;
 
-    maxPositionDelta = physx::PxMax(maxPositionDelta,
-      (bodies[i].position - prevPos[i]).magnitude());
-    maxRotationDelta = physx::PxMax(maxRotationDelta,
-      computeRotationDeltaMagnitude(bodies[i].rotation, prevRot[i]));
+    maxPositionDelta = physx::PxMax(
+        maxPositionDelta, (bodies[i].position - prevPos[i]).magnitude());
+    maxRotationDelta = physx::PxMax(
+        maxRotationDelta,
+        computeRotationDeltaMagnitude(bodies[i].rotation, prevRot[i]));
   }
 }
 
@@ -4755,13 +5802,17 @@ void AvbdSolver::solveLocalSystemWithJoints(
     const AvbdBodyConstraintMap *d6Map, const AvbdBodyConstraintMap *gearMap,
     AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
     AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
-    AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies) {
+    AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+    const physx::PxU32 *rigidTargetContactStarts,
+    const physx::PxU32 *rigidTargetContactRefs,
+    const AvbdOgcPairTrustRegionContext *ogcPairContext) {
 
   if (body.invMass <= 0.0f)
     return;
 
   PX_UNUSED(softBodies);
   PX_UNUSED(numSoftBodies);
+  PX_UNUSED(ogcPairContext);
 
   const physx::PxU32 bodyIndex = body.nodeIndex;
 
@@ -4802,7 +5853,8 @@ void AvbdSolver::solveLocalSystemWithJoints(
   accumulateBodyContactRows(
       body, bodyIndex, bodies, numBodies, contacts, numContacts, contactMap,
       softParticles, numSoftParticles, softContacts, numSoftContacts,
-      dt, massInvDt2, A, gLinear, gAngular, numTouching);
+      dt, massInvDt2, A, gLinear, gAngular, numTouching,
+      rigidTargetContactStarts, rigidTargetContactRefs);
 
   // Rigid-vertex attachments are not accumulated into this one-body block.
   // Their compiled owner is the coupled rigid+particle positional block run
@@ -5958,6 +7010,13 @@ void AvbdSolver::solveLocalSystemWithJoints(
     }
   }
 
+  const physx::PxReal ogcAlpha = limitRigidOgcCandidate(
+      ogcPairContext, bodyIndex, body, deltaPos, deltaTheta, softContacts,
+      numSoftContacts, rigidTargetContactStarts, rigidTargetContactRefs,
+      softParticles);
+  deltaPos *= ogcAlpha;
+  deltaTheta *= ogcAlpha;
+
 #if AVBD_JOINT_DEBUG
   {
     static physx::PxU32 s_debugSolveFrame2 = 0;
@@ -6137,6 +7196,128 @@ bool AvbdSolver::computeD6JointCorrection(const AvbdD6JointConstraint &joint,
 // Solver with Joint Constraints
 //=============================================================================
 
+// Validate provider-owned support arrays exactly once, before any mixed
+// lifecycle stage consumes them.  Besides making the fallback boundary
+// explicit, this lets prediction share the Scene's swept-contact preparation
+// pass without trusting a merely shape-complete CSR.
+static bool avbdValidateSoftIslandExecutionPlan(
+    const AvbdSoftIslandExecutionPlan &plan,
+    const AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
+    physx::PxU32 numSoftParticles, physx::PxU32 numSoftContacts) {
+  if (!plan.isComplete(numSoftParticles) || !softBodies ||
+      numSoftBodies == 0)
+    return false;
+
+  for (physx::PxU32 particleIndex = 0;
+       particleIndex < numSoftParticles; ++particleIndex) {
+    const physx::PxU32 bodyIndex = plan.particleBodyIndices[particleIndex];
+    if (bodyIndex >= numSoftBodies)
+      return false;
+    const AvbdSoftBody &softBody = softBodies[bodyIndex];
+    if (particleIndex < softBody.compiled.particleStart ||
+        particleIndex - softBody.compiled.particleStart >=
+            softBody.compiled.particleCount ||
+        plan.contactStarts[particleIndex] >
+            plan.contactStarts[particleIndex + 1])
+      return false;
+  }
+  for (physx::PxU32 refIndex = 0; refIndex < plan.numContactRefs;
+       ++refIndex) {
+    if (plan.contactRefs[refIndex].contactIndex >= numSoftContacts)
+      return false;
+  }
+  return true;
+}
+
+// The rigid-facing contact mirror is optional for provider compatibility.  A
+// valid mirror contains each dynamic rigid target exactly once, in source
+// order within its target-body range.  This proof lets the 6x6 blocks skip
+// their former all-soft-contact scans without changing the fallback route.
+#if PX_CHECKED
+static bool avbdValidateRigidTargetContactPlan(
+    const AvbdSoftIslandExecutionPlan &plan,
+    const AvbdSolverBody *bodies, physx::PxU32 numRigidBodies,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts) {
+  if (!plan.hasRigidTargetContactPlan(numRigidBodies) ||
+      !bodies || (numSoftContacts > 0 && !softContacts))
+    return false;
+
+  for (physx::PxU32 bodyIndex = 0; bodyIndex < numRigidBodies;
+       ++bodyIndex) {
+    if (bodies[bodyIndex].nodeIndex != bodyIndex)
+      return false;
+  }
+
+  physx::PxU32 expectedRefCount = 0;
+  for (physx::PxU32 contactIndex = 0; contactIndex < numSoftContacts;
+       ++contactIndex) {
+    const AvbdSoftContactGeometry &geometry =
+        softContacts[contactIndex].geometry;
+    if (geometry.hasRigidBodyTarget() &&
+        geometry.targetIndex < numRigidBodies)
+      ++expectedRefCount;
+  }
+  if (expectedRefCount != plan.numRigidTargetContactRefs)
+    return false;
+
+  for (physx::PxU32 rigidBodyIndex = 0;
+       rigidBodyIndex < numRigidBodies; ++rigidBodyIndex) {
+    const physx::PxU32 begin =
+        plan.rigidTargetContactStarts[rigidBodyIndex];
+    const physx::PxU32 end =
+        plan.rigidTargetContactStarts[rigidBodyIndex + 1];
+    if (begin > end)
+      return false;
+    physx::PxU32 previousContactIndex = 0;
+    for (physx::PxU32 refIndex = begin; refIndex < end; ++refIndex) {
+      const physx::PxU32 contactIndex =
+          plan.rigidTargetContactRefs[refIndex];
+      if (contactIndex >= numSoftContacts ||
+          (refIndex > begin && previousContactIndex >= contactIndex))
+        return false;
+      const AvbdSoftContactGeometry &geometry =
+          softContacts[contactIndex].geometry;
+      if (!geometry.hasRigidBodyTarget() ||
+          geometry.targetIndex != rigidBodyIndex)
+        return false;
+      previousContactIndex = contactIndex;
+    }
+  }
+  return true;
+}
+#endif
+
+// A Scene-generated plan is immutable for the island solve.  Shipping builds
+// retain only its O(numBodies) ownership proof so that the contact CSR removes
+// work rather than moving the same work into validation.  Checked builds also
+// verify every source row, which keeps provider-contract failures fail-closed
+// during development.
+static bool avbdCanUseRigidTargetContactPlan(
+    const AvbdSoftIslandExecutionPlan &plan,
+    const AvbdSolverBody *bodies, physx::PxU32 numRigidBodies,
+    const AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts) {
+  if (!plan.hasRigidTargetContactPlan(numRigidBodies) || !bodies)
+    return false;
+  for (physx::PxU32 bodyIndex = 0; bodyIndex < numRigidBodies;
+       ++bodyIndex) {
+    const physx::PxU32 begin =
+        plan.rigidTargetContactStarts[bodyIndex];
+    const physx::PxU32 end =
+        plan.rigidTargetContactStarts[bodyIndex + 1];
+    if (bodies[bodyIndex].nodeIndex != bodyIndex || begin > end ||
+        end > plan.numRigidTargetContactRefs)
+      return false;
+  }
+#if PX_CHECKED
+  return avbdValidateRigidTargetContactPlan(
+      plan, bodies, numRigidBodies, softContacts, numSoftContacts);
+#else
+  PX_UNUSED(softContacts);
+  PX_UNUSED(numSoftContacts);
+  return true;
+#endif
+}
+
 void AvbdSolver::solveWithJoints(
     physx::PxReal dt, AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
@@ -6149,6 +7330,7 @@ void AvbdSolver::solveWithJoints(
     AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
     AvbdSoftBody *softBodies, physx::PxU32 numSoftBodies,
     AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    const AvbdSoftIslandExecutionPlan *softExecutionPlan,
     FeatherstoneArticulation *const *articulationForBody,
     const physx::PxU32 *linkIndexForBody,
     AvbdSolverStats &stats) {
@@ -6167,9 +7349,35 @@ void AvbdSolver::solveWithJoints(
     return;
   }
 
-  stats.numBodies = numBodies;
-  stats.numContacts = numContacts;
-  stats.numJoints = numD6 + numGear;
+  // Validate once at the native island boundary.  No lifecycle stage is
+  // allowed to consume a provider token before this semantic validation: a
+  // shape-complete but malformed plan must still take the local fallback.
+  const bool useProvidedSoftExecutionPlan =
+      hasCompleteSoftSelection && softExecutionPlan &&
+      avbdValidateSoftIslandExecutionPlan(
+          *softExecutionPlan, softBodies, numSoftBodies, numSoftParticles,
+          numSoftContacts);
+  const bool useProvidedRigidTargetContactPlan =
+      useProvidedSoftExecutionPlan && numBodies > 0 &&
+      avbdCanUseRigidTargetContactPlan(
+          *softExecutionPlan, bodies, numBodies, softContacts,
+          numSoftContacts);
+  // A Scene-selected mixed island has already predicted its particles while
+  // compiling swept/OGC contact objectives.  Reusing that exact frame state
+  // makes prediction one owner-stage shared by contact preparation and the
+  // AVBD primal, without changing direct/standalone callers that do not
+  // provide a valid complete plan.
+  const bool hasPreparedSoftPrediction =
+      useProvidedSoftExecutionPlan &&
+      softExecutionPlan->softPredictionPrepared;
+
+	physx::PxArray<physx::PxU8> endpointRecoveredWorldStaticBodies;
+	physx::PxArray<physx::PxVec3> endpointWorldStaticRecoveryNormals;
+	physx::PxArray<physx::PxU8> endpointRecoveredDynamicSoftRigidContacts;
+
+  PX_AVBD_PROFILE_STAT(stats.numBodies = numBodies);
+  PX_AVBD_PROFILE_STAT(stats.numContacts = numContacts);
+  PX_AVBD_PROFILE_STAT(stats.numJoints = numD6 + numGear);
 
   const physx::PxReal invDt = 1.0f / dt;
   const physx::PxReal invDt2 = invDt * invDt;
@@ -6770,7 +7978,7 @@ void AvbdSolver::solveWithJoints(
   if (numSoftParticles == 0 && numSoftBodies == 0 &&
       numSoftContacts == 0) {
     compileAvbdOrdinaryRigidContactObjectives(
-        contacts, numContacts, numBodies);
+        contacts, numContacts, numBodies, contactMap);
   }
 
   for (physx::PxU32 jointIndex = 0; jointIndex < numD6;
@@ -6956,8 +8164,8 @@ void AvbdSolver::solveWithJoints(
       const physx::PxU32 bi = geometry.targetIndex;
       if (geometry.hasRigidBodyTarget() &&
           bi < numBodies &&
-          geometry.particleIdx < numSoftParticles &&
-          softParticles[geometry.particleIdx].invMass <= 0.0f) {
+          avbdIsSoftContactQueryFullyKinematic(
+              geometry, softParticles, numSoftParticles)) {
         touchesKinematicShell[bi] = true;
         hasKinematicShellContacts = true;
       }
@@ -7044,10 +8252,22 @@ void AvbdSolver::solveWithJoints(
     PX_PROFILE_ZONE("AVBD.prediction", 0);
     computePrediction(bodies, numBodies, dt, gravity);
 
-    // Soft particle prediction
-    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
-      softParticles[i].computePrediction(dt, gravity);
+    // Soft particle prediction.  The native Scene provider precomputes this
+    // only when it needs the pose for contact preparation; all other solver
+    // users retain the local prediction authority.
+    if (!hasPreparedSoftPrediction) {
+      for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+        softParticles[i].computePrediction(dt, gravity);
+    }
   }
+
+  // Split world-static ownership before any positional contact iteration.
+  // The normal remains in Position-AL; tangential Coulomb response is rebuilt
+  // from final velocities so an expanded collision-proxy row cannot pin the
+  // whole deformable component through a persistent position spring.
+  avbdAssignVelocityTangentOwners(
+      softContacts, numSoftContacts, softBodies, numSoftBodies,
+      softParticles, numSoftParticles);
 
   // =========================================================================
   // Stage 2: Adaptive position warmstarting (ref: AVBD3D solver.cpp L76-98)
@@ -7144,12 +8364,13 @@ void AvbdSolver::solveWithJoints(
         }
       }
     }
+
     for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
       AvbdSoftContact &sc = softContacts[sci];
       const AvbdSoftContactGeometry &geometry = sc.geometry;
       AvbdSoftContactAugmentedState &state = sc.state;
-      if (geometry.particleIdx < numSoftParticles &&
-          softParticles[geometry.particleIdx].invMass <= 0.0f) {
+      if (avbdIsSoftContactQueryFullyKinematic(
+              geometry, softParticles, numSoftParticles)) {
         state.alLambda *= mConfig.avbdAlpha * mConfig.avbdGamma;
         state.k = physx::PxMax(
             1000.0f, physx::PxMin(state.ke, state.k * mConfig.avbdGamma));
@@ -7162,7 +8383,20 @@ void AvbdSolver::solveWithJoints(
         }
         continue;
       }
-      state.k = physx::PxMin(1e4f, state.ke);
+      // Current-pose dynamic soft/rigid SDF and OGC-feature rows are
+      // prepared with a 1e5 normal penalty.  Do not silently demote them to
+      // the static-shell 1e4 baseline here: under a large compressive load
+      // that permits the rigid to enter the volume before the coupled AL
+      // system can distribute displacement through the soft support, after
+      // which the emergency whole-body escape path looks like a launch.
+      // Preserve the prepared dynamic normal scale (still bounded by ke);
+      // ordinary world-static shell rows retain the softer 1e4 baseline.
+      const bool dynamicRigidOgc =
+          geometry.source.type == AvbdSoftContactSource::eRIGID_SDF &&
+          geometry.hasRigidBodyTarget() &&
+          geometry.targetIndex < numBodies &&
+          bodies[geometry.targetIndex].invMass > 0.0f;
+      state.k = physx::PxMin(dynamicRigidOgc ? 1e5f : 1e4f, state.ke);
       if (geometry.hasRigidBodyTarget() &&
           geometry.targetIndex < numBodies) {
         const AvbdSolverBody &rb = bodies[geometry.targetIndex];
@@ -7175,6 +8409,155 @@ void AvbdSolver::solveWithJoints(
       }
     }
   }
+
+  // Establish one feasible endpoint epoch before pair-state construction.
+  // The following local AVBD updates are then admitted by the same shared
+  // pair state instead of beginning from a rigid already inside a soft mesh.
+  applyWorldStaticOgcInitialAdmission(
+      softParticles, numSoftParticles, softBodies, numSoftBodies,
+      softContacts, numSoftContacts);
+  physx::PxArray<physx::PxU8> mixedOgcAdmissionContacts;
+  physx::PxArray<physx::PxReal> mixedOgcAdmissionDisplacements;
+  applyOgcMixedWarmstartAdmission(
+      bodies, numBodies, softParticles, numSoftParticles, softBodies,
+      numSoftBodies, softContacts, numSoftContacts,
+      &mixedOgcAdmissionContacts, &mixedOgcAdmissionDisplacements);
+
+  // Initialize one shared OGC pair epoch after warmstart poses are current.
+  // A static target has no 6DOF response, but it still owns the same positive
+  // current-pose gap budget as a dynamic rigid.  Excluding it here lets a
+  // material update cross the ground or a world box before post-AL repair.
+  Dy::AvbdOgcPairState *mixedOgcPairStates = nullptr;
+  physx::PxU32 numMixedOgcPairStates = 0;
+  AvbdOgcPairTrustRegionContext mixedOgcPairContext;
+  if (useProvidedSoftExecutionPlan &&
+      softExecutionPlan->hasMixedOgcPairPlan(numSoftContacts)) {
+    mixedOgcPairStates = softExecutionPlan->ogcPairStates;
+    numMixedOgcPairStates = softExecutionPlan->numOgcPairStates;
+    for (physx::PxU32 pairIndex = 0; pairIndex < numMixedOgcPairStates;
+         ++pairIndex) {
+      AvbdOgcPairState &pair = mixedOgcPairStates[pairIndex];
+      // Pair identity is selection-owned and survives across solve calls;
+      // only the DCD epoch values are per-step mutable.
+      pair.representativeContact = PX_MAX_U32;
+      pair.admissionContact = PX_MAX_U32;
+      pair.triangleCoreFace = PX_MAX_U8;
+      pair.triangleCoreFaceExit = 0.0f;
+      pair.hasTriangleCoreManifold = false;
+      pair.triangleCoreLocallyResolved = false;
+      pair.representativeNormal = physx::PxVec3(0.0f);
+      pair.representativeRigidOffset = physx::PxVec3(0.0f);
+	  pair.referenceRelativePoint = physx::PxVec3(0.0f);
+      pair.representativeGap = PX_MAX_F32;
+      pair.accumulatedNormalLambda = 0.0f;
+      pair.admittedNormalDisplacement = 0.0f;
+      pair.admittedNormalLoad = 0.0f;
+      // Positive separations must remain positive in the epoch state.  Zero
+      // is a real boundary value, not an "unset" sentinel: using it here
+      // schedules a terminal DCD rebuild for every merely nearby pair.
+      pair.safetyGap = PX_MAX_F32;
+      pair.remainingSafeDisplacement = 0.0f;
+      pair.accumulatedRelativeDisplacement = 0.0f;
+      pair.referenceGap = PX_MAX_F32;
+      pair.minimumGap = PX_MAX_F32;
+      ++pair.epoch;
+      pair.active = false;
+      pair.admittedAtBoundary = false;
+      pair.refreshRequested = false;
+    }
+    for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
+      const physx::PxU32 pairIndex = softExecutionPlan->ogcPairIndices[sci];
+      if (pairIndex >= numMixedOgcPairStates)
+        continue;
+      AvbdOgcPairState &pair = mixedOgcPairStates[pairIndex];
+      const AvbdSoftContactGeometry &geometry = softContacts[sci].geometry;
+      const bool dynamicRigid =
+          geometry.source.type == AvbdSoftContactSource::eRIGID_SDF &&
+          geometry.hasRigidBodyTarget() && geometry.targetIndex < numBodies &&
+          bodies[geometry.targetIndex].invMass > 0.0f;
+      const bool worldStatic =
+          (geometry.source.type == AvbdSoftContactSource::eRIGID_SDF ||
+           geometry.source.type == AvbdSoftContactSource::eGROUND) &&
+          geometry.hasWorldStaticTarget();
+      if ((!dynamicRigid && !worldStatic) ||
+		  pair.sourceType != geometry.source.type ||
+		  pair.targetKind != geometry.targetKind ||
+		  pair.sourceBodyIndex != geometry.queryBodyIndex ||
+          pair.targetBodyIndex != geometry.targetIndex ||
+          pair.primitiveKey != geometry.source.primitiveKey ||
+          !avbdHasSoftContactDynamicQuerySupport(
+              geometry, softParticles, numSoftParticles))
+        continue;
+      const physx::PxVec3 queryPoint =
+          avbdGetSoftContactQueryPoint(geometry, softParticles);
+      const physx::PxReal normalLengthSq = geometry.normal.magnitudeSquared();
+      if (!queryPoint.isFinite() || !physx::PxIsFinite(normalLengthSq) ||
+          normalLengthSq <= 1.0e-12f)
+        continue;
+      const physx::PxVec3 normal =
+          geometry.normal * physx::PxRecipSqrt(normalLengthSq);
+      physx::PxReal gap = 0.0f;
+      physx::PxVec3 surfacePoint(0.0f);
+      physx::PxVec3 rigidOffset(0.0f);
+      if (dynamicRigid) {
+        const AvbdSolverBody &rigid = bodies[geometry.targetIndex];
+        rigidOffset = rigid.rotation.rotate(geometry.rigidLocalPoint);
+        surfacePoint = rigid.position + rigidOffset;
+        gap = (queryPoint - surfacePoint).dot(normal);
+      } else {
+        if (!queryCurrentWorldStaticPairSignedDistance(
+                geometry, queryPoint, gap))
+          continue;
+        surfacePoint = geometry.hasRigidBoxSdf
+            ? geometry.rigidBoxPose.p : geometry.surfacePoint;
+      }
+      if (!physx::PxIsFinite(gap))
+        continue;
+      if (!pair.active || gap < pair.referenceGap)
+        pair.referenceGap = gap;
+      if (pair.representativeContact == PX_MAX_U32 ||
+          gap < pair.representativeGap) {
+        pair.representativeContact = sci;
+        pair.representativeNormal = normal;
+        pair.representativeRigidOffset = rigidOffset;
+		pair.referenceRelativePoint = queryPoint - surfacePoint;
+        pair.representativeGap = gap;
+      }
+      if (pair.representativeContact == sci || gap < pair.safetyGap)
+        pair.safetyGap = gap;
+      if (mixedOgcAdmissionContacts.size() == numSoftContacts &&
+          mixedOgcAdmissionContacts[sci] != 0u) {
+        pair.admissionContact = sci;
+        pair.admittedAtBoundary = true;
+        if (mixedOgcAdmissionDisplacements.size() == numSoftContacts)
+          pair.admittedNormalDisplacement = physx::PxMax(
+              pair.admittedNormalDisplacement,
+              mixedOgcAdmissionDisplacements[sci]);
+      }
+      pair.minimumGap = pair.safetyGap;
+      pair.active = true;
+      pair.remainingSafeDisplacement = physx::PxMax(pair.safetyGap, 0.0f);
+      if (pair.admittedAtBoundary && pair.admittedNormalDisplacement > 0.0f)
+        pair.admittedNormalLoad = physx::PxMax(
+            pair.admittedNormalLoad,
+            pair.admittedNormalDisplacement *
+                physx::PxMin(1.0e5f, physx::PxMax(1.0e3f, softContacts[sci].state.k)));
+      // A static triangle-core row is an actual discrete triangle/OBB
+      // intersection, not mere shell proximity.  Request one terminal
+      // same-time verification so material deformation after this prediction
+      // cannot leave an unobserved core through the static target.
+      if (worldStatic && geometry.hasRigidBoxTriangleCoreExit)
+        pair.refreshRequested = true;
+    }
+    mixedOgcPairContext.pairStates = mixedOgcPairStates;
+    mixedOgcPairContext.numPairStates = numMixedOgcPairStates;
+    mixedOgcPairContext.contactPairIndices =
+        softExecutionPlan->ogcPairIndices;
+    mixedOgcPairContext.numContactPairIndices =
+        softExecutionPlan->numOgcPairIndices;
+
+  }
+
 
   // maxDepenetrationVelocity is a contact-bias policy. Build one shifted
   // normal target from the frame-start relative gap after prediction state
@@ -7199,6 +8582,80 @@ void AvbdSolver::solveWithJoints(
     avbdInitializeSoftContactDepenetrationLimitAtSurfacePoint(
         contact, softParticles, softBodies, numSoftBodies,
         initialSurfacePoint, dt);
+  }
+
+  // If a non-CCD current-pose endpoint first appears deeply inside a static
+  // target, move the entire unconstrained source body coherently before the
+  // nonlinear material sweep.  This preserves its tet F exactly and avoids
+  // asking a local support correction to repair an inversion it has not yet
+  // created.  Ordinary shell contacts remain exclusively Position-AL owned.
+  if (hasCompleteSoftSelection && numSoftContacts > 0) {
+    endpointRecoveredWorldStaticBodies.resize(numSoftBodies);
+    endpointWorldStaticRecoveryNormals.resize(numSoftBodies);
+    physx::PxArray<physx::PxVec3> endpointWorldStaticRecoveryTranslations;
+    endpointWorldStaticRecoveryTranslations.resize(numSoftBodies);
+    for (physx::PxU32 bodyIndex = 0; bodyIndex < numSoftBodies;
+         ++bodyIndex) {
+      endpointRecoveredWorldStaticBodies[bodyIndex] = 0u;
+      endpointWorldStaticRecoveryNormals[bodyIndex] = physx::PxVec3(0.0f);
+      endpointWorldStaticRecoveryTranslations[bodyIndex] =
+          physx::PxVec3(0.0f);
+    }
+    // Resolve fresh triangle/box cores through their collision support.  This
+    // is deliberately local: a world-static target must resist a falling
+    // volume through deformation, never by translating the full body out of
+    // contact and thereby cancelling gravity for the whole volume.
+    PX_PROFILE_ZONE("AVBD.worldStaticTriangleCoreLocalManifold", 0);
+    applyWorldStaticTriangleCoreLocalManifold(
+        softParticles, numSoftParticles, softBodies, numSoftBodies,
+        softContacts, numSoftContacts, 1u, &stats);
+
+		// Begin fresh triangle cores in the local shared manifold.  It couples the
+		// dynamic rigid to the same support rows but never translates an entire
+		// soft body/rigid pair, which would turn compression into rigid ejection.
+		endpointRecoveredDynamicSoftRigidContacts.resize(numSoftContacts);
+		for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci)
+			endpointRecoveredDynamicSoftRigidContacts[sci] = 0u;
+		PX_PROFILE_ZONE("AVBD.endpointDynamicSoftRigidTranslation", 0);
+		applyDynamicSoftRigidBodyEndpointTranslations(
+            bodies, numBodies, softParticles, numSoftParticles, softBodies,
+            numSoftBodies, softContacts, numSoftContacts, 4u,
+            &endpointRecoveredDynamicSoftRigidContacts,
+            &endpointWorldStaticRecoveryTranslations,
+            /*allowFreshTriangleCoreExit=*/true,
+            /*preferLocalTriangleCoreManifold=*/true,
+            /*allowCoherentEndpointFallback=*/false, &stats,
+            mixedOgcPairStates, numMixedOgcPairStates,
+            useProvidedSoftExecutionPlan
+                ? softExecutionPlan->ogcPairIndices : nullptr,
+            useProvidedSoftExecutionPlan
+                ? softExecutionPlan->numOgcPairIndices : 0u,
+            useProvidedSoftExecutionPlan &&
+                    softExecutionPlan->hasMixedOgcPairContactPlan(
+                        numSoftContacts)
+                ? softExecutionPlan->ogcPairContactStarts : nullptr,
+            useProvidedSoftExecutionPlan &&
+                    softExecutionPlan->hasMixedOgcPairContactPlan(
+                        numSoftContacts)
+                ? softExecutionPlan->numOgcPairContactStarts : 0u,
+            useProvidedSoftExecutionPlan &&
+                    softExecutionPlan->hasMixedOgcPairContactPlan(
+                        numSoftContacts)
+                ? softExecutionPlan->ogcPairContactRefs : nullptr,
+            useProvidedSoftExecutionPlan &&
+                    softExecutionPlan->hasMixedOgcPairContactPlan(
+                        numSoftContacts)
+                ? softExecutionPlan->numOgcPairContactRefs : 0u);
+
+		// The paired dynamic correction can move the same local soft support
+		// towards a static target. Re-evaluate the cached triangle vertices and
+		// project only their deepest support point back through the local static
+		// manifold before material iterations begin.
+		PX_PROFILE_ZONE("AVBD.worldStaticTriangleCoreLocalManifold", 0);
+		applyWorldStaticTriangleCoreLocalManifold(
+            softParticles, numSoftParticles, softBodies, numSoftBodies,
+            softContacts, numSoftContacts, 1u, &stats);
+
   }
 
   // =========================================================================
@@ -7338,9 +8795,6 @@ void AvbdSolver::solveWithJoints(
     }
   }
 
-  captureBodyStaticNormalDiagnosticStart(bodies, numBodies, contacts,
-                                         numContacts);
-
   // Sort constraints for deterministic iteration order (same as solve())
   if (mConfig.isDeterministic() &&
       (mConfig.determinismFlags & AvbdDeterminismFlags::eSORT_CONSTRAINTS) &&
@@ -7422,66 +8876,246 @@ void AvbdSolver::solveWithJoints(
   }
 #endif
 
-  // Build the same per-particle contact adjacency used by the standalone
-  // soft component.  Scanning every soft contact from every particle block
-  // makes a resting surface O(particles * contacts * iterations), which is
-  // effectively quadratic when most vertices touch a support.  Preserve
-  // contact order in each particle range so this remains numerically
-  // equivalent to the former full scan.
-  physx::PxArray<physx::PxU32> softContactStarts(
-      numSoftParticles + 1);
-  physx::PxArray<physx::PxU32> softContactCounts(
-      numSoftParticles);
-  physx::PxArray<AvbdSoftContactParticleRef> softContactRefs;
-  for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
-    softContactCounts[i] = 0;
-  for (physx::PxU32 contactIndex = 0;
-       contactIndex < numSoftContacts; ++contactIndex) {
-    const AvbdSoftContactGeometry &geometry =
-        softContacts[contactIndex].geometry;
-    physx::PxU32 particleIndices[6];
-    const physx::PxU32 particleIndexCount =
-        avbdCollectSoftContactParticleIndices(
-            geometry, particleIndices);
-    for (physx::PxU32 i = 0; i < particleIndexCount; ++i) {
-      const physx::PxU32 particleIndex = particleIndices[i];
-      if (particleIndex >= numSoftParticles)
-        continue;
-      if (physx::PxAbs(avbdGetSoftContactParticleJacobianScale(
-              geometry, particleIndex)) > 1e-12f)
-        softContactCounts[particleIndex]++;
+  // Scene owns the compiled support program whenever the island came from a
+  // soft selection.  The early validation above keeps its particle ownership
+  // and contact CSR safe to reuse here; standalone and malformed-provider
+  // callers build the same source-ordered representation locally.
+  physx::PxArray<physx::PxU32> localParticleBodyIndices;
+  physx::PxArray<physx::PxU8> localParticleBodyConflicts;
+  physx::PxArray<physx::PxU32> localSoftContactStarts;
+  physx::PxArray<physx::PxU32> localSoftContactCounts;
+  physx::PxArray<AvbdSoftContactParticleRef> localSoftContactRefs;
+  physx::PxArray<physx::PxU32> localTriangleCoreSafetyStarts;
+  physx::PxArray<physx::PxU32> localTriangleCoreSafetyCounts;
+  physx::PxArray<AvbdSoftContactParticleRef> localTriangleCoreSafetyRefs;
+  const physx::PxU32 *softParticleBodyIndices = nullptr;
+  const physx::PxU32 *softContactStarts = nullptr;
+  const AvbdSoftContactParticleRef *softContactRefs = nullptr;
+  const physx::PxU32 *triangleCoreSafetyStarts = nullptr;
+  const AvbdSoftContactParticleRef *triangleCoreSafetyRefs = nullptr;
+  physx::PxU32 numTriangleCoreSafetyStarts = 0;
+  physx::PxU32 numTriangleCoreSafetyRefs = 0;
+  const physx::PxU32 *rigidTargetContactStarts = nullptr;
+  const physx::PxU32 *rigidTargetContactRefs = nullptr;
+
+  if (useProvidedSoftExecutionPlan) {
+    softParticleBodyIndices = softExecutionPlan->particleBodyIndices;
+    softContactStarts = softExecutionPlan->contactStarts;
+    softContactRefs = softExecutionPlan->contactRefs;
+    if (softExecutionPlan->hasTriangleCoreSafetyPlan(numSoftParticles)) {
+      triangleCoreSafetyStarts =
+          softExecutionPlan->triangleCoreSafetyStarts;
+      numTriangleCoreSafetyStarts =
+          softExecutionPlan->numTriangleCoreSafetyStarts;
+      triangleCoreSafetyRefs = softExecutionPlan->triangleCoreSafetyRefs;
+      numTriangleCoreSafetyRefs =
+          softExecutionPlan->numTriangleCoreSafetyRefs;
     }
+  } else {
+    localParticleBodyIndices.resize(numSoftParticles);
+    localParticleBodyConflicts.resize(numSoftParticles);
+    for (physx::PxU32 particleIndex = 0;
+         particleIndex < numSoftParticles; ++particleIndex) {
+      localParticleBodyIndices[particleIndex] = PX_MAX_U32;
+      localParticleBodyConflicts[particleIndex] = 0;
+    }
+    for (physx::PxU32 bodyIndex = 0; bodyIndex < numSoftBodies;
+         ++bodyIndex) {
+      const AvbdSoftBody &softBody = softBodies[bodyIndex];
+      const physx::PxU32 particleStart =
+          softBody.compiled.particleStart;
+      const physx::PxU32 particleCount =
+          softBody.compiled.particleCount;
+      if (particleStart > numSoftParticles ||
+          particleCount > numSoftParticles - particleStart)
+        continue;
+      for (physx::PxU32 localParticleIndex = 0;
+           localParticleIndex < particleCount; ++localParticleIndex) {
+        const physx::PxU32 particleIndex =
+            particleStart + localParticleIndex;
+        // Overlapping body ranges are invalid provider input.  Keep that
+        // state sticky: a third overlapping range must not make a particle
+        // look unowned and silently claim it again.
+        if (localParticleBodyConflicts[particleIndex] ||
+            localParticleBodyIndices[particleIndex] != PX_MAX_U32) {
+          localParticleBodyConflicts[particleIndex] = 1;
+          localParticleBodyIndices[particleIndex] = PX_MAX_U32;
+          continue;
+        }
+        localParticleBodyIndices[particleIndex] = bodyIndex;
+      }
+    }
+
+    // Build the same per-particle contact adjacency used by the standalone
+    // soft component.  Scanning every soft contact from every particle block
+    // makes a resting surface O(particles * contacts * iterations), which is
+    // effectively quadratic when most vertices touch a support.  Preserve
+    // contact order in each particle range so this remains numerically
+    // equivalent to the former full scan.
+    localSoftContactStarts.resize(numSoftParticles + 1);
+    localSoftContactCounts.resize(numSoftParticles);
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+      localSoftContactCounts[i] = 0;
+    for (physx::PxU32 contactIndex = 0;
+         contactIndex < numSoftContacts; ++contactIndex) {
+      const AvbdSoftContactGeometry &geometry =
+          softContacts[contactIndex].geometry;
+      physx::PxU32 particleIndices[AVBD_CONTACT_MAX_PARTICLES];
+      const physx::PxU32 particleIndexCount =
+          avbdCollectSoftContactParticleIndices(
+              geometry, particleIndices);
+      for (physx::PxU32 i = 0; i < particleIndexCount; ++i) {
+        const physx::PxU32 particleIndex = particleIndices[i];
+        if (particleIndex >= numSoftParticles)
+          continue;
+        if (physx::PxAbs(avbdGetSoftContactParticleJacobianScale(
+                geometry, particleIndex)) > 1e-12f)
+          localSoftContactCounts[particleIndex]++;
+      }
+    }
+    localSoftContactStarts[0] = 0;
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+      localSoftContactStarts[i + 1] =
+          localSoftContactStarts[i] + localSoftContactCounts[i];
+    localSoftContactRefs.resize(
+        localSoftContactStarts[numSoftParticles]);
+    for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
+      localSoftContactCounts[i] = 0;
+    for (physx::PxU32 contactIndex = 0;
+         contactIndex < numSoftContacts; ++contactIndex) {
+      const AvbdSoftContactGeometry &geometry =
+          softContacts[contactIndex].geometry;
+      physx::PxU32 particleIndices[AVBD_CONTACT_MAX_PARTICLES];
+      const physx::PxU32 particleIndexCount =
+          avbdCollectSoftContactParticleIndices(
+              geometry, particleIndices);
+      for (physx::PxU32 i = 0; i < particleIndexCount; ++i) {
+        const physx::PxU32 particleIndex = particleIndices[i];
+        if (particleIndex >= numSoftParticles)
+          continue;
+        const physx::PxReal jacobianScale =
+            avbdGetSoftContactParticleJacobianScale(
+                geometry, particleIndex);
+        if (physx::PxAbs(jacobianScale) <= 1e-12f)
+          continue;
+        localSoftContactRefs[
+            localSoftContactStarts[particleIndex] +
+            localSoftContactCounts[particleIndex]++] =
+                AvbdSoftContactParticleRef(
+                    contactIndex, jacobianScale);
+      }
+    }
+    softParticleBodyIndices = localParticleBodyIndices.begin();
+    softContactStarts = localSoftContactStarts.begin();
+    softContactRefs = localSoftContactRefs.begin();
   }
-  softContactStarts[0] = 0;
-  for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
-    softContactStarts[i + 1] =
-        softContactStarts[i] + softContactCounts[i];
-  softContactRefs.resize(softContactStarts[numSoftParticles]);
-  for (physx::PxU32 i = 0; i < numSoftParticles; ++i)
-    softContactCounts[i] = 0;
-  for (physx::PxU32 contactIndex = 0;
-       contactIndex < numSoftContacts; ++contactIndex) {
-    const AvbdSoftContactGeometry &geometry =
-        softContacts[contactIndex].geometry;
-    physx::PxU32 particleIndices[6];
-    const physx::PxU32 particleIndexCount =
-        avbdCollectSoftContactParticleIndices(
-            geometry, particleIndices);
-    for (physx::PxU32 i = 0; i < particleIndexCount; ++i) {
-      const physx::PxU32 particleIndex = particleIndices[i];
-      if (particleIndex >= numSoftParticles)
+
+  // Direct/native callers that do not supply the Scene-owned geometry CSR
+  // compile the same compact core-support program locally.  This is separate
+  // from the AL particle CSR above: each contact appears at most once per
+  // simulation particle even when a proxy triangle's three embeddings share
+  // a tet vertex.
+  if (!triangleCoreSafetyStarts) {
+    const physx::PxU32 maxCoreSafetyParticles =
+        3u * AVBD_CONTACT_POINT_MAX_SUPPORT;
+    auto collectTriangleCoreSafetyParticles =
+        [&](const AvbdSoftContactGeometry &geometry,
+            physx::PxU32 *particleIndices) -> physx::PxU32 {
+      if (!geometry.hasRigidBoxTriangleCoreExit ||
+          !geometry.hasRigidBodyTarget())
+        return 0;
+      physx::PxU32 count = 0;
+      for (physx::PxU32 vertex = 0; vertex < 3; ++vertex) {
+        const AvbdWeightedContactPoint &mapping =
+            geometry.rigidBoxTriangleCorePoints[vertex];
+        if (mapping.count == 0 ||
+            mapping.count > AVBD_CONTACT_POINT_MAX_SUPPORT)
+          return PX_MAX_U32;
+        for (physx::PxU32 support = 0; support < mapping.count; ++support) {
+          const physx::PxU32 particleIndex =
+              mapping.particleIndices[support];
+          if (particleIndex >= numSoftParticles)
+            return PX_MAX_U32;
+          bool duplicate = false;
+          for (physx::PxU32 prior = 0; prior < count; ++prior)
+            duplicate |= particleIndices[prior] == particleIndex;
+          if (!duplicate) {
+            if (count >= maxCoreSafetyParticles)
+              return PX_MAX_U32;
+            particleIndices[count++] = particleIndex;
+          }
+        }
+      }
+      return count;
+    };
+
+    localTriangleCoreSafetyStarts.resize(numSoftParticles + 1);
+    localTriangleCoreSafetyCounts.resize(numSoftParticles);
+    for (physx::PxU32 particleIndex = 0;
+         particleIndex < numSoftParticles; ++particleIndex)
+      localTriangleCoreSafetyCounts[particleIndex] = 0;
+    for (physx::PxU32 contactIndex = 0;
+         contactIndex < numSoftContacts; ++contactIndex) {
+      physx::PxU32 particleIndices[3 * AVBD_CONTACT_POINT_MAX_SUPPORT];
+      const physx::PxU32 particleCount = collectTriangleCoreSafetyParticles(
+          softContacts[contactIndex].geometry, particleIndices);
+      if (particleCount == PX_MAX_U32)
         continue;
-      const physx::PxReal jacobianScale =
-          avbdGetSoftContactParticleJacobianScale(
-              geometry, particleIndex);
-      if (physx::PxAbs(jacobianScale) <= 1e-12f)
-        continue;
-      softContactRefs[
-          softContactStarts[particleIndex] +
-          softContactCounts[particleIndex]++] =
-              AvbdSoftContactParticleRef(
-                  contactIndex, jacobianScale);
+      for (physx::PxU32 index = 0; index < particleCount; ++index)
+        localTriangleCoreSafetyCounts[particleIndices[index]]++;
     }
+    localTriangleCoreSafetyStarts[0] = 0;
+    for (physx::PxU32 particleIndex = 0;
+         particleIndex < numSoftParticles; ++particleIndex)
+      localTriangleCoreSafetyStarts[particleIndex + 1] =
+          localTriangleCoreSafetyStarts[particleIndex] +
+          localTriangleCoreSafetyCounts[particleIndex];
+    localTriangleCoreSafetyRefs.resize(
+        localTriangleCoreSafetyStarts[numSoftParticles]);
+    for (physx::PxU32 particleIndex = 0;
+         particleIndex < numSoftParticles; ++particleIndex)
+      localTriangleCoreSafetyCounts[particleIndex] = 0;
+    for (physx::PxU32 contactIndex = 0;
+         contactIndex < numSoftContacts; ++contactIndex) {
+      physx::PxU32 particleIndices[3 * AVBD_CONTACT_POINT_MAX_SUPPORT];
+      const physx::PxU32 particleCount =
+          collectTriangleCoreSafetyParticles(
+              softContacts[contactIndex].geometry, particleIndices);
+      if (particleCount == PX_MAX_U32)
+        continue;
+      for (physx::PxU32 index = 0; index < particleCount; ++index) {
+        const physx::PxU32 particleIndex = particleIndices[index];
+        localTriangleCoreSafetyRefs[
+            localTriangleCoreSafetyStarts[particleIndex] +
+            localTriangleCoreSafetyCounts[particleIndex]++] =
+            AvbdSoftContactParticleRef(contactIndex, 1.0f);
+      }
+    }
+    triangleCoreSafetyStarts = localTriangleCoreSafetyStarts.begin();
+    numTriangleCoreSafetyStarts = localTriangleCoreSafetyStarts.size();
+    triangleCoreSafetyRefs = localTriangleCoreSafetyRefs.begin();
+    numTriangleCoreSafetyRefs = localTriangleCoreSafetyRefs.size();
+  }
+
+  if (useProvidedRigidTargetContactPlan) {
+    rigidTargetContactStarts = softExecutionPlan->rigidTargetContactStarts;
+    rigidTargetContactRefs = softExecutionPlan->rigidTargetContactRefs;
+  }
+
+  if (mixedOgcPairContext.isComplete(numSoftContacts) &&
+      triangleCoreSafetyStarts &&
+      numTriangleCoreSafetyStarts == numSoftParticles + 1 &&
+      (numTriangleCoreSafetyRefs == 0 || triangleCoreSafetyRefs) &&
+      triangleCoreSafetyStarts[0] == 0 &&
+      triangleCoreSafetyStarts[numSoftParticles] ==
+          numTriangleCoreSafetyRefs) {
+    mixedOgcPairContext.triangleCoreSafetyStarts =
+        triangleCoreSafetyStarts;
+    mixedOgcPairContext.numTriangleCoreSafetyStarts =
+        numTriangleCoreSafetyStarts;
+    mixedOgcPairContext.triangleCoreSafetyRefs = triangleCoreSafetyRefs;
+    mixedOgcPairContext.numTriangleCoreSafetyRefs =
+        numTriangleCoreSafetyRefs;
   }
 
   // =========================================================================
@@ -7508,10 +9142,29 @@ void AvbdSolver::solveWithJoints(
     // Chebyshev extrapolation assumes a smooth stationary iteration and can
     // repeatedly overshoot that active set, losing drive authority at coarse
     // timesteps.  Keep the scoped physical SLERP island on plain block descent.
+    bool hasDynamicSoftRigidContact = false;
+    for (physx::PxU32 sci = 0; sci < numSoftContacts; ++sci) {
+      const AvbdSoftContactGeometry &geometry = softContacts[sci].geometry;
+      if (geometry.hasRigidBodyTarget() &&
+          geometry.targetIndex < numBodies &&
+          bodies[geometry.targetIndex].invMass > 0.0f) {
+        hasDynamicSoftRigidContact = true;
+        break;
+      }
+    }
+    // A unilateral soft-rigid manifold changes its active row set as the
+    // bodies separate and re-enter the OGC shell.  Chebyshev acceleration
+    // assumes a smooth stationary iteration; extrapolating across that active
+    // set can cross the inertial minimizer after the contact has gone inactive
+    // and give the rigid endpoint motion with the wrong sign.  The per-row OGC
+    // trust-region only admits the local solve candidate, so it cannot bound a
+    // later whole-island extrapolation.  Keep mixed dynamic contact islands on
+    // the stable block Gauss-Seidel schedule.
     const bool useChebyshev =
         !slerpVelocityDriveIsland && !coupledFixedD6Island &&
         !coupledSphericalConeIsland &&
         !coupledSpatialTendonIsland &&
+        !hasDynamicSoftRigidContact &&
         mConfig.chebyshevRho > 0.0f &&
         mConfig.chebyshevRho < 1.0f;
     physx::PxReal chebyOmega = 1.0f;
@@ -7530,22 +9183,26 @@ void AvbdSolver::solveWithJoints(
       }
     }
 
-    const physx::PxU32 baseIters = (iterationOverride > 0)
-        ? iterationOverride : mConfig.innerIterations;
-    const bool hasJointConstraints = (numD6 > 0 || numGear > 0);
+    const physx::PxU32 baseIterations =
+        physx::PxMax(mConfig.iterations, iterationOverride);
+    const bool hasExplicitJointConstraints = numD6 > 0 || numGear > 0;
     const physx::PxU32 jointIterations =
-        hasJointConstraints
-            ? physx::PxMax(baseIters, physx::PxU32(8))
-            : baseIters;
-    const bool enableEarlyStop =
-      (mConfig.positionTolerance > 0.0f && jointIterations > 1);
+        hasExplicitJointConstraints && mConfig.jointIterationOverride > 0
+            ? physx::PxMax(baseIterations,
+                           mConfig.jointIterationOverride)
+            : baseIterations;
     const physx::PxU32 minIterations =
-      physx::PxMin(jointIterations,
-                   physx::PxU32(hasJointConstraints ? 8 : 4));
+        hasExplicitJointConstraints && mConfig.jointIterationOverride > 0
+            ? physx::PxMin(jointIterations,
+                           mConfig.jointIterationOverride)
+            : physx::PxMin(jointIterations, physx::PxU32(4));
+    const bool enableEarlyStop =
+        mConfig.enableEarlyStop && !hasCompleteSoftSelection &&
+        jointIterations - minIterations > 1;
     const physx::PxReal rotationTolerance =
-      physx::PxMax(4.0f * mConfig.positionTolerance /
-                       physx::PxMax(mConfig.lengthScale, 1e-6f),
-                   1e-4f);
+        physx::PxMax(4.0f * mConfig.positionTolerance /
+                         physx::PxMax(mConfig.lengthScale, 1e-6f),
+                     1e-4f);
     physx::PxU32 consecutiveConvergedIterations = 0;
     physx::PxArray<physx::PxVec3> earlyStopPrevPos;
     physx::PxArray<physx::PxQuat> earlyStopPrevRot;
@@ -7553,6 +9210,18 @@ void AvbdSolver::solveWithJoints(
       earlyStopPrevPos.resize(numBodies);
       earlyStopPrevRot.resize(numBodies);
     }
+
+    // The packet material backend is a relaxed production fast path: it may
+    // use ISA-specific arithmetic and therefore is intentionally not part of
+    // the ordered/enhanced-determinism authority.  The material program is
+    // immutable for this island solve, so choose its backend once rather than
+    // scanning the body list from every primal sweep.
+    const AvbdCpuIsaCorotationalTetPacket8Fn corotationalTetPacketKernel =
+        numSoftParticles > 0 && numSoftBodies > 0 &&
+                !mConfig.requiresOrderedBackend()
+            ? avbdSelectCorotationalTetPacketKernel(softBodies,
+                                                     numSoftBodies)
+            : NULL;
 
     for (physx::PxU32 iter = 0; iter < jointIterations; ++iter) {
       // Save pre-iteration state for Chebyshev
@@ -7570,7 +9239,6 @@ void AvbdSolver::solveWithJoints(
           earlyStopPrevRot[i] = bodies[i].rotation;
         }
       }
-
       // --- Primal step: block descent over bodies ---
       {
         PX_PROFILE_ZONE("AVBD.blockDescentWithJoints", 0);
@@ -7650,10 +9318,6 @@ void AvbdSolver::solveWithJoints(
         const physx::PxU32 *orderPtr =
             useDeterministicOrder ? bodyOrder.begin() : nullptr;
 
-        const bool useParallel = mConfig.enableParallelization
-            && !useDeterministicOrder
-            && numBodies >= AVBD_PARALLEL_MIN_ITEMS;
-
         auto solveBody = [&](physx::PxU32 idx) {
           const physx::PxU32 i = orderPtr ? orderPtr[idx] : idx;
           if (bodies[i].invMass <= 0.0f)
@@ -7663,13 +9327,16 @@ void AvbdSolver::solveWithJoints(
                                      numGear, dt, invDt2, contactMap, d6Map,
                                      gearMap, softParticles, numSoftParticles,
                                      softContacts, numSoftContacts,
-                                     softBodies, numSoftBodies);
+                                     softBodies, numSoftBodies,
+                                     rigidTargetContactStarts,
+                                     rigidTargetContactRefs,
+                                     mixedOgcPairContext.isComplete(
+                                         numSoftContacts)
+                                         ? &mixedOgcPairContext : nullptr);
         };
 
         if (coupledSolved) {
           // Both endpoints were updated from one frozen island objective.
-        } else if (useParallel) {
-          avbdParallelFor(0u, numBodies, solveBody);
         } else {
           for (physx::PxU32 idx = 0; idx < numBodies; ++idx)
             solveBody(idx);
@@ -7707,21 +9374,29 @@ void AvbdSolver::solveWithJoints(
 
           auto solveSP = [&](physx::PxU32 spi) {
             if (softParticles[spi].invMass <= 0.0f) return;
+            const physx::PxU32 softBodyIndex =
+                softParticleBodyIndices[spi];
+            if (softBodyIndex >= numSoftBodies)
+              return;
             solveSoftParticle(spi, softParticles, numSoftParticles,
-                              bodies, numBodies, softBodies, numSoftBodies,
+                              bodies, numBodies,
+                              softBodies[softBodyIndex],
                               softContacts, numSoftContacts,
-                              softContactRefs.begin(),
+                              softContactRefs,
                               softContactStarts[spi],
                               softContactStarts[spi + 1],
-                              dt, invDt2);
+                              dt, invDt2,
+                              corotationalTetPacketKernel,
+                              mixedOgcPairContext.isComplete(numSoftContacts)
+                                  ? &mixedOgcPairContext : nullptr);
           };
 
-          if (useParallel) {
-            avbdParallelFor(0u, numSoftParticles, solveSP);
-          } else {
-            for (physx::PxU32 spi = 0; spi < numSoftParticles; ++spi)
-              solveSP(spi);
-          }
+          // The soft-particle primal is nonlinear GS. It deliberately stays
+          // serial until P4 supplies a conflict-colored taskgraph schedule;
+          // `numBodies` is not a proxy for soft work and no private worker
+          // pool may be entered from this stage.
+          for (physx::PxU32 spi = 0; spi < numSoftParticles; ++spi)
+            solveSP(spi);
 
           solveSoftRigidAttachmentsCoupled(
               softParticles, numSoftParticles,
@@ -7738,7 +9413,7 @@ void AvbdSolver::solveWithJoints(
             bodies[i].projectLockedPose(bodies[i].prevPosition,
                                         bodies[i].prevRotation);
         }
-        stats.totalIterations++;
+        PX_AVBD_PROFILE_STAT(stats.totalIterations++);
       }
 
       // --- Dual step: AL multiplier updates ---
@@ -8662,17 +10337,18 @@ void AvbdSolver::solveWithJoints(
                                       bodies[i].prevRotation);
       }
 
+
+
       if (enableEarlyStop) {
         physx::PxReal maxPositionDelta = 0.0f;
         physx::PxReal maxRotationDelta = 0.0f;
         computeMaxPoseDeltas(bodies, numBodies, earlyStopPrevPos,
                              earlyStopPrevRot, maxPositionDelta,
                              maxRotationDelta);
-
         if ((iter + 1) >= minIterations &&
             maxPositionDelta <= mConfig.positionTolerance &&
             maxRotationDelta <= rotationTolerance) {
-          consecutiveConvergedIterations++;
+          ++consecutiveConvergedIterations;
           if (consecutiveConvergedIterations >= 2)
             break;
         } else {
@@ -8725,20 +10401,73 @@ void AvbdSolver::solveWithJoints(
     }
   }
   postAlStages(
-      dt, invDt, bodies, numBodies, contacts, numContacts, gravity,
+      dt, invDt, bodies, numBodies, contacts, numContacts, contactMap, gravity,
       hasBodyStaticContact, deformableFastImpactIsland, touchingBodyStatic,
       numContacts > 0 ? &linearVelAtSolveStart : nullptr,
       numContacts > 0 ? &angularVelAtSolveStart : nullptr,
       /*allowRigidDeepPoseRecoverySplit=*/false,
       /*allowRigidFiniteMaterialPoseSplit=*/false, softParticles,
-      numSoftParticles, softContacts, numSoftContacts, touchesKinematicShell,
+      numSoftParticles, softBodies, numSoftBodies, softContacts,
+      numSoftContacts, touchesKinematicShell,
       hasKinematicShellContacts ? &shellLinearVelAtSolveStart : nullptr,
       &positionOwnedAngularBodies,
       d6Joints, numD6, /*hasJointConstraints=*/true,
       contactCoupledNativeRevoluteMotorVelocityProjectionIsland ||
           coupledLinearPositionDriveFrictionPositionOwnerIsland,
-      /*applyVelocityDamping=*/true, softParticles,
-      numSoftParticles, stats);
+      /*applyVelocityDamping=*/true, softParticles, numSoftParticles, stats,
+      /*postAlContactWork=*/nullptr,
+      useProvidedSoftExecutionPlan ? softExecutionPlan : nullptr);
+  // The DCD admission above may have clipped an incoming mixed endpoint at
+  // the physical boundary.  Convert only that withheld normal motion into a
+  // shared e=0 pair impulse after both soft and rigid velocities have been
+  // reconstructed.  This keeps the regular Position-AL rows responsible for
+  // local deformation, while preventing the next frame from treating the
+  // withheld approach as a spurious elastic launch.
+  if (mixedOgcPairContext.isComplete(numSoftContacts)) {
+    PX_PROFILE_ZONE("AVBD.admittedMixedOgcPairInelasticVel", 0);
+    clampAdmittedMixedOgcPairNormalVelocities(
+        bodies, numBodies, softParticles, numSoftParticles, softContacts,
+        numSoftContacts, mixedOgcPairStates, numMixedOgcPairStates,
+        useProvidedSoftExecutionPlan
+            ? softExecutionPlan->ogcPairIndices : nullptr,
+        useProvidedSoftExecutionPlan
+            ? softExecutionPlan->numOgcPairIndices : 0u,
+        useProvidedSoftExecutionPlan &&
+                softExecutionPlan->hasMixedOgcPairContactPlan(
+                    numSoftContacts)
+            ? softExecutionPlan->ogcPairContactStarts : nullptr,
+        useProvidedSoftExecutionPlan &&
+                softExecutionPlan->hasMixedOgcPairContactPlan(
+                    numSoftContacts)
+            ? softExecutionPlan->numOgcPairContactStarts : 0u,
+        useProvidedSoftExecutionPlan &&
+                softExecutionPlan->hasMixedOgcPairContactPlan(
+                    numSoftContacts)
+            ? softExecutionPlan->ogcPairContactRefs : nullptr,
+        useProvidedSoftExecutionPlan &&
+                softExecutionPlan->hasMixedOgcPairContactPlan(
+                    numSoftContacts)
+            ? softExecutionPlan->numOgcPairContactRefs : 0u,
+        &stats);
+  }
+  if (endpointRecoveredWorldStaticBodies.size() == numSoftBodies &&
+      endpointWorldStaticRecoveryNormals.size() == numSoftBodies) {
+		if (endpointRecoveredDynamicSoftRigidContacts.size() ==
+			numSoftContacts) {
+			PX_PROFILE_ZONE("AVBD.endpointDynamicSoftRigidInelasticVel", 0);
+			clampDynamicSoftRigidBodyEndpointVelocities(
+				bodies, numBodies, softParticles, numSoftParticles, softBodies,
+				numSoftBodies, softContacts, numSoftContacts,
+				&endpointRecoveredDynamicSoftRigidContacts, &stats);
+		}
+    // The coherent endpoint shift deliberately carries initialPosition with
+    // it.  Remove the pre-impact normal velocity only after postAlStages has
+    // completed the ordinary position-to-velocity reconstruction.
+    clampWorldStaticSoftBodyEndpointVelocities(
+        softParticles, numSoftParticles, softBodies, numSoftBodies,
+        &endpointRecoveredWorldStaticBodies,
+        &endpointWorldStaticRecoveryNormals, &stats);
+  }
   avbdApplyBendingDamping(
       softParticles, softBodies, numSoftBodies, dt);
 
@@ -8924,15 +10653,14 @@ void AvbdSolver::solveWithJoints(
   for (physx::PxU32 i = 0; i < numD6; ++i) {
     const AvbdCompiledJointObjectiveProgram &program =
         d6Joints[i].objectiveProgram;
-    stats.jointObjectiveFingerprint +=
-        fingerprintAvbdJointObjectiveProgram(program);
+    (void)0;
     if (!isValidAvbdJointObjectiveProgram(program)) {
-      stats.jointObjectiveInvalidRows++;
+      (void)0;
       continue;
     }
     if (program.entryCount == 0 ||
         program.legacySourceRowMask != 0) {
-      stats.jointObjectiveLegacyRows++;
+      (void)0;
     }
     for (physx::PxU32 entryIndex = 0;
          entryIndex < program.entryCount; ++entryIndex) {
@@ -8940,18 +10668,18 @@ void AvbdSolver::solveWithJoints(
           program.entries[entryIndex];
       switch (objective.owner) {
       case AvbdVelocityObjectiveOwner::PositionAL:
-        stats.jointObjectivePositionRows++;
+        (void)0;
         break;
       case AvbdVelocityObjectiveOwner::JointFinalize:
-        stats.jointObjectiveFinalizeRows++;
+        (void)0;
         break;
       case AvbdVelocityObjectiveOwner::Unsupported:
-        stats.jointObjectiveUnsupportedRows++;
+        (void)0;
         break;
       case AvbdVelocityObjectiveOwner::PointFinalize:
       case AvbdVelocityObjectiveOwner::ManifoldFinalize:
       case AvbdVelocityObjectiveOwner::ComponentFinalize:
-        stats.jointObjectiveInvalidRows++;
+        (void)0;
         break;
       }
     }
@@ -8982,11 +10710,13 @@ void AvbdSolver::solveSoftParticle(
     PxU32 spi,
     AvbdSoftParticle *softParticles, PxU32 numSoftParticles,
     AvbdSolverBody *rigidBodies, PxU32 numRigidBodies,
-    AvbdSoftBody *softBodies, PxU32 numSoftBodies,
+    const AvbdSoftBody &sb,
     AvbdSoftContact *softContacts, PxU32 numSoftContacts,
     const AvbdSoftContactParticleRef *softContactRefs,
     PxU32 softContactRefBegin, PxU32 softContactRefEnd,
-    PxReal dt, PxReal invDt2)
+    PxReal dt, PxReal invDt2,
+    AvbdCpuIsaCorotationalTetPacket8Fn corotationalTetPacketKernel,
+    const AvbdOgcPairTrustRegionContext *ogcPairContext)
 {
   PX_UNUSED(numSoftParticles);
   PX_UNUSED(dt);
@@ -9000,17 +10730,18 @@ void AvbdSolver::solveSoftParticle(
   PxVec3 f3 = (sp.predictedPosition - sp.position) * mOverDt2;
   PxMat33 H3 = PxMat33::createDiagonal(PxVec3(mOverDt2));
 
-  // Accumulate VBD element contributions using per-particle adjacency
-  for (PxU32 sbi = 0; sbi < numSoftBodies; ++sbi)
-  {
-    const AvbdSoftBody &sb = softBodies[sbi];
-    PxU32 localIdx = spi - sb.compiled.particleStart;
-    if (localIdx >= sb.compiled.particleCount) continue;
-
-    const AvbdParticleElementAdjacency &elementAdjacency =
-        sb.compiled.elementAdjacency[localIdx];
-    const AvbdParticleObjectiveAdjacency &objectiveAdjacency =
-        sb.runtime.objectiveAdjacency[localIdx];
+  // The Scene-compiled execution plan gives every active particle one body
+  // owner.  That removes the former O(particles * softBodies) membership
+  // scan while preserving the material/objective accumulation order inside
+  // the owning body.
+  if (spi < sb.compiled.particleStart ||
+      spi - sb.compiled.particleStart >= sb.compiled.particleCount)
+    return;
+  const PxU32 localIdx = spi - sb.compiled.particleStart;
+  const AvbdParticleElementAdjacency &elementAdjacency =
+      sb.compiled.elementAdjacency[localIdx];
+  const AvbdParticleObjectiveAdjacency &objectiveAdjacency =
+      sb.runtime.objectiveAdjacency[localIdx];
 
     // StVK triangle contributions
     for (PxU32 ri = 0; ri < elementAdjacency.triRefs.size(); ++ri)
@@ -9022,22 +10753,40 @@ void AvbdSolver::solveSoftParticle(
       f3 += ft; H3 += Ht;
     }
 
-    // Tetrahedral material-model contributions
-    for (PxU32 ri = 0; ri < elementAdjacency.tetRefs.size(); ++ri)
-    {
-      const AvbdParticleElementRef &ref = elementAdjacency.tetRefs[ri];
-      PxVec3 ft; PxMat33 Ht;
-      if (sb.material.coRotationalVolumeModel)
-        avbdEvaluateCorotationalForceHessianPrepared(
-            sb.compiled.tetElements[ref.index], ref.vOrder,
-            sb.material.mu, sb.material.lambda,
-            softParticles, ft, Ht);
-      else
-        avbdEvaluateNeoHookeanForceHessianPrepared(
-            sb.compiled.tetElements[ref.index], ref.vOrder,
-            sb.material.mu, sb.material.lambda, sb.material.neoHookeanAlpha,
-            softParticles, ft, Ht);
-      f3 += ft; H3 += Ht;
+    // Tetrahedral material-model contributions.  A complete packet program
+    // only changes the local material evaluation; it never changes particle
+    // ownership, attachment ownership, or the rigid/soft phase barriers.
+    // Ordered scenes intentionally retain the scalar evaluation above the
+    // call site, while the relaxed fast path uses the same packet backend as
+    // the component solver and falls back lane-by-lane when necessary.
+    const bool useCorotationalTetPackets =
+        corotationalTetPacketKernel &&
+        sb.material.coRotationalVolumeModel &&
+        sb.compiled.tetIncidencePacketProgramValid &&
+        localIdx < sb.compiled.tetIncidencePacketRanges.size() &&
+        elementAdjacency.tetRefs.size() >=
+            eAVBD_TET_INCIDENCE_PACKET_WIDTH;
+    if (useCorotationalTetPackets) {
+      avbdAccumulateCorotationalTetPacketContributions(
+          sb, localIdx, softParticles, corotationalTetPacketKernel,
+          false, NULL, f3, H3);
+    } else {
+      for (PxU32 ri = 0; ri < elementAdjacency.tetRefs.size(); ++ri)
+      {
+        const AvbdParticleElementRef &ref = elementAdjacency.tetRefs[ri];
+        PxVec3 ft; PxMat33 Ht;
+        if (sb.material.coRotationalVolumeModel)
+          avbdEvaluateCorotationalForceHessianPrepared(
+              sb.compiled.tetElements[ref.index], ref.vOrder,
+              sb.material.mu, sb.material.lambda,
+              softParticles, ft, Ht);
+        else
+          avbdEvaluateNeoHookeanForceHessianPrepared(
+              sb.compiled.tetElements[ref.index], ref.vOrder,
+              sb.material.mu, sb.material.lambda, sb.material.neoHookeanAlpha,
+              softParticles, ft, Ht);
+        f3 += ft; H3 += Ht;
+      }
     }
 
     // Bending contributions
@@ -9086,7 +10835,6 @@ void AvbdSolver::solveSoftParticle(
       f3 += objectiveForce;
       H3 += objectiveHessian;
     }
-  }
 
   // Soft contacts (ground / rigid, AVBD penalty). Contact prep groups only
   // the rows incident to this particle while preserving source order.
@@ -9115,6 +10863,39 @@ void AvbdSolver::solveSoftParticle(
           contactRef.jacobianScale, fc, Hc);
     }
     f3 += fc; H3 += Hc;
+
+    // Endpoint admission clips a mixed pair to its current DCD boundary so
+    // the rigid cannot enter the soft mesh.  The clipped normal work must
+    // still reach the material solve; otherwise the rigid simply stops at
+    // the boundary and the soft volume never develops the compressive
+    // deformation requested by the motion.  Apply one shared pair load,
+    // distributed over the prepared manifold, to the soft side only.  The
+    // rigid side remains owned by the coupled body solve and its trust-region
+    // limiter, preventing the old high-speed rebound.
+    if (ogcPairContext &&
+        ogcPairContext->isComplete(numSoftContacts) &&
+        geometry.source.type == AvbdSoftContactSource::eRIGID_SDF &&
+        geometry.hasRigidBodyTarget() &&
+        geometry.targetIndex < numRigidBodies) {
+      const PxU32 pairIndex =
+          ogcPairContext->contactPairIndices[contactRef.contactIndex];
+      if (pairIndex < ogcPairContext->numPairStates) {
+        const AvbdOgcPairState &pair =
+            ogcPairContext->pairStates[pairIndex];
+        const PxReal load = avbdGetOgcPairNormalLoadPerContact(pair);
+        if (load > 0.0f) {
+          const PxReal normalLengthSq = geometry.normal.magnitudeSquared();
+          if (PxIsFinite(load) && load > 0.0f &&
+              PxIsFinite(normalLengthSq) && normalLengthSq > 1.0e-12f) {
+            const PxVec3 normal = geometry.normal *
+                PxRecipSqrt(normalLengthSq);
+            const PxReal weight = PxAbs(contactRef.jacobianScale);
+            if (normal.isFinite() && PxIsFinite(weight))
+              f3 += normal * (load * weight);
+          }
+        }
+      }
+    }
   }
 
   // Solve 3x3: displacement = inv(H) * f
@@ -9122,6 +10903,29 @@ void AvbdSolver::solveSoftParticle(
   PxReal dispMag = displacement.magnitude();
   if (!PxIsFinite(dispMag))
     displacement = PxVec3(0.0f);
+
+  const PxReal ogcAlpha = limitSoftParticleOgcCandidate(
+      ogcPairContext, softContacts, numSoftContacts, softContactRefs,
+      softContactRefBegin, softContactRefEnd, spi, softParticles,
+      numSoftParticles, rigidBodies,
+      numRigidBodies, displacement);
+  displacement *= ogcAlpha;
+
+  // The mixed OGC limiter constrains motion against the rigid trust region,
+  // but it does not protect the incident tetrahedra from a local material
+  // solve collapsing their positive Jacobian.  This is especially important
+  // for a dynamic box pressing two soft volumes: if a particle crosses the
+  // J floor first, the later OGC response has no valid soft deformation left
+  // to absorb the load and the rigid body receives an artificial rebound.
+  // Apply the same analytic incident-tet limiter used by the component path
+  // to the final candidate (after OGC scaling, before committing position).
+  if(displacement.magnitudeSquared() > 0.0f)
+  {
+    const AvbdSoftTetDisplacementLimitResult positiveJLimit =
+        avbdLimitTetDisplacementObserved(
+            sb, spi, softParticles, displacement);
+    displacement = positiveJLimit.appliedDisplacement;
+  }
 
   sp.position += displacement;
 }
@@ -9503,8 +11307,8 @@ void AvbdSolver::updateSoftDual(
     AvbdSoftContact &sc = softContacts[sci];
     const AvbdSoftContactGeometry& geometry = sc.geometry;
     AvbdSoftContactAugmentedState& state = sc.state;
-    if (geometry.particleIdx < numSoftParticles &&
-        softParticles[geometry.particleIdx].invMass <= 0.0f &&
+    if (avbdIsSoftContactQueryFullyKinematic(
+            geometry, softParticles, numSoftParticles) &&
         geometry.hasRigidBodyTarget() &&
         geometry.targetIndex < numRigidBodies) {
       avbdUpdateKinematicShellContactDual(

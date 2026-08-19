@@ -94,7 +94,7 @@ def main() -> int:
 
     swept = section(
         soft,
-        "inline void avbdDetectSoftRigidSphereSweptSDF(",
+        "inline void avbdDetectSoftRigidSphereSweptSDFRange(",
         "inline void avbdDetectSoftRigidOGCFeatures(",
     )
     require_all(
@@ -274,6 +274,8 @@ def main() -> int:
             "scene-volume-dynamic-sphere-relative-swept-ccd",
             "addSceneDynamicFiniteSweepPair(",
             "0.8f, 0.0f, -132.0f",
+            "a soft nor a rigid response",
+            "positive_rigid_drop + 0.05",
         )
         + public_gate_fragments,
     )

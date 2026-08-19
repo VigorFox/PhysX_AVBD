@@ -157,6 +157,7 @@ KERNEL_DEF(OUTPUT_THRESHOLDELEMENT_MASK_INDICES, "outputThresholdPairsMaskIndice
 KERNEL_DEF(CREATE_FORCECHANGE_THRESHOLDELEMENTS, "createForceChangeThresholdElements")
 KERNEL_DEF(SOLVE_UNIFIED, "solveBlockUnified")
 KERNEL_DEF(PROPAGATE_STATIC_SOLVER_VELOCITIES, "propagateStaticSolverBodyVelocities")
+KERNEL_DEF(AVBD_SOLVE_RIGID_OWNER_WAVE_BATCH, "avbdSolveRigidOwnerWaveBatch")
 
 ////////////////////////////////////////////////////////////////
 //integration kernels
