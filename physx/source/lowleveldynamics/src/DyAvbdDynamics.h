@@ -110,8 +110,6 @@ struct AvbdContactPrepSnapshot {
 
 namespace Dy {
 
-class AvbdKernelLabCapture;
-
 // Complete soft/VBD tuple selected for exactly one already-gathered rigid
 // island.  The provider must either return every pointer/count here or return
 // false; partial soft representations are never routed into the solver.
@@ -211,20 +209,6 @@ public:
 
   /** Task factory used by an island task's dispatcher fan-in stages. */
   AvbdTaskFactory &getTaskFactory() { return *mTaskFactory; }
-
-  // Diagnostic-only avbd_kernel_lab capture. A ticket is reserved during
-  // serial update before an island task is submitted; task code can then copy
-  // one prepared CPU color range without allocating, locking, or writing.
-  PxU32 reserveKernelLabCapture(PxU32 islandIndex, PxU32 bodyCount,
-                                PxU32 contactCount);
-  void captureKernelLabCpuColorPreRange(
-      PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 islandIndex,
-      PxU32 colorIndex, const PxU32 *ownerOrder, PxU32 begin, PxU32 end,
-      PxU32 workerCount, PxU32 taskGrainBodies, PxU32 taskCount,
-      PxU32 taskChunkBodies);
-  void captureKernelLabCpuColorPostRange(
-      PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 colorIndex);
-  void flushKernelLabCapture();
 
   /** Current per-context warm-start cache epoch (zero is reserved invalid). */
   PX_FORCE_INLINE PxU16 getAvbdFrameStamp() const {

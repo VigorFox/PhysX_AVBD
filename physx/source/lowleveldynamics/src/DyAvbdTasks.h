@@ -259,11 +259,10 @@ public:
 
   AvbdSolveIslandTask(AvbdDynamicsContext &context, AvbdSolver &solver,
                       const AvbdIslandBatch &batch, PxReal dt,
-                      const PxVec3 &gravity, PxU32 kernelLabCaptureTicket)
+                      const PxVec3 &gravity)
       : AvbdTask(context), mSolver(solver), mBatch(batch), mDt(dt),
         mGravity(gravity), mCurrentWave(0), mCurrentColor(0),
-        mGpuWaveEpoch(0), mKernelLabCaptureTicket(kernelLabCaptureTicket),
-        mRigidPhase(eRIGID_PRIMAL),
+        mGpuWaveEpoch(0), mRigidPhase(eRIGID_PRIMAL),
         mRigidStarted(false),
         mRigidAsync(false), mRigidWaiting(false), mRigidSubmitHold(false),
         mRigidUsesBodyColors(false) {}
@@ -293,7 +292,6 @@ private:
   PxU32 mCurrentWave;
   PxU32 mCurrentColor;
   PxU32 mGpuWaveEpoch;
-  PxU32 mKernelLabCaptureTicket;
   RigidAsyncPhase mRigidPhase;
   bool mRigidStarted;
   bool mRigidAsync;
@@ -377,12 +375,11 @@ public:
   AvbdSolveIslandTask *createSolveTask(AvbdDynamicsContext &context,
                                        AvbdSolver &solver,
                                        const AvbdIslandBatch &batch, PxReal dt,
-                                       const PxVec3 &gravity,
-                                       PxU32 kernelLabCaptureTicket) {
+                                       const PxVec3 &gravity) {
     void *mem = mAllocator.allocate(sizeof(AvbdSolveIslandTask),
                                     "AvbdSolveIslandTask", __FILE__, __LINE__);
     return PX_PLACEMENT_NEW(mem, AvbdSolveIslandTask)(
-        context, solver, batch, dt, gravity, kernelLabCaptureTicket);
+        context, solver, batch, dt, gravity);
   }
 
   AvbdRigidBodyRangeTask *createRigidBodyRangeTask(

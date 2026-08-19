@@ -67,7 +67,6 @@ SET(LLDYNAMICS_SHARED
 	${LLDYNAMICS_BASE_DIR}/shared/DyCpuGpu1dConstraint.h
     ${LLDYNAMICS_BASE_DIR}/shared/DyCpuGpuBiasCoefficient.h
 	${LLDYNAMICS_BASE_DIR}/shared/DyAvbdOwnerWaveContract.h
-	${LLDYNAMICS_BASE_DIR}/shared/DyAvbdKernelLabTraceContract.h
 )
 SOURCE_GROUP("shared" FILES ${LLDYNAMICS_SHARED})
 
@@ -84,8 +83,6 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuIsa.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuProducer.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdCpuProducer.h
-	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelLabCapture.cpp
-	${LLDYNAMICS_BASE_DIR}/src/DyAvbdKernelLabCapture.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdGpuWaveBridge.h
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.cpp
 	${LLDYNAMICS_BASE_DIR}/src/DyAvbdDynamics.h

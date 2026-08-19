@@ -48,9 +48,6 @@
 # Maintainer-local AVBD optimization labs and numbered iteration probes.
 # These are useful while tuning a candidate, but are not product build,
 # regression, or release assets and must not grow the main repository.
-/tools/avbd_kernel_lab/
-/tools/avbd_kernel_lab_source_gate.py
-/tools/avbd_kernel_lab_trace_roundtrip_gate.py
 /tools/avbd_p[0-9]*
 /tools/p[0-9]*
 /tools/run_avbd_p[0-9]*

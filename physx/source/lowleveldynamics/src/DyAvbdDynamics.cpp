@@ -31,7 +31,6 @@
 #include "DyArticulationTendon.h"
 #include "DyAvbdBodyConversion.h"
 #include "DyAvbdConstraint.h"
-#include "DyAvbdKernelLabCapture.h"
 #include "DyAvbdTasks.h"
 #include "DyConstraint.h"
 #include "DyConstraintPrep.h"
@@ -209,8 +208,6 @@ AvbdDynamicsContext::AvbdDynamicsContext(
       mAvbdEnableEarlyStop(avbdEnableEarlyStop),
       mScratchAdapter(scratchAllocator), mAllocatorAdapter(allocator),
       mTaskManager(taskManager),
-      mKernelLabCapture(nullptr),
-      mKernelLabCaptureReservationSubmitted(false),
       mTaskGraphSerialMode(
           isEnvFlagEnabled("PHYSX_AVBD_TASKGRAPH_SERIAL")),
       mFrictionEveryIteration(
@@ -223,8 +220,6 @@ AvbdDynamicsContext::AvbdDynamicsContext(
   // Tasks need explicit deallocation, which ScratchAllocatorAdapter doesn't
   // provide.
   mTaskFactory = new AvbdTaskFactory(mTaskManager, mAllocatorAdapter);
-  if (isEnvFlagEnabled("PHYSX_AVBD_KERNEL_LAB_CAPTURE"))
-    mKernelLabCapture = new AvbdKernelLabCapture();
 
   // Initialize lambda warm-starting cache
   mEnableLambdaWarmStart = true;
@@ -336,8 +331,6 @@ void AvbdDynamicsContext::ensureBodyVelocityHistoryCapacity(
 }
 
 AvbdDynamicsContext::~AvbdDynamicsContext() {
-  flushKernelLabCapture();
-  delete mKernelLabCapture;
   delete mTaskFactory;
 
   if (mSolverInitialized) {
@@ -358,41 +351,6 @@ void AvbdDynamicsContext::destroyTask(AvbdTask *task) {
   if (mTaskFactory) {
     mTaskFactory->destroyTask(task);
   }
-}
-
-PxU32 AvbdDynamicsContext::reserveKernelLabCapture(PxU32 islandIndex,
-                                                    PxU32 bodyCount,
-                                                    PxU32 contactCount) {
-  if (!mKernelLabCapture || mKernelLabCaptureReservationSubmitted)
-    return AvbdKernelLabCapture::eINVALID_TICKET;
-  const PxU32 ticket =
-      mKernelLabCapture->reserve(islandIndex, bodyCount, contactCount);
-  if (ticket != AvbdKernelLabCapture::eINVALID_TICKET)
-    mKernelLabCaptureReservationSubmitted = true;
-  return ticket;
-}
-
-void AvbdDynamicsContext::captureKernelLabCpuColorPreRange(
-    PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 islandIndex,
-    PxU32 colorIndex, const PxU32 *ownerOrder, PxU32 begin, PxU32 end,
-    PxU32 workerCount, PxU32 taskGrainBodies, PxU32 taskCount,
-    PxU32 taskChunkBodies) {
-  if (mKernelLabCapture && ticket != AvbdKernelLabCapture::eINVALID_TICKET)
-    mKernelLabCapture->capturePreRange(
-        ticket, context, mSolver.getConfig(), islandIndex, colorIndex,
-        ownerOrder, begin, end, workerCount, taskGrainBodies, taskCount,
-        taskChunkBodies);
-}
-
-void AvbdDynamicsContext::captureKernelLabCpuColorPostRange(
-    PxU32 ticket, const AvbdRigidSolveContext &context, PxU32 colorIndex) {
-  if (mKernelLabCapture && ticket != AvbdKernelLabCapture::eINVALID_TICKET)
-    mKernelLabCapture->capturePostRange(ticket, context, colorIndex);
-}
-
-void AvbdDynamicsContext::flushKernelLabCapture() {
-  if (mKernelLabCapture)
-    mKernelLabCapture->flush();
 }
 
 //=============================================================================
@@ -2469,45 +2427,8 @@ void AvbdDynamicsContext::update(
       batch.d6Map.release(alloc);
       batch.gearMap.release(alloc);
     } else {
-      // Reservation is serial and precedes task submission.  It must also
-      // mirror the coarse CPU-color admission below: a wildcard capture must
-      // not claim the one global sink for a small/joint/ordered island which
-      // can never visit submitRigidColor().  The 512-body threshold mirrors
-      // AvbdRigidExecutionPolicy::eMIN_PARALLEL_ISLAND_BODIES in
-      // DyAvbdTasks.cpp; that policy is task-local, whereas reservation has
-      // to happen here before the task exists.
-      const AvbdSolverConfig &kernelLabConfig = mSolver.getConfig();
-      AvbdRigidGpuWaveBackend *kernelLabGpuBackend =
-          getRigidGpuWaveBackend();
-      // Deferred contact preparation materializes its rows inside the island
-      // task.  Its frozen capacity is nevertheless known on this serial
-      // thread, and is the only safe bound available for pre-reserving the
-      // capture arrays before workers begin.
-      const PxU32 kernelLabContactCapacity = batch.numConstraints > 0
-          ? batch.numConstraints
-          : batch.deferredContactPrep.constraintCapacity;
-      const bool kernelLabCpuCandidate =
-          !mTaskGraphSerialMode && batch.numBodies >= 512u &&
-          kernelLabContactCapacity > 0 && !batch.hasArticulationBodies &&
-          batch.numD6 == 0 && batch.numGear == 0 &&
-          batch.numSoftParticles == 0 && batch.numSoftBodies == 0 &&
-          batch.numSoftContacts == 0 && mTaskManager &&
-          mTaskManager->getCpuDispatcher() &&
-          mTaskManager->getCpuDispatcher()->getWorkerCount() >= 2 &&
-          kernelLabConfig.enableParallelization &&
-          kernelLabConfig.enableLocal6x6Solve &&
-          !kernelLabConfig.requiresOrderedBackend() &&
-          !(kernelLabGpuBackend && kernelLabGpuBackend->isAvailable());
-      // The selected task later copies into this fixed-capacity sink at its
-      // color barrier; no allocation or file I/O is permitted in the solve
-      // range itself.
-      const PxU32 kernelLabCaptureTicket = kernelLabCpuCandidate
-          ? reserveKernelLabCapture(batch.islandStart, batch.numBodies,
-                                    kernelLabContactCapacity)
-          : AvbdKernelLabCapture::eINVALID_TICKET;
       AvbdSolveIslandTask *solveTask =
-          mTaskFactory->createSolveTask(
-              *this, mSolver, batch, dt, gravity, kernelLabCaptureTicket);
+          mTaskFactory->createSolveTask(*this, mSolver, batch, dt, gravity);
       solveTask->setContinuation(coordTask);
       solveTask->removeReference();
     }
@@ -3557,10 +3478,6 @@ void AvbdDynamicsContext::prepareContacts(const IG::IslandSim &islandSim) {
 }
 
 void AvbdDynamicsContext::mergeResults() {
-  // The opt-in kernel-lab capture only writes after every task has joined.
-  // Its worker-side hook has already deep-copied the selected prepared range.
-  flushKernelLabCapture();
-
   // Clean up any heap fallback allocations from this frame
   // No mutex needed since mergeResults() is called from a single thread
   // context

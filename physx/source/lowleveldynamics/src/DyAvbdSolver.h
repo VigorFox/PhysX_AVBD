@@ -43,10 +43,6 @@ namespace Dy {
 class FeatherstoneArticulation;
 class AvbdRigidBodyRangeTask;
 class AvbdRigidDualRangeTask;
-// Test-owned accessor for the standalone AVBD kernel lab.  The friend does
-// not change the solver ABI; it lets the lab invoke the existing contact-only
-// scalar authority without copying its local 6x6 assembly mathematics.
-class AvbdKernelLabSolverAccess;
 
 struct AvbdOgcPairTrustRegionContext {
   AvbdOgcPairState *pairStates;
@@ -508,7 +504,6 @@ private:
   friend class AvbdRigidBodyRangeTask;
   friend class AvbdRigidDualRangeTask;
   friend class AvbdSolveIslandTask;
-  friend class AvbdKernelLabSolverAccess;
 
   //-------------------------------------------------------------------------
   // Algorithm Stages

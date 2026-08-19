@@ -34,11 +34,6 @@
 
   PxTaskManager *mTaskManager;   //!< Task manager for parallel execution
   AvbdTaskFactory *mTaskFactory; //!< Factory for creating AVBD tasks
-  AvbdKernelLabCapture *mKernelLabCapture; //!< Opt-in lab-only capture sink
-  // Serial update owns this latch. Once a task has been given the sole sink
-  // ticket, later island submissions must not read the sink state while that
-  // task's worker may be publishing its capture.
-  bool mKernelLabCaptureReservationSubmitted;
   // P2 only supports the Scene PxTaskManager path. `true` is the explicit
   // serial reference mode selected by PHYSX_AVBD_TASKGRAPH_SERIAL.
   bool mTaskGraphSerialMode;

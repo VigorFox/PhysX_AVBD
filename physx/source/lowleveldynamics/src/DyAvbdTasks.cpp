@@ -377,23 +377,12 @@ void AvbdSolveIslandTask::submitRigidColor() {
       ? count
       : (count + taskCount - 1u) / taskCount;
 
-  // This is a lab-only, opt-in parent-side capture point.  The color plan and
-  // prepared CSR are real production data, while no body in this color has
-  // begun solving yet.  The context reserved all storage before task
-  // submission; this call only validates and copies, and is unreachable from
-  // the GPU owner-wave path.
-  mContext.captureKernelLabCpuColorPreRange(
-      mKernelLabCaptureTicket, mRigidContext, mBatch.islandStart,
-      mCurrentColor, mRigidContext.bodyColorBodies.begin(), begin, end,
-      workers, targetBodiesPerTask, taskCount, chunk);
   if (count <= targetBodiesPerTask) {
     AvbdRigidSolveIterationState &state = mRigidContext.iteration;
     mSolver.solveRigidBodyRange(
         state.bodies, state.numBodies, state.contacts, state.numContacts,
         state.dt, mRigidContext.invDt2, state.contactMap,
         mRigidContext.bodyColorBodies.begin(), begin, end);
-    mContext.captureKernelLabCpuColorPostRange(mKernelLabCaptureTicket,
-                                               mRigidContext, mCurrentColor);
     mRigidWaiting = false;
     return;
   }
@@ -541,9 +530,6 @@ void AvbdSolveIslandTask::run() {
       mRigidContext.iteration.parallelDualComplete = true;
       mRigidPhase = eRIGID_POST_DUAL;
     } else if (mRigidUsesBodyColors) {
-      mContext.captureKernelLabCpuColorPostRange(mKernelLabCaptureTicket,
-                                                 mRigidContext,
-                                                 mCurrentColor);
       ++mCurrentColor;
     } else {
       ++mCurrentWave;
