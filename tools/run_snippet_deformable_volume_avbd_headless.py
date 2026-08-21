@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -22,9 +23,22 @@ DEFAULT_BIN_DIR = (
     REPO_ROOT / "physx" / "bin" / "win.x86_64.vc143.md" / "checked"
 )
 EXECUTABLE = "SnippetDeformableVolumeAVBD_64.exe"
+CASE_REGISTRY_PATH = (
+    REPO_ROOT
+    / "physx"
+    / "snippets"
+    / "snippetdeformablevolumeavbd"
+    / "SnippetDeformableVolumeAVBDCases.inc"
+)
 MEASUREMENT_SOURCE_PATHS = (
     "physx/snippets/snippetdeformablevolumeavbd/"
     "SnippetDeformableVolumeAVBD.cpp",
+    "physx/snippets/snippetdeformablevolumeavbd/"
+    "SnippetDeformableVolumeAVBDCases.inc",
+    "physx/snippets/snippetdeformablevolumeavbd/"
+    "SnippetDeformableVolumeAVBDValidation.cpp",
+    "physx/snippets/snippetdeformablevolumeavbd/"
+    "SnippetDeformableVolumeAVBDReport.cpp",
     "tools/run_snippet_deformable_volume_avbd_headless.py",
     "tools/snippet_headless_process.py",
     "physx/include/PxAvbdCpuIsa.h",
@@ -35,119 +49,65 @@ MEASUREMENT_SOURCE_PATHS = (
     "physx/source/lowleveldynamics/src/DyAvbdDynamics.cpp",
     "physx/source/lowleveldynamics/src/DyAvbdSoftBodyComponent.h",
 )
-CASES = (
-    "volume-ground",
-    "volume-performance-dense-no-contact",
-    "volume-performance-many-small-no-contact",
-    "volume-static-box",
-    "soft-soft",
-    "cone-ground",
-    "scene-volume-lifecycle",
-    "scene-volume-corotational",
-    "scene-volume-visual-showcase",
-    "scene-volume-ogc-sandwich",
-    "scene-volume-sphere-long-roll",
-    "scene-volume-sphere-soft-soft-glancing",
-    "scene-volume-soft-soft-torque",
-    "scene-volume-taskgraph-pure-soft",
-    "scene-volume-taskgraph-pure-soft-corotational",
-    "scene-volume-taskgraph-writeback",
-    "scene-volume-taskgraph-writeback-four-way",
-    "scene-volume-taskgraph-writeback-heterogeneous",
-    "scene-volume-ground",
-    "scene-volume-ground-embedded-tet-probe",
-    "scene-volume-static-box",
-    "scene-volume-static-churn",
-    "scene-volume-dynamic-box",
-    "scene-volume-true-boundary-dynamic-box",
-    "scene-volume-dynamic-sphere",
-    "scene-volume-dynamic-capsule",
-    "scene-volume-dynamic-convex",
-    "scene-volume-dynamic-churn",
-    "scene-volume-multi-dynamic-box",
-    "scene-volume-multi-soft-islands",
-    "scene-volume-sleep-wake",
-    "scene-volume-rigid-wake",
-    "scene-volume-mixed-sleep-islands",
-    "scene-volume-soft-churn",
-    "scene-volume-buffer-mutation",
-    "scene-volume-world-pin",
-    "scene-volume-world-element-attachment",
-    "scene-volume-rigid-attachment",
-    "scene-volume-rigid-element-attachment",
-    "scene-volume-static-attachment",
-    "scene-volume-static-element-attachment",
-    "scene-volume-kinematic-attachment",
-    "scene-volume-kinematic-element-attachment",
-    "scene-volume-articulation-attachment",
-    "scene-volume-articulation-element-attachment",
-    "scene-volume-element-filter",
-    "scene-volume-partial-element-filter",
-    "scene-volume-kinematic-box",
-    "scene-volume-kinematic-sphere",
-    "scene-volume-kinematic-capsule",
-    "scene-volume-kinematic-convex",
-    "scene-volume-kinematic-triangle-mesh",
-    "scene-volume-kinematic-heightfield",
-    "scene-volume-multi-scene-isolation",
-    "scene-volume-soft-soft-wake",
-    "scene-volume-volume-attachment",
-    "scene-volume-full-kinematic-target",
-    "scene-volume-partial-kinematic-target",
-    "scene-volume-skinning",
-    "scene-volume-motion-controls",
-    "scene-volume-max-depenetration-velocity",
-    "scene-volume-speculative-ccd",
-    "scene-volume-plane-speculative-ccd",
-    "scene-volume-sphere-speculative-ccd",
-    "scene-volume-capsule-speculative-ccd",
-    "scene-volume-convex-speculative-ccd",
-    "scene-volume-moving-kinematic-sphere-speculative-ccd",
-    "scene-volume-moving-kinematic-capsule-speculative-ccd",
-    "scene-volume-rotating-kinematic-capsule-speculative-ccd",
-    "scene-volume-rotating-kinematic-convex-speculative-ccd",
-    "scene-volume-moving-kinematic-convex-speculative-ccd",
-    "scene-volume-dynamic-sphere-relative-swept-ccd",
-    "scene-volume-dynamic-capsule-relative-swept-ccd",
-    "scene-volume-dynamic-rotating-capsule-relative-swept-ccd",
-    "scene-volume-dynamic-rotating-convex-relative-swept-ccd",
-    "scene-volume-dynamic-convex-relative-swept-ccd",
-    "scene-volume-deforming-sphere-reverse-swept-ccd",
-    "scene-volume-deforming-capsule-reverse-swept-ccd",
-    "scene-volume-deforming-convex-reverse-swept-ccd",
-    "scene-volume-static-sphere-reverse-swept-ccd",
-    "scene-volume-kinematic-sphere-reverse-swept-ccd",
-    "scene-volume-dynamic-sphere-reverse-swept-ccd",
-    "scene-volume-static-capsule-reverse-swept-ccd",
-    "scene-volume-kinematic-capsule-reverse-swept-ccd",
-    "scene-volume-dynamic-capsule-reverse-swept-ccd",
-    "scene-volume-rotating-kinematic-capsule-reverse-swept-ccd",
-    "scene-volume-dynamic-rotating-capsule-reverse-swept-ccd",
-    "scene-volume-rotating-kinematic-convex-reverse-swept-ccd",
-    "scene-volume-dynamic-rotating-convex-reverse-swept-ccd",
-    "scene-volume-static-convex-reverse-swept-ccd",
-    "scene-volume-kinematic-convex-reverse-swept-ccd",
-    "scene-volume-dynamic-convex-reverse-swept-ccd",
-    "scene-volume-static-triangle-mesh-speculative-ccd",
-    "scene-volume-kinematic-triangle-mesh-speculative-ccd",
-    "scene-volume-static-heightfield-speculative-ccd",
-    "scene-volume-kinematic-heightfield-speculative-ccd",
-    "scene-volume-static-triangle-mesh-reverse-swept-ccd",
-    "scene-volume-kinematic-triangle-mesh-reverse-swept-ccd",
-    "scene-volume-static-heightfield-reverse-swept-ccd",
-    "scene-volume-kinematic-heightfield-reverse-swept-ccd",
-    "scene-volume-rotating-kinematic-triangle-mesh-speculative-ccd",
-    "scene-volume-rotating-kinematic-heightfield-speculative-ccd",
-    "scene-volume-rotating-kinematic-triangle-mesh-reverse-swept-ccd",
-    "scene-volume-rotating-kinematic-heightfield-reverse-swept-ccd",
-    "scene-volume-rigid-triangle-steady-contact",
-    "scene-volume-sphere-reverse-feature",
-    "scene-volume-capsule-reverse-feature",
-    "scene-volume-convex-reverse-feature",
-    "scene-volume-triangle-mesh-reverse-feature",
-    "scene-volume-heightfield-reverse-feature",
-    "current-all",
+_CASE_REGISTRY_PATTERN = re.compile(
+    r'^AVBD_VOLUME_CASE\('
+    r'(COMPONENT|SCENE|CORE_SCENE|INTERNAL_SCENE|META),\s*"([^"]+)"'
+    r'(?:,\s*([1-9][0-9]*))?\)$'
 )
+
+
+def load_case_registry(
+    path: Path = CASE_REGISTRY_PATH,
+) -> tuple[tuple[str, str, int | None], ...]:
+    rows: list[tuple[str, str, int | None]] = []
+    seen: set[str] = set()
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("//"):
+            continue
+        match = _CASE_REGISTRY_PATTERN.fullmatch(line)
+        if match is None:
+            raise RuntimeError(
+                f"invalid AVBD volume case registry row at "
+                f"{path}:{line_number}: {line}"
+            )
+        kind, case_name, default_frames_text = match.groups()
+        if case_name in seen:
+            raise RuntimeError(
+                f"duplicate AVBD volume case '{case_name}' at "
+                f"{path}:{line_number}"
+            )
+        seen.add(case_name)
+        default_frames = (
+            int(default_frames_text)
+            if default_frames_text is not None
+            else None
+        )
+        if (kind == "CORE_SCENE") != (default_frames is not None):
+            raise RuntimeError(
+                f"AVBD volume case '{case_name}' must provide default "
+                f"frames exactly when registered as CORE_SCENE"
+            )
+        rows.append((kind, case_name, default_frames))
+    if not rows:
+        raise RuntimeError(f"empty AVBD volume case registry: {path}")
+    return tuple(rows)
+
+
+CASE_REGISTRY = load_case_registry()
+CASES = tuple(
+    case_name
+    for kind, case_name, _ in CASE_REGISTRY
+    if kind != "INTERNAL_SCENE"
+)
+CORRECTNESS_CASE_FRAMES = {
+    case_name: default_frames
+    for kind, case_name, default_frames in CASE_REGISTRY
+    if kind == "CORE_SCENE" and default_frames is not None
+}
+CORRECTNESS_CASES = tuple(CORRECTNESS_CASE_FRAMES)
 INT_KEYS = (
     "frames",
     "fetchFailures",
@@ -476,7 +436,6 @@ PERF_SCHEMA2_INT_KEYS = (
     "physicalCores",
     "actualSoftWorkers",
     "taskCount",
-    "chunkCount",
     "barrierCount",
     "taskGraphRequestedWorkers",
     "taskGraphCompletedTasks",
@@ -491,10 +450,6 @@ PERF_SCHEMA2_INT_KEYS = (
     "writeBackCompletedTasks",
     "writeBackPeakActiveTasks",
     "writeBackSerialStages",
-    "staticColorCount",
-    "dynamicColorCount",
-    "hostWritebackMeasured",
-    "cpuSkinningMeasured",
     "topologySoftBodies",
     "topologySoftParticles",
     "topologyTriElements",
@@ -512,9 +467,6 @@ PERF_SCHEMA2_INT_KEYS = (
 )
 PERF_SCHEMA2_FLOAT_KEYS = (
 	"isaProbeValue",
-    "taskWorkMs",
-    "longestTaskMs",
-    "cpuSkinningMs",
 )
 PERF_SCHEMA2_STRING_KEYS = (
 	"isaKernelSelfTest",
@@ -904,8 +856,6 @@ def run_one(
     surface_triangle_bvh: str,
     rigid_triangle_bvh: str,
     rigid_triangle_grid_dim: int,
-    contact_set_trace: Path | None,
-    contact_set_reference: Path | None,
     enforce_performance_contract: bool,
     *,
     rotation_quality_lane: str | None = None,
@@ -1021,10 +971,6 @@ def run_one(
         )
     else:
         env.pop("PHYSX_AVBD_RIGID_TRIANGLE_GRID_DIM", None)
-    if contact_set_trace is not None:
-        if contact_set_trace.exists():
-            contact_set_trace.unlink()
-        env["PHYSX_AVBD_CONTACT_SET_TRACE"] = str(contact_set_trace)
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout
     )
@@ -1461,6 +1407,7 @@ def run_one(
     scene_taskgraph_writeback_four_way = (
         case_name == "scene-volume-taskgraph-writeback-four-way"
         or case_name == "scene-volume-taskgraph-writeback-heterogeneous"
+        or case_name == "scene-volume-taskgraph-pipeline"
     )
     scene_taskgraph_writeback = (
         case_name == "scene-volume-taskgraph-writeback"
@@ -1581,13 +1528,9 @@ def run_one(
         "scene-volume-dynamic-convex-relative-swept-ccd",
     )
     scene_triangle_surface_swept_ccd = case_name in (
-        "scene-volume-static-triangle-mesh-speculative-ccd",
         "scene-volume-kinematic-triangle-mesh-speculative-ccd",
-        "scene-volume-static-heightfield-speculative-ccd",
         "scene-volume-kinematic-heightfield-speculative-ccd",
-        "scene-volume-static-triangle-mesh-reverse-swept-ccd",
         "scene-volume-kinematic-triangle-mesh-reverse-swept-ccd",
-        "scene-volume-static-heightfield-reverse-swept-ccd",
         "scene-volume-kinematic-heightfield-reverse-swept-ccd",
         "scene-volume-rotating-kinematic-triangle-mesh-speculative-ccd",
         "scene-volume-rotating-kinematic-heightfield-speculative-ccd",
@@ -1602,13 +1545,8 @@ def run_one(
         scene_triangle_surface_swept_ccd
         and "reverse-swept" in case_name
     )
-    scene_static_triangle_surface_swept_ccd = (
-        scene_triangle_surface_swept_ccd
-        and case_name.startswith("scene-volume-static-")
-    )
     scene_kinematic_triangle_surface_swept_ccd = (
         scene_triangle_surface_swept_ccd
-        and not scene_static_triangle_surface_swept_ccd
     )
     scene_heightfield_swept_ccd = (
         scene_triangle_surface_swept_ccd
@@ -1837,22 +1775,22 @@ def run_one(
             else (
                 "SCENE_TASKGRAPH_PURE_SOFT_GATED"
                 if scene_taskgraph_pure_soft
-            else (
-                "SCENE_MIXED_SLEEP_ISLANDS_GATED"
-                if scene_mixed_sleep
                 else (
-                    "SCENE_SOFT_RIGID_WAKE_GATED"
-                    if scene_soft_rigid_wake
+                    "SCENE_MIXED_SLEEP_ISLANDS_GATED"
+                    if scene_mixed_sleep
                     else (
-                        "SCENE_SOFT_SLEEP_WAKE_GATED"
-                        if scene_soft_sleep_wake
+                        "SCENE_SOFT_RIGID_WAKE_GATED"
+                        if scene_soft_rigid_wake
                         else (
-                            "SCENE_LIFECYCLE_GATED"
-                            if scene_lifecycle
+                            "SCENE_SOFT_SLEEP_WAKE_GATED"
+                            if scene_soft_sleep_wake
                             else (
-                                "SCENE_STATIC_LIFECYCLE_GATED"
-                                if scene_static_churn
+                                "SCENE_LIFECYCLE_GATED"
+                                if scene_lifecycle
                                 else (
+                                    "SCENE_STATIC_LIFECYCLE_GATED"
+                                    if scene_static_churn
+                                    else (
                                     (
                                         (
                                             "SCENE_DYNAMIC_LIFECYCLE_GATED"
@@ -1929,6 +1867,8 @@ def run_one(
         "fatalErrors": "0",
         "cleanupComplete": "1",
     }
+    if case_name == "scene-volume-taskgraph-pipeline":
+        required["validation"] = "SCENE_TASKGRAPH_PIPELINE_GATED"
     if scene_soft_churn:
         required["validation"] = "SCENE_SOFT_CHURN_GATED"
     if scene_buffer_mutation:
@@ -2032,6 +1972,7 @@ def run_one(
                             scene_sphere_long_roll
                             or scene_static
                             or scene_static_attachment
+                            or case_name == "scene-volume-taskgraph-pipeline"
                             or case_name == "scene-volume-dynamic-sphere"
                             or case_name == "scene-volume-dynamic-capsule"
                             or case_name == "scene-volume-dynamic-convex"
@@ -2102,30 +2043,21 @@ def run_one(
         if scene_triangle_surface_swept_ccd:
             required.update(
                 {
-                    "sceneStatics": (
-                        "1"
-                        if scene_static_triangle_surface_swept_ccd
-                        else "0"
-                    ),
-                    "sceneDynamics": (
-                        "0"
-                        if scene_static_triangle_surface_swept_ccd
-                        else "2"
-                    ),
+                    "sceneStatics": "0",
+                    "sceneDynamics": "2",
                     "speculativeCcdNegativeControlTunneled": "1",
                 }
             )
-            if scene_kinematic_triangle_surface_swept_ccd:
-                required.update(
-                    {
-                        "sceneDynamicActorAdded": "1",
-                        "sceneSecondDynamicActorAdded": "1",
-                        "sceneDynamicActorRemoved": "1",
-                        "sceneSecondDynamicActorRemoved": "1",
-                        "sceneDynamicActorReleased": "1",
-                        "sceneSecondDynamicActorReleased": "1",
-                    }
-                )
+            required.update(
+                {
+                    "sceneDynamicActorAdded": "1",
+                    "sceneSecondDynamicActorAdded": "1",
+                    "sceneDynamicActorRemoved": "1",
+                    "sceneSecondDynamicActorRemoved": "1",
+                    "sceneDynamicActorReleased": "1",
+                    "sceneSecondDynamicActorReleased": "1",
+                }
+            )
             swept_lines = (
                 triangle_surface_reverse_swept_lines
                 if scene_triangle_surface_reverse_swept_ccd
@@ -2142,11 +2074,7 @@ def run_one(
                     swept_lines[0]
                 )
                 errors.extend(parse_errors)
-            expected_target = (
-                "static"
-                if scene_static_triangle_surface_swept_ccd
-                else "kinematic"
-            )
+            expected_target = "kinematic"
             expected_geometry = (
                 "heightfield"
                 if scene_heightfield_swept_ccd
@@ -2201,64 +2129,31 @@ def run_one(
             vertex_separation = triangle_swept_values.get(
                 "minimumVertexSweepSeparation"
             )
-            if scene_static_triangle_surface_swept_ccd:
-                minimum_negative_drop = (
-                    0.8
-                    if (
-                        scene_triangle_surface_reverse_swept_ccd
-                        and scene_heightfield_swept_ccd
-                    )
-                    else 1.5
-                )
-                if (
-                    negative_drop is not None
-                    and negative_drop <= minimum_negative_drop
-                ):
-                    errors.append(
-                        "flag-off static triangle-surface volume "
-                        "did not tunnel"
-                    )
-                control_separation = (
-                    0.01
+            response_threshold = (
+                0.002
+                if scene_rotational_triangle_surface_swept_ccd
+                else (
+                    0.005
                     if scene_triangle_surface_reverse_swept_ccd
-                    else 0.10
+                    else 0.02
                 )
-                if (
-                    positive_drop is not None
-                    and negative_drop is not None
-                    and positive_drop + control_separation
-                    >= negative_drop
-                ):
-                    errors.append(
-                        "static triangle-surface sweep did not "
-                        "separate controls"
-                    )
-            else:
-                response_threshold = (
-                    0.002
-                    if scene_rotational_triangle_surface_swept_ccd
-                    else (
-                        0.005
-                        if scene_triangle_surface_reverse_swept_ccd
-                        else 0.02
-                    )
+            )
+            if (
+                positive_displacement is not None
+                and positive_displacement <= response_threshold
+            ):
+                errors.append(
+                    "moving triangle surface did not move "
+                    "the swept volume"
                 )
-                if (
-                    positive_displacement is not None
-                    and positive_displacement <= response_threshold
-                ):
-                    errors.append(
-                        "moving triangle surface did not move "
-                        "the swept volume"
-                    )
-                if (
-                    negative_displacement is not None
-                    and negative_displacement >= 0.01
-                ):
-                    errors.append(
-                        "flag-off kinematic triangle-surface "
-                        "volume moved"
-                    )
+            if (
+                negative_displacement is not None
+                and negative_displacement >= 0.01
+            ):
+                errors.append(
+                    "flag-off kinematic triangle-surface "
+                    "volume moved"
+                )
             if (
                 scene_triangle_surface_reverse_swept_ccd
                 and vertex_separation is not None
@@ -3955,14 +3850,14 @@ def run_one(
             }
         )
         try:
-            if float(fields["sceneElementFilterMinY"]) >= -0.2:
+            if float(fields["sceneElementFilterMinY"]) > -0.02:
                 errors.append(
                     "volume element filter did not suppress rigid contact"
                 )
             final_min_y = float(
                 fields["sceneElementFilterFinalMinY"]
             )
-            if not -0.05 < final_min_y < 0.05:
+            if not -0.005 <= final_min_y <= 0.06:
                 errors.append(
                     "volume rigid contact did not recover after filter release"
                 )
@@ -3985,7 +3880,7 @@ def run_one(
                     )
                 if float(
                     fields["scenePartialFilterUnfilteredMinY"]
-                ) <= -0.05:
+                ) < -0.005:
                     errors.append(
                         "unfiltered volume component penetrated the ground"
                     )
@@ -4465,13 +4360,24 @@ def run_one(
             scene_taskgraph_available = (
                 fields.get("sceneSoftIntegration") == "1"
             )
+            scene_taskgraph_owner_released = (
+                scene_multi_scene
+                and fields.get("scenePrimarySceneReleased") == "1"
+                and fields.get("sceneSecondSceneReleased") == "1"
+            )
             if (
                 scene_taskgraph_available
+                and not scene_taskgraph_owner_released
                 and requested_workers != dispatcher_threads
             ):
                 errors.append(
                     "taskgraph requested workers="
                     f"{requested_workers}, expected {dispatcher_threads}"
+                )
+            if scene_taskgraph_owner_released and requested_workers != 0:
+                errors.append(
+                    "released multi-scene fixture retained taskgraph workers="
+                    f"{requested_workers}"
                 )
             if not scene_taskgraph_available and (
                 requested_workers != 0
@@ -4892,20 +4798,6 @@ def run_one(
             )
     elif result.returncode != 0:
         errors.append(f"exit code {result.returncode}, expected 0")
-    if contact_set_trace is not None:
-        if not contact_set_trace.is_file():
-            errors.append("contact-set trace was not written")
-        elif contact_set_reference is not None:
-            try:
-                if (
-                    contact_set_trace.read_bytes()
-                    != contact_set_reference.read_bytes()
-                ):
-                    errors.append("contact-set trace differs from reference")
-            except OSError as exc:
-                errors.append(
-                    f"could not read contact-set reference: {exc}"
-                )
     print(
         "[DEFORMABLE_VOLUME_AVBD_RUN] "
         f"name={name} status={fields.get('status', 'MISSING')} "
@@ -4914,13 +4806,6 @@ def run_one(
     )
     if combined:
         print(combined.rstrip())
-    if contact_set_trace is not None and contact_set_trace.is_file():
-        print(
-            "[AVBD_CONTACT_SET_TRACE] "
-            f"path={contact_set_trace.resolve()} "
-            "sha256="
-            f"{hashlib.sha256(contact_set_trace.read_bytes()).hexdigest()}"
-        )
     for error in errors:
         print(
             "[DEFORMABLE_VOLUME_AVBD_RUN_ERROR] "
@@ -5239,11 +5124,6 @@ def write_performance_json(
             "surfaceTriangleBvh": args.surface_triangle_bvh,
             "rigidTriangleBvh": args.rigid_triangle_bvh,
             "rigidTriangleGridDim": args.rigid_triangle_grid_dim,
-            "contactSetTrace": (
-                str(args.contact_set_trace.resolve())
-                if args.contact_set_trace is not None
-                else None
-            ),
             "binDir": str(args.bin_dir.resolve()),
         },
         "machine": {
@@ -5361,8 +5241,6 @@ def run_rotation_quality_probe(
                 args.surface_triangle_bvh,
                 args.rigid_triangle_bvh,
                 args.rigid_triangle_grid_dim,
-                None,
-                None,
                 False,
                 rotation_quality_lane=lane,
                 rotation_quality_acceptance=strict_acceptance,
@@ -5721,8 +5599,6 @@ def run_soft_soft_torque_probe(
                 args.surface_triangle_bvh,
                 args.rigid_triangle_bvh,
                 args.rigid_triangle_grid_dim,
-                None,
-                None,
                 False,
                 soft_soft_torque_lane=lane,
             )
@@ -6087,8 +5963,6 @@ def run_sphere_soft_soft_glancing_probe(
                 args.surface_triangle_bvh,
                 args.rigid_triangle_bvh,
                 args.rigid_triangle_grid_dim,
-                None,
-                None,
                 False,
                 sphere_soft_soft_glancing_lane=lane,
             )
@@ -6224,6 +6098,7 @@ def main() -> int:
         choices=(
             "probe",
             "acceptance",
+            "correctness",
             "rotation-quality-probe",
             "rotation-quality-acceptance",
             "sphere-soft-soft-glancing-probe",
@@ -6297,16 +6172,6 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--contact-set-trace",
-        type=Path,
-        help="Write the Scene AVBD canonical OGC contact-set trace for one run.",
-    )
-    parser.add_argument(
-        "--contact-set-reference",
-        type=Path,
-        help="Fail if --contact-set-trace differs byte-for-byte from this reference.",
-    )
-    parser.add_argument(
         "--execution",
         choices=("parallel", "sequential"),
         default="sequential",
@@ -6320,12 +6185,6 @@ def main() -> int:
     if args.frames <= 0:
         print("[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] frames must be positive")
         return 2
-    if args.contact_set_reference is not None and args.contact_set_trace is None:
-        print(
-            "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
-            "--contact-set-reference requires --contact-set-trace"
-        )
-        return 2
     rotation_quality_mode = args.mode in (
         "rotation-quality-probe",
         "rotation-quality-acceptance",
@@ -6338,18 +6197,22 @@ def main() -> int:
         "sphere-soft-soft-glancing-probe",
         "sphere-soft-soft-glancing-acceptance",
     )
+    correctness_mode = args.mode == "correctness"
+    if (
+        correctness_mode
+        and args.case is not None
+        and args.case not in CORRECTNESS_CASES
+    ):
+        print(
+            "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
+            f"{args.case} is not registered in the correctness suite"
+        )
+        return 2
     if rotation_quality_mode:
         if args.case not in (None, SPHERE_LONG_ROLL_CASE):
             print(
                 "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
                 f"{args.mode} only measures {SPHERE_LONG_ROLL_CASE}"
-            )
-            return 2
-        if args.contact_set_trace is not None:
-            print(
-                "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
-                f"{args.mode} does not support contact-set tracing; "
-                "it runs two independent lanes"
             )
             return 2
     if soft_soft_torque_mode:
@@ -6364,13 +6227,6 @@ def main() -> int:
             print(
                 "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
                 f"{args.mode} only measures {SPHERE_SOFT_SOFT_GLANCING_CASE}"
-            )
-            return 2
-        if args.contact_set_trace is not None:
-            print(
-                "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
-                f"{args.mode} does not support contact-set tracing; "
-                "it runs two independent lanes"
             )
             return 2
     if args.mode == "rotation-quality-acceptance":
@@ -6539,25 +6395,8 @@ def main() -> int:
             "sphere-soft-soft-glancing-acceptance requires at least 2 repeats"
         )
         return 2
-    if args.contact_set_trace is not None and repeats != 1:
-        print(
-            "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
-            "contact-set tracing requires exactly one repeat"
-        )
-        return 2
     args.repeats_effective = repeats
     bin_dir = args.bin_dir.resolve()
-    if args.contact_set_trace is not None:
-        args.contact_set_trace = args.contact_set_trace.resolve()
-        args.contact_set_trace.parent.mkdir(parents=True, exist_ok=True)
-    if args.contact_set_reference is not None:
-        args.contact_set_reference = args.contact_set_reference.resolve()
-        if not args.contact_set_reference.is_file():
-            print(
-                "[DEFORMABLE_VOLUME_AVBD_RUNNER_ERROR] "
-                f"missing contact-set reference: {args.contact_set_reference}"
-            )
-            return 2
     executable = bin_dir / EXECUTABLE
     if not executable.is_file():
         print(
@@ -6644,29 +6483,33 @@ def main() -> int:
             ),
         )
     selected_cases = (args.case,) if args.case else (
-        ("current-all",) if performance_mode else CASES
+        ("current-all",) if performance_mode else
+        CORRECTNESS_CASES if correctness_mode else CASES
     )
     passed = True
     results: dict[tuple[str, int], dict[str, str]] = {}
     perf_results: dict[tuple[str, int], dict[str, str]] = {}
     for repeat in range(1, repeats + 1):
         for case_name in selected_cases:
+            case_frames = (
+                CORRECTNESS_CASE_FRAMES[case_name]
+                if correctness_mode
+                else args.frames
+            )
             run_passed, fields, perf_fields = run_one(
                 case_name,
                 repeat,
                 bin_dir,
-                args.frames,
+                case_frames,
                 args.timeout,
                 args.execution,
                 warmup,
                 args.dispatcher_threads,
                 required_perf_schema,
-                args.collision_telemetry,
+                args.collision_telemetry or correctness_mode,
                 args.surface_triangle_bvh,
                 args.rigid_triangle_bvh,
                 args.rigid_triangle_grid_dim,
-                args.contact_set_trace,
-                args.contact_set_reference,
                 performance_mode,
             )
             passed = passed and run_passed

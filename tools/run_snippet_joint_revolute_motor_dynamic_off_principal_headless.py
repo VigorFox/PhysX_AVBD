@@ -34,14 +34,14 @@ def specs_for(mode: str) -> tuple[RunSpec, ...]:
         return (RunSpec("tgs", "parallel", "PASS"),)
     if mode == "probe":
         return (
-            RunSpec("avbd", "parallel", "FAIL"),
-            RunSpec("avbd", "sequential", "FAIL"),
+            RunSpec("avbd", "parallel", "PASS"),
+            RunSpec("avbd", "sequential", "PASS"),
         )
     if mode == "baseline":
         return (
             RunSpec("tgs", "parallel", "PASS"),
-            RunSpec("avbd", "parallel", "FAIL"),
-            RunSpec("avbd", "sequential", "FAIL"),
+            RunSpec("avbd", "parallel", "PASS"),
+            RunSpec("avbd", "sequential", "PASS"),
         )
     return (
         RunSpec("tgs", "parallel", "PASS"),

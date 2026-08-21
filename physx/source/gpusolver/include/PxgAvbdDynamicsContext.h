@@ -16,7 +16,7 @@
 #define PXG_AVBD_DYNAMICS_CONTEXT_H
 
 #include "DyContext.h"
-#include "DyAvbdGpuWaveBackend.h"
+#include "avbd/backend/gpu/DyAvbdGpuWaveBackend.h"
 #include "DyAvbdOwnerWaveContract.h"
 
 namespace physx

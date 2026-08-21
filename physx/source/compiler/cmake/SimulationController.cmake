@@ -122,6 +122,46 @@ SET(SIMULATIONCONTROLLER_SOURCE
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScRigidSim.cpp
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScRigidSim.h
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScScene.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/contact/ScAvbdCollisionProxy.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/contact/ScAvbdCollisionProxyWorkspace.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/contact/ScAvbdContactDetectionView.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/contact/ScAvbdSceneContactFacade.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/lifecycle/ScAvbdSceneAttachments.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/lifecycle/ScAvbdSceneLifecycle.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdComponentFallback.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdCpuSoftScene.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdCpuSoftScene.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdSceneConstruction.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdSceneDataSync.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdSceneEntries.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdSceneStatistics.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdSceneStateTypes.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scene/ScAvbdStandaloneSolve.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdSchedulingPolicy.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdSchedulingPolicy.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdAnalyticContactKernels.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdAnalyticContactKernels.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdAnalyticContactTasks.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdComplexContactTasks.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdComplexContactTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdRigidBoxTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdRigidPrimitiveTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdTriangleSurfaceContactTasks.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdTriangleSurfaceTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdContactTasks.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdSceneScheduling.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdTaskGraphTelemetry.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/scheduling/ScAvbdWorldPlaneTaskGraph.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdIslandSelectionPlan.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdIslandSelectionPlan.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdIslandSelectionStorage.h
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdIslandSelection.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdSceneIslandPreparation.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdSceneSelectionPreparation.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdSceneSelectionFacade.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdOgcPairPlan.cpp
+	${SIMULATIONCONTROLLER_BASE_DIR}/src/avbd/selection/ScAvbdOgcPairPlan.h
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScCCD.cpp
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScShapeCore.cpp
 	${SIMULATIONCONTROLLER_BASE_DIR}/src/ScShapeInteraction.cpp

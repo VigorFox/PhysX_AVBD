@@ -2,7 +2,7 @@
 
 #include "PxgAvbdDynamicsContextImpl.h"
 #include "PxgKernelWrangler.h"
-#include "DyAvbdDynamics.h"
+#include "avbd/pipeline/DyAvbdDynamics.h"
 #include "foundation/PxAssert.h"
 #include "cudamanager/PxCudaContextManager.h"
 

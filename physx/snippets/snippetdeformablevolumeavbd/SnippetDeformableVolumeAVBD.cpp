@@ -44,16 +44,12 @@
 // No GPU or CUDA dependency -- runs entirely on the CPU.
 // ****************************************************************************
 
-#define DY_AVBD_SOFT_BODY_SCALAR_STEP_IMPLEMENTATION
-
 #include <cstdio>
 #include <cmath>
 #include "PxPhysicsAPI.h"
 #include "cooking/PxCooking.h"
-#include "DyAvbdSoftBodyComponent.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyComponent.h"
 #include "extensions/PxDeformableVolumeExt.h"
-#include "extensions/PxTetrahedronMeshExt.h"
-#include "GuIntersectionTriangleBox.h"
 
 #include "../snippetcommon/SnippetHeadless.h"
 #include "../snippetcommon/SnippetPrint.h"
@@ -62,14 +58,86 @@
 #include "../snippetdeformablevolume/MeshGenerator.h"
 
 #include "SnippetDeformableVolumeAVBD.h"
+#include "SnippetDeformableVolumeAVBDFixtures.h"
+#include "SnippetDeformableVolumeAVBDHeadless.h"
+#include "SnippetDeformableVolumeAVBDReport.h"
+#include "SnippetDeformableVolumeAVBDValidation.h"
 
-#include <cfloat>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
 using namespace physx;
 using namespace physx::Dy;
+using SnippetDeformableVolumeAVBDFixtures::createLayeredConeSurface;
+using SnippetDeformableVolumeAVBDFixtures::createSubdividedCubeSurface;
+using SnippetDeformableVolumeAVBDFixtures::isComponentDenseNoContactCase;
+using SnippetDeformableVolumeAVBDFixtures::isComponentManySmallNoContactCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeCapsuleReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeConvexReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeDeformingReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeHeightFieldSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeKinematicRigidCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeRigidTriangleSteadyContactCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeRotationalCapsuleReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeRotationalConvexReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeSphereReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeSpeculativeCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphDirectSimulationDomainCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphPipelineCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphPureSoftCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphRigidTriangleSurfaceLargeCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphWriteBackCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTaskGraphWriteBackFourWayCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::isSceneCpuVolumeTriangleSurfaceSweptCcdCase;
+using SnippetDeformableVolumeAVBDFixtures::rotateVerticesAroundZ;
+using SnippetDeformableVolumeAVBDFixtures::scaleVerticesAboutCenter;
+using SnippetDeformableVolumeAVBDReport::DeformableVolumePerformanceMetrics;
+using SnippetDeformableVolumeAVBDReport::PerformanceReportConfig;
+using SnippetDeformableVolumeAVBDReport::finalizePerformanceMetrics;
+using SnippetDeformableVolumeAVBDReport::printPerformanceResult;
+using SnippetDeformableVolumeAVBDValidation::OgcSandwichFrameSample;
+using SnippetDeformableVolumeAVBDValidation::OgcSandwichMetrics;
+using SnippetDeformableVolumeAVBDValidation::OgcSandwichMonitor;
+using SnippetDeformableVolumeAVBDValidation::RotationMetrics;
+using SnippetDeformableVolumeAVBDValidation::RotationMonitor;
+using SnippetDeformableVolumeAVBDValidation::RotationSamplingConfig;
+using SnippetDeformableVolumeAVBDValidation::RotationalSweepMetrics;
+using SnippetDeformableVolumeAVBDValidation::ReverseSweptMetrics;
+using SnippetDeformableVolumeAVBDValidation::SweptGeometrySampler;
+using SnippetDeformableVolumeAVBDValidation::ReverseFeatureMetrics;
+using SnippetDeformableVolumeAVBDValidation::DeformingReverseSweptMetrics;
+using SnippetDeformableVolumeAVBDValidation::DeformableVolumeMetrics;
+using SnippetDeformableVolumeAVBDValidation::DynamicFiniteSweptMetrics;
+using SnippetDeformableVolumeAVBDValidation::VolumeSkinningMetrics;
+using SnippetDeformableVolumeAVBDValidation::KinematicFiniteSweptMetrics;
+using SnippetDeformableVolumeAVBDValidation::SoftContactPhaseFrameSample;
+using SnippetDeformableVolumeAVBDValidation::SoftContactPhaseMetrics;
+using SnippetDeformableVolumeAVBDValidation::SoftContactPhaseMonitor;
+using SceneCpuSoftSoftTorqueMetrics =
+	SnippetDeformableVolumeAVBDValidation::SoftSoftTorqueMetrics;
+using SnippetDeformableVolumeAVBDValidation::SoftSoftTorqueFrameSample;
+using SnippetDeformableVolumeAVBDValidation::SoftSoftTorqueMonitor;
+using SnippetDeformableVolumeAVBDValidation::VolumeHealthMonitor;
+using SnippetDeformableVolumeAVBDValidation::VolumeHealthSample;
+using SnippetDeformableVolumeAVBDValidation::VisualInteractionFrameSample;
+using SnippetDeformableVolumeAVBDValidation::VisualInteractionMetrics;
+using SnippetDeformableVolumeAVBDValidation::VisualInteractionMonitor;
+using SceneCpuGroundEmbeddedTetProbeMetrics =
+	SnippetDeformableVolumeAVBDValidation::GroundEmbeddedTetProbeMetrics;
+using SnippetDeformableVolumeAVBDValidation::GroundEmbeddedTetProbeFrameSample;
+using SnippetDeformableVolumeAVBDValidation::isRollingKinematicsValid;
+using SnippetDeformableVolumeAVBDValidation::isRotationLongRunBounded;
+using SnippetDeformableVolumeAVBDValidation::getCapsuleSignedSeparation;
+using SnippetDeformableVolumeAVBDValidation::sampleGroundEmbeddedTetProbe;
+using SnippetDeformableVolumeAVBDValidation::updateReverseFeatureMetrics;
+
+namespace Headless = SnippetDeformableVolumeAVBDHeadless;
 
 #ifndef AVBD_VOLUME_SNIPPET_NAME
 #define AVBD_VOLUME_SNIPPET_NAME "SnippetDeformableVolumeAVBD"
@@ -85,164 +153,6 @@ using namespace physx::Dy;
 #ifndef AVBD_VOLUME_VISUAL_CASE
 #define AVBD_VOLUME_VISUAL_CASE "scene-volume-visual-showcase"
 #endif
-
-static void rotateVerticesAroundZ(
-	PxArray<PxVec3>& verts,
-	const PxVec3& center,
-	PxReal angle)
-{
-	const PxReal cs = PxCos(angle);
-	const PxReal sn = PxSin(angle);
-	for (PxU32 i = 0; i < verts.size(); i++)
-	{
-		const PxVec3 r = verts[i] - center;
-		verts[i].x = center.x + r.x * cs - r.y * sn;
-		verts[i].y = center.y + r.x * sn + r.y * cs;
-	}
-}
-
-static void scaleVerticesAboutCenter(
-	PxArray<PxVec3>& verts,
-	const PxVec3& center,
-	const PxVec3& scale)
-{
-	for (PxU32 i = 0; i < verts.size(); i++)
-	{
-		const PxVec3 r = verts[i] - center;
-		verts[i] = center + PxVec3(r.x * scale.x, r.y * scale.y, r.z * scale.z);
-	}
-}
-
-static void appendSubdividedQuad(
-	PxArray<PxVec3>& vertices,
-	PxArray<PxU32>& triangles,
-	const PxVec3& origin,
-	const PxVec3& axisU,
-	const PxVec3& axisV,
-	PxU32 subdivisions)
-{
-	PX_ASSERT(subdivisions > 0);
-	const PxU32 base = vertices.size();
-	for(PxU32 v = 0; v <= subdivisions; ++v)
-	{
-		for(PxU32 u = 0; u <= subdivisions; ++u)
-		{
-			vertices.pushBack(origin +
-				axisU * (PxReal(u) / PxReal(subdivisions)) +
-				axisV * (PxReal(v) / PxReal(subdivisions)));
-		}
-	}
-	const PxU32 row = subdivisions + 1;
-	for(PxU32 v = 0; v < subdivisions; ++v)
-	{
-		for(PxU32 u = 0; u < subdivisions; ++u)
-		{
-			const PxU32 i00 = base + v * row + u;
-			const PxU32 i10 = i00 + 1;
-			const PxU32 i01 = i00 + row;
-			const PxU32 i11 = i01 + 1;
-			triangles.pushBack(i00);
-			triangles.pushBack(i10);
-			triangles.pushBack(i11);
-			triangles.pushBack(i00);
-			triangles.pushBack(i11);
-			triangles.pushBack(i01);
-		}
-	}
-}
-
-static void createSubdividedCubeSurface(
-	PxArray<PxVec3>& vertices,
-	PxArray<PxU32>& triangles,
-	const PxVec3& center,
-	PxReal sideLength,
-	PxU32 subdivisions)
-{
-	vertices.clear();
-	triangles.clear();
-	const PxReal h = 0.5f * sideLength;
-	const PxReal s = sideLength;
-	// axisU x axisV points outwards on every face. Duplicate seam vertices
-	// are intentional cooking input; eWELD_VERTICES merges them into one
-	// manifold collision boundary.
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(h, -h, -h), PxVec3(0, s, 0),
-		PxVec3(0, 0, s), subdivisions);
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(-h, -h, -h), PxVec3(0, 0, s),
-		PxVec3(0, s, 0), subdivisions);
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(-h, h, -h), PxVec3(0, 0, s),
-		PxVec3(s, 0, 0), subdivisions);
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(-h, -h, -h), PxVec3(s, 0, 0),
-		PxVec3(0, 0, s), subdivisions);
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(-h, -h, h), PxVec3(s, 0, 0),
-		PxVec3(0, s, 0), subdivisions);
-	appendSubdividedQuad(vertices, triangles,
-		center + PxVec3(-h, -h, -h), PxVec3(0, s, 0),
-		PxVec3(s, 0, 0), subdivisions);
-}
-
-static void createLayeredConeSurface(
-	PxArray<PxVec3>& vertices,
-	PxArray<PxU32>& triangles,
-	const PxVec3& center,
-	PxReal radius,
-	PxReal height,
-	PxU32 ringSegments,
-	PxU32 heightSegments)
-{
-	vertices.clear();
-	triangles.clear();
-	PX_ASSERT(ringSegments >= 3 && heightSegments >= 2);
-	for(PxU32 layer = 0; layer < heightSegments; ++layer)
-	{
-		const PxReal t = PxReal(layer) / PxReal(heightSegments);
-		const PxReal layerRadius = radius * (1.0f - t);
-		for(PxU32 segment = 0; segment < ringSegments; ++segment)
-		{
-			const PxReal angle = 2.0f * PxPi * PxReal(segment) /
-				PxReal(ringSegments);
-			vertices.pushBack(center + PxVec3(
-				layerRadius * PxSin(angle), height * t,
-				layerRadius * PxCos(angle)));
-		}
-	}
-	const PxU32 apex = vertices.size();
-	vertices.pushBack(center + PxVec3(0, height, 0));
-	for(PxU32 layer = 0; layer + 1 < heightSegments; ++layer)
-	{
-		const PxU32 lower = layer * ringSegments;
-		const PxU32 upper = (layer + 1) * ringSegments;
-		for(PxU32 segment = 0; segment < ringSegments; ++segment)
-		{
-			const PxU32 next = (segment + 1) % ringSegments;
-			triangles.pushBack(upper + segment);
-			triangles.pushBack(lower + next);
-			triangles.pushBack(lower + segment);
-			triangles.pushBack(upper + segment);
-			triangles.pushBack(upper + next);
-			triangles.pushBack(lower + next);
-		}
-	}
-	const PxU32 topRing = (heightSegments - 1) * ringSegments;
-	for(PxU32 segment = 0; segment < ringSegments; ++segment)
-	{
-		triangles.pushBack(apex);
-		triangles.pushBack(topRing + (segment + 1) % ringSegments);
-		triangles.pushBack(topRing + segment);
-	}
-	const PxU32 baseCenter = vertices.size();
-	vertices.pushBack(center);
-	for(PxU32 segment = 0; segment < ringSegments; ++segment)
-	{
-		triangles.pushBack(baseCenter);
-		triangles.pushBack(segment);
-		triangles.pushBack((segment + 1) % ringSegments);
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -281,11 +191,6 @@ static PxArray<PxDeformableVolumeMesh*> gSceneCpuTaskGraphExtraMeshes;
 // actor that references them. The cube mesh is shared by three actors; sphere
 // and cone retain their own cooked collision/simulation pair.
 static PxArray<PxDeformableVolumeMesh*> gSceneCpuVisualVolumeMeshes;
-static const PxU32 SCENE_CPU_VISUAL_ROTATION_GATE_MIN_FRAMES = 80;
-static const PxReal SCENE_CPU_VISUAL_MIN_ORIENTATION_CHANGE = 0.25f;
-static const PxReal SCENE_CPU_VISUAL_MIN_ANGULAR_SPEED = 0.5f;
-static const PxReal SCENE_CPU_VISUAL_SPHERE_MIN_ORIENTATION_CHANGE = 0.1f;
-static const PxReal SCENE_CPU_VISUAL_SPHERE_MIN_ANGULAR_SPEED = 0.2f;
 static const PxU32 SCENE_CPU_VISUAL_SPHERE_EARLY_END_FRAME = 600;
 static const PxU32 SCENE_CPU_VISUAL_SPHERE_LATE_BEGIN_FRAME = 1200;
 static const PxU32 SCENE_CPU_VISUAL_SPHERE_LONG_RUN_MIN_FRAMES = 2000;
@@ -301,17 +206,6 @@ static const PxReal SCENE_CPU_SPHERE_ROLL_MIN_ORIENTATION_CHANGE = 0.03f;
 static const PxReal SCENE_CPU_SPHERE_ROLL_MAX_RIGID_SLIP_SPEED = 0.03f;
 static const PxReal SCENE_CPU_VISUAL_SPHERE_MAX_LATE_SPEED_FLOOR = 0.75f;
 static const PxReal SCENE_CPU_VISUAL_SPHERE_MAX_LATE_SPEED_RATIO = 1.5f;
-static const PxReal SCENE_CPU_VISUAL_MIN_DET_F = 0.35f;
-static const PxReal SCENE_CPU_VISUAL_MAX_DET_F = 2.5f;
-static const PxReal SCENE_CPU_VISUAL_MIN_VOLUME_RATIO = 0.9f;
-static const PxReal SCENE_CPU_VISUAL_MAX_VOLUME_RATIO = 1.1f;
-// The pressure showcase intentionally asks the two jaws to absorb a rigid
-// body's load through large elastic deformation.  Its collision-surface SDF
-// and triangle/OBB gates own non-penetration; these lower, showcase-only
-// quality limits reject inversion/collapse without rejecting that intended
-// compression.  Other visual cases retain the stricter generic thresholds.
-static const PxReal SCENE_CPU_VISUAL_SHOWCASE_MIN_DET_F = 0.03f;
-static const PxReal SCENE_CPU_VISUAL_SHOWCASE_MIN_VOLUME_RATIO = 0.89f;
 // Keep the showcase visibly compliant while retaining the same collision,
 // damping and volume-preservation setup used by its long-roll regression.
 static const PxReal SCENE_CPU_VISUAL_YOUNGS_MODULUS = 1.2e5f;
@@ -368,17 +262,14 @@ static const PxReal SCENE_CPU_VISUAL_PRIMARY_SPHERE_START_X = -0.2f;
 // Sixteen position iterations is the stable budget for the current-pose rows;
 // a larger global count made the lower jaw's static landing less healthy.
 static const PxU32 SCENE_CPU_VISUAL_POSITION_ITERATIONS = 16u;
-// Measure against the collision skin rather than OGC's offset shell.  Permit
-// only a millimetre of numerical tolerance before this visual case fails.
-static const PxReal SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION =
-	1.0e-3f;
-// Allow the falling showcase bodies time to reach the free rigid target before
-// making the mixed-contact telemetry a headless requirement.
-static const PxU32 SCENE_CPU_VISUAL_INTERACTION_GATE_MIN_FRAMES = 120u;
-// The original showcase used four cells along each edge of its primary cube.
-// Keep the public collision boundary at that baseline too: three cube actors
-// contribute 3 * 6 * 4 * 4 * 2 = 576 of the scene's 1152 surface triangles.
-static const PxU32 SCENE_CPU_VISUAL_MIN_SURFACE_TRIANGLES = 1152;
+// Element-filter fixtures validate ownership at one current pose.  A small
+// deterministic overlap keeps the test independent of gravity, CCD, and the
+// amount of time spent accelerating before the filter is released.
+static const PxReal SCENE_CPU_ELEMENT_FILTER_INITIAL_CLEARANCE = 0.05f;
+static const PxReal SCENE_CPU_ELEMENT_FILTER_TEST_PENETRATION = 0.03f;
+static const PxReal SCENE_CPU_ELEMENT_FILTER_MIN_SUPPRESSED_DEPTH = 0.02f;
+static const PxReal SCENE_CPU_ELEMENT_FILTER_SURFACE_TOLERANCE = 0.005f;
+static const PxReal SCENE_CPU_ELEMENT_FILTER_CONTACT_OFFSET_LIMIT = 0.06f;
 // Keep the falling dynamic rigid between broad horizontal soft faces: yellow
 // above, magenta below. The yaw makes the objects visually non-axis-aligned
 // while preserving local +Y as the world-up stacking direction.
@@ -432,7 +323,6 @@ static const PxVec3 SCENE_CPU_VISUAL_FOLLOWER_CUBE_INITIAL_LINEAR_VELOCITY(
 // only possible collision owner is the two soft-volume / free-rigid-box
 // manifold.  The jaws retain the public showcase collision skin and material
 // so this is a solver test, rather than a low-resolution surrogate.
-static const PxU32 SCENE_CPU_OGC_SANDWICH_GATE_MIN_FRAMES = 90u;
 static const PxVec3 SCENE_CPU_OGC_SANDWICH_BOX_CENTER(0.0f, 25.0f, 0.0f);
 static const PxVec3 SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS(
 	0.50f, 0.35f, 0.70f);
@@ -455,289 +345,50 @@ static const PxVec3 SCENE_CPU_OGC_SANDWICH_LOWER_JAW_VELOCITY(
 // contained just two initial-velocity contact frames, so it could pass after
 // the bodies separated and never exercise a sustained mixed OGC manifold.
 static const PxU32 SCENE_CPU_OGC_SANDWICH_PRESSURE_DRIVE_FRAMES = 36u;
-static const PxU32 SCENE_CPU_OGC_SANDWICH_MIN_NATIVE_ISLAND_STEPS = 18u;
 // Use an inertia comparable to the two volumetric jaws.  The box stays fully
 // dynamic (all six DOF free); this merely makes the fixture a compression
 // test instead of a one-sided light-projectile rebound test.
 static const PxReal SCENE_CPU_OGC_SANDWICH_BOX_MASS = 500.0f;
-static const PxReal SCENE_CPU_OGC_SANDWICH_MIN_JAW_COMPRESSION = 0.005f;
-static const PxReal SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_OFFSET = 0.35f;
-static const PxReal SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_SPEED = 1.0f;
-// The fixture's squeeze axis is world Y.  Lateral checks alone cannot catch
-// the old failure mode where a broad two-jaw manifold launched the box out
-// through one jaw along the contact normal.
-static const PxReal SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_OFFSET = 0.35f;
-static const PxReal SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_SPEED = 1.0f;
-struct SceneCpuVisualRotationMetrics
-{
-	PxDeformableVolume* volume;
-	PxU32 axisVertex0;
-	PxU32 axisVertex1;
-	PxVec3 initialAxis;
-	PxReal maxOrientationChange;
-	PxReal maxAngularSpeed;
-	PxReal finalAngularSpeed;
-	PxReal earlyMaxAngularSpeed;
-	PxReal lateMaxAngularSpeed;
-	PxReal windowMinAngularSpeed;
-	PxReal windowMaxAngularSpeed;
-	PxF64 windowAngularSpeedSum;
-	PxU32 windowSampleCount;
-	PxReal finalLinearSpeed;
-	PxVec3 finalLinearVelocity;
-	PxVec3 finalAngularVelocity;
-	PxVec3 finalCentroid;
-	PxVec3 finalLowestCollisionOffset;
-	PxReal finalRigidRollSlipSpeed;
-	PxReal finalMinCollisionY;
-	PxReal windowMinLinearSpeed;
-	PxReal windowMaxLinearSpeed;
-	PxF64 windowLinearSpeedSum;
-	PxReal checkpointAngularSpeeds[
-		SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT];
-	PxReal checkpointLinearSpeeds[
-		SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT];
-	PxReal checkpointCentroidY[
-		SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT];
-	PxU32 maxAngularSpeedFrame;
-	PxU32 groundContactEpisodes;
-	PxU32 firstGroundContactFrame;
-	PxU32 secondGroundContactFrame;
-	PxReal minSecondGroundEpisodeAngularSpeed;
-	bool groundContactActive;
-	bool initialized;
+static RotationMonitor gSceneCpuVisualRotationMonitor;
+static RotationMonitor gSceneCpuVisualPrimaryCubeRotationMonitor;
+static RotationMonitor gSceneCpuVisualSphereRotationMonitor;
+static const RotationMetrics& gSceneCpuVisualRotationMetrics =
+	gSceneCpuVisualRotationMonitor.getMetrics();
+static const RotationMetrics& gSceneCpuVisualPrimaryCubeRotationMetrics =
+	gSceneCpuVisualPrimaryCubeRotationMonitor.getMetrics();
+static const RotationMetrics& gSceneCpuVisualSphereRotationMetrics =
+	gSceneCpuVisualSphereRotationMonitor.getMetrics();
 
-	SceneCpuVisualRotationMetrics()
-		: volume(NULL), axisVertex0(PX_MAX_U32),
-		  axisVertex1(PX_MAX_U32), initialAxis(0.0f),
-		  maxOrientationChange(0.0f), maxAngularSpeed(0.0f),
-		  finalAngularSpeed(0.0f), earlyMaxAngularSpeed(0.0f),
-		  lateMaxAngularSpeed(0.0f), windowMinAngularSpeed(PX_MAX_F32),
-		  windowMaxAngularSpeed(0.0f), windowAngularSpeedSum(0.0),
-		  windowSampleCount(0), finalLinearSpeed(0.0f),
-		  finalLinearVelocity(0.0f), finalAngularVelocity(0.0f),
-		  finalCentroid(0.0f), finalLowestCollisionOffset(0.0f),
-		  finalRigidRollSlipSpeed(0.0f),
-		  finalMinCollisionY(PX_MAX_F32),
-		  windowMinLinearSpeed(PX_MAX_F32), windowMaxLinearSpeed(0.0f),
-		  windowLinearSpeedSum(0.0),
-		  checkpointAngularSpeeds{0.0f},
-		  checkpointLinearSpeeds{0.0f}, checkpointCentroidY{0.0f},
-		  maxAngularSpeedFrame(PX_MAX_U32), groundContactEpisodes(0),
-		  firstGroundContactFrame(PX_MAX_U32),
-		  secondGroundContactFrame(PX_MAX_U32),
-		  minSecondGroundEpisodeAngularSpeed(PX_MAX_F32),
-		  groundContactActive(false),
-		  initialized(false)
-	{
-	}
-};
-static SceneCpuVisualRotationMetrics gSceneCpuVisualRotationMetrics;
-static SceneCpuVisualRotationMetrics gSceneCpuVisualPrimaryCubeRotationMetrics;
-static SceneCpuVisualRotationMetrics gSceneCpuVisualSphereRotationMetrics;
+static VisualInteractionMonitor gSceneCpuVisualInteractionMonitor;
+static const VisualInteractionMetrics& gSceneCpuVisualInteractionMetrics =
+	gSceneCpuVisualInteractionMonitor.getMetrics();
 
-struct SceneCpuVisualSurfaceGapMetrics
-{
-	PxReal initialSignedSdf;
-	PxReal minSignedSdf;
-	PxReal finalSignedSdf;
-	PxU32 penetrationFrames;
-	bool penetrated;
-
-	SceneCpuVisualSurfaceGapMetrics()
-		: initialSignedSdf(PX_MAX_F32), minSignedSdf(PX_MAX_F32),
-		  finalSignedSdf(PX_MAX_F32), penetrationFrames(0),
-		  penetrated(false)
-	{
-	}
-};
-
-struct SceneCpuVisualInteractionMetrics
-{
-	PxU64 generatedRigidContacts;
-	PxU64 generatedSoftContacts;
-	// Native island steps are the authoritative response signal for the free
-	// dynamic box.  Selection-time OGC contact discovery is intentionally not
-	// included in the post-step aggregate rigid-contact statistics.
-	PxU64 nativeIslandSteps;
-	PxDeformableVolume* upperJaw;
-	PxDeformableVolume* lowerJaw;
-	PxArray<PxU32> upperJawSurfaceTriangles;
-	PxArray<PxU32> lowerJawSurfaceTriangles;
-	PxReal initialUpperJawSignedSdf;
-	PxReal initialLowerJawSignedSdf;
-	PxReal minUpperJawSignedSdf;
-	PxReal minLowerJawSignedSdf;
-	PxReal finalUpperJawSignedSdf;
-	PxReal finalLowerJawSignedSdf;
-	PxU32 upperJawTrianglePenetrationFrames;
-	PxU32 lowerJawTrianglePenetrationFrames;
-	PxU32 upperJawTrianglePenetrationFirstFrame;
-	PxU32 lowerJawTrianglePenetrationFirstFrame;
-	bool upperJawTrianglePenetrated;
-	bool lowerJawTrianglePenetrated;
-	// These retain the same collision-mesh surface contract as the dynamic-box
-	// metrics above.  The pedestal uses an OBB SDF plus triangle SAT; the
-	// ground uses its exact half-space SDF, whose triangle minimum is attained
-	// at a vertex.
-	SceneCpuVisualSurfaceGapMetrics upperJawPedestalGap;
-	SceneCpuVisualSurfaceGapMetrics lowerJawPedestalGap;
-	SceneCpuVisualSurfaceGapMetrics upperJawGroundGap;
-	SceneCpuVisualSurfaceGapMetrics lowerJawGroundGap;
-	bool collisionTelemetryEnabled;
-	bool initialized;
-
-	SceneCpuVisualInteractionMetrics()
-		: generatedRigidContacts(0), generatedSoftContacts(0),
-		  nativeIslandSteps(0), upperJaw(NULL), lowerJaw(NULL),
-		  initialUpperJawSignedSdf(PX_MAX_F32),
-		  initialLowerJawSignedSdf(PX_MAX_F32),
-		  minUpperJawSignedSdf(PX_MAX_F32),
-		  minLowerJawSignedSdf(PX_MAX_F32),
-		  finalUpperJawSignedSdf(PX_MAX_F32),
-		  finalLowerJawSignedSdf(PX_MAX_F32),
-		  upperJawTrianglePenetrationFrames(0),
-		  lowerJawTrianglePenetrationFrames(0),
-		  upperJawTrianglePenetrationFirstFrame(PX_MAX_U32),
-		  lowerJawTrianglePenetrationFirstFrame(PX_MAX_U32),
-		  upperJawTrianglePenetrated(false),
-		  lowerJawTrianglePenetrated(false),
-		  collisionTelemetryEnabled(false), initialized(false)
-	{
-	}
-};
-static SceneCpuVisualInteractionMetrics gSceneCpuVisualInteractionMetrics;
-
-// Unlike the visual-showcase metrics, this fixture has no static targets.  It
-// measures the public collision skin against the free box and records the
-// deformation in the contact-normal direction after removing each jaw's
-// translational centroid motion.  This makes a rigid-box escape impossible to
-// misreport as compliant soft deformation.
-struct SceneCpuOgcSandwichMetrics
-{
-	PxU64 generatedRigidContacts;
-	PxU64 nativeIslandSteps;
-	PxDeformableVolume* upperJaw;
-	PxDeformableVolume* lowerJaw;
-	PxArray<PxU32> upperJawSurfaceTriangles;
-	PxArray<PxU32> lowerJawSurfaceTriangles;
-	PxReal initialUpperBottomOffset;
-	PxReal initialLowerTopOffset;
-	PxReal maxUpperCompression;
-	PxReal maxLowerCompression;
-	PxReal upperJawMinDetF;
-	PxReal lowerJawMinDetF;
-	PxReal minUpperJawSignedSdf;
-	PxReal minLowerJawSignedSdf;
-	PxReal finalUpperJawSignedSdf;
-	PxReal finalLowerJawSignedSdf;
-	PxU32 upperJawTrianglePenetrationFrames;
-	PxU32 lowerJawTrianglePenetrationFrames;
-	bool upperJawTrianglePenetrated;
-	bool lowerJawTrianglePenetrated;
-	PxVec3 initialBoxPosition;
-	PxReal maxBoxLateralOffset;
-	PxReal maxBoxLateralSpeed;
-	PxReal maxBoxNormalOffset;
-	PxReal maxBoxNormalSpeed;
-	bool collisionTelemetryEnabled;
-	bool initialized;
-
-	SceneCpuOgcSandwichMetrics()
-		: generatedRigidContacts(0), nativeIslandSteps(0),
-		  upperJaw(NULL), lowerJaw(NULL),
-		  initialUpperBottomOffset(PX_MAX_F32),
-		  initialLowerTopOffset(PX_MAX_F32), maxUpperCompression(0.0f),
-		  maxLowerCompression(0.0f), upperJawMinDetF(PX_MAX_F32),
-		  lowerJawMinDetF(PX_MAX_F32), minUpperJawSignedSdf(PX_MAX_F32),
-		  minLowerJawSignedSdf(PX_MAX_F32),
-		  finalUpperJawSignedSdf(PX_MAX_F32),
-		  finalLowerJawSignedSdf(PX_MAX_F32),
-		  upperJawTrianglePenetrationFrames(0),
-		  lowerJawTrianglePenetrationFrames(0),
-		  upperJawTrianglePenetrated(false),
-		  lowerJawTrianglePenetrated(false), initialBoxPosition(0.0f),
-		  maxBoxLateralOffset(0.0f), maxBoxLateralSpeed(0.0f),
-		  maxBoxNormalOffset(0.0f), maxBoxNormalSpeed(0.0f),
-		  collisionTelemetryEnabled(false), initialized(false)
-	{
-	}
-};
-static SceneCpuOgcSandwichMetrics gSceneCpuOgcSandwichMetrics;
-// The long-roll scene is deliberately a production-like chain (cube -> sphere
-// -> ground), so its absolute sphere spin includes motion caused by the ground
-// before the two soft bodies ever meet.  Keep a separate, test-only phase
-// trace: it identifies the incremental response attributable to the actual
-// soft/soft contact window without changing the simulation or its gate.
-struct SceneCpuSoftContactPhaseMetrics
-{
-	PxU32 firstSoftContactFrame;
-	PxU32 lastSoftContactFrame;
-	PxU32 peakSoftContactFrame;
-	PxU32 softContactFrames;
-	PxU64 generatedGroundContacts;
-	PxU64 generatedSoftContacts;
-	PxReal preSoftAngularMomentum;
-	PxReal preSoftAngularSpeed;
-	PxReal peakSoftContactAngularMomentum;
-	PxReal peakSoftContactAngularSpeed;
-	PxReal lastSoftContactAngularMomentum;
-	PxReal lastSoftContactAngularSpeed;
-	PxReal finalPostSoftAngularMomentum;
-	PxReal finalPostSoftAngularSpeed;
-	PxReal lastNoSoftAngularMomentum;
-	PxReal lastNoSoftAngularSpeed;
-	PxVec3 preSoftAngularVelocity;
-	PxVec3 peakSoftContactAngularVelocity;
-	PxVec3 lastNoSoftAngularVelocity;
-	bool hasPreSoftContactSample;
-	bool contactTelemetryEnabled;
-	bool initialized;
-
-	SceneCpuSoftContactPhaseMetrics()
-		: firstSoftContactFrame(PX_MAX_U32),
-		  lastSoftContactFrame(PX_MAX_U32),
-		  peakSoftContactFrame(PX_MAX_U32), softContactFrames(0),
-		  generatedGroundContacts(0), generatedSoftContacts(0),
-		  preSoftAngularMomentum(0.0f), preSoftAngularSpeed(0.0f),
-		  peakSoftContactAngularMomentum(0.0f),
-		  peakSoftContactAngularSpeed(0.0f),
-		  lastSoftContactAngularMomentum(0.0f),
-		  lastSoftContactAngularSpeed(0.0f),
-		  finalPostSoftAngularMomentum(0.0f),
-		  finalPostSoftAngularSpeed(0.0f),
-		  lastNoSoftAngularMomentum(0.0f),
-		  lastNoSoftAngularSpeed(0.0f), hasPreSoftContactSample(false),
-		  preSoftAngularVelocity(0.0f),
-		  peakSoftContactAngularVelocity(0.0f),
-		  lastNoSoftAngularVelocity(0.0f),
-		  contactTelemetryEnabled(false),
-		  initialized(false)
-	{
-	}
-};
-static SceneCpuSoftContactPhaseMetrics gSceneCpuSoftContactPhaseMetrics;
+static OgcSandwichMonitor gSceneCpuOgcSandwichMonitor;
+static SoftContactPhaseMonitor gSceneCpuSoftContactPhaseMonitor;
+static const SoftContactPhaseMetrics& gSceneCpuSoftContactPhaseMetrics =
+	gSceneCpuSoftContactPhaseMonitor.getMetrics();
 // Dedicated, gravity-free soft/soft rotation fixture.  Unlike the visual
 // showcase, this owns no plane, static actor or rigid actor: any target
 // angular momentum observed here must originate in the off-centre soft/soft
 // boundary contact below.
-static const PxU32 SCENE_CPU_SOFT_SOFT_TORQUE_GATE_MIN_FRAMES = 120u;
-static const PxU32 SCENE_CPU_SOFT_SOFT_TORQUE_MIN_RETENTION_SAMPLES = 16u;
 static const PxReal SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED =
 	1.0e-3f;
 static const PxReal SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_MOMENTUM =
 	1.0e-3f;
-static const PxReal SCENE_CPU_SOFT_SOFT_TORQUE_MIN_LEVER_ARM = 0.15f;
-static const PxU32 SCENE_CPU_SPHERE_SOFT_SOFT_GLANCING_GATE_MIN_FRAMES =
-	120u;
-static const PxReal SCENE_CPU_SPHERE_SOFT_SOFT_GLANCING_MIN_DELTA_SPEED =
-	1.0e-3f;
+// The rotating capsule begins and ends well outside the unit collision
+// tetrahedron translated to (-2, 0, 0), but its long axis crosses the corner
+// (-2, 0, 0) near the middle of the 200 degree sweep.  The old (-2.9, 0, 0)
+// center left only a few millimetres at the start pose, so its CCD-off actor
+// was legitimately admitted by current-pose OGC and was not a swept negative
+// control.
+static const PxVec3 SCENE_CPU_DYNAMIC_ROTATING_CAPSULE_SWEEP_CENTER(
+	-2.35f, -0.95f, 0.0f);
+static const PxVec3 SCENE_CPU_DYNAMIC_ROTATING_CAPSULE_CONTROL_CENTER(
+	0.65f, -0.95f, 0.0f);
 // The embedded-tet ground fixture begins with pure +X translation.  Its
 // expected rolling axis is groundNormal x travelDirection = -Z, so any
 // measured angular state is contact-generated rather than injected at setup.
 static const PxReal SCENE_CPU_GROUND_EMBEDDED_TET_PROBE_LAUNCH_SPEED = 1.0f;
-static const PxReal SCENE_CPU_GROUND_EMBEDDED_TET_PROBE_MIN_NORMALIZED_ROLL =
-	128.0f * FLT_EPSILON;
 
 // The two dedicated soft/soft rotation cases use Scene collision statistics as
 // part of their correctness contract.  Enable that test-only accounting before
@@ -751,168 +402,19 @@ static bool enableSceneCpuFixtureCollisionTelemetry()
 #endif
 }
 
-struct SceneCpuSoftSoftTorqueMetrics
-{
-	PxDeformableVolume* target;
-	PxU32 targetSimulationVertices;
-	PxU32 targetCollisionVertices;
-	PxU32 driverSimulationVertices;
-	PxU32 driverCollisionVertices;
-	PxU32 targetDistinctCollisionSimulation;
-	PxU32 driverDistinctCollisionSimulation;
-	PxU32 isolatedConfiguration;
-	PxU32 supportExpansionInstrumentationAvailable;
-	PxU32 softContactFrames;
-	PxU32 firstContactFrame;
-	PxU32 firstRotationFrame;
-	PxU32 retainedRotationSamples;
-	PxU64 generatedSoftContacts;
-	PxU64 generatedGroundContacts;
-	PxU64 generatedRigidContacts;
-	PxU64 generatedSelfContacts;
-	PxReal firstContactCentroidLeverArm;
-	PxReal maxCentroidLeverArm;
-	PxReal maxAngularMomentum;
-	PxReal finalAngularMomentum;
-	PxReal maxAngularSpeed;
-	PxReal finalAngularSpeed;
-	bool initialized;
-
-	SceneCpuSoftSoftTorqueMetrics()
-		: target(NULL), targetSimulationVertices(0),
-		  targetCollisionVertices(0), driverSimulationVertices(0),
-		  driverCollisionVertices(0),
-		  targetDistinctCollisionSimulation(0),
-		  driverDistinctCollisionSimulation(0), isolatedConfiguration(0),
-		  supportExpansionInstrumentationAvailable(0), softContactFrames(0),
-		  firstContactFrame(PX_MAX_U32), firstRotationFrame(PX_MAX_U32),
-		  retainedRotationSamples(0), generatedSoftContacts(0),
-		  generatedGroundContacts(0), generatedRigidContacts(0),
-		  generatedSelfContacts(0), firstContactCentroidLeverArm(0.0f),
-		  maxCentroidLeverArm(0.0f), maxAngularMomentum(0.0f),
-		  finalAngularMomentum(0.0f), maxAngularSpeed(0.0f),
-		  finalAngularSpeed(0.0f), initialized(false)
-	{
-	}
-};
-static SceneCpuSoftSoftTorqueMetrics gSceneCpuSoftSoftTorqueMetrics;
+static SoftSoftTorqueMonitor gSceneCpuSoftSoftTorqueMonitor;
+static const SceneCpuSoftSoftTorqueMetrics& gSceneCpuSoftSoftTorqueMetrics =
+	gSceneCpuSoftSoftTorqueMonitor.getMetrics();
 
 // A deliberately tiny public-Volume ground fixture for the first ground-row
 // coupling experiment.  The collision tetrahedron is strictly embedded in one
 // larger simulation tetrahedron, so every contact point must expand through
 // all four simulation vertices rather than coinciding with a simulation-mesh
 // boundary vertex.
-struct SceneCpuGroundEmbeddedTetProbeMetrics
-{
-	PxU32 simulationVertices;
-	PxU32 collisionVertices;
-	PxU32 simulationTetrahedra;
-	PxU32 collisionTetrahedra;
-	PxU32 distinctCollisionSimulation;
-	PxU32 strictInteriorEmbedding;
-	PxU32 selfCollisionDisabled;
-	PxU32 speculativeCcdDisabled;
-	PxU32 contactTelemetryEnabled;
-	PxU32 hasPreGroundSample;
-	PxU32 groundContactWindowClosed;
-	PxU32 firstGroundContactFrame;
-	PxU32 lastGroundContactFrame;
-	PxU32 peakGroundRollFrame;
-	PxU32 groundContactWindowFrames;
-	PxU64 generatedGroundContacts;
-	PxU64 generatedRigidContacts;
-	PxU64 generatedSoftContacts;
-	PxU64 generatedSelfContacts;
-	PxReal launchSpeed;
-	PxReal initialMass;
-	PxReal initialRmsRadius;
-	PxVec3 rollAxis;
-	PxVec3 preGroundAngularMomentum;
-	PxVec3 preGroundAngularVelocity;
-	PxVec3 peakDeltaAngularMomentum;
-	PxVec3 peakDeltaAngularVelocity;
-	PxReal peakExpectedRollAngularMomentum;
-	PxReal peakExpectedRollAngularSpeed;
-	PxReal peakNormalizedRollMomentum;
-	PxReal peakNormalizedRollOmega;
-	bool initialized;
-
-	SceneCpuGroundEmbeddedTetProbeMetrics()
-		: simulationVertices(0), collisionVertices(0),
-		  simulationTetrahedra(0), collisionTetrahedra(0),
-		  distinctCollisionSimulation(0), strictInteriorEmbedding(0),
-		  selfCollisionDisabled(0), speculativeCcdDisabled(0),
-		  contactTelemetryEnabled(0), hasPreGroundSample(0),
-		  groundContactWindowClosed(0),
-		  firstGroundContactFrame(PX_MAX_U32),
-		  lastGroundContactFrame(PX_MAX_U32),
-		  peakGroundRollFrame(PX_MAX_U32),
-		  groundContactWindowFrames(0), generatedGroundContacts(0),
-		  generatedRigidContacts(0), generatedSoftContacts(0),
-		  generatedSelfContacts(0),
-		  launchSpeed(0.0f), initialMass(0.0f), initialRmsRadius(0.0f),
-		  rollAxis(0.0f), preGroundAngularMomentum(0.0f),
-		  preGroundAngularVelocity(0.0f),
-		  peakDeltaAngularMomentum(0.0f), peakDeltaAngularVelocity(0.0f),
-		  peakExpectedRollAngularMomentum(0.0f),
-		  peakExpectedRollAngularSpeed(0.0f),
-		  peakNormalizedRollMomentum(0.0f), peakNormalizedRollOmega(0.0f),
-		  initialized(false)
-	{
-	}
-};
 static SceneCpuGroundEmbeddedTetProbeMetrics
 	gSceneCpuGroundEmbeddedTetProbeMetrics;
 
-struct SceneCpuVisualTetRestState
-{
-	PxMat33 dmInv;
-	PxReal restVolume;
-
-	SceneCpuVisualTetRestState()
-		: dmInv(PxIdentity), restVolume(0.0f)
-	{
-	}
-};
-
-struct SceneCpuVisualVolumeRestState
-{
-	PxDeformableVolume* volume;
-	PxArray<SceneCpuVisualTetRestState> tets;
-	PxReal totalRestVolume;
-
-	SceneCpuVisualVolumeRestState()
-		: volume(NULL), totalRestVolume(0.0f)
-	{
-	}
-};
-static PxArray<SceneCpuVisualVolumeRestState>
-	gSceneCpuVisualVolumeRestStates;
-struct SceneCpuVisualBodyHealthMetrics
-{
-	PxReal minDetF;
-	PxReal maxDetF;
-	PxReal minVolumeRatio;
-	PxReal maxVolumeRatio;
-	PxReal finalMinDetF;
-	PxReal finalMaxDetF;
-	PxReal finalVolumeRatio;
-	PxU32 minDetFFrame;
-	PxU32 maxDetFFrame;
-	PxU32 minVolumeRatioFrame;
-
-	SceneCpuVisualBodyHealthMetrics()
-		: minDetF(FLT_MAX), maxDetF(-FLT_MAX),
-		  minVolumeRatio(FLT_MAX), maxVolumeRatio(-FLT_MAX),
-		  finalMinDetF(FLT_MAX), finalMaxDetF(-FLT_MAX),
-		  finalVolumeRatio(FLT_MAX), minDetFFrame(PX_MAX_U32),
-		  maxDetFFrame(PX_MAX_U32),
-		  minVolumeRatioFrame(PX_MAX_U32)
-	{
-	}
-};
-static SceneCpuVisualBodyHealthMetrics
-	gSceneCpuVisualBodyHealthMetrics[5];
+static VolumeHealthMonitor gSceneCpuVolumeHealthMonitor;
 static PxDeformableAttachment*   gSceneCpuWorldAttachment = NULL;
 static PxDeformableAttachment*   gSceneCpuRigidAttachment = NULL;
 static PxDeformableElementFilter* gSceneCpuElementFilter = NULL;
@@ -1001,906 +503,17 @@ static PxArray<PxVec3>             gVolumeSkinningPositions;
 static PxArray<PxVec3>             gVolumeSkinningNormals;
 static PxArray<PxVec3>             gVolumeSkinningInitialPositions;
 
-struct VolumeSkinningMetrics
-{
-	PxU32 initialized;
-	PxU32 finiteFrames;
-	PxU32 evaluatedFrames;
-	PxU32 vertices;
-	PxU32 triangles;
-	PxReal maxDisplacement;
-
-	VolumeSkinningMetrics()
-		: initialized(0), finiteFrames(0), evaluatedFrames(0),
-		  vertices(0), triangles(0), maxDisplacement(0.0f)
-	{
-	}
-};
-
 static VolumeSkinningMetrics gVolumeSkinningMetrics;
 
-struct SphereReverseFeatureMetrics
-{
-	PxU32 faceResponseObserved;
-	PxU32 vertexSdfExcluded;
-	PxU32 negativeControlPassed;
-	PxU32 nonFiniteSamples;
-	PxReal positiveDisplacement;
-	PxReal positiveDrop;
-	PxReal negativeDrop;
-	PxReal faceSeparation;
-	PxReal minimumVertexSeparation;
+static ReverseFeatureMetrics gSphereReverseFeatureMetrics;
 
-	SphereReverseFeatureMetrics()
-		: faceResponseObserved(0), vertexSdfExcluded(0),
-		  negativeControlPassed(0), nonFiniteSamples(0),
-		  positiveDisplacement(0.0f), positiveDrop(0.0f),
-		  negativeDrop(0.0f), faceSeparation(PX_MAX_F32),
-		  minimumVertexSeparation(PX_MAX_F32)
-	{
-	}
-};
+static ReverseSweptMetrics gSphereReverseSweptMetrics;
+static DeformingReverseSweptMetrics gDeformingVolumeReverseSweptMetrics;
+static RotationalSweepMetrics gCapsuleRotationalSweepMetrics;
 
-static SphereReverseFeatureMetrics gSphereReverseFeatureMetrics;
-
-struct SphereReverseSweptMetrics
-{
-	PxU32 responseObserved;
-	PxU32 negativeControlPassed;
-	PxU32 twoSidedResponseObserved;
-	PxU32 vertexSweepExcluded;
-	PxU32 nonFiniteSamples;
-	PxReal positiveDisplacement;
-	PxReal negativeDisplacement;
-	PxReal positiveDrop;
-	PxReal negativeDrop;
-	PxReal positiveRigidDrop;
-	PxReal negativeRigidDrop;
-	PxReal faceSeparation;
-	PxReal minimumVertexSweepSeparation;
-
-	SphereReverseSweptMetrics()
-		: responseObserved(0), negativeControlPassed(0),
-		  twoSidedResponseObserved(0), vertexSweepExcluded(0),
-		  nonFiniteSamples(0), positiveDisplacement(0.0f),
-		  negativeDisplacement(0.0f), positiveDrop(0.0f),
-		  negativeDrop(0.0f), positiveRigidDrop(0.0f),
-		  negativeRigidDrop(0.0f), faceSeparation(PX_MAX_F32),
-		  minimumVertexSweepSeparation(PX_MAX_F32)
-	{
-	}
-};
-
-static SphereReverseSweptMetrics gSphereReverseSweptMetrics;
-
-struct DeformingVolumeReverseSweptMetrics
-{
-	PxU32 geometricSweepIsolated;
-	PxReal endpointMinSeparation;
-	PxReal midSweepMinSeparation;
-	PxReal responseDelta;
-
-	DeformingVolumeReverseSweptMetrics()
-		: geometricSweepIsolated(0),
-		  endpointMinSeparation(PX_MAX_F32),
-		  midSweepMinSeparation(PX_MAX_F32),
-		  responseDelta(0.0f)
-	{
-	}
-};
-
-static DeformingVolumeReverseSweptMetrics
-	gDeformingVolumeReverseSweptMetrics;
-
-struct CapsuleRotationalSweepMetrics
-{
-	PxU32 sweepIsolated;
-	PxU32 nonFiniteSamples;
-	PxReal endpointMinSeparation;
-	PxReal midSweepMinSeparation;
-	PxReal positiveAngularTravel;
-	PxReal negativeAngularTravel;
-
-	CapsuleRotationalSweepMetrics()
-		: sweepIsolated(0), nonFiniteSamples(0),
-		  endpointMinSeparation(PX_MAX_F32),
-		  midSweepMinSeparation(PX_MAX_F32),
-		  positiveAngularTravel(0.0f),
-		  negativeAngularTravel(0.0f)
-	{
-	}
-};
-
-static CapsuleRotationalSweepMetrics
-	gCapsuleRotationalSweepMetrics;
-
-struct DeformableVolumeMetrics
-{
-	PxU32 initialized;
-	PxU32 completedFrames;
-	PxU32 fetchFailures;
-	PxU32 nonFiniteParticleSamples;
-	PxU32 invertedElementSamples;
-	PxU32 firstInversionFrame;
-	PxU32 firstInversionBody;
-	PxU32 firstInversionElement;
-	PxU32 invertedBodiesMask;
-	PxU32 particles;
-	PxU32 softBodies;
-	PxU32 tetElements;
-	PxU32 surfaceTriangles;
-	PxU32 rigidBoxes;
-	PxU32 sceneStatics;
-	PxU32 sceneDynamics;
-	PxU32 sceneDeformableVolumes;
-	PxU32 groundContactFrames;
-	PxU32 rigidContactFrames;
-	PxU32 softContactFrames;
-	PxU32 maxGroundContacts;
-	PxU32 maxRigidContacts;
-	PxU32 maxSoftContacts;
-	PxU32 invalidContactSourceSamples;
-	PxU32 finalInsideParticles;
-	PxU32 cleanupComplete;
-	PxU32 sceneActorCreated;
-	PxU32 sceneShapeAttached;
-	PxU32 sceneSimulationMeshAttached;
-	PxU32 sceneHostBuffersInitialized;
-	PxU32 sceneActorAdded;
-	PxU32 sceneActorRemoved;
-	PxU32 sceneActorReleased;
-	PxU32 sceneBoundsFinite;
-	PxU32 sceneStaticShapeDetached;
-	PxU32 sceneStaticShapeReattached;
-	PxU32 sceneStaticActorRemoved;
-	PxU32 sceneStaticActorReadded;
-	PxU32 sceneDynamicActorAdded;
-	PxU32 sceneDynamicActorRemoved;
-	PxU32 sceneDynamicActorReleased;
-	PxU32 sceneDynamicInitiallySleeping;
-	PxU32 sceneDynamicWokeBySoft;
-	PxU32 sceneDynamicFirstWakeFrame;
-	PxU32 sceneDynamicShapeDetached;
-	PxU32 sceneDynamicShapeReattached;
-	PxU32 sceneDynamicActorReadded;
-	PxU32 sceneDynamicReaddedSleeping;
-	PxU32 sceneDynamicRewokeBySoft;
-	PxU32 sceneDynamicSecondWakeFrame;
-	PxU32 sceneSecondDynamicActorAdded;
-	PxU32 sceneSecondDynamicActorRemoved;
-	PxU32 sceneSecondDynamicActorReleased;
-	PxU32 sceneSecondDynamicInitiallySleeping;
-	PxU32 sceneSecondDynamicWokeBySoft;
-	PxU32 sceneSecondDynamicFirstWakeFrame;
-	PxU32 sceneSecondVolumeActorCreated;
-	PxU32 sceneSecondVolumeHostBuffersInitialized;
-	PxU32 sceneSecondVolumeActorAdded;
-	PxU32 sceneSecondVolumeActorRemoved;
-	PxU32 sceneSecondVolumeActorReleased;
-	PxU32 sceneSecondVolumeBoundsFinite;
-	PxU32 sceneSoftInitiallyAwake;
-	PxU32 sceneSoftFirstSlept;
-	PxU32 sceneSoftFirstSleepFrame;
-	PxU32 sceneSoftSleepWakeCounterZero;
-	PxU32 sceneSoftSleepVelocitiesZero;
-	PxU32 sceneSoftStableWhileSleeping;
-	PxU32 sceneSoftCounterWakeIssued;
-	PxU32 sceneSoftWokeByCounter;
-	PxU32 sceneSoftCounterWakeFrame;
-	PxU32 sceneSoftSecondSlept;
-	PxU32 sceneSoftSecondSleepFrame;
-	PxU32 sceneSoftVelocityWakeIssued;
-	PxU32 sceneSoftWokeByVelocity;
-	PxU32 sceneSoftVelocityWakeFrame;
-	PxU32 sceneSoftMovedAfterVelocityWake;
-	PxU32 sceneSoftVelocityStopIssued;
-	PxU32 sceneSoftFinalSlept;
-	PxU32 sceneSoftFinalSleepFrame;
-	PxU32 sceneSoftRigidWakeActorAdded;
-	PxU32 sceneSoftWokeByRigid;
-	PxU32 sceneSoftRigidWakeFrame;
-	PxU32 sceneSoftMovedAfterRigidWake;
-	PxU32 sceneMixedFirstSlept;
-	PxU32 sceneMixedFirstSleepFrame;
-	PxU32 sceneMixedFirstStable;
-	PxU32 sceneMixedSecondStayedAwake;
-	PxU32 sceneMixedSecondMoved;
-	PxU32 sceneSoftChurnRemoveCount;
-	PxU32 sceneSoftChurnReaddCount;
-	PxU32 sceneSoftChurnCycles;
-	PxU32 sceneSoftChurnPostCompactMoveCount;
-	PxU32 sceneSoftChurnStable;
-	PxU32 sceneBufferMutationIssued;
-	PxU32 sceneBufferMutationWoke;
-	PxU32 sceneBufferMutationApplied;
-	PxU32 sceneBufferDriveIssued;
-	PxU32 sceneBufferPinHeld;
-	PxU32 sceneBufferDynamicMoved;
-	PxU32 sceneBufferInvMassRestored;
-	PxU32 sceneBufferRestoredMoved;
-	PxU32 sceneBufferResetIssued;
-	PxU32 sceneWorldPinCreated;
-	PxU32 sceneWorldPinHeld;
-	PxU32 sceneWorldPinActorReadded;
-	PxU32 sceneWorldPinReleased;
-	PxU32 sceneWorldPinMovedAfterRelease;
-	PxU32 sceneRigidAttachmentActorAdded;
-	PxU32 sceneRigidAttachmentInitiallySleeping;
-	PxU32 sceneRigidAttachmentCreated;
-	PxU32 sceneRigidAttachmentRigidWoke;
-	PxU32 sceneRigidAttachmentRigidMoved;
-	PxU32 sceneRigidAttachmentHeldAcrossReadd;
-	PxU32 sceneRigidAttachmentReleased;
-	PxU32 sceneRigidAttachmentSeparatedAfterRelease;
-	PxU32 sceneArticulationCreated;
-	PxU32 sceneArticulationAdded;
-	PxU32 sceneArticulationInitiallySleeping;
-	PxU32 sceneArticulationWoke;
-	PxU32 sceneArticulationJointSubspaceHeld;
-	PxU32 sceneArticulationRootStable;
-	PxU32 sceneElementFilterCreated;
-	PxU32 sceneElementFilterActorReadded;
-	PxU32 sceneElementFilterSuppressedContact;
-	PxU32 sceneElementFilterReleased;
-	PxU32 sceneElementFilterContactRestored;
-	PxU32 scenePartialFilterUnfilteredContactHeld;
-	PxU32 scenePartialFilterExactOwnership;
-	PxU32 sceneKinematicActorAdded;
-	PxU32 sceneKinematicTargetIssued;
-	PxU32 sceneKinematicTargetReached;
-	PxU32 sceneKinematicSoftWoke;
-	PxU32 sceneKinematicSoftMoved;
-	PxU32 sceneKinematicContactObserved;
-	PxU32 sceneVolumeTargetBound;
-	PxU32 sceneVolumeTargetMutated;
-	PxU32 sceneVolumeTargetWoke;
-	PxU32 sceneVolumeTargetReached;
-	PxU32 sceneVolumePartialInactiveIgnored;
-	PxU32 sceneVolumePartialActivated;
-	PxU32 sceneVolumePartialActivatedReached;
-	PxU32 sceneSecondSceneCreated;
-	PxU32 sceneSecondSceneSolverMatched;
-	PxU32 scenePrimarySceneReleased;
-	PxU32 sceneSecondSceneReleased;
-	PxU32 sceneMultiPrimaryStable;
-	PxU32 sceneMultiPrimaryDetachedStable;
-	PxU32 sceneMultiSecondaryUpdatedBeforeRelease;
-	PxU32 sceneMultiSecondaryUpdatedAfterRelease;
-	PxU32 sceneSoftSoftBothSlept;
-	PxU32 sceneSoftSoftDriveIssued;
-	PxU32 sceneSoftSoftDriverWoke;
-	PxU32 sceneSoftSoftTargetWoke;
-	PxU32 sceneSoftSoftTargetWakeFrame;
-	PxU32 sceneSoftSoftTargetMoved;
-	PxU32 sceneSoftSoftResetIssued;
-	PxU32 sceneSoftSoftBothFinalSlept;
-	PxU32 motionMaxVelocityBounded;
-	PxU32 motionSettlingApplied;
-	PxU32 motionSettlingSlept;
-	PxU32 motionControlStayedAwake;
-	PxU32 depenetrationLimitApplied;
-	PxU32 depenetrationFirstStepBounded;
-	PxU32 depenetrationControlSeparated;
-	PxU32 depenetrationGradualRecovery;
-	PxU32 speculativeCcdFlagApplied;
-	PxU32 speculativeCcdPreventedTunneling;
-	PxU32 speculativeCcdNegativeControlTunneled;
-	PxU32 movingSphereTargetIssued;
-	PxU32 movingSphereCcdResponseObserved;
-	PxU32 movingSphereNegativeControlHeld;
-	PxU32 dynamicSphereSweepLaunched;
-	PxU32 dynamicSphereSweepResponseObserved;
-	PxU32 dynamicSphereSweepNegativeControlTunneled;
-	PxU32 dynamicSphereSweepTwoSidedResponseObserved;
-	PxReal minDetF;
-	PxReal maxDetF;
-	PxReal minBodyVolumeRatio;
-	PxReal maxBodyVolumeRatio;
-	PxReal minY;
-	PxReal maxY;
-	PxReal maxParticleSpeed;
-	PxReal finalMinY;
-	PxReal finalMaxY;
-	PxReal finalMaxParticleSpeed;
-	PxReal maxCentroidDrop;
-	PxReal sceneDynamicMinY;
-	PxReal sceneDynamicFinalY;
-	PxReal sceneDynamicMaxDrop;
-	PxReal sceneDynamicPreContactMaxDrop;
-	PxReal sceneDynamicMaxDownSpeed;
-	PxReal sceneSecondDynamicMinY;
-	PxReal sceneSecondDynamicFinalY;
-	PxReal sceneSecondDynamicMaxDrop;
-	PxReal sceneSecondDynamicPreContactMaxDrop;
-	PxReal sceneSecondDynamicMaxDownSpeed;
-	PxReal sceneSecondVolumeMaxCentroidDrop;
-	PxReal sceneSecondVolumeFinalCentroidY;
-	PxReal sceneWorldPinMaxDrift;
-	PxReal sceneWorldPinReleasedMaxDisplacement;
-	PxReal sceneRigidAttachmentMaxDrift;
-	PxReal sceneRigidAttachmentMaxRigidDisplacement;
-	PxReal sceneRigidAttachmentMaxRigidSpeed;
-	PxReal sceneRigidAttachmentReleasedSeparation;
-	PxReal sceneArticulationRootMaxDisplacement;
-	PxReal sceneArticulationChildMaxForbiddenDisplacement;
-	PxReal sceneArticulationChildMaxAngularDisplacement;
-	PxReal sceneElementFilterMinY;
-	PxReal sceneElementFilterFinalMinY;
-	PxReal scenePartialFilterUnfilteredMinY;
-	PxReal sceneKinematicMaxPoseError;
-	PxReal sceneKinematicSoftDisplacement;
-	PxReal sceneKinematicFinalY;
-	PxReal sceneVolumeTargetFinalMaxError;
-	PxReal sceneVolumeTargetMaxDisplacement;
-	PxReal sceneVolumePartialInactiveDecoyDistance;
-	PxReal minDynamicSurfaceSeparation;
-	PxReal finalDynamicSurfaceSeparation;
-	PxReal motionMaxVelocityFirstStepDisplacement;
-	PxReal motionMaxVelocityFirstStepSpeed;
-	PxReal motionSettlingFinalSpeed;
-	PxReal motionControlFinalSpeed;
-	PxReal depenetrationLimitedFirstStepRise;
-	PxReal depenetrationControlFirstStepRise;
-	PxReal depenetrationLimitedFinalRise;
-	PxReal depenetrationLimitedMaxSpeed;
-	PxReal speculativeCcdPositiveMinY;
-	PxReal speculativeCcdPositiveMinSeparation;
-	PxReal speculativeCcdNegativeMaxY;
-	PxReal movingSpherePositiveDisplacement;
-	PxReal movingSphereNegativeDisplacement;
-	PxReal movingSpherePositiveMinSeparation;
-	PxReal dynamicSphereSweepPositiveSoftDisplacement;
-	PxReal dynamicSphereSweepNegativeSoftDisplacement;
-	PxReal dynamicSphereSweepPositiveRigidDrop;
-	PxReal dynamicSphereSweepNegativeRigidDrop;
-	PxReal dynamicSphereSweepPositiveMinSeparation;
-	bool solverReadbackMatched;
-
-	DeformableVolumeMetrics()
-	: initialized(0), completedFrames(0), fetchFailures(0),
-	  nonFiniteParticleSamples(0), invertedElementSamples(0),
-	  firstInversionFrame(PX_MAX_U32), firstInversionBody(PX_MAX_U32),
-	  firstInversionElement(PX_MAX_U32), invertedBodiesMask(0),
-	  particles(0), softBodies(0), tetElements(0), surfaceTriangles(0),
-	  rigidBoxes(0),
-	  sceneStatics(0), sceneDynamics(0), sceneDeformableVolumes(0),
-	  groundContactFrames(0), rigidContactFrames(0), softContactFrames(0),
-	  maxGroundContacts(0), maxRigidContacts(0), maxSoftContacts(0),
-	  invalidContactSourceSamples(0), finalInsideParticles(0),
-	  cleanupComplete(0), sceneActorCreated(0), sceneShapeAttached(0),
-	  sceneSimulationMeshAttached(0), sceneHostBuffersInitialized(0),
-	  sceneActorAdded(0), sceneActorRemoved(0), sceneActorReleased(0),
-	  sceneBoundsFinite(0), sceneStaticShapeDetached(0),
-	  sceneStaticShapeReattached(0), sceneStaticActorRemoved(0),
-	  sceneStaticActorReadded(0), sceneDynamicActorAdded(0),
-	  sceneDynamicActorRemoved(0),
-	  sceneDynamicActorReleased(0), sceneDynamicInitiallySleeping(0),
-	  sceneDynamicWokeBySoft(0),
-	  sceneDynamicFirstWakeFrame(PX_MAX_U32),
-	  sceneDynamicShapeDetached(0),
-	  sceneDynamicShapeReattached(0),
-	  sceneDynamicActorReadded(0),
-	  sceneDynamicReaddedSleeping(0),
-	  sceneDynamicRewokeBySoft(0),
-	  sceneDynamicSecondWakeFrame(PX_MAX_U32),
-	  sceneSecondDynamicActorAdded(0),
-	  sceneSecondDynamicActorRemoved(0),
-	  sceneSecondDynamicActorReleased(0),
-	  sceneSecondDynamicInitiallySleeping(0),
-	  sceneSecondDynamicWokeBySoft(0),
-	  sceneSecondDynamicFirstWakeFrame(PX_MAX_U32),
-	  sceneSecondVolumeActorCreated(0),
-	  sceneSecondVolumeHostBuffersInitialized(0),
-	  sceneSecondVolumeActorAdded(0),
-	  sceneSecondVolumeActorRemoved(0),
-	  sceneSecondVolumeActorReleased(0),
-	  sceneSecondVolumeBoundsFinite(0),
-	  sceneSoftInitiallyAwake(0),
-	  sceneSoftFirstSlept(0),
-	  sceneSoftFirstSleepFrame(PX_MAX_U32),
-	  sceneSoftSleepWakeCounterZero(0),
-	  sceneSoftSleepVelocitiesZero(0),
-	  sceneSoftStableWhileSleeping(0),
-	  sceneSoftCounterWakeIssued(0),
-	  sceneSoftWokeByCounter(0),
-	  sceneSoftCounterWakeFrame(PX_MAX_U32),
-	  sceneSoftSecondSlept(0),
-	  sceneSoftSecondSleepFrame(PX_MAX_U32),
-	  sceneSoftVelocityWakeIssued(0),
-	  sceneSoftWokeByVelocity(0),
-	  sceneSoftVelocityWakeFrame(PX_MAX_U32),
-	  sceneSoftMovedAfterVelocityWake(0),
-	  sceneSoftVelocityStopIssued(0),
-	  sceneSoftFinalSlept(0),
-	  sceneSoftFinalSleepFrame(PX_MAX_U32),
-	  sceneSoftRigidWakeActorAdded(0),
-	  sceneSoftWokeByRigid(0),
-	  sceneSoftRigidWakeFrame(PX_MAX_U32),
-	  sceneSoftMovedAfterRigidWake(0),
-	  sceneMixedFirstSlept(0),
-	  sceneMixedFirstSleepFrame(PX_MAX_U32),
-	  sceneMixedFirstStable(0),
-	  sceneMixedSecondStayedAwake(0),
-	  sceneMixedSecondMoved(0),
-	  sceneSoftChurnRemoveCount(0),
-	  sceneSoftChurnReaddCount(0),
-	  sceneSoftChurnCycles(0),
-	  sceneSoftChurnPostCompactMoveCount(0),
-	  sceneSoftChurnStable(0),
-	  sceneBufferMutationIssued(0),
-	  sceneBufferMutationWoke(0),
-	  sceneBufferMutationApplied(0),
-	  sceneBufferDriveIssued(0),
-	  sceneBufferPinHeld(0),
-	  sceneBufferDynamicMoved(0),
-	  sceneBufferInvMassRestored(0),
-	  sceneBufferRestoredMoved(0),
-	  sceneBufferResetIssued(0),
-	  sceneWorldPinCreated(0),
-	  sceneWorldPinHeld(0),
-	  sceneWorldPinActorReadded(0),
-	  sceneWorldPinReleased(0),
-	  sceneWorldPinMovedAfterRelease(0),
-	  sceneRigidAttachmentActorAdded(0),
-	  sceneRigidAttachmentInitiallySleeping(0),
-	  sceneRigidAttachmentCreated(0),
-	  sceneRigidAttachmentRigidWoke(0),
-	  sceneRigidAttachmentRigidMoved(0),
-	  sceneRigidAttachmentHeldAcrossReadd(0),
-	  sceneRigidAttachmentReleased(0),
-	  sceneRigidAttachmentSeparatedAfterRelease(0),
-	  sceneArticulationCreated(0),
-	  sceneArticulationAdded(0),
-	  sceneArticulationInitiallySleeping(0),
-	  sceneArticulationWoke(0),
-	  sceneArticulationJointSubspaceHeld(0),
-	  sceneArticulationRootStable(0),
-	  sceneElementFilterCreated(0),
-	  sceneElementFilterActorReadded(0),
-	  sceneElementFilterSuppressedContact(0),
-	  sceneElementFilterReleased(0),
-	  sceneElementFilterContactRestored(0),
-	  scenePartialFilterUnfilteredContactHeld(0),
-	  scenePartialFilterExactOwnership(0),
-	  sceneKinematicActorAdded(0),
-	  sceneKinematicTargetIssued(0),
-	  sceneKinematicTargetReached(0),
-	  sceneKinematicSoftWoke(0),
-	  sceneKinematicSoftMoved(0),
-	  sceneKinematicContactObserved(0),
-	  sceneVolumeTargetBound(0),
-	  sceneVolumeTargetMutated(0),
-	  sceneVolumeTargetWoke(0),
-	  sceneVolumeTargetReached(0),
-	  sceneVolumePartialInactiveIgnored(0),
-	  sceneVolumePartialActivated(0),
-	  sceneVolumePartialActivatedReached(0),
-	  sceneSecondSceneCreated(0),
-	  sceneSecondSceneSolverMatched(0),
-	  scenePrimarySceneReleased(0),
-	  sceneSecondSceneReleased(0),
-	  sceneMultiPrimaryStable(0),
-	  sceneMultiPrimaryDetachedStable(0),
-	  sceneMultiSecondaryUpdatedBeforeRelease(0),
-	  sceneMultiSecondaryUpdatedAfterRelease(0),
-	  sceneSoftSoftBothSlept(0),
-	  sceneSoftSoftDriveIssued(0),
-	  sceneSoftSoftDriverWoke(0),
-	  sceneSoftSoftTargetWoke(0),
-	  sceneSoftSoftTargetWakeFrame(PX_MAX_U32),
-	  sceneSoftSoftTargetMoved(0),
-	  sceneSoftSoftResetIssued(0),
-	  sceneSoftSoftBothFinalSlept(0),
-	  motionMaxVelocityBounded(0),
-	  motionSettlingApplied(0),
-	  motionSettlingSlept(0),
-	  motionControlStayedAwake(0),
-	  depenetrationLimitApplied(0),
-	  depenetrationFirstStepBounded(0),
-	  depenetrationControlSeparated(0),
-	  depenetrationGradualRecovery(0),
-	  speculativeCcdFlagApplied(0),
-	  speculativeCcdPreventedTunneling(0),
-	  speculativeCcdNegativeControlTunneled(0),
-	  movingSphereTargetIssued(0),
-	  movingSphereCcdResponseObserved(0),
-	  movingSphereNegativeControlHeld(0),
-	  dynamicSphereSweepLaunched(0),
-	  dynamicSphereSweepResponseObserved(0),
-	  dynamicSphereSweepNegativeControlTunneled(0),
-	  dynamicSphereSweepTwoSidedResponseObserved(0),
-	  minDetF(FLT_MAX),
-	  maxDetF(-FLT_MAX), minBodyVolumeRatio(FLT_MAX),
-	  maxBodyVolumeRatio(-FLT_MAX), minY(FLT_MAX), maxY(-FLT_MAX),
-	  maxParticleSpeed(0.0f), finalMinY(FLT_MAX), finalMaxY(-FLT_MAX),
-	  finalMaxParticleSpeed(0.0f),
-	  maxCentroidDrop(0.0f), sceneDynamicMinY(FLT_MAX),
-	  sceneDynamicFinalY(FLT_MAX),
-	  sceneDynamicMaxDrop(0.0f),
-	  sceneDynamicPreContactMaxDrop(0.0f),
-	  sceneDynamicMaxDownSpeed(0.0f),
-	  sceneSecondDynamicMinY(FLT_MAX),
-	  sceneSecondDynamicFinalY(FLT_MAX),
-	  sceneSecondDynamicMaxDrop(0.0f),
-	  sceneSecondDynamicPreContactMaxDrop(0.0f),
-	  sceneSecondDynamicMaxDownSpeed(0.0f),
-	  sceneSecondVolumeMaxCentroidDrop(0.0f),
-	  sceneSecondVolumeFinalCentroidY(FLT_MAX),
-	  sceneWorldPinMaxDrift(0.0f),
-	  sceneWorldPinReleasedMaxDisplacement(0.0f),
-	  sceneRigidAttachmentMaxDrift(0.0f),
-	  sceneRigidAttachmentMaxRigidDisplacement(0.0f),
-	  sceneRigidAttachmentMaxRigidSpeed(0.0f),
-	  sceneRigidAttachmentReleasedSeparation(0.0f),
-	  sceneArticulationRootMaxDisplacement(0.0f),
-	  sceneArticulationChildMaxForbiddenDisplacement(0.0f),
-	  sceneArticulationChildMaxAngularDisplacement(0.0f),
-	  sceneElementFilterMinY(FLT_MAX),
-	  sceneElementFilterFinalMinY(FLT_MAX),
-	  scenePartialFilterUnfilteredMinY(FLT_MAX),
-	  sceneKinematicMaxPoseError(0.0f),
-	  sceneKinematicSoftDisplacement(0.0f),
-	  sceneKinematicFinalY(FLT_MAX),
-	  sceneVolumeTargetFinalMaxError(FLT_MAX),
-	  sceneVolumeTargetMaxDisplacement(0.0f),
-	  sceneVolumePartialInactiveDecoyDistance(0.0f),
-	  minDynamicSurfaceSeparation(FLT_MAX),
-	  finalDynamicSurfaceSeparation(FLT_MAX),
-	  motionMaxVelocityFirstStepDisplacement(0.0f),
-	  motionMaxVelocityFirstStepSpeed(0.0f),
-	  motionSettlingFinalSpeed(0.0f),
-	  motionControlFinalSpeed(0.0f),
-	  depenetrationLimitedFirstStepRise(0.0f),
-	  depenetrationControlFirstStepRise(0.0f),
-	  depenetrationLimitedFinalRise(0.0f),
-	  depenetrationLimitedMaxSpeed(0.0f),
-	  speculativeCcdPositiveMinY(PX_MAX_F32),
-	  speculativeCcdPositiveMinSeparation(PX_MAX_F32),
-	  speculativeCcdNegativeMaxY(-PX_MAX_F32),
-	  movingSpherePositiveDisplacement(0.0f),
-	  movingSphereNegativeDisplacement(0.0f),
-	  movingSpherePositiveMinSeparation(PX_MAX_F32),
-	  dynamicSphereSweepPositiveSoftDisplacement(0.0f),
-	  dynamicSphereSweepNegativeSoftDisplacement(0.0f),
-	  dynamicSphereSweepPositiveRigidDrop(0.0f),
-	  dynamicSphereSweepNegativeRigidDrop(0.0f),
-	  dynamicSphereSweepPositiveMinSeparation(PX_MAX_F32),
-	  solverReadbackMatched(false)
-	{
-	}
-};
 
 static DeformableVolumeMetrics gMetrics;
 static PxArray<PxVec3> gInitialCentroids;
-
-struct DeformableVolumePerformanceMetrics
-{
-	PxU32 warmupFrames;
-	PxU32 profiledFrames;
-	PxU32 softWorkers;
-	PxArray<PxReal> stepSamplesMs;
-	PxF64 initialContactMs;
-	PxF64 solverMs;
-	PxF64 sceneMs;
-	PxF64 metricsMs;
-	PxReal avgStepMs;
-	PxReal p50StepMs;
-	PxReal p95StepMs;
-	PxReal maxStepMs;
-	PxU64 topologySoftBodies;
-	PxU64 topologySoftParticles;
-	PxU64 topologyTriElements;
-	PxU64 topologyTetElements;
-	PxU64 topologyBendElements;
-	PxU64 topologySurfaceTriangles;
-	PxU64 topologySurfaceVertices;
-	PxU64 topologySurfaceEdges;
-	PxU64 topologyRigidBoxes;
-	// Scene CPU AVBD has two mutually exclusive solve authorities per step.
-	// Keep both in schema-2 so task-graph validation can prove that an
-	// experimental component continuation never consumes a native rigid/soft
-	// island merely because the scene also contains dynamic rigid actors.
-	PxU64 componentFallbackSteps;
-	PxU64 nativeIslandSteps;
-	// These two counters retain step granularity which the aggregate authority
-	// counters above intentionally do not have.  They make it possible for an
-	// opt-in task-graph audit to prove that no causal-layer task was submitted
-	// during a native-island step, even when one profile window contains both
-	// ownership modes after an attachment is released.
-	PxU64 nativeIslandComponentFallbackOverlapFrames;
-	PxU64 nativeIslandCausalLayerTaskOverlapFrames;
-	// Raw topology for one shared rigid triangle mesh asset. This deliberately
-	// does not multiply by shape instances: it is the immutable hierarchy size
-	// used by the rigid-triangle query/cache contract.
-	PxU64 topologyRigidTriangleMeshTriangles;
-	// P6 Scene-published CPU ISA dispatch snapshot.  The Snippet never probes
-	// CPUID itself: these values are the actual low-level context selection.
-	PxU32 cpuIsaRequested;
-	PxU32 cpuIsaSelected;
-	PxU32 cpuIsaCompiledBackendMask;
-	PxU32 cpuIsaCapabilityMask;
-	PxU32 cpuIsaForceModeRejected;
-	PxU32 cpuIsaKernelSelfTestPassed;
-	PxU32 cpuIsaFmaUsed;
-	PxReal cpuIsaKernelSelfTestValue;
-	PxU32 taskGraphRequestedDispatcherWorkers;
-	PxU32 taskGraphPeakActiveSolveTasks;
-	PxU64 taskGraphSubmittedSolveTasks;
-	PxU64 taskGraphCompletedSolveTasks;
-	PxU64 taskGraphBarrierTasks;
-	PxU64 taskGraphSerialSolveTasks;
-	PxU64 taskGraphSubmittedPredictionTasks;
-	PxU64 taskGraphCompletedPredictionTasks;
-	PxU32 taskGraphPeakActivePredictionTasks;
-	PxU64 taskGraphSerialPredictionStages;
-	PxU64 taskGraphSubmittedWriteBackTasks;
-	PxU64 taskGraphCompletedWriteBackTasks;
-	PxU32 taskGraphPeakActiveWriteBackTasks;
-	PxU64 taskGraphSerialWriteBackStages;
-	PxU64 taskGraphSubmittedCausalLayerTasks;
-	PxU64 taskGraphCompletedCausalLayerTasks;
-	PxU32 taskGraphPeakActiveCausalLayerTasks;
-	PxU64 taskGraphCausalLayerFanIns;
-	PxU64 taskGraphSerialCausalLayerFallbacks;
-	PxU32 taskGraphMaxCausalLayerOccupancy;
-	PxU64 taskGraphTotalCausalLayerOccupancy;
-	PxU64 taskGraphCausalLayerParentReductionNanos;
-	PxU64 taskGraphCausalLayerTaskPoolGrowthEvents;
-	PxU64 taskGraphCausalLayerTaskPoolGrowthBytes;
-	PxU64 taskGraphSubmittedWorldPlaneContactTasks;
-	PxU64 taskGraphCompletedWorldPlaneContactTasks;
-	PxU32 taskGraphPeakActiveWorldPlaneContactTasks;
-	PxU64 taskGraphWorldPlaneContactFanIns;
-	PxU64 taskGraphSerialWorldPlaneContactFallbacks;
-	PxU64 taskGraphSubmittedRigidBoxSdfContactTasks;
-	PxU64 taskGraphCompletedRigidBoxSdfContactTasks;
-	PxU32 taskGraphPeakActiveRigidBoxSdfContactTasks;
-	PxU64 taskGraphRigidBoxSdfContactFanIns;
-	PxU64 taskGraphSerialRigidBoxSdfContactFallbacks;
-	PxU64 taskGraphSubmittedRigidSphereSdfContactTasks;
-	PxU64 taskGraphCompletedRigidSphereSdfContactTasks;
-	PxU32 taskGraphPeakActiveRigidSphereSdfContactTasks;
-	PxU64 taskGraphRigidSphereSdfContactFanIns;
-	PxU64 taskGraphSerialRigidSphereSdfContactFallbacks;
-	PxU64 taskGraphSubmittedRigidCapsuleSdfContactTasks;
-	PxU64 taskGraphCompletedRigidCapsuleSdfContactTasks;
-	PxU32 taskGraphPeakActiveRigidCapsuleSdfContactTasks;
-	PxU64 taskGraphRigidCapsuleSdfContactFanIns;
-	PxU64 taskGraphSerialRigidCapsuleSdfContactFallbacks;
-	PxU64 taskGraphSubmittedRigidConvexSdfContactTasks;
-	PxU64 taskGraphCompletedRigidConvexSdfContactTasks;
-	PxU32 taskGraphPeakActiveRigidConvexSdfContactTasks;
-	PxU64 taskGraphRigidConvexSdfContactFanIns;
-	PxU64 taskGraphSerialRigidConvexSdfContactFallbacks;
-	PxU64 taskGraphSubmittedRigidTriangleSurfaceContactTasks;
-	PxU64 taskGraphCompletedRigidTriangleSurfaceContactTasks;
-	PxU32 taskGraphPeakActiveRigidTriangleSurfaceContactTasks;
-	PxU64 taskGraphRigidTriangleSurfaceContactFanIns;
-	PxU64 taskGraphSerialRigidTriangleSurfaceContactFallbacks;
-	PxU64 taskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems;
-	PxU64 taskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems;
-	PxU64 taskGraphRigidTriangleSurfaceFeaturePlanRows;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureFacePairWorkItems;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges;
-	PxU32 taskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange;
-	PxU64 taskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask;
-	PxU64 taskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask;
-	PxU64 taskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask;
-	PxU64 taskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask;
-	PxU64 taskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask;
-	PxU64 taskGraphRigidTriangleSurfaceTaskPoolGrowthEvents;
-	PxU64 taskGraphRigidTriangleSurfaceTaskPoolGrowthBytes;
-	PxU64 taskGraphRigidTriangleSurfaceOutputGrowthEvents;
-	PxU64 taskGraphRigidTriangleSurfaceOutputGrowthBytes;
-	PxU64 taskGraphRigidTriangleSurfaceQueryScratchGrowthEvents;
-	PxU64 taskGraphRigidTriangleSurfaceQueryScratchGrowthBytes;
-	PxU64 taskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes;
-	PxU64 taskGraphRigidTriangleSurfaceOutputResidentPayloadBytes;
-	PxU64 taskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes;
-	PxU64 taskGraphRigidTriangleSurfaceContactTaskWallNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxTaskWallNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFanInSpanNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactSerialTransactionNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactParentCompletionNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactPostContinuationNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactTaskSubmissionNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos;
-	PxU64 taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns;
-	PxU64 taskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns;
-	PxU64 taskGraphSubmittedSoftPairContactTasks;
-	PxU64 taskGraphCompletedSoftPairContactTasks;
-	PxU32 taskGraphPeakActiveSoftPairContactTasks;
-	PxU64 taskGraphSoftPairContactFanIns;
-	PxU64 taskGraphSerialSoftPairContactFallbacks;
-	PxU64 taskGraphPureSoftEligibleIslands;
-	PxU64 taskGraphPureSoftEligibleParticles;
-	// Scene statistics expose this rigid-query count only in aggregate.  Keep
-	// it separate from the component-path shape-specific counters below so a
-	// Scene AVBD measurement never mislabels triangle work as box work.
-	PxU64 collisionRigidParticleTests;
-	AvbdSoftBodyStepStats solverStages;
-	AvbdSoftCollisionStats collision;
-
-	DeformableVolumePerformanceMetrics()
-		: warmupFrames(0), profiledFrames(0), softWorkers(1),
-		  initialContactMs(0.0),
-		  solverMs(0.0), sceneMs(0.0), metricsMs(0.0),
-		  avgStepMs(0.0f), p50StepMs(0.0f), p95StepMs(0.0f),
-		  maxStepMs(0.0f), topologySoftBodies(0),
-		  topologySoftParticles(0), topologyTriElements(0),
-	  topologyTetElements(0), topologyBendElements(0),
-	  topologySurfaceTriangles(0), topologySurfaceVertices(0),
-	  topologySurfaceEdges(0), topologyRigidBoxes(0),
-	  componentFallbackSteps(0), nativeIslandSteps(0),
-	  nativeIslandComponentFallbackOverlapFrames(0),
-	  nativeIslandCausalLayerTaskOverlapFrames(0),
-	  topologyRigidTriangleMeshTriangles(0),
-	  cpuIsaRequested(0), cpuIsaSelected(0),
-	  cpuIsaCompiledBackendMask(0), cpuIsaCapabilityMask(0),
-	  cpuIsaForceModeRejected(0), cpuIsaKernelSelfTestPassed(0),
-	  cpuIsaFmaUsed(0), cpuIsaKernelSelfTestValue(0.0f),
-		  taskGraphRequestedDispatcherWorkers(0),
-		  taskGraphPeakActiveSolveTasks(0),
-		  taskGraphSubmittedSolveTasks(0),
-		  taskGraphCompletedSolveTasks(0), taskGraphBarrierTasks(0),
-		  taskGraphSerialSolveTasks(0),
-		  taskGraphSubmittedPredictionTasks(0),
-		  taskGraphCompletedPredictionTasks(0),
-		  taskGraphPeakActivePredictionTasks(0),
-		  taskGraphSerialPredictionStages(0),
-		  taskGraphSubmittedWriteBackTasks(0),
-		  taskGraphCompletedWriteBackTasks(0),
-		  taskGraphPeakActiveWriteBackTasks(0),
-		  taskGraphSerialWriteBackStages(0),
-		  taskGraphSubmittedCausalLayerTasks(0),
-		  taskGraphCompletedCausalLayerTasks(0),
-		  taskGraphPeakActiveCausalLayerTasks(0),
-		  taskGraphCausalLayerFanIns(0),
-		  taskGraphSerialCausalLayerFallbacks(0),
-		  taskGraphMaxCausalLayerOccupancy(0),
-		  taskGraphTotalCausalLayerOccupancy(0),
-		  taskGraphCausalLayerParentReductionNanos(0),
-		  taskGraphCausalLayerTaskPoolGrowthEvents(0),
-		  taskGraphCausalLayerTaskPoolGrowthBytes(0),
-		  taskGraphSubmittedWorldPlaneContactTasks(0),
-		  taskGraphCompletedWorldPlaneContactTasks(0),
-		  taskGraphPeakActiveWorldPlaneContactTasks(0),
-		  taskGraphWorldPlaneContactFanIns(0),
-		  taskGraphSerialWorldPlaneContactFallbacks(0),
-		  taskGraphSubmittedRigidBoxSdfContactTasks(0),
-		  taskGraphCompletedRigidBoxSdfContactTasks(0),
-		  taskGraphPeakActiveRigidBoxSdfContactTasks(0),
-		  taskGraphRigidBoxSdfContactFanIns(0),
-		  taskGraphSerialRigidBoxSdfContactFallbacks(0),
-		  taskGraphSubmittedRigidSphereSdfContactTasks(0),
-		  taskGraphCompletedRigidSphereSdfContactTasks(0),
-		  taskGraphPeakActiveRigidSphereSdfContactTasks(0),
-		  taskGraphRigidSphereSdfContactFanIns(0),
-		  taskGraphSerialRigidSphereSdfContactFallbacks(0),
-		  taskGraphSubmittedRigidCapsuleSdfContactTasks(0),
-		  taskGraphCompletedRigidCapsuleSdfContactTasks(0),
-		  taskGraphPeakActiveRigidCapsuleSdfContactTasks(0),
-		  taskGraphRigidCapsuleSdfContactFanIns(0),
-		  taskGraphSerialRigidCapsuleSdfContactFallbacks(0),
-		  taskGraphSubmittedRigidConvexSdfContactTasks(0),
-		  taskGraphCompletedRigidConvexSdfContactTasks(0),
-		  taskGraphPeakActiveRigidConvexSdfContactTasks(0),
-		  taskGraphRigidConvexSdfContactFanIns(0),
-		  taskGraphSerialRigidConvexSdfContactFallbacks(0),
-		  taskGraphSubmittedRigidTriangleSurfaceContactTasks(0),
-		  taskGraphCompletedRigidTriangleSurfaceContactTasks(0),
-		  taskGraphPeakActiveRigidTriangleSurfaceContactTasks(0),
-		  taskGraphRigidTriangleSurfaceContactFanIns(0),
-		  taskGraphSerialRigidTriangleSurfaceContactFallbacks(0),
-		  taskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems(0),
-		  taskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems(0),
-		  taskGraphRigidTriangleSurfaceFeaturePlanRows(0),
-		  taskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems(0),
-		  taskGraphRigidTriangleSurfaceFeatureFacePairWorkItems(0),
-		  taskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges(0),
-		  taskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange(0),
-		  taskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask(0),
-		  taskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask(0),
-		  taskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask(0),
-		  taskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask(0),
-		  taskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask(0),
-		  taskGraphRigidTriangleSurfaceTaskPoolGrowthEvents(0),
-		  taskGraphRigidTriangleSurfaceTaskPoolGrowthBytes(0),
-		  taskGraphRigidTriangleSurfaceOutputGrowthEvents(0),
-		  taskGraphRigidTriangleSurfaceOutputGrowthBytes(0),
-		  taskGraphRigidTriangleSurfaceQueryScratchGrowthEvents(0),
-		  taskGraphRigidTriangleSurfaceQueryScratchGrowthBytes(0),
-		  taskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes(0),
-		  taskGraphRigidTriangleSurfaceOutputResidentPayloadBytes(0),
-		  taskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes(0),
-		  taskGraphRigidTriangleSurfaceContactTaskWallNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxTaskWallNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFanInSpanNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos(0),
-		  taskGraphRigidTriangleSurfaceContactSerialTransactionNanos(0),
-		  taskGraphRigidTriangleSurfaceContactParentCompletionNanos(0),
-		  taskGraphRigidTriangleSurfaceContactPostContinuationNanos(0),
-		  taskGraphRigidTriangleSurfaceContactTaskSubmissionNanos(0),
-		  taskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos(0),
-		  taskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos(0),
-		  taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos(0),
-		  taskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls(0),
-		  taskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries(0),
-		  taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits(0),
-		  taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates(0),
-		  taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries(0),
-		  taskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns(0),
-		  taskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns(0),
-		  taskGraphSubmittedSoftPairContactTasks(0),
-		  taskGraphCompletedSoftPairContactTasks(0),
-		  taskGraphPeakActiveSoftPairContactTasks(0),
-		  taskGraphSoftPairContactFanIns(0),
-		  taskGraphSerialSoftPairContactFallbacks(0),
-		  taskGraphPureSoftEligibleIslands(0),
-		  taskGraphPureSoftEligibleParticles(0),
-		  collisionRigidParticleTests(0)
-	{
-	}
-};
 
 static DeformableVolumePerformanceMetrics gPerformance;
 static AvbdSoftCollisionStats gFrameCollisionStats;
@@ -2225,12 +838,6 @@ static void accumulateScenePerformanceStatistics(
 		sceneStatistics.avbdCpuTaskGraphMaxCausalLayerOccupancy);
 	gPerformance.taskGraphTotalCausalLayerOccupancy +=
 		sceneStatistics.avbdCpuTaskGraphTotalCausalLayerOccupancy;
-	gPerformance.taskGraphCausalLayerParentReductionNanos +=
-		sceneStatistics.avbdCpuTaskGraphCausalLayerParentReductionNanos;
-	gPerformance.taskGraphCausalLayerTaskPoolGrowthEvents +=
-		sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents;
-	gPerformance.taskGraphCausalLayerTaskPoolGrowthBytes +=
-		sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes;
 	gPerformance.taskGraphSubmittedWorldPlaneContactTasks +=
 		sceneStatistics.avbdCpuTaskGraphSubmittedWorldPlaneContactTasks;
 	gPerformance.taskGraphCompletedWorldPlaneContactTasks +=
@@ -2297,163 +904,6 @@ static void accumulateScenePerformanceStatistics(
 		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFanIns;
 	gPerformance.taskGraphSerialRigidTriangleSurfaceContactFallbacks +=
 		sceneStatistics.avbdCpuTaskGraphSerialRigidTriangleSurfaceContactFallbacks;
-	gPerformance.taskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems;
-	gPerformance.taskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems;
-	gPerformance.taskGraphRigidTriangleSurfaceFeaturePlanRows +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeaturePlanRows;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureFacePairWorkItems +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureFacePairWorkItems;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange);
-	gPerformance.taskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask);
-	gPerformance.taskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask);
-	gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask);
-	gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask);
-	gPerformance.taskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask);
-	gPerformance.taskGraphRigidTriangleSurfaceTaskPoolGrowthEvents +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthEvents;
-	gPerformance.taskGraphRigidTriangleSurfaceTaskPoolGrowthBytes +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthBytes;
-	gPerformance.taskGraphRigidTriangleSurfaceOutputGrowthEvents +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthEvents;
-	gPerformance.taskGraphRigidTriangleSurfaceOutputGrowthBytes +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthBytes;
-	gPerformance.taskGraphRigidTriangleSurfaceQueryScratchGrowthEvents +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthEvents;
-	gPerformance.taskGraphRigidTriangleSurfaceQueryScratchGrowthBytes +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthBytes;
-	gPerformance.taskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes);
-	gPerformance.taskGraphRigidTriangleSurfaceOutputResidentPayloadBytes = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceOutputResidentPayloadBytes,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceOutputResidentPayloadBytes);
-	gPerformance.taskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes);
-	gPerformance.taskGraphRigidTriangleSurfaceContactTaskWallNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactTaskWallNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxTaskWallNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxTaskWallNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxTaskWallNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFanInSpanNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFanInSpanNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactSerialTransactionNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactSerialTransactionNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactParentCompletionNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactParentCompletionNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactPostContinuationNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactPostContinuationNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactTaskSubmissionNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactTaskSubmissionNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos = PxMax(
-		gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos,
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos);
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns;
-	gPerformance.taskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns +=
-		sceneStatistics.avbdCpuTaskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns;
-	gPerformance.taskGraphSubmittedSoftPairContactTasks +=
-		sceneStatistics.avbdCpuTaskGraphSubmittedSoftPairContactTasks;
-	gPerformance.taskGraphCompletedSoftPairContactTasks +=
-		sceneStatistics.avbdCpuTaskGraphCompletedSoftPairContactTasks;
-	gPerformance.taskGraphPeakActiveSoftPairContactTasks = PxMax(
-		gPerformance.taskGraphPeakActiveSoftPairContactTasks,
-		sceneStatistics.avbdCpuTaskGraphPeakActiveSoftPairContactTasks);
-	gPerformance.taskGraphSoftPairContactFanIns +=
-		sceneStatistics.avbdCpuTaskGraphSoftPairContactFanIns;
-	gPerformance.taskGraphSerialSoftPairContactFallbacks +=
-		sceneStatistics.avbdCpuTaskGraphSerialSoftPairContactFallbacks;
 	gPerformance.taskGraphPureSoftEligibleIslands +=
 		sceneStatistics.avbdCpuTaskGraphPureSoftEligibleIslands;
 	gPerformance.taskGraphPureSoftEligibleParticles +=
@@ -2698,397 +1148,57 @@ static bool addRigidBox(
 	return true;
 }
 
-static bool isSceneCpuVolumeSpeculativeCcdCase(
-	const std::string& caseName)
+
+static SweptGeometrySampler getSceneCpuVolumeSweptGeometrySampler()
 {
-	return caseName == "scene-volume-speculative-ccd" ||
-		caseName == "scene-volume-plane-speculative-ccd" ||
-		caseName == "scene-volume-sphere-speculative-ccd" ||
-		caseName == "scene-volume-capsule-speculative-ccd" ||
-		caseName == "scene-volume-convex-speculative-ccd" ||
-		caseName ==
-			"scene-volume-moving-kinematic-sphere-speculative-ccd" ||
-		caseName ==
-			"scene-volume-moving-kinematic-capsule-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-capsule-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-convex-speculative-ccd" ||
-		caseName ==
-			"scene-volume-moving-kinematic-convex-speculative-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-sphere-relative-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-capsule-relative-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-capsule-relative-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-convex-relative-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-convex-relative-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-static-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-static-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-heightfield-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-heightfield-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-heightfield-reverse-swept-ccd";
+	return SweptGeometrySampler(
+		gSceneCpuSphereReverseSweptInitialPositions,
+		gSceneCpuDeformingReverseSweptFreeEndPositions,
+		gSceneCpuCapsuleRotationalSweptInitialPositions,
+		gSceneCpuRigidConvexMesh,
+		gSceneCpuRigidTriangleMesh,
+		gSceneCpuRigidHeightField);
 }
 
-static bool isSceneCpuVolumeTriangleSurfaceSweptCcdCase(
-	const std::string& caseName)
+static KinematicFiniteSweptMetrics getKinematicFiniteSweptMetrics()
 {
-	return
-		caseName ==
-			"scene-volume-static-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-static-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-static-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-heightfield-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-heightfield-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-triangle-mesh-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-heightfield-speculative-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-triangle-mesh-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-heightfield-reverse-swept-ccd";
+	KinematicFiniteSweptMetrics metrics;
+	metrics.targetIssued = gMetrics.movingSphereTargetIssued;
+	metrics.responseObserved = gMetrics.movingSphereCcdResponseObserved;
+	metrics.negativeControlPassed =
+		gMetrics.movingSphereNegativeControlHeld;
+	metrics.positiveDisplacement =
+		gMetrics.movingSpherePositiveDisplacement;
+	metrics.negativeDisplacement =
+		gMetrics.movingSphereNegativeDisplacement;
+	metrics.positiveMinSeparation =
+		gMetrics.movingSpherePositiveMinSeparation;
+	return metrics;
 }
 
-static bool isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
-	const std::string& caseName)
+static DynamicFiniteSweptMetrics getDynamicFiniteSweptMetrics()
 {
-	return isSceneCpuVolumeTriangleSurfaceSweptCcdCase(caseName) &&
-		caseName.find("reverse-swept") != std::string::npos;
+	DynamicFiniteSweptMetrics metrics;
+	metrics.launched = gMetrics.dynamicSphereSweepLaunched;
+	metrics.responseObserved =
+		gMetrics.dynamicSphereSweepResponseObserved;
+	metrics.negativeControlPassed =
+		gMetrics.dynamicSphereSweepNegativeControlTunneled;
+	metrics.twoSidedResponseObserved =
+		gMetrics.dynamicSphereSweepTwoSidedResponseObserved;
+	metrics.positiveSoftDisplacement =
+		gMetrics.dynamicSphereSweepPositiveSoftDisplacement;
+	metrics.negativeSoftDisplacement =
+		gMetrics.dynamicSphereSweepNegativeSoftDisplacement;
+	metrics.positiveRigidDrop =
+		gMetrics.dynamicSphereSweepPositiveRigidDrop;
+	metrics.negativeRigidDrop =
+		gMetrics.dynamicSphereSweepNegativeRigidDrop;
+	metrics.positiveMinSeparation =
+		gMetrics.dynamicSphereSweepPositiveMinSeparation;
+	return metrics;
 }
 
-static bool isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
-	const std::string& caseName)
-{
-	return isSceneCpuVolumeTriangleSurfaceSweptCcdCase(caseName) &&
-		caseName.find("static") != std::string::npos;
-}
-
-static bool isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase(
-	const std::string& caseName)
-{
-	return isSceneCpuVolumeTriangleSurfaceSweptCcdCase(caseName) &&
-		caseName.find("rotating-kinematic") !=
-			std::string::npos;
-}
-
-static bool isSceneCpuVolumeHeightFieldSweptCcdCase(
-	const std::string& caseName)
-{
-	return isSceneCpuVolumeTriangleSurfaceSweptCcdCase(caseName) &&
-		caseName.find("heightfield") != std::string::npos;
-}
-
-// P1 timing fixture. This remains separate from the one-shot correctness
-// sweeps above: it deliberately keeps all three triangle OGC primitive types
-// active after warmup, without weakening their coverage.
-static bool isSceneCpuVolumeRigidTriangleSteadyContactCase(
-	const std::string& caseName)
-{
-	return caseName == "scene-volume-rigid-triangle-steady-contact";
-}
-
-// P5.19 is deliberately a separate headless workload rather than a change to
-// P5.16b/P5.17d's small two-range oracle.  It gives threshold-policy work a
-// fixed large body and two world-static triangle-surface instances while
-// retaining that transaction's strict eligibility and merge contract.
-static bool isSceneCpuVolumeTaskGraphRigidTriangleSurfaceLargeCase(
-	const std::string& caseName)
-{
-	return caseName ==
-		"scene-volume-taskgraph-rigid-triangle-surface-large";
-}
-
-// P5.42 is an active-feature correctness corpus for the already admitted
-// triangle-surface task transaction.  Unlike P5.19's hierarchy/empty-query
-// workload, its dense dynamic body initially overlaps the reverse-feature
-// tetra so face, edge and vertex OGC paths have non-empty work.
-static bool isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
-	const std::string& caseName)
-{
-	return caseName ==
-		"scene-volume-taskgraph-rigid-triangle-surface-feature-overlap";
-}
-
-// P5.20 deliberately underfills four dispatcher workers under the accepted
-// 128-particle policy. Its only purpose is to compare that three-child route
-// with the separately gated 96-particle candidate against the serial oracle.
-static bool isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-		"scene-volume-taskgraph-rigid-triangle-surface-threshold";
-}
-
-static bool isSceneCpuVolumeTaskGraphWriteBackCase(
-	const std::string& caseName)
-{
-	return caseName == "scene-volume-taskgraph-writeback" ||
-		caseName == "scene-volume-taskgraph-writeback-four-way" ||
-		caseName ==
-			"scene-volume-taskgraph-writeback-heterogeneous";
-}
-
-static bool isSceneCpuVolumeTaskGraphWriteBackFourWayCase(
-	const std::string& caseName)
-{
-	return caseName == "scene-volume-taskgraph-writeback-four-way" ||
-		caseName ==
-			"scene-volume-taskgraph-writeback-heterogeneous";
-}
-
-static bool isSceneCpuVolumeTaskGraphPureSoftCase(
-	const std::string& caseName)
-{
-	return caseName == "scene-volume-taskgraph-pure-soft" ||
-		caseName == "scene-volume-taskgraph-pure-soft-corotational";
-}
-
-static bool isSceneCpuVolumeTaskGraphDirectSimulationDomainCase(
-	const std::string& caseName)
-{
-	return isSceneCpuVolumeTaskGraphPureSoftCase(caseName) ||
-		caseName == "scene-volume-taskgraph-world-plane" ||
-		caseName == "scene-volume-taskgraph-rigid-box-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-sphere-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-capsule-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-convex-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-triangle-surface" ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceLargeCase(caseName) ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
-			caseName) ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase(caseName) ||
-		caseName == "scene-volume-taskgraph-soft-pair" ||
-		isSceneCpuVolumeTaskGraphWriteBackCase(caseName);
-}
-
-static bool isSceneCpuVolumeSphereReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-deforming-sphere-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-deforming-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-deforming-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-sphere-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-sphere-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-sphere-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-convex-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeCapsuleReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-deforming-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-capsule-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeRotationalCapsuleReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-rotating-kinematic-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-capsule-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeConvexReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-deforming-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-static-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-kinematic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-rotating-kinematic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-convex-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeRotationalConvexReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-rotating-kinematic-convex-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-dynamic-rotating-convex-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeDeformingReverseSweptCcdCase(
-	const std::string& caseName)
-{
-	return caseName ==
-			"scene-volume-deforming-sphere-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-deforming-capsule-reverse-swept-ccd" ||
-		caseName ==
-			"scene-volume-deforming-convex-reverse-swept-ccd";
-}
-
-static bool isSceneCpuVolumeKinematicRigidCase(
-	const std::string& caseName)
-{
-	return caseName == "scene-volume-kinematic-box" ||
-		caseName == "scene-volume-kinematic-sphere" ||
-		caseName == "scene-volume-kinematic-capsule" ||
-		caseName == "scene-volume-kinematic-convex" ||
-		caseName == "scene-volume-kinematic-triangle-mesh" ||
-		caseName == "scene-volume-kinematic-heightfield";
-}
-
-static bool isSceneCpuVolumeCase(const std::string& caseName)
-{
-	return caseName == "scene-volume-visual-showcase" ||
-		caseName == "scene-volume-ogc-sandwich" ||
-		caseName == "scene-volume-sphere-long-roll" ||
-		caseName == "scene-volume-sphere-soft-soft-glancing" ||
-		caseName == "scene-volume-soft-soft-torque" ||
-		caseName == "scene-volume-lifecycle" ||
-		caseName == "scene-volume-corotational" ||
-		isSceneCpuVolumeTaskGraphPureSoftCase(caseName) ||
-		caseName == "scene-volume-taskgraph-world-plane" ||
-		caseName == "scene-volume-taskgraph-rigid-box-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-sphere-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-capsule-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-convex-sdf" ||
-		caseName == "scene-volume-taskgraph-rigid-triangle-surface" ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceLargeCase(caseName) ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
-			caseName) ||
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase(caseName) ||
-		caseName == "scene-volume-taskgraph-soft-pair" ||
-		isSceneCpuVolumeTaskGraphWriteBackCase(caseName) ||
-		caseName == "scene-volume-ground" ||
-		caseName == "scene-volume-ground-embedded-tet-probe" ||
-		caseName == "scene-volume-static-box" ||
-		caseName == "scene-volume-static-churn" ||
-		caseName == "scene-volume-dynamic-box" ||
-		caseName == "scene-volume-true-boundary-dynamic-box" ||
-		caseName == "scene-volume-dynamic-sphere" ||
-		caseName == "scene-volume-dynamic-capsule" ||
-		caseName == "scene-volume-dynamic-convex" ||
-		caseName == "scene-volume-dynamic-churn" ||
-		caseName == "scene-volume-multi-dynamic-box" ||
-		caseName == "scene-volume-multi-soft-islands" ||
-		caseName == "scene-volume-sleep-wake" ||
-		caseName == "scene-volume-rigid-wake" ||
-		caseName == "scene-volume-mixed-sleep-islands" ||
-		caseName == "scene-volume-soft-churn" ||
-		caseName == "scene-volume-buffer-mutation" ||
-		caseName == "scene-volume-world-pin" ||
-		caseName == "scene-volume-world-element-attachment" ||
-		caseName == "scene-volume-rigid-attachment" ||
-		caseName == "scene-volume-rigid-element-attachment" ||
-		caseName == "scene-volume-static-attachment" ||
-		caseName == "scene-volume-static-element-attachment" ||
-		caseName == "scene-volume-kinematic-attachment" ||
-		caseName == "scene-volume-kinematic-element-attachment" ||
-		caseName == "scene-volume-articulation-attachment" ||
-		caseName == "scene-volume-articulation-element-attachment" ||
-		caseName == "scene-volume-element-filter" ||
-		caseName == "scene-volume-partial-element-filter" ||
-		isSceneCpuVolumeKinematicRigidCase(caseName) ||
-		caseName == "scene-volume-full-kinematic-target" ||
-		caseName == "scene-volume-partial-kinematic-target" ||
-		caseName == "scene-volume-multi-scene-isolation" ||
-		caseName == "scene-volume-soft-soft-wake" ||
-		caseName == "scene-volume-volume-attachment" ||
-		caseName == "scene-volume-skinning" ||
-		caseName == "scene-volume-motion-controls" ||
-		caseName ==
-			"scene-volume-max-depenetration-velocity" ||
-		caseName == "scene-volume-sphere-reverse-feature" ||
-		caseName == "scene-volume-capsule-reverse-feature" ||
-		caseName == "scene-volume-convex-reverse-feature" ||
-		caseName ==
-			"scene-volume-triangle-mesh-reverse-feature" ||
-		caseName ==
-			"scene-volume-heightfield-reverse-feature" ||
-		isSceneCpuVolumeSpeculativeCcdCase(caseName) ||
-		isSceneCpuVolumeSphereReverseSweptCcdCase(caseName) ||
-		isSceneCpuVolumeRigidTriangleSteadyContactCase(caseName);
-}
-
-static bool isComponentDenseNoContactCase(
-	const std::string& caseName)
-{
-	return caseName == "volume-performance-dense-no-contact";
-}
-
-static bool isComponentManySmallNoContactCase(
-	const std::string& caseName)
-{
-	return caseName == "volume-performance-many-small-no-contact";
-}
 
 static bool isComponentNoContactCase(const std::string& caseName)
 {
@@ -4989,839 +3099,112 @@ static bool setSceneCpuVolumeVelocity(
 	PxDeformableVolume& volume, const PxVec3& velocity);
 
 static bool initializeSceneCpuVisualRotationMetrics(
-	SceneCpuVisualRotationMetrics& metrics,
+	RotationMonitor& monitor,
 	PxDeformableVolume& volume)
 {
-	metrics = SceneCpuVisualRotationMetrics();
-	const PxTetrahedronMesh* collisionMesh = volume.getCollisionMesh();
-	const PxVec4* positions = volume.getPositionInvMassBufferH();
-	if(!collisionMesh || !positions || collisionMesh->getNbVertices() < 2)
-		return false;
-	const PxVec3* restVertices = collisionMesh->getVertices();
-	PxU32 minX = 0;
-	PxU32 maxX = 0;
-	for(PxU32 vertexIndex = 1;
-		vertexIndex < collisionMesh->getNbVertices(); ++vertexIndex)
-	{
-		if(restVertices[vertexIndex].x < restVertices[minX].x)
-			minX = vertexIndex;
-		if(restVertices[vertexIndex].x > restVertices[maxX].x)
-			maxX = vertexIndex;
-	}
-	PxVec3 axis = positions[maxX].getXYZ() - positions[minX].getXYZ();
-	if(axis.normalize() <= 1.0e-6f)
-		return false;
-	metrics.volume = &volume;
-	metrics.axisVertex0 = minX;
-	metrics.axisVertex1 = maxX;
-	metrics.initialAxis = axis;
-	metrics.initialized = true;
-	return true;
+	RotationSamplingConfig config;
+	config.earlyEndFrame = SCENE_CPU_VISUAL_SPHERE_EARLY_END_FRAME;
+	config.lateBeginFrame = SCENE_CPU_VISUAL_SPHERE_LATE_BEGIN_FRAME;
+	config.windowBeginFrame = SCENE_CPU_SPHERE_ROLL_WINDOW_BEGIN_FRAME;
+	config.windowEndFrame = SCENE_CPU_SPHERE_ROLL_WINDOW_END_FRAME;
+	config.checkpointInterval = SCENE_CPU_SPHERE_ROLL_CHECKPOINT_INTERVAL;
+	config.checkpointCount = SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT;
+	return monitor.initialize(volume, config);
 }
 
 static bool sampleSceneCpuVisualRotationMetrics(
-	SceneCpuVisualRotationMetrics& metrics)
+	RotationMonitor& monitor)
 {
-	if(!metrics.initialized || !metrics.volume)
-		return false;
-	PxDeformableVolume& volume = *metrics.volume;
-	const PxTetrahedronMesh* collisionMesh = volume.getCollisionMesh();
-	const PxVec4* collisionPositions = volume.getPositionInvMassBufferH();
-	const PxTetrahedronMesh* simulationMesh = volume.getSimulationMesh();
-	const PxVec4* positions = volume.getSimPositionInvMassBufferH();
-	const PxVec4* velocities = volume.getSimVelocityBufferH();
-	if(!collisionMesh || !collisionPositions || !simulationMesh ||
-		!positions || !velocities ||
-		metrics.axisVertex0 >= collisionMesh->getNbVertices() ||
-		metrics.axisVertex1 >= collisionMesh->getNbVertices())
-		return false;
-
-	PxVec3 axis = collisionPositions[metrics.axisVertex1].getXYZ() -
-		collisionPositions[metrics.axisVertex0].getXYZ();
-	if(axis.normalize() <= 1.0e-6f)
-		return false;
-	const PxReal orientationChange = PxAcos(PxClamp(
-		metrics.initialAxis.dot(axis), -1.0f, 1.0f));
-	if(!PxIsFinite(orientationChange))
-		return false;
-	metrics.maxOrientationChange = PxMax(
-		metrics.maxOrientationChange, orientationChange);
-
-	PxReal mass = 0.0f;
-	PxVec3 centroid(0.0f);
-	PxVec3 linearMomentum(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < simulationMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxReal invMass = positions[vertexIndex].w;
-		if(invMass <= 0.0f || !PxIsFinite(invMass))
-			continue;
-		const PxReal vertexMass = 1.0f / invMass;
-		centroid += positions[vertexIndex].getXYZ() * vertexMass;
-		linearMomentum += velocities[vertexIndex].getXYZ() * vertexMass;
-		mass += vertexMass;
-	}
-	if(mass <= 0.0f)
-		return false;
-	centroid *= 1.0f / mass;
-	const PxVec3 linearVelocity = linearMomentum * (1.0f / mass);
-	PxMat33 inertia(PxZero);
-	PxVec3 angularMomentum(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < simulationMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxReal invMass = positions[vertexIndex].w;
-		if(invMass <= 0.0f || !PxIsFinite(invMass))
-			continue;
-		const PxReal vertexMass = 1.0f / invMass;
-		const PxVec3 offset = positions[vertexIndex].getXYZ() - centroid;
-		const PxVec3 relativeVelocity =
-			velocities[vertexIndex].getXYZ() - linearVelocity;
-		inertia = inertia +
-			(PxMat33::createDiagonal(PxVec3(offset.magnitudeSquared())) -
-			 avbdOuter(offset, offset)) * vertexMass;
-		angularMomentum +=
-			offset.cross(relativeVelocity) * vertexMass;
-	}
-	const PxReal determinant = inertia.getDeterminant();
-	if(!PxIsFinite(determinant) || PxAbs(determinant) <= 1.0e-12f)
-		return false;
-	const PxVec3 angularVelocity = inertia.getInverse() * angularMomentum;
-	const PxReal angularSpeed = angularVelocity.magnitude();
-	const PxReal linearSpeed = linearVelocity.magnitude();
-	if(!PxIsFinite(angularSpeed) || !PxIsFinite(linearSpeed))
-		return false;
-	metrics.finalAngularSpeed = angularSpeed;
-	metrics.finalLinearSpeed = linearSpeed;
-	metrics.finalLinearVelocity = linearVelocity;
-	metrics.finalAngularVelocity = angularVelocity;
-	metrics.finalCentroid = centroid;
-	PxReal minCollisionY = PX_MAX_F32;
-	PxVec3 lowestCollisionPoint(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < collisionMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxVec3 point = collisionPositions[vertexIndex].getXYZ();
-		if(point.y < minCollisionY)
-		{
-			minCollisionY = point.y;
-			lowestCollisionPoint = point;
-		}
-	}
-	if(!PxIsFinite(minCollisionY))
-		return false;
-	metrics.finalLowestCollisionOffset = lowestCollisionPoint - centroid;
-	const PxVec3 rigidContactVelocity = linearVelocity +
-		angularVelocity.cross(metrics.finalLowestCollisionOffset);
-	metrics.finalRigidRollSlipSpeed = PxSqrt(
-		rigidContactVelocity.x * rigidContactVelocity.x +
-		rigidContactVelocity.z * rigidContactVelocity.z);
-	if(!metrics.finalLowestCollisionOffset.isFinite() ||
-		!PxIsFinite(metrics.finalRigidRollSlipSpeed))
-		return false;
-	metrics.finalMinCollisionY = minCollisionY;
-	const PxReal groundEnterHeight = 0.01f;
-	const PxReal groundExitHeight = 0.05f;
-	if(!metrics.groundContactActive && minCollisionY <= groundEnterHeight)
-	{
-		metrics.groundContactActive = true;
-		++metrics.groundContactEpisodes;
-		if(metrics.groundContactEpisodes == 1u)
-			metrics.firstGroundContactFrame = gMetrics.completedFrames;
-		else if(metrics.groundContactEpisodes == 2u)
-			metrics.secondGroundContactFrame = gMetrics.completedFrames;
-	}
-	else if(metrics.groundContactActive && minCollisionY > groundExitHeight)
-		metrics.groundContactActive = false;
-	if(metrics.groundContactEpisodes >= 2u && metrics.groundContactActive)
-		metrics.minSecondGroundEpisodeAngularSpeed = PxMin(
-			metrics.minSecondGroundEpisodeAngularSpeed, angularSpeed);
-	if(gMetrics.completedFrames <=
-		SCENE_CPU_VISUAL_SPHERE_EARLY_END_FRAME)
-		metrics.earlyMaxAngularSpeed = PxMax(
-			metrics.earlyMaxAngularSpeed, angularSpeed);
-	if(gMetrics.completedFrames >=
-		SCENE_CPU_VISUAL_SPHERE_LATE_BEGIN_FRAME)
-		metrics.lateMaxAngularSpeed = PxMax(
-			metrics.lateMaxAngularSpeed, angularSpeed);
-	if(gMetrics.completedFrames >=
-			SCENE_CPU_SPHERE_ROLL_WINDOW_BEGIN_FRAME &&
-		gMetrics.completedFrames <=
-			SCENE_CPU_SPHERE_ROLL_WINDOW_END_FRAME)
-	{
-		metrics.windowMinAngularSpeed = PxMin(
-			metrics.windowMinAngularSpeed, angularSpeed);
-		metrics.windowMaxAngularSpeed = PxMax(
-			metrics.windowMaxAngularSpeed, angularSpeed);
-		metrics.windowAngularSpeedSum += angularSpeed;
-		metrics.windowMinLinearSpeed = PxMin(
-			metrics.windowMinLinearSpeed, linearSpeed);
-		metrics.windowMaxLinearSpeed = PxMax(
-			metrics.windowMaxLinearSpeed, linearSpeed);
-		metrics.windowLinearSpeedSum += linearSpeed;
-		metrics.windowSampleCount++;
-	}
-	if(gMetrics.completedFrames > 0 &&
-		gMetrics.completedFrames %
-			SCENE_CPU_SPHERE_ROLL_CHECKPOINT_INTERVAL == 0)
-	{
-		const PxU32 checkpointIndex =
-			gMetrics.completedFrames /
-				SCENE_CPU_SPHERE_ROLL_CHECKPOINT_INTERVAL - 1;
-		if(checkpointIndex < SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT)
-		{
-			metrics.checkpointAngularSpeeds[checkpointIndex] = angularSpeed;
-			metrics.checkpointLinearSpeeds[checkpointIndex] = linearSpeed;
-			metrics.checkpointCentroidY[checkpointIndex] = centroid.y;
-		}
-	}
-	if(angularSpeed > metrics.maxAngularSpeed)
-	{
-		metrics.maxAngularSpeed = angularSpeed;
-		metrics.maxAngularSpeedFrame = gMetrics.completedFrames;
-	}
-	return true;
-}
-
-// Test the entire collision/render triangle, not just its three vertices.
-// A triangle can pass through an OBB even if all of its vertices remain
-// outside, which is exactly the visual failure this showcase must reject.
-static bool doesSceneCpuVisualTrianglePenetrateBox(
-	const PxVec3& localP0, const PxVec3& localP1, const PxVec3& localP2,
-	const PxVec3& halfExtents)
-{
-	// SAT treats touching as overlap. Shrink one extra epsilon so a face at the
-	// allowed 1 mm boundary does not spuriously fail the inclusive test.
-	const PxReal tolerance =
-		SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION + 1.0e-6f;
-	const PxVec3 shrunkenHalfExtents(
-		PxMax(halfExtents.x - tolerance,
-			1.0e-6f),
-		PxMax(halfExtents.y - tolerance,
-			1.0e-6f),
-		PxMax(halfExtents.z - tolerance,
-			1.0e-6f));
-	return Gu::intersectTriangleBox_ReferenceCode(
-		PxVec3(0.0f), shrunkenHalfExtents,
-		localP0, localP1, localP2) != 0;
-}
-
-// Measure against the same collision-domain boundary rendered by the public
-// visual case. Positive vertex SDF is a real mesh gap; zero is mesh contact;
-// negative values are actual vertex interpenetration. The triangle test below
-// catches a face that cuts through the box between otherwise safe vertices.
-// Both measurements are deliberately distinct from OGC's offset shell.
-static bool measureSceneCpuVisualJawSignedSdf(
-	PxDeformableVolume& volume, const PxArray<PxU32>& surfaceTriangles,
-	const PxTransform& boxPose, const PxVec3& boxHalfExtents,
-	PxReal& outMinSignedSdf,
-	bool& outTrianglePenetrated)
-{
-	const PxTetrahedronMesh* const collisionMesh = volume.getCollisionMesh();
-	const PxVec4* const positions = volume.getPositionInvMassBufferH();
-	if(!collisionMesh || !positions || surfaceTriangles.empty() ||
-		surfaceTriangles.size() % 3 != 0 ||
-		!boxPose.isValid() || !boxHalfExtents.isFinite() ||
-		boxHalfExtents.x <= 0.0f || boxHalfExtents.y <= 0.0f ||
-		boxHalfExtents.z <= 0.0f)
-		return false;
-	const PxQuat inverseBoxRotation = boxPose.q.getConjugate();
-	outMinSignedSdf = PX_MAX_F32;
-	outTrianglePenetrated = false;
-	for(PxU32 surfaceIndex = 0;
-		surfaceIndex < surfaceTriangles.size(); surfaceIndex += 3)
-	{
-		PxVec3 localPositions[3];
-		for(PxU32 vertex = 0; vertex < 3; ++vertex)
-		{
-			const PxU32 vertexIndex =
-				surfaceTriangles[surfaceIndex + vertex];
-			if(vertexIndex >= collisionMesh->getNbVertices())
-				return false;
-			const PxVec3 worldPosition = positions[vertexIndex].getXYZ();
-			if(!worldPosition.isFinite())
-				return false;
-			const PxVec3 localPosition = inverseBoxRotation.rotate(
-				worldPosition - boxPose.p);
-			const PxVec3 distanceToBox(
-				PxAbs(localPosition.x) -
-					boxHalfExtents.x,
-				PxAbs(localPosition.y) -
-					boxHalfExtents.y,
-				PxAbs(localPosition.z) -
-					boxHalfExtents.z);
-			const PxVec3 outsideDistance(
-				PxMax(distanceToBox.x, 0.0f),
-				PxMax(distanceToBox.y, 0.0f),
-				PxMax(distanceToBox.z, 0.0f));
-			const PxReal signedSdf = outsideDistance.magnitude() + PxMin(
-				PxMax(distanceToBox.x,
-					PxMax(distanceToBox.y, distanceToBox.z)), 0.0f);
-			if(!localPosition.isFinite() || !PxIsFinite(signedSdf))
-				return false;
-			outMinSignedSdf = PxMin(outMinSignedSdf, signedSdf);
-			localPositions[vertex] = localPosition;
-		}
-		outTrianglePenetrated = outTrianglePenetrated ||
-			doesSceneCpuVisualTrianglePenetrateBox(
-				localPositions[0], localPositions[1], localPositions[2],
-				boxHalfExtents);
-	}
-	return PxIsFinite(outMinSignedSdf);
-}
-
-// A plane SDF is affine over a triangle, so its exact triangle minimum is the
-// smallest vertex SDF.  Unlike an OBB, there is no hidden face-core crossing
-// when all three collision vertices are on the non-penetrating side.
-static bool measureSceneCpuVisualJawGroundSignedSdf(
-	PxDeformableVolume& volume, const PxArray<PxU32>& surfaceTriangles,
-	PxReal groundHeight, PxReal& outMinSignedSdf,
-	bool& outTrianglePenetrated)
-{
-	const PxTetrahedronMesh* const collisionMesh = volume.getCollisionMesh();
-	const PxVec4* const positions = volume.getPositionInvMassBufferH();
-	if(!collisionMesh || !positions || surfaceTriangles.empty() ||
-		surfaceTriangles.size() % 3 != 0 || !PxIsFinite(groundHeight))
-		return false;
-
-	outMinSignedSdf = PX_MAX_F32;
-	outTrianglePenetrated = false;
-	const PxReal tolerance =
-		SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-	for(PxU32 surfaceIndex = 0;
-		surfaceIndex < surfaceTriangles.size(); surfaceIndex += 3)
-	{
-		bool trianglePenetrated = false;
-		for(PxU32 vertex = 0; vertex < 3; ++vertex)
-		{
-			const PxU32 vertexIndex =
-				surfaceTriangles[surfaceIndex + vertex];
-			if(vertexIndex >= collisionMesh->getNbVertices())
-				return false;
-			const PxVec3 worldPosition = positions[vertexIndex].getXYZ();
-			if(!worldPosition.isFinite())
-				return false;
-			const PxReal signedSdf = worldPosition.y - groundHeight;
-			if(!PxIsFinite(signedSdf))
-				return false;
-			outMinSignedSdf = PxMin(outMinSignedSdf, signedSdf);
-			trianglePenetrated = trianglePenetrated ||
-				signedSdf < -tolerance;
-		}
-		outTrianglePenetrated = outTrianglePenetrated ||
-			trianglePenetrated;
-	}
-	return PxIsFinite(outMinSignedSdf);
-}
-
-static bool isSceneCpuVisualSurfaceGapSeparated(
-	const SceneCpuVisualSurfaceGapMetrics& gap)
-{
-	return PxIsFinite(gap.minSignedSdf) && !gap.penetrated &&
-		gap.minSignedSdf >=
-			-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-}
-
-static void initializeSceneCpuVisualSurfaceGapMetrics(
-	SceneCpuVisualSurfaceGapMetrics& gap, PxReal initialSignedSdf,
-	bool initiallyPenetrated)
-{
-	gap.initialSignedSdf = initialSignedSdf;
-	gap.minSignedSdf = initialSignedSdf;
-	gap.finalSignedSdf = initialSignedSdf;
-	gap.penetrationFrames = 0;
-	gap.penetrated = initiallyPenetrated;
-}
-
-static void updateSceneCpuVisualSurfaceGapMetrics(
-	SceneCpuVisualSurfaceGapMetrics& gap, PxReal signedSdf,
-	bool penetrated)
-{
-	gap.minSignedSdf = PxMin(gap.minSignedSdf, signedSdf);
-	gap.finalSignedSdf = signedSdf;
-	gap.penetrated = gap.penetrated || penetrated;
-	if(penetrated)
-		gap.penetrationFrames++;
+	return monitor.sample(gMetrics.completedFrames);
 }
 
 static bool initializeSceneCpuVisualInteractionMetrics(
 	PxDeformableVolume& upperJaw, PxDeformableVolume& lowerJaw)
 {
-	SceneCpuVisualInteractionMetrics& metrics =
-		gSceneCpuVisualInteractionMetrics;
-	metrics = SceneCpuVisualInteractionMetrics();
-	metrics.upperJaw = &upperJaw;
-	metrics.lowerJaw = &lowerJaw;
-	const PxTetrahedronMesh* const upperMesh = upperJaw.getCollisionMesh();
-	const PxTetrahedronMesh* const lowerMesh = lowerJaw.getCollisionMesh();
-	if(!upperMesh || !lowerMesh || !gSceneCpuDynamicActor ||
-		!gSceneCpuStaticActor ||
+	if(!gSceneCpuDynamicActor || !gSceneCpuStaticActor ||
 		gSceneCpuDynamicActor->getScene() != gScene ||
 		gSceneCpuStaticActor->getScene() != gScene)
 		return false;
-	PxTetrahedronMeshExt::extractTetMeshSurface(
-		upperMesh, metrics.upperJawSurfaceTriangles, NULL, false);
-	PxTetrahedronMeshExt::extractTetMeshSurface(
-		lowerMesh, metrics.lowerJawSurfaceTriangles, NULL, false);
-	const PxTransform dynamicBoxPose =
-		gSceneCpuDynamicActor->getGlobalPose();
-	const PxTransform pedestalPose =
-		gSceneCpuStaticActor->getGlobalPose();
-	if(!measureSceneCpuVisualJawSignedSdf(
-			upperJaw, metrics.upperJawSurfaceTriangles, dynamicBoxPose,
-			SCENE_CPU_VISUAL_DYNAMIC_BOX_HALF_EXTENTS,
-			metrics.initialUpperJawSignedSdf,
-			metrics.upperJawTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			lowerJaw, metrics.lowerJawSurfaceTriangles, dynamicBoxPose,
-			SCENE_CPU_VISUAL_DYNAMIC_BOX_HALF_EXTENTS,
-			metrics.initialLowerJawSignedSdf,
-			metrics.lowerJawTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			upperJaw, metrics.upperJawSurfaceTriangles, pedestalPose,
-			SCENE_CPU_VISUAL_STATIC_PEDESTAL_HALF_EXTENTS,
-			metrics.upperJawPedestalGap.initialSignedSdf,
-			metrics.upperJawPedestalGap.penetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			lowerJaw, metrics.lowerJawSurfaceTriangles, pedestalPose,
-			SCENE_CPU_VISUAL_STATIC_PEDESTAL_HALF_EXTENTS,
-			metrics.lowerJawPedestalGap.initialSignedSdf,
-			metrics.lowerJawPedestalGap.penetrated) ||
-		!measureSceneCpuVisualJawGroundSignedSdf(
-			upperJaw, metrics.upperJawSurfaceTriangles,
-			SCENE_CPU_VISUAL_GROUND_HEIGHT,
-			metrics.upperJawGroundGap.initialSignedSdf,
-			metrics.upperJawGroundGap.penetrated) ||
-		!measureSceneCpuVisualJawGroundSignedSdf(
-			lowerJaw, metrics.lowerJawSurfaceTriangles,
-			SCENE_CPU_VISUAL_GROUND_HEIGHT,
-			metrics.lowerJawGroundGap.initialSignedSdf,
-			metrics.lowerJawGroundGap.penetrated))
-		return false;
-	metrics.minUpperJawSignedSdf = metrics.initialUpperJawSignedSdf;
-	metrics.minLowerJawSignedSdf = metrics.initialLowerJawSignedSdf;
-	metrics.finalUpperJawSignedSdf = metrics.initialUpperJawSignedSdf;
-	metrics.finalLowerJawSignedSdf = metrics.initialLowerJawSignedSdf;
-	initializeSceneCpuVisualSurfaceGapMetrics(
-		metrics.upperJawPedestalGap,
-		metrics.upperJawPedestalGap.initialSignedSdf,
-		metrics.upperJawPedestalGap.penetrated);
-	initializeSceneCpuVisualSurfaceGapMetrics(
-		metrics.lowerJawPedestalGap,
-		metrics.lowerJawPedestalGap.initialSignedSdf,
-		metrics.lowerJawPedestalGap.penetrated);
-	initializeSceneCpuVisualSurfaceGapMetrics(
-		metrics.upperJawGroundGap,
-		metrics.upperJawGroundGap.initialSignedSdf,
-		metrics.upperJawGroundGap.penetrated);
-	initializeSceneCpuVisualSurfaceGapMetrics(
-		metrics.lowerJawGroundGap,
-		metrics.lowerJawGroundGap.initialSignedSdf,
-		metrics.lowerJawGroundGap.penetrated);
-	metrics.collisionTelemetryEnabled = true;
-	metrics.initialized = true;
-	return true;
+	return gSceneCpuVisualInteractionMonitor.initialize(
+		upperJaw, lowerJaw, *gSceneCpuDynamicActor, *gSceneCpuStaticActor,
+		SCENE_CPU_VISUAL_DYNAMIC_BOX_HALF_EXTENTS,
+		SCENE_CPU_VISUAL_STATIC_PEDESTAL_HALF_EXTENTS,
+		SCENE_CPU_VISUAL_GROUND_HEIGHT);
 }
 
 static bool sampleSceneCpuVisualInteractionMetrics()
 {
-	SceneCpuVisualInteractionMetrics& metrics =
-		gSceneCpuVisualInteractionMetrics;
-	if(!metrics.initialized || !metrics.collisionTelemetryEnabled || !gScene ||
-		!gSceneCpuDynamicActor || !gSceneCpuStaticActor ||
-		gSceneCpuDynamicActor->getScene() != gScene ||
-		gSceneCpuStaticActor->getScene() != gScene)
+	if(!gScene)
 		return false;
-
-	PxSimulationStatistics sceneStatistics;
-	gScene->getSimulationStatistics(sceneStatistics);
-	const PxU64 frameRigidContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts;
-	const PxU64 frameSoftContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSoftContacts;
-	const PxU32 frameNativeIslandSteps =
-		sceneStatistics.avbdCpuSoftBodyNativeIslandSteps;
-	metrics.generatedRigidContacts += frameRigidContacts;
-	metrics.generatedSoftContacts += frameSoftContacts;
-	metrics.nativeIslandSteps += frameNativeIslandSteps;
-	if(frameRigidContacts)
-	{
-		gMetrics.rigidContactFrames++;
-		gMetrics.maxRigidContacts = PxMax(gMetrics.maxRigidContacts,
-			static_cast<PxU32>(frameRigidContacts));
-	}
-	if(frameSoftContacts)
-	{
-		gMetrics.softContactFrames++;
-		gMetrics.maxSoftContacts = PxMax(gMetrics.maxSoftContacts,
-			static_cast<PxU32>(frameSoftContacts));
-	}
-
-	const PxTransform pose = gSceneCpuDynamicActor->getGlobalPose();
-	const PxTransform pedestalPose =
-		gSceneCpuStaticActor->getGlobalPose();
-	const PxVec3 linearVelocity =
-		gSceneCpuDynamicActor->getLinearVelocity();
-	const PxVec3 angularVelocity =
-		gSceneCpuDynamicActor->getAngularVelocity();
-	if(!pose.isValid() || !pedestalPose.isValid() ||
-		!linearVelocity.isFinite() ||
-		!angularVelocity.isFinite())
+	VisualInteractionFrameSample sample;
+	if(!gSceneCpuVisualInteractionMonitor.sample(
+			*gScene, gMetrics.completedFrames, sample))
 	{
 		gMetrics.nonFiniteParticleSamples++;
 		return false;
 	}
-	PxReal upperJawSignedSdf = PX_MAX_F32;
-	PxReal lowerJawSignedSdf = PX_MAX_F32;
-	bool upperJawTrianglePenetrated = false;
-	bool lowerJawTrianglePenetrated = false;
-	PxReal upperJawPedestalSignedSdf = PX_MAX_F32;
-	PxReal lowerJawPedestalSignedSdf = PX_MAX_F32;
-	bool upperJawPedestalTrianglePenetrated = false;
-	bool lowerJawPedestalTrianglePenetrated = false;
-	PxReal upperJawGroundSignedSdf = PX_MAX_F32;
-	PxReal lowerJawGroundSignedSdf = PX_MAX_F32;
-	bool upperJawGroundPlanePenetrated = false;
-	bool lowerJawGroundPlanePenetrated = false;
-	if(!metrics.upperJaw || !metrics.lowerJaw ||
-		!measureSceneCpuVisualJawSignedSdf(
-			*metrics.upperJaw, metrics.upperJawSurfaceTriangles, pose,
-			SCENE_CPU_VISUAL_DYNAMIC_BOX_HALF_EXTENTS,
-			upperJawSignedSdf, upperJawTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			*metrics.lowerJaw, metrics.lowerJawSurfaceTriangles, pose,
-			SCENE_CPU_VISUAL_DYNAMIC_BOX_HALF_EXTENTS,
-			lowerJawSignedSdf, lowerJawTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			*metrics.upperJaw, metrics.upperJawSurfaceTriangles,
-			pedestalPose, SCENE_CPU_VISUAL_STATIC_PEDESTAL_HALF_EXTENTS,
-			upperJawPedestalSignedSdf,
-			upperJawPedestalTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(
-			*metrics.lowerJaw, metrics.lowerJawSurfaceTriangles,
-			pedestalPose, SCENE_CPU_VISUAL_STATIC_PEDESTAL_HALF_EXTENTS,
-			lowerJawPedestalSignedSdf,
-			lowerJawPedestalTrianglePenetrated) ||
-		!measureSceneCpuVisualJawGroundSignedSdf(
-			*metrics.upperJaw, metrics.upperJawSurfaceTriangles,
-			SCENE_CPU_VISUAL_GROUND_HEIGHT,
-			upperJawGroundSignedSdf,
-			upperJawGroundPlanePenetrated) ||
-		!measureSceneCpuVisualJawGroundSignedSdf(
-			*metrics.lowerJaw, metrics.lowerJawSurfaceTriangles,
-			SCENE_CPU_VISUAL_GROUND_HEIGHT,
-			lowerJawGroundSignedSdf,
-			lowerJawGroundPlanePenetrated))
-		return false;
-	metrics.minUpperJawSignedSdf = PxMin(
-		metrics.minUpperJawSignedSdf, upperJawSignedSdf);
-	metrics.minLowerJawSignedSdf = PxMin(
-		metrics.minLowerJawSignedSdf, lowerJawSignedSdf);
-	metrics.finalUpperJawSignedSdf = upperJawSignedSdf;
-	metrics.finalLowerJawSignedSdf = lowerJawSignedSdf;
-	metrics.upperJawTrianglePenetrated =
-		metrics.upperJawTrianglePenetrated || upperJawTrianglePenetrated;
-	metrics.lowerJawTrianglePenetrated =
-		metrics.lowerJawTrianglePenetrated || lowerJawTrianglePenetrated;
-	if(upperJawTrianglePenetrated)
+	if(sample.generatedRigidContacts)
 	{
-		metrics.upperJawTrianglePenetrationFrames++;
-		if(metrics.upperJawTrianglePenetrationFirstFrame == PX_MAX_U32)
-			metrics.upperJawTrianglePenetrationFirstFrame =
-				gMetrics.completedFrames;
+		gMetrics.rigidContactFrames++;
+		gMetrics.maxRigidContacts = PxMax(gMetrics.maxRigidContacts,
+			static_cast<PxU32>(sample.generatedRigidContacts));
 	}
-	if(lowerJawTrianglePenetrated)
+	if(sample.generatedSoftContacts)
 	{
-		metrics.lowerJawTrianglePenetrationFrames++;
-		if(metrics.lowerJawTrianglePenetrationFirstFrame == PX_MAX_U32)
-			metrics.lowerJawTrianglePenetrationFirstFrame =
-				gMetrics.completedFrames;
+		gMetrics.softContactFrames++;
+		gMetrics.maxSoftContacts = PxMax(gMetrics.maxSoftContacts,
+			static_cast<PxU32>(sample.generatedSoftContacts));
 	}
-	updateSceneCpuVisualSurfaceGapMetrics(
-		metrics.upperJawPedestalGap, upperJawPedestalSignedSdf,
-		upperJawPedestalTrianglePenetrated);
-	updateSceneCpuVisualSurfaceGapMetrics(
-		metrics.lowerJawPedestalGap, lowerJawPedestalSignedSdf,
-		lowerJawPedestalTrianglePenetrated);
-	updateSceneCpuVisualSurfaceGapMetrics(
-		metrics.upperJawGroundGap, upperJawGroundSignedSdf,
-		upperJawGroundPlanePenetrated);
-	updateSceneCpuVisualSurfaceGapMetrics(
-		metrics.lowerJawGroundGap, lowerJawGroundSignedSdf,
-		lowerJawGroundPlanePenetrated);
-
 	// The showcase body begins awake under gravity.  Its actual soft/rigid
 	// participation is gated below by contact telemetry plus a finite falling
 	// trajectory, rather than by the legacy sleeping-body wake signal.
 	gMetrics.sceneDynamicMinY = PxMin(
-		gMetrics.sceneDynamicMinY, pose.p.y);
-	gMetrics.sceneDynamicFinalY = pose.p.y;
+		gMetrics.sceneDynamicMinY, sample.boxPosition.y);
+	gMetrics.sceneDynamicFinalY = sample.boxPosition.y;
 	gMetrics.sceneDynamicMaxDrop = PxMax(
 		gMetrics.sceneDynamicMaxDrop,
-		gSceneCpuDynamicInitialY - pose.p.y);
+		gSceneCpuDynamicInitialY - sample.boxPosition.y);
 	gMetrics.sceneDynamicMaxDownSpeed = PxMax(
 		gMetrics.sceneDynamicMaxDownSpeed,
-		PxMax(-linearVelocity.y, 0.0f));
+		PxMax(-sample.boxLinearVelocity.y, 0.0f));
 	return true;
-}
-
-static bool measureSceneCpuOgcSandwichJawContactPatchOffset(
-	PxDeformableVolume& jaw, bool lowerFace, PxReal& outOffset)
-{
-	const PxTetrahedronMesh* const collisionMesh = jaw.getCollisionMesh();
-	const PxVec4* const positions = jaw.getPositionInvMassBufferH();
-	if(!collisionMesh || !positions || collisionMesh->getNbVertices() == 0)
-		return false;
-
-	PxVec3 centroid(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < collisionMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxVec3 position = positions[vertexIndex].getXYZ();
-		if(!position.isFinite())
-			return false;
-		centroid += position;
-	}
-	centroid *= 1.0f / collisionMesh->getNbVertices();
-
-	// The jaw has a larger footprint than the rigid box.  Measuring the whole
-	// face extremum reports an untouched outer corner and misses the central
-	// dimple that contact creates.  Sample only collision-skin vertices inside
-	// the box footprint and on the facing half of the jaw.  This fixture is
-	// axis-aligned by design, so the world-space projection is exact here.
-	const PxReal footprintPadding = 0.06f;
-	const PxReal faceHalfHeight = 0.35f;
-	PxReal patchCoordinate = 0.0f;
-	PxU32 patchVertexCount = 0;
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < collisionMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxVec3 position = positions[vertexIndex].getXYZ();
-		const bool insideFootprint =
-			PxAbs(position.x - SCENE_CPU_OGC_SANDWICH_BOX_CENTER.x) <=
-				SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS.x + footprintPadding &&
-			PxAbs(position.z - SCENE_CPU_OGC_SANDWICH_BOX_CENTER.z) <=
-				SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS.z + footprintPadding;
-		const bool onFacingHalf = lowerFace ?
-			position.y <= centroid.y - faceHalfHeight :
-			position.y >= centroid.y + faceHalfHeight;
-		if(!insideFootprint || !onFacingHalf)
-			continue;
-		patchCoordinate += position.y;
-		++patchVertexCount;
-	}
-	if(patchVertexCount == 0)
-		return false;
-	outOffset = patchCoordinate / patchVertexCount - centroid.y;
-	return PxIsFinite(outOffset);
 }
 
 static bool initializeSceneCpuOgcSandwichMetrics(
 	PxDeformableVolume& upperJaw, PxDeformableVolume& lowerJaw)
 {
-	SceneCpuOgcSandwichMetrics& metrics = gSceneCpuOgcSandwichMetrics;
-	metrics = SceneCpuOgcSandwichMetrics();
-	metrics.upperJaw = &upperJaw;
-	metrics.lowerJaw = &lowerJaw;
 	if(!gScene || !gSceneCpuDynamicActor ||
-		gSceneCpuDynamicActor->getScene() != gScene ||
-		!upperJaw.getCollisionMesh() || !lowerJaw.getCollisionMesh())
+		gSceneCpuDynamicActor->getScene() != gScene)
 		return false;
-
-	PxTetrahedronMeshExt::extractTetMeshSurface(upperJaw.getCollisionMesh(),
-		metrics.upperJawSurfaceTriangles, NULL, false);
-	PxTetrahedronMeshExt::extractTetMeshSurface(lowerJaw.getCollisionMesh(),
-		metrics.lowerJawSurfaceTriangles, NULL, false);
-	if(metrics.upperJawSurfaceTriangles.empty() ||
-		metrics.lowerJawSurfaceTriangles.empty() ||
-		(metrics.upperJawSurfaceTriangles.size() % 3) != 0 ||
-		(metrics.lowerJawSurfaceTriangles.size() % 3) != 0)
-		return false;
-
-	const PxTransform boxPose = gSceneCpuDynamicActor->getGlobalPose();
-	if(!boxPose.isValid() ||
-		!measureSceneCpuVisualJawSignedSdf(upperJaw,
-			metrics.upperJawSurfaceTriangles, boxPose,
-			SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS,
-			metrics.minUpperJawSignedSdf,
-			metrics.upperJawTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(lowerJaw,
-			metrics.lowerJawSurfaceTriangles, boxPose,
-			SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS,
-			metrics.minLowerJawSignedSdf,
-			metrics.lowerJawTrianglePenetrated) ||
-		!measureSceneCpuOgcSandwichJawContactPatchOffset(upperJaw, true,
-			metrics.initialUpperBottomOffset) ||
-		!measureSceneCpuOgcSandwichJawContactPatchOffset(lowerJaw, false,
-			metrics.initialLowerTopOffset))
-		return false;
-	metrics.finalUpperJawSignedSdf = metrics.minUpperJawSignedSdf;
-	metrics.finalLowerJawSignedSdf = metrics.minLowerJawSignedSdf;
-	metrics.initialBoxPosition = boxPose.p;
-	metrics.collisionTelemetryEnabled = true;
-	metrics.initialized = true;
-	return true;
+	return gSceneCpuOgcSandwichMonitor.initialize(
+		upperJaw, lowerJaw, *gSceneCpuDynamicActor,
+		SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS);
 }
 
 static bool sampleSceneCpuOgcSandwichMetrics()
 {
-	SceneCpuOgcSandwichMetrics& metrics = gSceneCpuOgcSandwichMetrics;
-	if(!metrics.initialized || !metrics.collisionTelemetryEnabled || !gScene ||
-		!gSceneCpuDynamicActor || !metrics.upperJaw || !metrics.lowerJaw ||
-		gSceneCpuDynamicActor->getScene() != gScene)
+	if(!gScene)
 		return false;
-
-	PxSimulationStatistics statistics;
-	gScene->getSimulationStatistics(statistics);
-	metrics.generatedRigidContacts +=
-		statistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts;
-	metrics.nativeIslandSteps += statistics.avbdCpuSoftBodyNativeIslandSteps;
-	if(statistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts)
+	OgcSandwichFrameSample sample;
+	if(!gSceneCpuOgcSandwichMonitor.sample(
+			*gScene, gSceneCpuVolumeHealthMonitor, sample))
+		return false;
+	if(sample.generatedRigidContacts)
 	{
 		gMetrics.rigidContactFrames++;
 		gMetrics.maxRigidContacts = PxMax(gMetrics.maxRigidContacts,
-			static_cast<PxU32>(
-				statistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts));
+			static_cast<PxU32>(sample.generatedRigidContacts));
 	}
-
-	const PxTransform boxPose = gSceneCpuDynamicActor->getGlobalPose();
-	const PxVec3 boxVelocity = gSceneCpuDynamicActor->getLinearVelocity();
-	if(!boxPose.isValid() || !boxVelocity.isFinite())
-		return false;
-	PxReal upperSdf = PX_MAX_F32;
-	PxReal lowerSdf = PX_MAX_F32;
-	bool upperTrianglePenetrated = false;
-	bool lowerTrianglePenetrated = false;
-	if(!measureSceneCpuVisualJawSignedSdf(*metrics.upperJaw,
-			metrics.upperJawSurfaceTriangles, boxPose,
-			SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS, upperSdf,
-			upperTrianglePenetrated) ||
-		!measureSceneCpuVisualJawSignedSdf(*metrics.lowerJaw,
-			metrics.lowerJawSurfaceTriangles, boxPose,
-			SCENE_CPU_OGC_SANDWICH_BOX_HALF_EXTENTS, lowerSdf,
-			lowerTrianglePenetrated))
-		return false;
-
-	PxReal upperBottomOffset = PX_MAX_F32;
-	PxReal lowerTopOffset = PX_MAX_F32;
-	if(!measureSceneCpuOgcSandwichJawContactPatchOffset(*metrics.upperJaw, true,
-			upperBottomOffset) ||
-		!measureSceneCpuOgcSandwichJawContactPatchOffset(*metrics.lowerJaw, false,
-			lowerTopOffset))
-		return false;
-	metrics.maxUpperCompression = PxMax(metrics.maxUpperCompression,
-		upperBottomOffset - metrics.initialUpperBottomOffset);
-	metrics.maxLowerCompression = PxMax(metrics.maxLowerCompression,
-		metrics.initialLowerTopOffset - lowerTopOffset);
-	// The face-offset probe is intentionally strict: it reports only
-	// contact-normal skin motion after centroid translation is removed.
-	// Retain each jaw's minimum det(F) alongside it, so a failure tells us
-	// whether the material did not respond at all or only sheared internally.
-	if(gSceneCpuVisualVolumeRestStates.size() != 2 ||
-		gSceneCpuVisualVolumeRestStates[0].volume != metrics.upperJaw ||
-		gSceneCpuVisualVolumeRestStates[1].volume != metrics.lowerJaw)
-		return false;
-	const SceneCpuVisualBodyHealthMetrics& upperHealth =
-		gSceneCpuVisualBodyHealthMetrics[0];
-	const SceneCpuVisualBodyHealthMetrics& lowerHealth =
-		gSceneCpuVisualBodyHealthMetrics[1];
-	if(!PxIsFinite(upperHealth.minDetF) || !PxIsFinite(lowerHealth.minDetF))
-		return false;
-	metrics.upperJawMinDetF = PxMin(metrics.upperJawMinDetF,
-		upperHealth.minDetF);
-	metrics.lowerJawMinDetF = PxMin(metrics.lowerJawMinDetF,
-		lowerHealth.minDetF);
-	metrics.minUpperJawSignedSdf = PxMin(metrics.minUpperJawSignedSdf,
-		upperSdf);
-	metrics.minLowerJawSignedSdf = PxMin(metrics.minLowerJawSignedSdf,
-		lowerSdf);
-	metrics.finalUpperJawSignedSdf = upperSdf;
-	metrics.finalLowerJawSignedSdf = lowerSdf;
-	metrics.upperJawTrianglePenetrated =
-		metrics.upperJawTrianglePenetrated || upperTrianglePenetrated;
-	metrics.lowerJawTrianglePenetrated =
-		metrics.lowerJawTrianglePenetrated || lowerTrianglePenetrated;
-	metrics.upperJawTrianglePenetrationFrames +=
-		upperTrianglePenetrated ? 1u : 0u;
-	metrics.lowerJawTrianglePenetrationFrames +=
-		lowerTrianglePenetrated ? 1u : 0u;
-	const PxVec3 lateralOffset(
-		boxPose.p.x - metrics.initialBoxPosition.x, 0.0f,
-		boxPose.p.z - metrics.initialBoxPosition.z);
-	const PxVec3 lateralVelocity(boxVelocity.x, 0.0f, boxVelocity.z);
-	metrics.maxBoxLateralOffset = PxMax(metrics.maxBoxLateralOffset,
-		lateralOffset.magnitude());
-	metrics.maxBoxLateralSpeed = PxMax(metrics.maxBoxLateralSpeed,
-		lateralVelocity.magnitude());
-	metrics.maxBoxNormalOffset = PxMax(metrics.maxBoxNormalOffset,
-		PxAbs(boxPose.p.y - metrics.initialBoxPosition.y));
-	metrics.maxBoxNormalSpeed = PxMax(metrics.maxBoxNormalSpeed,
-		PxAbs(boxVelocity.y));
-	gMetrics.sceneDynamicMinY = PxMin(gMetrics.sceneDynamicMinY, boxPose.p.y);
-	gMetrics.sceneDynamicFinalY = boxPose.p.y;
+	const OgcSandwichMetrics& metrics =
+		gSceneCpuOgcSandwichMonitor.getMetrics();
+	gMetrics.sceneDynamicMinY = PxMin(
+		gMetrics.sceneDynamicMinY, sample.boxPosition.y);
+	gMetrics.sceneDynamicFinalY = sample.boxPosition.y;
 	gMetrics.sceneDynamicMaxDrop = PxMax(gMetrics.sceneDynamicMaxDrop,
-		metrics.initialBoxPosition.y - boxPose.p.y);
+		metrics.initialBoxPosition.y - sample.boxPosition.y);
 	gMetrics.sceneDynamicMaxDownSpeed = PxMax(gMetrics.sceneDynamicMaxDownSpeed,
-		PxMax(-boxVelocity.y, 0.0f));
+		PxMax(-sample.boxVelocity.y, 0.0f));
 	return true;
-}
-
-static bool getSceneCpuVolumeAngularState(
-	PxDeformableVolume& volume, PxVec3& centroid,
-	PxVec3& angularMomentum, PxVec3& angularVelocity)
-{
-	const PxTetrahedronMesh* const simulationMesh =
-		volume.getSimulationMesh();
-	const PxVec4* const positions = volume.getSimPositionInvMassBufferH();
-	const PxVec4* const velocities = volume.getSimVelocityBufferH();
-	if(!simulationMesh || !positions || !velocities)
-		return false;
-
-	PxReal mass = 0.0f;
-	PxVec3 linearMomentum(0.0f);
-	centroid = PxVec3(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < simulationMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxReal invMass = positions[vertexIndex].w;
-		if(invMass <= 0.0f || !PxIsFinite(invMass))
-			continue;
-		const PxReal vertexMass = 1.0f / invMass;
-		const PxVec3 position = positions[vertexIndex].getXYZ();
-		const PxVec3 velocity = velocities[vertexIndex].getXYZ();
-		if(!position.isFinite() || !velocity.isFinite())
-			return false;
-		centroid += position * vertexMass;
-		linearMomentum += velocity * vertexMass;
-		mass += vertexMass;
-	}
-	if(!PxIsFinite(mass) || mass <= 0.0f)
-		return false;
-	centroid *= 1.0f / mass;
-	const PxVec3 linearVelocity = linearMomentum * (1.0f / mass);
-	PxMat33 inertia(PxZero);
-	angularMomentum = PxVec3(0.0f);
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < simulationMesh->getNbVertices(); ++vertexIndex)
-	{
-		const PxReal invMass = positions[vertexIndex].w;
-		if(invMass <= 0.0f || !PxIsFinite(invMass))
-			continue;
-		const PxReal vertexMass = 1.0f / invMass;
-		const PxVec3 offset = positions[vertexIndex].getXYZ() - centroid;
-		const PxVec3 relativeVelocity =
-			velocities[vertexIndex].getXYZ() - linearVelocity;
-		inertia = inertia +
-			(PxMat33::createDiagonal(PxVec3(offset.magnitudeSquared())) -
-			 avbdOuter(offset, offset)) * vertexMass;
-		angularMomentum += offset.cross(relativeVelocity) * vertexMass;
-	}
-	const PxReal determinant = inertia.getDeterminant();
-	if(!PxIsFinite(determinant) || PxAbs(determinant) <= 1.0e-12f ||
-		!angularMomentum.isFinite())
-		return false;
-	angularVelocity = inertia.getInverse() * angularMomentum;
-	return angularVelocity.isFinite();
 }
 
 static bool getSceneCpuVolumeMassAndRmsRadius(
@@ -5871,313 +3254,108 @@ static bool sampleSceneCpuGroundEmbeddedTetProbeMetrics()
 {
 	SceneCpuGroundEmbeddedTetProbeMetrics& metrics =
 		gSceneCpuGroundEmbeddedTetProbeMetrics;
-	if(!metrics.initialized || !metrics.contactTelemetryEnabled || !gScene ||
-		!gSceneCpuVolume || !metrics.rollAxis.isFinite() ||
-		metrics.rollAxis.magnitudeSquared() < 0.999f ||
-		metrics.launchSpeed <= 0.0f || !PxIsFinite(metrics.launchSpeed) ||
-		metrics.initialMass <= 0.0f || !PxIsFinite(metrics.initialMass) ||
-		metrics.initialRmsRadius <= 0.0f ||
-		!PxIsFinite(metrics.initialRmsRadius))
+	if(!gScene || !gSceneCpuVolume)
 		return false;
-
-	PxVec3 centroid(0.0f);
-	PxVec3 angularMomentum(0.0f);
-	PxVec3 angularVelocity(0.0f);
-	if(!getSceneCpuVolumeAngularState(
-			*gSceneCpuVolume, centroid, angularMomentum, angularVelocity))
+	GroundEmbeddedTetProbeFrameSample sample;
+	if(!sampleGroundEmbeddedTetProbe(
+			*gScene, *gSceneCpuVolume, gMetrics.completedFrames,
+			metrics, sample))
 		return false;
-
-	PxSimulationStatistics sceneStatistics;
-	gScene->getSimulationStatistics(sceneStatistics);
-	const PxU64 frameGroundContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedGroundContacts;
-	const PxU64 frameRigidContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts;
-	const PxU64 frameSoftContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSoftContacts;
-	const PxU64 frameSelfContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSelfContacts;
-	metrics.generatedGroundContacts += frameGroundContacts;
-	metrics.generatedRigidContacts += frameRigidContacts;
-	metrics.generatedSoftContacts += frameSoftContacts;
-	metrics.generatedSelfContacts += frameSelfContacts;
-	if(frameGroundContacts)
+	if(sample.generatedGroundContacts)
 	{
 		gMetrics.groundContactFrames++;
 		gMetrics.maxGroundContacts = PxMax(gMetrics.maxGroundContacts,
-			static_cast<PxU32>(frameGroundContacts));
+			static_cast<PxU32>(sample.generatedGroundContacts));
 	}
-	if(frameRigidContacts)
+	if(sample.generatedRigidContacts)
 	{
 		gMetrics.rigidContactFrames++;
 		gMetrics.maxRigidContacts = PxMax(gMetrics.maxRigidContacts,
-			static_cast<PxU32>(frameRigidContacts));
+			static_cast<PxU32>(sample.generatedRigidContacts));
 	}
-	if(frameSoftContacts)
+	if(sample.generatedSoftContacts)
 	{
 		gMetrics.softContactFrames++;
 		gMetrics.maxSoftContacts = PxMax(gMetrics.maxSoftContacts,
-			static_cast<PxU32>(frameSoftContacts));
+			static_cast<PxU32>(sample.generatedSoftContacts));
 	}
-
-	if(frameGroundContacts == 0)
-	{
-		if(metrics.firstGroundContactFrame == PX_MAX_U32)
-		{
-			metrics.hasPreGroundSample = 1;
-			metrics.preGroundAngularMomentum = angularMomentum;
-			metrics.preGroundAngularVelocity = angularVelocity;
-		}
-		else
-			metrics.groundContactWindowClosed = 1;
-		return true;
-	}
-
-	if(metrics.firstGroundContactFrame == PX_MAX_U32)
-	{
-		if(!metrics.hasPreGroundSample)
-			return false;
-		metrics.firstGroundContactFrame = gMetrics.completedFrames;
-	}
-	if(metrics.groundContactWindowClosed)
-		return true;
-
-	metrics.groundContactWindowFrames++;
-	metrics.lastGroundContactFrame = gMetrics.completedFrames;
-	const PxVec3 deltaAngularMomentum =
-		angularMomentum - metrics.preGroundAngularMomentum;
-	const PxVec3 deltaAngularVelocity =
-		angularVelocity - metrics.preGroundAngularVelocity;
-	const PxReal expectedMomentum =
-		deltaAngularMomentum.dot(metrics.rollAxis);
-	const PxReal expectedOmega =
-		deltaAngularVelocity.dot(metrics.rollAxis);
-	if(!deltaAngularMomentum.isFinite() || !deltaAngularVelocity.isFinite() ||
-		!PxIsFinite(expectedMomentum) || !PxIsFinite(expectedOmega))
-		return false;
-	if(expectedOmega > metrics.peakExpectedRollAngularSpeed)
-	{
-		metrics.peakExpectedRollAngularMomentum = expectedMomentum;
-		metrics.peakExpectedRollAngularSpeed = expectedOmega;
-		metrics.peakDeltaAngularMomentum = deltaAngularMomentum;
-		metrics.peakDeltaAngularVelocity = deltaAngularVelocity;
-		metrics.peakGroundRollFrame = gMetrics.completedFrames;
-		metrics.peakNormalizedRollOmega = expectedOmega *
-			metrics.initialRmsRadius / metrics.launchSpeed;
-		metrics.peakNormalizedRollMomentum = expectedMomentum /
-			(metrics.initialMass * metrics.initialRmsRadius *
-				metrics.launchSpeed);
-	}
-	return PxIsFinite(metrics.peakNormalizedRollOmega) &&
-		PxIsFinite(metrics.peakNormalizedRollMomentum);
+	return true;
 }
 
 static bool sampleSceneCpuSphereLongRollContactPhaseMetrics()
 {
-	SceneCpuSoftContactPhaseMetrics& metrics =
-		gSceneCpuSoftContactPhaseMetrics;
-	if(!metrics.initialized || !gScene || !gSceneCpuSecondVolume)
+	if(!gScene)
 		return false;
-	if(!metrics.contactTelemetryEnabled)
-		return true;
-
-	PxVec3 centroid(0.0f);
-	PxVec3 angularMomentum(0.0f);
-	PxVec3 angularVelocity(0.0f);
-	if(!getSceneCpuVolumeAngularState(
-			*gSceneCpuSecondVolume, centroid, angularMomentum,
-			angularVelocity))
+	SoftContactPhaseFrameSample sample;
+	if(!gSceneCpuSoftContactPhaseMonitor.sample(
+			*gScene, gMetrics.completedFrames, sample))
 		return false;
-	const PxReal angularMomentumMagnitude = angularMomentum.magnitude();
-	const PxReal angularSpeed = angularVelocity.magnitude();
-	if(!PxIsFinite(angularMomentumMagnitude) || !PxIsFinite(angularSpeed))
-		return false;
-
-	PxSimulationStatistics sceneStatistics;
-	gScene->getSimulationStatistics(sceneStatistics);
-	const PxU64 frameGroundContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedGroundContacts;
-	const PxU64 frameSoftContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSoftContacts;
-	metrics.generatedGroundContacts += frameGroundContacts;
-	metrics.generatedSoftContacts += frameSoftContacts;
 	// Keep the common gate counters truthful as well as maintaining the
 	// contact-phase baseline below.  The dedicated phase telemetry is sampled
 	// after fetchResults(), so it is the sole consumer of these per-frame Scene
 	// collision statistics for the two sphere controls.
-	if(frameGroundContacts)
+	if(sample.generatedGroundContacts)
 	{
 		gMetrics.groundContactFrames++;
 		gMetrics.maxGroundContacts = PxMax(
 			gMetrics.maxGroundContacts,
-			static_cast<PxU32>(frameGroundContacts));
+			static_cast<PxU32>(sample.generatedGroundContacts));
 	}
-	if(frameSoftContacts)
+	if(sample.generatedSoftContacts)
 	{
 		gMetrics.softContactFrames++;
 		gMetrics.maxSoftContacts = PxMax(
 			gMetrics.maxSoftContacts,
-			static_cast<PxU32>(frameSoftContacts));
-	}
-
-	if(frameSoftContacts == 0)
-	{
-		if(metrics.firstSoftContactFrame == PX_MAX_U32)
-		{
-			metrics.hasPreSoftContactSample = true;
-			metrics.lastNoSoftAngularMomentum = angularMomentumMagnitude;
-			metrics.lastNoSoftAngularSpeed = angularSpeed;
-			metrics.lastNoSoftAngularVelocity = angularVelocity;
-		}
-		else
-		{
-			metrics.finalPostSoftAngularMomentum = angularMomentumMagnitude;
-			metrics.finalPostSoftAngularSpeed = angularSpeed;
-		}
-		return true;
-	}
-
-	if(metrics.firstSoftContactFrame == PX_MAX_U32)
-	{
-		// Use the immediately preceding no-soft-contact sample as the baseline;
-		// this cleanly excludes the ground-induced angular response that is
-		// already present in this three-body showcase before impact.
-		metrics.firstSoftContactFrame = gMetrics.completedFrames;
-		metrics.preSoftAngularMomentum =
-			metrics.lastNoSoftAngularMomentum;
-		metrics.preSoftAngularSpeed = metrics.lastNoSoftAngularSpeed;
-		metrics.preSoftAngularVelocity = metrics.lastNoSoftAngularVelocity;
-	}
-	metrics.softContactFrames++;
-	metrics.lastSoftContactFrame = gMetrics.completedFrames;
-	metrics.lastSoftContactAngularMomentum = angularMomentumMagnitude;
-	metrics.lastSoftContactAngularSpeed = angularSpeed;
-	if(angularSpeed > metrics.peakSoftContactAngularSpeed)
-	{
-		metrics.peakSoftContactAngularSpeed = angularSpeed;
-		metrics.peakSoftContactAngularMomentum = angularMomentumMagnitude;
-		metrics.peakSoftContactAngularVelocity = angularVelocity;
-		metrics.peakSoftContactFrame = gMetrics.completedFrames;
+			static_cast<PxU32>(sample.generatedSoftContacts));
 	}
 	return true;
 }
 
 static bool sampleSceneCpuSoftSoftTorqueMetrics()
 {
-	SceneCpuSoftSoftTorqueMetrics& metrics =
-		gSceneCpuSoftSoftTorqueMetrics;
-	if(!metrics.initialized || !metrics.target || !gSceneCpuVolume ||
-		!gScene)
+	if(!gSceneCpuVolume || !gScene)
 		return false;
-
-	PxSimulationStatistics sceneStatistics;
-	gScene->getSimulationStatistics(sceneStatistics);
-	const PxU64 frameGroundContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedGroundContacts;
-	const PxU64 frameRigidContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedRigidContacts;
-	const PxU64 frameSoftContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSoftContacts;
-	const PxU64 frameSelfContacts =
-		sceneStatistics.avbdCpuSoftBodyCollisionGeneratedSelfContacts;
-	metrics.generatedGroundContacts += frameGroundContacts;
-	metrics.generatedRigidContacts += frameRigidContacts;
-	metrics.generatedSoftContacts += frameSoftContacts;
-	metrics.generatedSelfContacts += frameSelfContacts;
-	if(frameGroundContacts)
+	SoftSoftTorqueFrameSample sample;
+	if(!gSceneCpuSoftSoftTorqueMonitor.sample(
+			*gScene, gMetrics.completedFrames,
+			SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_MOMENTUM,
+			SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED, sample))
+		return false;
+	if(sample.generatedGroundContacts)
 	{
 		gMetrics.groundContactFrames++;
 		gMetrics.maxGroundContacts = PxMax(
 			gMetrics.maxGroundContacts,
-			static_cast<PxU32>(frameGroundContacts));
+			static_cast<PxU32>(sample.generatedGroundContacts));
 	}
-	if(frameRigidContacts)
+	if(sample.generatedRigidContacts)
 	{
 		gMetrics.rigidContactFrames++;
 		gMetrics.maxRigidContacts = PxMax(
 			gMetrics.maxRigidContacts,
-			static_cast<PxU32>(frameRigidContacts));
+			static_cast<PxU32>(sample.generatedRigidContacts));
 	}
-	if(frameSoftContacts)
+	if(sample.generatedSoftContacts)
 	{
-		metrics.softContactFrames++;
 		gMetrics.softContactFrames++;
 		gMetrics.maxSoftContacts = PxMax(
 			gMetrics.maxSoftContacts,
-			static_cast<PxU32>(frameSoftContacts));
+			static_cast<PxU32>(sample.generatedSoftContacts));
 	}
-
-	PxVec3 targetCentroid(0.0f);
-	PxVec3 angularMomentum(0.0f);
-	PxVec3 angularVelocity(0.0f);
-	if(!getSceneCpuVolumeAngularState(
-		*metrics.target, targetCentroid, angularMomentum, angularVelocity))
-		return false;
-	const PxVec3 driverCentroid =
-		getSceneCpuVolumeCentroid(gSceneCpuVolume);
-	if(!driverCentroid.isFinite())
-		return false;
-	const PxVec3 centroidDelta = driverCentroid - targetCentroid;
-	// The driver translates along +X.  The perpendicular centroid separation is
-	// the reproducible lever-arm proxy; it does not claim to be the private
-	// OGC contact-point anchor, which is not exposed through the public API.
-	const PxReal transverseLeverArm = PxSqrt(
-		centroidDelta.y * centroidDelta.y +
-		centroidDelta.z * centroidDelta.z);
-	const PxReal angularMomentumMagnitude = angularMomentum.magnitude();
-	const PxReal angularSpeed = angularVelocity.magnitude();
-	if(!PxIsFinite(transverseLeverArm) ||
-		!PxIsFinite(angularMomentumMagnitude) ||
-		!PxIsFinite(angularSpeed))
-		return false;
-	metrics.maxCentroidLeverArm = PxMax(
-		metrics.maxCentroidLeverArm, transverseLeverArm);
-	metrics.maxAngularMomentum = PxMax(
-		metrics.maxAngularMomentum, angularMomentumMagnitude);
-	metrics.maxAngularSpeed = PxMax(
-		metrics.maxAngularSpeed, angularSpeed);
-	metrics.finalAngularMomentum = angularMomentumMagnitude;
-	metrics.finalAngularSpeed = angularSpeed;
-	if(frameSoftContacts && metrics.firstContactFrame == PX_MAX_U32)
-	{
-		metrics.firstContactFrame = gMetrics.completedFrames;
-		metrics.firstContactCentroidLeverArm = transverseLeverArm;
-	}
-	if(metrics.firstContactFrame != PX_MAX_U32 &&
-		metrics.firstRotationFrame == PX_MAX_U32 &&
-		angularMomentumMagnitude >=
-			SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_MOMENTUM &&
-		angularSpeed >= SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED)
-		metrics.firstRotationFrame = gMetrics.completedFrames;
-	if(metrics.firstRotationFrame != PX_MAX_U32 &&
-		angularSpeed >=
-			SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED * 0.25f)
-		metrics.retainedRotationSamples++;
-
-	const PxBounds3 driverBounds = gSceneCpuVolume->getWorldBounds();
-	const PxBounds3 targetBounds = metrics.target->getWorldBounds();
-	if(driverBounds.isValid() && driverBounds.minimum.isFinite() &&
-		driverBounds.maximum.isFinite())
+	if(sample.driverBoundsFinite)
 		gMetrics.sceneBoundsFinite = 1;
-	if(targetBounds.isValid() && targetBounds.minimum.isFinite() &&
-		targetBounds.maximum.isFinite())
+	if(sample.targetBoundsFinite)
 		gMetrics.sceneSecondVolumeBoundsFinite = 1;
 	return true;
 }
 
 static bool isSceneCpuVisualSphereLongRunBounded()
 {
-	if(gMetrics.completedFrames <
-		SCENE_CPU_VISUAL_SPHERE_LONG_RUN_MIN_FRAMES)
-		return true;
-	const PxReal allowedLateSpeed = PxMax(
+	return isRotationLongRunBounded(
+		gSceneCpuVisualSphereRotationMetrics, gMetrics.completedFrames,
+		SCENE_CPU_VISUAL_SPHERE_LONG_RUN_MIN_FRAMES,
 		SCENE_CPU_VISUAL_SPHERE_MAX_LATE_SPEED_FLOOR,
-		gSceneCpuVisualSphereRotationMetrics.earlyMaxAngularSpeed *
-			SCENE_CPU_VISUAL_SPHERE_MAX_LATE_SPEED_RATIO);
-	return gSceneCpuVisualSphereRotationMetrics.lateMaxAngularSpeed <=
-			allowedLateSpeed &&
-		gSceneCpuVisualSphereRotationMetrics.finalAngularSpeed <=
-			allowedLateSpeed;
+		SCENE_CPU_VISUAL_SPHERE_MAX_LATE_SPEED_RATIO);
 }
 
 static bool isSceneCpuSphereLongRollRegressionPassed()
@@ -6185,7 +3363,7 @@ static bool isSceneCpuSphereLongRollRegressionPassed()
 	if(gMetrics.completedFrames <
 		SCENE_CPU_SPHERE_ROLL_REGRESSION_MIN_FRAMES)
 		return true;
-	const SceneCpuVisualRotationMetrics& metrics =
+	const RotationMetrics& metrics =
 		gSceneCpuVisualSphereRotationMetrics;
 	if(metrics.windowSampleCount == 0)
 		return false;
@@ -6199,55 +3377,16 @@ static bool isSceneCpuSphereLongRollRegressionPassed()
 
 static bool isSceneCpuSphereRollingKinematicsValid()
 {
-	const SceneCpuVisualRotationMetrics& metrics =
+	const RotationMetrics& metrics =
 		gSceneCpuVisualSphereRotationMetrics;
 	// Headless output is emitted after cleanup clears the non-owning Volume
 	// pointer and initialized flag.  The sampled values remain authoritative,
 	// so validate their explicit finite/episode witnesses rather than lifetime
 	// state that is intentionally false by print time.
-	return metrics.groundContactEpisodes >= 1u &&
-		metrics.firstGroundContactFrame != PX_MAX_U32 &&
-		metrics.groundContactActive &&
-		metrics.maxOrientationChange >=
-			SCENE_CPU_SPHERE_ROLL_MIN_ORIENTATION_CHANGE &&
-		metrics.maxAngularSpeed >=
-			SCENE_CPU_SPHERE_ROLL_MIN_GENERATED_ANGULAR_SPEED &&
-		metrics.finalLinearVelocity.isFinite() &&
-		metrics.finalAngularVelocity.isFinite() &&
-		PxIsFinite(metrics.finalRigidRollSlipSpeed) &&
-		metrics.finalRigidRollSlipSpeed <=
-			SCENE_CPU_SPHERE_ROLL_MAX_RIGID_SLIP_SPEED;
-}
-
-static bool getSceneCpuVisualTetIndices(
-	const PxTetrahedronMesh& mesh, PxU32 tetIndex,
-	PxU32 (&indices)[4])
-{
-	if(tetIndex >= mesh.getNbTetrahedrons() || !mesh.getTetrahedrons())
-		return false;
-	const bool indices16 =
-		mesh.getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	if(indices16)
-	{
-		const PxU16* source =
-			static_cast<const PxU16*>(mesh.getTetrahedrons()) +
-			4 * tetIndex;
-		for(PxU32 vertex = 0; vertex < 4; ++vertex)
-			indices[vertex] = source[vertex];
-	}
-	else
-	{
-		const PxU32* source =
-			static_cast<const PxU32*>(mesh.getTetrahedrons()) +
-			4 * tetIndex;
-		for(PxU32 vertex = 0; vertex < 4; ++vertex)
-			indices[vertex] = source[vertex];
-	}
-	return indices[0] < mesh.getNbVertices() &&
-		indices[1] < mesh.getNbVertices() &&
-		indices[2] < mesh.getNbVertices() &&
-		indices[3] < mesh.getNbVertices();
+	return isRollingKinematicsValid(
+		metrics, SCENE_CPU_SPHERE_ROLL_MIN_ORIENTATION_CHANGE,
+		SCENE_CPU_SPHERE_ROLL_MIN_GENERATED_ANGULAR_SPEED,
+		SCENE_CPU_SPHERE_ROLL_MAX_RIGID_SLIP_SPEED);
 }
 
 static bool initializeSceneCpuVolumeRestStates(
@@ -6255,11 +3394,6 @@ static bool initializeSceneCpuVolumeRestStates(
 {
 	if(expectedVolumeCount == 0 || expectedVolumeCount > 5)
 		return false;
-	gSceneCpuVisualVolumeRestStates.reset();
-	for(PxU32 bodyIndex = 0;
-		bodyIndex < expectedVolumeCount; ++bodyIndex)
-		gSceneCpuVisualBodyHealthMetrics[bodyIndex] =
-			SceneCpuVisualBodyHealthMetrics();
 	PxDeformableVolume* volumes[5] =
 	{
 		gSceneCpuVolume,
@@ -6271,176 +3405,36 @@ static bool initializeSceneCpuVolumeRestStates(
 		gSceneCpuTaskGraphExtraVolumes.size() > 2
 			? gSceneCpuTaskGraphExtraVolumes[2] : NULL
 	};
-	for(PxU32 bodyIndex = 0;
-		bodyIndex < expectedVolumeCount; ++bodyIndex)
-	{
-		PxDeformableVolume* volume = volumes[bodyIndex];
-		const PxTetrahedronMesh* mesh =
-			volume ? volume->getSimulationMesh() : NULL;
-		const PxVec4* positions =
-			volume ? volume->getSimPositionInvMassBufferH() : NULL;
-		if(!volume || !mesh || !positions ||
-			mesh->getNbTetrahedrons() == 0)
-		{
-			gSceneCpuVisualVolumeRestStates.reset();
-			return false;
-		}
-		gSceneCpuVisualVolumeRestStates.resize(
-			gSceneCpuVisualVolumeRestStates.size() + 1);
-		SceneCpuVisualVolumeRestState& restState =
-			gSceneCpuVisualVolumeRestStates[
-				gSceneCpuVisualVolumeRestStates.size() - 1];
-		restState.volume = volume;
-		restState.tets.resize(mesh->getNbTetrahedrons());
-		for(PxU32 tetIndex = 0;
-			tetIndex < mesh->getNbTetrahedrons(); ++tetIndex)
-		{
-			PxU32 indices[4];
-			if(!getSceneCpuVisualTetIndices(*mesh, tetIndex, indices))
-			{
-				gSceneCpuVisualVolumeRestStates.reset();
-				return false;
-			}
-			const PxVec3 x0 = positions[indices[0]].getXYZ();
-			const PxMat33 dm(
-				positions[indices[1]].getXYZ() - x0,
-				positions[indices[2]].getXYZ() - x0,
-				positions[indices[3]].getXYZ() - x0);
-			const PxReal determinant = dm.getDeterminant();
-			if(!PxIsFinite(determinant) ||
-				PxAbs(determinant) <= 1.0e-12f)
-			{
-				gSceneCpuVisualVolumeRestStates.reset();
-				return false;
-			}
-			SceneCpuVisualTetRestState& tetState =
-				restState.tets[tetIndex];
-			tetState.dmInv = dm.getInverse();
-			tetState.restVolume = PxAbs(determinant) / 6.0f;
-			restState.totalRestVolume += tetState.restVolume;
-		}
-		if(!PxIsFinite(restState.totalRestVolume) ||
-			restState.totalRestVolume <= 0.0f)
-		{
-			gSceneCpuVisualVolumeRestStates.reset();
-			return false;
-		}
-	}
-	return gSceneCpuVisualVolumeRestStates.size() == expectedVolumeCount;
+	return gSceneCpuVolumeHealthMonitor.initialize(
+		volumes, expectedVolumeCount);
 }
 
 static bool sampleSceneCpuVolumeHealth()
 {
-	if(gSceneCpuVisualVolumeRestStates.empty() ||
-		gSceneCpuVisualVolumeRestStates.size() > 5)
+	VolumeHealthSample sample;
+	if(!gSceneCpuVolumeHealthMonitor.sample(
+			gMetrics.completedFrames, sample))
 		return false;
-	for(PxU32 bodyIndex = 0;
-		bodyIndex < gSceneCpuVisualVolumeRestStates.size(); ++bodyIndex)
+	gMetrics.nonFiniteParticleSamples += sample.nonFiniteParticleSamples;
+	gMetrics.invertedElementSamples += sample.invertedElementSamples;
+	gMetrics.invertedBodiesMask |= sample.invertedBodiesMask;
+	if(gMetrics.firstInversionFrame == PX_MAX_U32 &&
+		sample.firstInversionBody != PX_MAX_U32)
 	{
-		const SceneCpuVisualVolumeRestState& restState =
-			gSceneCpuVisualVolumeRestStates[bodyIndex];
-		SceneCpuVisualBodyHealthMetrics& bodyMetrics =
-			gSceneCpuVisualBodyHealthMetrics[bodyIndex];
-		PxDeformableVolume* volume = restState.volume;
-		const PxTetrahedronMesh* mesh =
-			volume ? volume->getSimulationMesh() : NULL;
-		const PxVec4* positions =
-			volume ? volume->getSimPositionInvMassBufferH() : NULL;
-		const PxVec4* velocities =
-			volume ? volume->getSimVelocityBufferH() : NULL;
-		if(!volume || !mesh || !positions || !velocities ||
-			restState.tets.size() != mesh->getNbTetrahedrons())
-			return false;
-
-		for(PxU32 vertexIndex = 0;
-			vertexIndex < mesh->getNbVertices(); ++vertexIndex)
-		{
-			const PxVec3 position = positions[vertexIndex].getXYZ();
-			const PxVec3 velocity = velocities[vertexIndex].getXYZ();
-			if(!position.isFinite() || !velocity.isFinite() ||
-				!PxIsFinite(positions[vertexIndex].w) ||
-				!PxIsFinite(velocities[vertexIndex].w))
-			{
-				gMetrics.nonFiniteParticleSamples++;
-				continue;
-			}
-			gMetrics.minY = PxMin(gMetrics.minY, position.y);
-			gMetrics.maxY = PxMax(gMetrics.maxY, position.y);
-			gMetrics.maxParticleSpeed = PxMax(
-				gMetrics.maxParticleSpeed, velocity.magnitude());
-		}
-
-		PxReal currentVolume = 0.0f;
-		PxReal frameMinDetF = FLT_MAX;
-		PxReal frameMaxDetF = -FLT_MAX;
-		for(PxU32 tetIndex = 0;
-			tetIndex < mesh->getNbTetrahedrons(); ++tetIndex)
-		{
-			PxU32 indices[4];
-			if(!getSceneCpuVisualTetIndices(*mesh, tetIndex, indices))
-				return false;
-			const PxVec3 x0 = positions[indices[0]].getXYZ();
-			const PxMat33 ds(
-				positions[indices[1]].getXYZ() - x0,
-				positions[indices[2]].getXYZ() - x0,
-				positions[indices[3]].getXYZ() - x0);
-			const SceneCpuVisualTetRestState& tetState =
-				restState.tets[tetIndex];
-			const PxReal detF =
-				(ds * tetState.dmInv).getDeterminant();
-			if(!PxIsFinite(detF) || detF <= 0.0f)
-			{
-				gMetrics.invertedElementSamples++;
-				if(gMetrics.firstInversionFrame == PX_MAX_U32)
-				{
-					gMetrics.firstInversionFrame =
-						gMetrics.completedFrames;
-					gMetrics.firstInversionBody = bodyIndex;
-					gMetrics.firstInversionElement = tetIndex;
-				}
-				gMetrics.invertedBodiesMask |= 1u << bodyIndex;
-			}
-			if(!PxIsFinite(detF))
-				continue;
-			gMetrics.minDetF = PxMin(gMetrics.minDetF, detF);
-			gMetrics.maxDetF = PxMax(gMetrics.maxDetF, detF);
-			frameMinDetF = PxMin(frameMinDetF, detF);
-			frameMaxDetF = PxMax(frameMaxDetF, detF);
-			currentVolume += detF * tetState.restVolume;
-		}
-		bodyMetrics.finalMinDetF = frameMinDetF;
-		bodyMetrics.finalMaxDetF = frameMaxDetF;
-		if(frameMinDetF < bodyMetrics.minDetF)
-		{
-			bodyMetrics.minDetF = frameMinDetF;
-			bodyMetrics.minDetFFrame = gMetrics.completedFrames;
-		}
-		if(frameMaxDetF > bodyMetrics.maxDetF)
-		{
-			bodyMetrics.maxDetF = frameMaxDetF;
-			bodyMetrics.maxDetFFrame = gMetrics.completedFrames;
-		}
-		const PxReal volumeRatio =
-			currentVolume / restState.totalRestVolume;
-		if(!PxIsFinite(volumeRatio))
-			gMetrics.nonFiniteParticleSamples++;
-		else
-		{
-			bodyMetrics.finalVolumeRatio = volumeRatio;
-			if(volumeRatio < bodyMetrics.minVolumeRatio)
-			{
-				bodyMetrics.minVolumeRatio = volumeRatio;
-				bodyMetrics.minVolumeRatioFrame =
-					gMetrics.completedFrames;
-			}
-			bodyMetrics.maxVolumeRatio = PxMax(
-				bodyMetrics.maxVolumeRatio, volumeRatio);
-			gMetrics.minBodyVolumeRatio = PxMin(
-				gMetrics.minBodyVolumeRatio, volumeRatio);
-			gMetrics.maxBodyVolumeRatio = PxMax(
-				gMetrics.maxBodyVolumeRatio, volumeRatio);
-		}
+		gMetrics.firstInversionFrame = gMetrics.completedFrames;
+		gMetrics.firstInversionBody = sample.firstInversionBody;
+		gMetrics.firstInversionElement = sample.firstInversionElement;
 	}
+	gMetrics.minY = PxMin(gMetrics.minY, sample.minY);
+	gMetrics.maxY = PxMax(gMetrics.maxY, sample.maxY);
+	gMetrics.maxParticleSpeed = PxMax(
+		gMetrics.maxParticleSpeed, sample.maxParticleSpeed);
+	gMetrics.minDetF = PxMin(gMetrics.minDetF, sample.minDetF);
+	gMetrics.maxDetF = PxMax(gMetrics.maxDetF, sample.maxDetF);
+	gMetrics.minBodyVolumeRatio = PxMin(
+		gMetrics.minBodyVolumeRatio, sample.minBodyVolumeRatio);
+	gMetrics.maxBodyVolumeRatio = PxMax(
+		gMetrics.maxBodyVolumeRatio, sample.maxBodyVolumeRatio);
 	return true;
 }
 
@@ -6629,7 +3623,7 @@ static bool initSceneCpuVolumeVisualShowcase()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
 	PxRigidStatic* ground = PxCreatePlane(
 		*gPhysics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), *gMaterial);
 	if(!ground)
@@ -6726,10 +3720,10 @@ static bool initSceneCpuVolumeVisualShowcase()
 			PxVec3(1.0f), 130.0f, gSceneCpuSecondVolume))
 		return false;
 	if(!initializeSceneCpuVisualRotationMetrics(
-			gSceneCpuVisualPrimaryCubeRotationMetrics,
+			gSceneCpuVisualPrimaryCubeRotationMonitor,
 			*gSceneCpuVolume) ||
 		!initializeSceneCpuVisualRotationMetrics(
-			gSceneCpuVisualSphereRotationMetrics,
+			gSceneCpuVisualSphereRotationMonitor,
 			*gSceneCpuSecondVolume))
 		return false;
 	configureSceneCpuVisualSphereDamping(*gSceneCpuSecondVolume);
@@ -6763,7 +3757,7 @@ static bool initSceneCpuVolumeVisualShowcase()
 	tiltedVolume->setLinearDamping(
 		SCENE_CPU_VISUAL_JAW_LINEAR_DAMPING);
 	if(!initializeSceneCpuVisualRotationMetrics(
-			gSceneCpuVisualRotationMetrics, *tiltedVolume))
+			gSceneCpuVisualRotationMonitor, *tiltedVolume))
 		return false;
 	// This is the upper yellow soft jaw. It begins above the rigid with a true
 	// mesh gap inside the current-pose OGC shell, without swept rows.
@@ -6890,7 +3884,7 @@ static bool initSceneCpuVolumeOgcSandwich()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
 	gSceneCpuVolumeMaterial = gPhysics->createDeformableVolumeMaterial(
 		SCENE_CPU_VISUAL_YOUNGS_MODULUS,
 		SCENE_CPU_VISUAL_POISSONS_RATIO,
@@ -7011,8 +4005,8 @@ static bool initSceneCpuVolumeSphereLongRoll()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
-	gSceneCpuSoftContactPhaseMetrics = SceneCpuSoftContactPhaseMetrics();
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
+	gSceneCpuSoftContactPhaseMonitor.releaseSource();
 	PxRigidStatic* ground = PxCreatePlane(
 		*gPhysics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), *gMaterial);
 	if(!ground)
@@ -7073,15 +4067,16 @@ static bool initSceneCpuVolumeSphereLongRoll()
 			PxVec3(1.0f), 130.0f, gSceneCpuSecondVolume))
 		return false;
 	if(!initializeSceneCpuVisualRotationMetrics(
-			gSceneCpuVisualSphereRotationMetrics,
+			gSceneCpuVisualSphereRotationMonitor,
 			*gSceneCpuSecondVolume))
 		return false;
 	const char* const collisionTelemetry =
 		std::getenv("PHYSX_AVBD_COLLISION_TELEMETRY");
-	gSceneCpuSoftContactPhaseMetrics.contactTelemetryEnabled =
-		collisionTelemetry && collisionTelemetry[0] == '1' &&
-		collisionTelemetry[1] == '\0';
-	gSceneCpuSoftContactPhaseMetrics.initialized = true;
+	if(!gSceneCpuSoftContactPhaseMonitor.initialize(
+			*gSceneCpuSecondVolume,
+			collisionTelemetry && collisionTelemetry[0] == '1' &&
+			collisionTelemetry[1] == '\0'))
+		return false;
 	configureSceneCpuVisualSphereDamping(*gSceneCpuSecondVolume);
 	if(!setSceneCpuVolumeVelocity(
 			*gSceneCpuVolume, PxVec3(2.5f, 0.0f, 0.0f)) ||
@@ -7128,8 +4123,8 @@ static bool initSceneCpuVolumeSphereSoftSoftGlancing()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
-	gSceneCpuSoftContactPhaseMetrics = SceneCpuSoftContactPhaseMetrics();
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
+	gSceneCpuSoftContactPhaseMonitor.releaseSource();
 
 	gSceneCpuVolumeMaterial =
 		gPhysics->createDeformableVolumeMaterial(
@@ -7182,15 +4177,16 @@ static bool initSceneCpuVolumeSphereSoftSoftGlancing()
 			PxVec3(1.0f), 130.0f, gSceneCpuSecondVolume))
 		return false;
 	if(!initializeSceneCpuVisualRotationMetrics(
-			gSceneCpuVisualSphereRotationMetrics,
+			gSceneCpuVisualSphereRotationMonitor,
 			*gSceneCpuSecondVolume))
 		return false;
 	configureSceneCpuVisualSphereDamping(*gSceneCpuSecondVolume);
 	// This fixture's validity depends on its contact-phase proof.  Collect its
 	// small test-only statistics unconditionally so direct invocation has the
 	// same gate semantics as the headless runner.
-	gSceneCpuSoftContactPhaseMetrics.contactTelemetryEnabled = true;
-	gSceneCpuSoftContactPhaseMetrics.initialized = true;
+	if(!gSceneCpuSoftContactPhaseMonitor.initialize(
+			*gSceneCpuSecondVolume, true))
+		return false;
 
 	auto configureContactOnlyVolume = [](PxDeformableVolume& volume,
 		const PxVec3& velocity)
@@ -7251,8 +4247,8 @@ static bool initSceneCpuVolumeSoftSoftTorque()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
-	gSceneCpuSoftSoftTorqueMetrics = SceneCpuSoftSoftTorqueMetrics();
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
+	gSceneCpuSoftSoftTorqueMonitor.releaseSources();
 
 	gSceneCpuVolumeMaterial =
 		gPhysics->createDeformableVolumeMaterial(
@@ -7312,29 +4308,11 @@ static bool initSceneCpuVolumeSoftSoftTorque()
 		!initializeSceneCpuVolumeRestStates(2))
 		return false;
 
-	SceneCpuSoftSoftTorqueMetrics& torqueMetrics =
-		gSceneCpuSoftSoftTorqueMetrics;
-	torqueMetrics.target = gSceneCpuSecondVolume;
-	torqueMetrics.targetSimulationVertices =
-		gSceneCpuSecondVolume->getSimulationMesh()->getNbVertices();
-	torqueMetrics.targetCollisionVertices =
-		gSceneCpuSecondVolume->getCollisionMesh()->getNbVertices();
-	torqueMetrics.driverSimulationVertices =
-		gSceneCpuVolume->getSimulationMesh()->getNbVertices();
-	torqueMetrics.driverCollisionVertices =
-		gSceneCpuVolume->getCollisionMesh()->getNbVertices();
-	torqueMetrics.targetDistinctCollisionSimulation =
-		gSceneCpuSecondVolume->getCollisionMesh() !=
-			gSceneCpuSecondVolume->getSimulationMesh() ? 1u : 0u;
-	torqueMetrics.driverDistinctCollisionSimulation =
-		gSceneCpuVolume->getCollisionMesh() !=
-			gSceneCpuVolume->getSimulationMesh() ? 1u : 0u;
 	// Public Volume exposes the two domains and the embedding, but deliberately
 	// does not expose the private weighted AVBD support rows.  Keep this
 	// telemetry honest rather than inferring an exact support count from a mesh
 	// vertex count.
-	torqueMetrics.supportExpansionInstrumentationAvailable = 0;
-	torqueMetrics.isolatedConfiguration =
+	const bool isolatedConfiguration =
 		gScene->getNbActors(PxActorTypeFlag::eRIGID_STATIC) == 0 &&
 		gScene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC) == 0 &&
 		gSceneCpuVolume->getActorFlags().isSet(
@@ -7348,14 +4326,13 @@ static bool initSceneCpuVolumeSoftSoftTorque()
 		!gSceneCpuVolume->getDeformableBodyFlags().isSet(
 			PxDeformableBodyFlag::eENABLE_SPECULATIVE_CCD) &&
 		!gSceneCpuSecondVolume->getDeformableBodyFlags().isSet(
-			PxDeformableBodyFlag::eENABLE_SPECULATIVE_CCD) ? 1u : 0u;
-	torqueMetrics.initialized =
-		torqueMetrics.targetSimulationVertices > 0 &&
-		torqueMetrics.targetCollisionVertices > 0 &&
-		torqueMetrics.driverSimulationVertices > 0 &&
-		torqueMetrics.driverCollisionVertices > 0;
-	if(!torqueMetrics.initialized)
+			PxDeformableBodyFlag::eENABLE_SPECULATIVE_CCD);
+	if(!gSceneCpuSoftSoftTorqueMonitor.initialize(
+			*gSceneCpuVolume, *gSceneCpuSecondVolume,
+			isolatedConfiguration, false))
 		return false;
+	const SceneCpuSoftSoftTorqueMetrics& torqueMetrics =
+		gSceneCpuSoftSoftTorqueMetrics;
 
 	gMetrics.initialized = 1;
 	gMetrics.sceneActorCreated = 1;
@@ -7401,7 +4378,7 @@ static bool initSceneCpuVolumeGroundEmbeddedTetProbe()
 {
 	PX_ASSERT(gSceneCpuTaskGraphExtraVolumes.empty());
 	PX_ASSERT(gSceneCpuVisualVolumeMeshes.empty());
-	PX_ASSERT(gSceneCpuVisualVolumeRestStates.empty());
+	PX_ASSERT(gSceneCpuVolumeHealthMonitor.empty());
 	gSceneCpuGroundEmbeddedTetProbeMetrics =
 		SceneCpuGroundEmbeddedTetProbeMetrics();
 
@@ -7800,6 +4777,9 @@ static bool initSceneCpuVolumeLifecycle()
 	const bool partialElementFilterCase =
 		gHeadlessOptions.caseName ==
 			"scene-volume-partial-element-filter";
+	const bool elementFilterCase =
+		gHeadlessOptions.caseName == "scene-volume-element-filter" ||
+		partialElementFilterCase;
 	const bool trueBoundaryDynamicBoxCase =
 		gHeadlessOptions.caseName ==
 			"scene-volume-true-boundary-dynamic-box";
@@ -7839,9 +4819,6 @@ static bool initSceneCpuVolumeLifecycle()
 		taskGraphRigidTriangleSurfaceLargeCase ||
 		taskGraphRigidTriangleSurfaceFeatureOverlapCase ||
 		taskGraphRigidTriangleSurfaceThresholdCase;
-	const bool taskGraphSoftPairCase =
-		gHeadlessOptions.caseName ==
-			"scene-volume-taskgraph-soft-pair";
 	const bool taskGraphWriteBackCase =
 		isSceneCpuVolumeTaskGraphWriteBackCase(gHeadlessOptions.caseName);
 	const bool taskGraphWriteBackFourWayCase =
@@ -7850,6 +4827,8 @@ static bool initSceneCpuVolumeLifecycle()
 	const bool taskGraphWriteBackHeterogeneousCase =
 		gHeadlessOptions.caseName ==
 			"scene-volume-taskgraph-writeback-heterogeneous";
+	const bool taskGraphPipelineCase =
+		isSceneCpuVolumeTaskGraphPipelineCase(gHeadlessOptions.caseName);
 	const bool taskGraphDirectSimulationDomainCase =
 		isSceneCpuVolumeTaskGraphDirectSimulationDomainCase(
 			gHeadlessOptions.caseName);
@@ -8197,12 +5176,6 @@ static bool initSceneCpuVolumeLifecycle()
 	const bool triangleSurfaceReverseSweptCcdCase =
 		isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
 			gHeadlessOptions.caseName);
-	const bool staticTriangleSurfaceSweptCcdCase =
-		isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
-			gHeadlessOptions.caseName);
-	const bool heightFieldSweptCcdCase =
-		isSceneCpuVolumeHeightFieldSweptCcdCase(
-			gHeadlessOptions.caseName);
 	const bool rotationalTriangleSurfaceSweptCcdCase =
 		isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase(
 			gHeadlessOptions.caseName);
@@ -8338,7 +5311,7 @@ static bool initSceneCpuVolumeLifecycle()
 		softSoftWakeCase || softPairAttachmentCase ||
 		motionControlsCase || maxDepenetrationVelocityCase ||
 		speculativeCcdCase || smoothReverseFeatureCase ||
-		taskGraphWriteBackCase || taskGraphSoftPairCase;
+		taskGraphWriteBackCase;
 	gSceneCpuTaskGraphExtraVolumes.reset();
 	const bool softSleepCase =
 		gHeadlessOptions.caseName == "scene-volume-sleep-wake" ||
@@ -8350,6 +5323,7 @@ static bool initSceneCpuVolumeLifecycle()
 		multiSceneIsolationCase ||
 		softSoftWakeCase || softPairAttachmentCase ||
 		volumeKinematicTargetCase;
+	const PxReal taskGraphPipelineHeight = 2.5f;
 	const PxVec3 translation =
 		rigidTriangleSteadyContactCase
 			? PxVec3(-2.0f, 1.1f, 0.0f)
@@ -8358,11 +5332,7 @@ static bool initSceneCpuVolumeLifecycle()
 			: smoothReverseFeatureCase
 			? PxVec3(-2.0f, 0.34f, 0.0f)
 			: triangleSurfaceSweptCcdCase
-			? PxVec3(
-				-2.0f,
-				staticTriangleSurfaceSweptCcdCase
-					? 1.1f : 0.0f,
-				0.0f)
+			? PxVec3(-2.0f, 0.0f, 0.0f)
 			: sphereReverseSweptCcdCase
 			? PxVec3(
 				-2.0f,
@@ -8379,11 +5349,14 @@ static bool initSceneCpuVolumeLifecycle()
 			? PxVec3(-2.0f, 1.2f, 0.0f)
 			: maxDepenetrationVelocityCase
 			? PxVec3(-3.0f, -1.05f, 0.0f)
-			: partialElementFilterCase
-			? PxVec3(0.0f, 1.0f, 0.0f)
+			: elementFilterCase
+			? PxVec3(
+				0.0f, SCENE_CPU_ELEMENT_FILTER_INITIAL_CLEARANCE, 0.0f)
+			: taskGraphPipelineCase
+			? PxVec3(-10.0f, taskGraphPipelineHeight, 0.0f)
 			: PxVec3(
 				twoSoftVolumeCase && !softSoftWakeCase &&
-					!softPairAttachmentCase && !taskGraphSoftPairCase ? -10.0f : 0.0f,
+					!softPairAttachmentCase ? -10.0f : 0.0f,
 				4.0f, 0.0f);
 	const PxTetrahedronMesh* simulationMesh =
 		gSceneCpuVolume->getSimulationMesh();
@@ -8470,11 +5443,7 @@ static bool initSceneCpuVolumeLifecycle()
 				? PxVec3(
 					0.0f,
 					triangleSurfaceSweptCcdCase
-						? (staticTriangleSurfaceSweptCcdCase
-							? (triangleSurfaceReverseSweptCcdCase &&
-									heightFieldSweptCcdCase
-								? -80.0f : -132.0f)
-							: 0.0f) :
+						? 0.0f :
 					staticSphereReverseSweptCcdCase
 						? -132.0f :
 					(movingKinematicFiniteSpeculativeCcdCase ||
@@ -8588,7 +5557,7 @@ static bool initSceneCpuVolumeLifecycle()
 	if(gHeadlessOptions.caseName == "scene-volume-skinning" &&
 		!initializeVolumeSkinning())
 		return false;
-	if(taskGraphPureSoftCase || taskGraphWriteBackCase || taskGraphSoftPairCase)
+	if(taskGraphPureSoftCase || taskGraphWriteBackCase)
 	{
 		// Keep the fixed no-contact workload awake. P2's pure-soft fixture is
 		// stationary; P3 adds two independent ballistic volumes so prediction
@@ -9020,11 +5989,7 @@ static bool initSceneCpuVolumeLifecycle()
 			smoothReverseFeatureCase
 				? PxVec3(1.0f, 0.34f, 0.0f)
 				: triangleSurfaceSweptCcdCase
-				? PxVec3(
-					1.0f,
-					staticTriangleSurfaceSweptCcdCase
-						? 1.1f : 0.0f,
-					0.0f)
+				? PxVec3(1.0f, 0.0f, 0.0f)
 				: sphereReverseSweptCcdCase
 				? PxVec3(
 					1.0f,
@@ -9041,8 +6006,8 @@ static bool initSceneCpuVolumeLifecycle()
 				? PxVec3(1.0f, 1.2f, 0.0f)
 			: maxDepenetrationVelocityCase
 			? PxVec3(3.0f, -1.05f, 0.0f)
-			: taskGraphSoftPairCase
-			? PxVec3(0.12f, 4.0f, 0.0f)
+			: taskGraphPipelineCase
+			? PxVec3(10.0f, taskGraphPipelineHeight, 0.0f)
 			: PxVec3(
 					softSoftWakeCase ? 3.0f :
 						(softPairAttachmentCase ? 0.0f : 10.0f),
@@ -9056,23 +6021,7 @@ static bool initSceneCpuVolumeLifecycle()
 		gMetrics.sceneSecondVolumeActorAdded = 1;
 		gSceneCpuSecondVolumeInitialCentroidY =
 			getSceneCpuVolumeCentroidY(gSceneCpuSecondVolume);
-		if(taskGraphSoftPairCase)
-		{
-			// P5.9d proof fixture: three overlapping, gravity-free volumes,
-			// no self collision and no rigid source. The parent plan therefore
-			// contains exactly the three soft-pair ranges owned by its children.
-			if(!configureSceneCpuTaskGraphVolume(
-					*gSceneCpuSecondVolume, PxVec3(0.0f)))
-				return false;
-			PxDeformableVolume* extraVolume = NULL;
-			if(!createAdditionalSceneCpuVolume(
-					extraVolume, PxVec3(-0.12f, 4.0f, 0.0f)) ||
-				!configureSceneCpuTaskGraphVolume(
-					*extraVolume, PxVec3(0.0f)))
-				return false;
-			gSceneCpuTaskGraphExtraVolumes.pushBack(extraVolume);
-		}
-		else if(taskGraphWriteBackCase)
+		if(taskGraphWriteBackCase)
 		{
 			// Every entry is far from the others, has no collision work and owns a
 			// distinct nonzero prediction/write-back range. The four-way variant
@@ -9088,8 +6037,12 @@ static bool initSceneCpuVolumeLifecycle()
 					return false;
 				const PxVec3 translations[2] =
 				{
-					PxVec3(-10.0f, 4.0f, 10.0f),
-					PxVec3(10.0f, 4.0f, 10.0f)
+					PxVec3(-10.0f,
+						taskGraphPipelineCase ? taskGraphPipelineHeight : 4.0f,
+						10.0f),
+					PxVec3(10.0f,
+						taskGraphPipelineCase ? taskGraphPipelineHeight : 4.0f,
+						10.0f)
 				};
 				const PxVec3 velocities[2] =
 				{
@@ -9228,11 +6181,7 @@ static bool initSceneCpuVolumeLifecycle()
 					PxVec3(
 						0.0f,
 						triangleSurfaceSweptCcdCase
-							? (staticTriangleSurfaceSweptCcdCase
-								? (triangleSurfaceReverseSweptCcdCase &&
-										heightFieldSweptCcdCase
-									? -80.0f : -132.0f)
-								: 0.0f) :
+							? 0.0f :
 						staticSphereReverseSweptCcdCase
 							? -132.0f :
 						(movingKinematicFiniteSpeculativeCcdCase ||
@@ -9373,7 +6322,6 @@ static bool initSceneCpuVolumeLifecycle()
 		}
 	}
 	const PxU32 expectedVolumeCount =
-		taskGraphSoftPairCase ? 3u :
 		taskGraphWriteBackFourWayCase ? 4u :
 		twoSoftVolumeCase ? 2u : 1u;
 	if(multiSceneIsolationCase)
@@ -9571,30 +6519,6 @@ static bool getSceneCpuVolumeSingleSphereMinSeparation(
 		minimumSeparation < PX_MAX_F32;
 }
 
-static PxReal getCapsuleSignedSeparation(
-	const PxVec3& point,
-	const PxTransform& capsulePose,
-	PxReal capsuleRadius,
-	PxReal capsuleHalfHeight)
-{
-	const PxVec3 localPoint = capsulePose.transformInv(point);
-	const PxReal axisCoordinate = PxClamp(
-		localPoint.x, -capsuleHalfHeight, capsuleHalfHeight);
-	return (
-		localPoint - PxVec3(axisCoordinate, 0.0f, 0.0f)).
-			magnitude() - capsuleRadius;
-}
-
-static PxReal getCapsuleSignedSeparation(
-	const PxVec3& point,
-	const PxVec3& capsuleCenter,
-	PxReal capsuleRadius,
-	PxReal capsuleHalfHeight)
-{
-	return getCapsuleSignedSeparation(
-		point, PxTransform(capsuleCenter),
-		capsuleRadius, capsuleHalfHeight);
-}
 
 static bool getSceneCpuVolumeCapsuleClusterMinSeparation(
 	PxDeformableVolume* volume, PxReal& minimumSeparation)
@@ -9755,1260 +6679,6 @@ static bool getSceneCpuVolumeSingleConvexMinSeparation(
 		minimumSeparation < PX_MAX_F32;
 }
 
-static PxVec3 closestPointOnTriangleForGate(
-	const PxVec3& point,
-	const PxVec3& a,
-	const PxVec3& b,
-	const PxVec3& c)
-{
-	const PxVec3 ab = b - a;
-	const PxVec3 ac = c - a;
-	const PxVec3 ap = point - a;
-	const PxReal d1 = ab.dot(ap);
-	const PxReal d2 = ac.dot(ap);
-	if(d1 <= 0.0f && d2 <= 0.0f)
-		return a;
-
-	const PxVec3 bp = point - b;
-	const PxReal d3 = ab.dot(bp);
-	const PxReal d4 = ac.dot(bp);
-	if(d3 >= 0.0f && d4 <= d3)
-		return b;
-
-	const PxReal vc = d1 * d4 - d3 * d2;
-	if(vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
-	{
-		const PxReal denominator = d1 - d3;
-		return denominator > 1.0e-20f
-			? a + ab * (d1 / denominator) : a;
-	}
-
-	const PxVec3 cp = point - c;
-	const PxReal d5 = ab.dot(cp);
-	const PxReal d6 = ac.dot(cp);
-	if(d6 >= 0.0f && d5 <= d6)
-		return c;
-
-	const PxReal vb = d5 * d2 - d1 * d6;
-	if(vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
-	{
-		const PxReal denominator = d2 - d6;
-		return denominator > 1.0e-20f
-			? a + ac * (d2 / denominator) : a;
-	}
-
-	const PxReal va = d3 * d6 - d5 * d4;
-	if(va <= 0.0f && d4 - d3 >= 0.0f &&
-		d5 - d6 >= 0.0f)
-	{
-		const PxReal edgeTerm = d4 - d3;
-		const PxReal denominator =
-			edgeTerm + d5 - d6;
-		return denominator > 1.0e-20f
-			? b + (c - b) * (edgeTerm / denominator) : b;
-	}
-
-	const PxReal denominator = va + vb + vc;
-	if(PxAbs(denominator) <= 1.0e-20f)
-		return a;
-	const PxReal inverseDenominator = 1.0f / denominator;
-	return a + ab * (vb * inverseDenominator) +
-		ac * (vc * inverseDenominator);
-}
-
-static bool getSceneCpuVolumeSmoothReverseSeparations(
-	PxDeformableVolume* volume,
-	const PxVec3& rigidCenter,
-	PxReal rigidRadius,
-	PxReal capsuleHalfHeight,
-	bool convexCase,
-	bool triangleMeshCase,
-	bool heightFieldCase,
-	PxReal& faceSeparation,
-	PxReal& minimumVertexSeparation);
-
-static bool getSceneCpuVolumeSphereReverseSweptSeparations(
-	PxDeformableVolume* volume,
-	const PxVec3& sphereCenterCurrent,
-	const PxVec3& sphereCenterStart,
-	const PxVec3& sphereCenterEnd,
-	PxReal sphereRadius,
-	PxReal capsuleHalfHeight,
-	bool convexCase,
-	PxReal& faceSeparation,
-	PxReal& minimumVertexSweepSeparation)
-{
-	PxReal currentVertexSeparation = PX_MAX_F32;
-	if(!getSceneCpuVolumeSmoothReverseSeparations(
-			volume, sphereCenterCurrent, sphereRadius,
-			capsuleHalfHeight,
-			convexCase, false, false,
-			faceSeparation, currentVertexSeparation) ||
-		!sphereCenterCurrent.isFinite() ||
-		!sphereCenterStart.isFinite() ||
-		!sphereCenterEnd.isFinite())
-		return false;
-
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	if(vertexCount == 0 ||
-		gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount)
-		return false;
-	minimumVertexSweepSeparation = PX_MAX_F32;
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < vertexCount; ++vertexIndex)
-	{
-		const PxVec3 initialPosition =
-			gSceneCpuSphereReverseSweptInitialPositions[vertexIndex];
-		if(!initialPosition.isFinite())
-			return false;
-		if(convexCase)
-		{
-			if(!gSceneCpuRigidConvexMesh)
-				return false;
-			const PxConvexMeshGeometry geometry(
-				gSceneCpuRigidConvexMesh);
-			for(PxU32 sampleIndex = 0;
-				sampleIndex <= 64; ++sampleIndex)
-			{
-				const PxReal alpha =
-					PxReal(sampleIndex) / 64.0f;
-				const PxVec3 center =
-					sphereCenterStart +
-					(sphereCenterEnd - sphereCenterStart) *
-						alpha;
-				const PxReal squaredDistance =
-					PxGeometryQuery::pointDistance(
-						initialPosition, geometry,
-						PxTransform(center));
-				if(!PxIsFinite(squaredDistance) ||
-					squaredDistance < 0.0f)
-					return false;
-				minimumVertexSweepSeparation = PxMin(
-					minimumVertexSweepSeparation,
-					PxSqrt(squaredDistance));
-			}
-		}
-		else
-		{
-			const PxVec3 centerPath =
-				sphereCenterEnd - sphereCenterStart;
-			const PxReal centerPathLengthSq =
-				centerPath.magnitudeSquared();
-			const PxReal centerPathWeight =
-				centerPathLengthSq > 1.0e-20f
-					? PxClamp(
-						(initialPosition - sphereCenterStart).
-							dot(centerPath) /
-							centerPathLengthSq,
-						0.0f, 1.0f)
-					: 0.0f;
-			const PxVec3 closestCenter =
-				sphereCenterStart +
-				centerPath * centerPathWeight;
-			const PxVec3 closestMedialPoint =
-				closestCenter + PxVec3(
-					PxClamp(
-						initialPosition.x - closestCenter.x,
-						-capsuleHalfHeight,
-						capsuleHalfHeight),
-					0.0f, 0.0f);
-			minimumVertexSweepSeparation = PxMin(
-				minimumVertexSweepSeparation,
-				(initialPosition - closestMedialPoint).
-					magnitude() - sphereRadius);
-		}
-	}
-	return PxIsFinite(minimumVertexSweepSeparation) &&
-		minimumVertexSweepSeparation < PX_MAX_F32;
-}
-
-static bool getSceneCpuVolumeDeformingReverseSweptProof(
-	PxDeformableVolume* volume,
-	const PxTransform& rigidPose,
-	PxReal radius,
-	PxReal capsuleHalfHeight,
-	bool convexCase,
-	PxReal& endpointMinSeparation,
-	PxReal& midSweepMinSeparation,
-	PxReal& minimumVertexSweepSeparation)
-{
-	if(!volume || !rigidPose.isValid() ||
-		!PxIsFinite(radius) || radius <= 0.0f ||
-		!PxIsFinite(capsuleHalfHeight) ||
-		capsuleHalfHeight < 0.0f ||
-		(convexCase && !gSceneCpuRigidConvexMesh))
-		return false;
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	const PxU32 tetrahedronCount =
-		mesh ? mesh->getNbTetrahedrons() : 0;
-	if(!mesh || vertexCount == 0 || tetrahedronCount == 0 ||
-		gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount ||
-		gSceneCpuDeformingReverseSweptFreeEndPositions.size() !=
-			vertexCount)
-		return false;
-	const bool has16BitIndices =
-		mesh->getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	const PxU16* indices16 = has16BitIndices
-		? static_cast<const PxU16*>(mesh->getTetrahedrons())
-		: NULL;
-	const PxU32* indices32 = has16BitIndices
-		? NULL
-		: static_cast<const PxU32*>(mesh->getTetrahedrons());
-	if((has16BitIndices && !indices16) ||
-		(!has16BitIndices && !indices32))
-		return false;
-	const PxU32 faceEndpoints[4][3] =
-	{
-		{0, 2, 1},
-		{0, 1, 3},
-		{0, 3, 2},
-		{1, 2, 3}
-	};
-	struct IndexedBoundaryFace
-	{
-		PxU32 vertices[3];
-		PxU32 sortedVertices[3];
-		PxU32 ownerCount;
-	};
-	PxArray<IndexedBoundaryFace> indexedFaces;
-	for(PxU32 tetrahedronIndex = 0;
-		tetrahedronIndex < tetrahedronCount;
-		++tetrahedronIndex)
-	{
-		PxU32 tetrahedron[4];
-		for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
-		{
-			const PxU32 flatIndex =
-				tetrahedronIndex * 4 + endpoint;
-			tetrahedron[endpoint] = has16BitIndices
-				? PxU32(indices16[flatIndex])
-				: indices32[flatIndex];
-			if(tetrahedron[endpoint] >= vertexCount)
-				return false;
-		}
-		for(PxU32 faceIndex = 0;
-			faceIndex < 4; ++faceIndex)
-		{
-			IndexedBoundaryFace face;
-			for(PxU32 endpoint = 0; endpoint < 3; ++endpoint)
-			{
-				face.vertices[endpoint] =
-					tetrahedron[
-						faceEndpoints[faceIndex][endpoint]];
-				face.sortedVertices[endpoint] =
-					face.vertices[endpoint];
-			}
-			for(PxU32 i = 0; i < 2; ++i)
-			{
-				for(PxU32 j = i + 1; j < 3; ++j)
-				{
-					if(face.sortedVertices[j] <
-						face.sortedVertices[i])
-					{
-						const PxU32 temporary =
-							face.sortedVertices[i];
-						face.sortedVertices[i] =
-							face.sortedVertices[j];
-						face.sortedVertices[j] =
-							temporary;
-					}
-				}
-			}
-			face.ownerCount = 1;
-			bool matched = false;
-			for(PxU32 existingIndex = 0;
-				existingIndex < indexedFaces.size();
-				++existingIndex)
-			{
-				IndexedBoundaryFace& existing =
-					indexedFaces[existingIndex];
-				if(existing.sortedVertices[0] ==
-						face.sortedVertices[0] &&
-					existing.sortedVertices[1] ==
-						face.sortedVertices[1] &&
-					existing.sortedVertices[2] ==
-						face.sortedVertices[2])
-				{
-					existing.ownerCount++;
-					matched = true;
-					break;
-				}
-			}
-			if(!matched)
-				indexedFaces.pushBack(face);
-		}
-	}
-	const PxVec3* convexVertices = convexCase
-		? gSceneCpuRigidConvexMesh->getVertices()
-		: NULL;
-	const PxU32 convexVertexCount = convexCase
-		? gSceneCpuRigidConvexMesh->getNbVertices()
-		: 0;
-	const PxConvexMeshGeometry convexGeometry(
-		convexCase ? gSceneCpuRigidConvexMesh : NULL);
-	const PxVec3 capsuleAxis = rigidPose.q.getBasisVector0();
-
-	auto getFaceSeparation = [&](
-		const PxVec3& a,
-		const PxVec3& b,
-		const PxVec3& c)
-	{
-		PxReal separation = PX_MAX_F32;
-		if(convexCase)
-		{
-			for(PxU32 rigidVertex = 0;
-				rigidVertex < convexVertexCount; ++rigidVertex)
-			{
-				const PxVec3 point =
-					rigidPose.transform(
-						convexVertices[rigidVertex]);
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						point, a, b, c);
-				separation = PxMin(
-					separation,
-					(point - closest).magnitude());
-			}
-		}
-		else
-		{
-			const PxU32 sampleCount =
-				capsuleHalfHeight > 0.0f ? 128u : 0u;
-			for(PxU32 sample = 0;
-				sample <= sampleCount; ++sample)
-			{
-				const PxReal axisCoordinate =
-					sampleCount > 0
-						? -capsuleHalfHeight +
-							2.0f * capsuleHalfHeight *
-								(PxReal(sample) /
-								 PxReal(sampleCount))
-						: 0.0f;
-				const PxVec3 medialPoint =
-					rigidPose.p +
-						capsuleAxis * axisCoordinate;
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						medialPoint, a, b, c);
-				separation = PxMin(
-					separation,
-					(medialPoint - closest).magnitude() -
-						radius);
-			}
-		}
-		return separation;
-	};
-
-	endpointMinSeparation = PX_MAX_F32;
-	midSweepMinSeparation = PX_MAX_F32;
-	minimumVertexSweepSeparation = PX_MAX_F32;
-	PxArray<PxVec3> samplePositions;
-	samplePositions.resize(vertexCount);
-	for(PxU32 sample = 0; sample <= 128; ++sample)
-	{
-		const PxReal alpha =
-			PxReal(sample) / 128.0f;
-		for(PxU32 vertexIndex = 0;
-			vertexIndex < vertexCount; ++vertexIndex)
-		{
-			const PxVec3 start =
-				gSceneCpuSphereReverseSweptInitialPositions[
-					vertexIndex];
-			const PxVec3 end =
-				gSceneCpuDeformingReverseSweptFreeEndPositions[
-					vertexIndex];
-			if(!start.isFinite() || !end.isFinite())
-				return false;
-			const PxVec3 point =
-				start + (end - start) * alpha;
-			samplePositions[vertexIndex] = point;
-			PxReal vertexSeparation = PX_MAX_F32;
-			if(convexCase)
-			{
-				const PxReal squaredDistance =
-					PxGeometryQuery::pointDistance(
-						point, convexGeometry, rigidPose);
-				if(!PxIsFinite(squaredDistance) ||
-					squaredDistance < 0.0f)
-					return false;
-				vertexSeparation = PxSqrt(squaredDistance);
-			}
-			else
-				vertexSeparation = getCapsuleSignedSeparation(
-					point, rigidPose, radius,
-					capsuleHalfHeight);
-			minimumVertexSweepSeparation = PxMin(
-				minimumVertexSweepSeparation,
-				vertexSeparation);
-		}
-
-		PxReal sampleFaceSeparation = PX_MAX_F32;
-		for(PxU32 faceIndex = 0;
-			faceIndex < indexedFaces.size(); ++faceIndex)
-		{
-			const IndexedBoundaryFace& face =
-				indexedFaces[faceIndex];
-			if(face.ownerCount != 1)
-				continue;
-			const PxVec3& a =
-				samplePositions[face.vertices[0]];
-			const PxVec3& b =
-				samplePositions[face.vertices[1]];
-			const PxVec3& c =
-				samplePositions[face.vertices[2]];
-			const PxReal candidateFaceSeparation =
-				getFaceSeparation(a, b, c);
-			sampleFaceSeparation = PxMin(
-				sampleFaceSeparation,
-				candidateFaceSeparation);
-		}
-		if(sample == 0 || sample == 128)
-		{
-			endpointMinSeparation = PxMin(
-				endpointMinSeparation,
-				sampleFaceSeparation);
-		}
-		else
-			midSweepMinSeparation = PxMin(
-				midSweepMinSeparation,
-				sampleFaceSeparation);
-	}
-	return PxIsFinite(endpointMinSeparation) &&
-		PxIsFinite(midSweepMinSeparation) &&
-		PxIsFinite(minimumVertexSweepSeparation);
-}
-
-static bool getSceneCpuVolumeCapsuleFaceSeparation(
-	PxDeformableVolume* volume,
-	const PxTransform& capsulePose,
-	PxReal capsuleRadius,
-	PxReal capsuleHalfHeight,
-	bool useInitialPositions,
-	PxReal& faceSeparation)
-{
-	if(!volume || !capsulePose.isValid() ||
-		!PxIsFinite(capsuleRadius) || capsuleRadius <= 0.0f ||
-		!PxIsFinite(capsuleHalfHeight) || capsuleHalfHeight < 0.0f)
-		return false;
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxVec4* positions = volume->getPositionInvMassBufferH();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	const PxU32 tetrahedronCount =
-		mesh ? mesh->getNbTetrahedrons() : 0;
-	if(!mesh || !positions || vertexCount == 0 ||
-		tetrahedronCount == 0 ||
-		(useInitialPositions &&
-		 gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount))
-		return false;
-
-	const bool has16BitIndices =
-		mesh->getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	const PxU16* indices16 = has16BitIndices
-		? static_cast<const PxU16*>(mesh->getTetrahedrons())
-		: NULL;
-	const PxU32* indices32 = has16BitIndices
-		? NULL
-		: static_cast<const PxU32*>(mesh->getTetrahedrons());
-	if((has16BitIndices && !indices16) ||
-		(!has16BitIndices && !indices32))
-		return false;
-	const PxU32 faceEndpoints[4][3] =
-	{
-		{0, 2, 1},
-		{0, 1, 3},
-		{0, 3, 2},
-		{1, 2, 3}
-	};
-	const PxVec3 capsuleAxis = capsulePose.q.getBasisVector0();
-	faceSeparation = PX_MAX_F32;
-	for(PxU32 tetrahedronIndex = 0;
-		tetrahedronIndex < tetrahedronCount;
-		++tetrahedronIndex)
-	{
-		PxU32 tetrahedron[4];
-		for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
-		{
-			const PxU32 flatIndex =
-				tetrahedronIndex * 4 + endpoint;
-			tetrahedron[endpoint] = has16BitIndices
-				? PxU32(indices16[flatIndex])
-				: indices32[flatIndex];
-			if(tetrahedron[endpoint] >= vertexCount)
-				return false;
-		}
-		for(PxU32 faceIndex = 0; faceIndex < 4; ++faceIndex)
-		{
-			PxVec3 face[3];
-			for(PxU32 endpoint = 0; endpoint < 3; ++endpoint)
-			{
-				const PxU32 vertexIndex =
-					tetrahedron[faceEndpoints[faceIndex][endpoint]];
-				face[endpoint] = useInitialPositions
-					? gSceneCpuSphereReverseSweptInitialPositions[
-						vertexIndex]
-					: positions[vertexIndex].getXYZ();
-				if(!face[endpoint].isFinite())
-					return false;
-			}
-			for(PxU32 sample = 0; sample <= 128; ++sample)
-			{
-				const PxReal axisCoordinate =
-					-capsuleHalfHeight +
-					2.0f * capsuleHalfHeight *
-						(PxReal(sample) / 128.0f);
-				const PxVec3 medialPoint =
-					capsulePose.p + capsuleAxis * axisCoordinate;
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						medialPoint, face[0], face[1], face[2]);
-				if(!closest.isFinite())
-					return false;
-				faceSeparation = PxMin(
-					faceSeparation,
-					(medialPoint - closest).magnitude() -
-						capsuleRadius);
-			}
-		}
-	}
-	return PxIsFinite(faceSeparation) &&
-		faceSeparation < PX_MAX_F32;
-}
-
-static bool getSceneCpuVolumeConvexFaceSeparation(
-	PxDeformableVolume* volume,
-	const PxTransform& convexPose,
-	bool useInitialPositions,
-	PxReal& faceSeparation)
-{
-	if(!volume || !convexPose.isValid() ||
-		!gSceneCpuRigidConvexMesh)
-		return false;
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxVec4* positions = volume->getPositionInvMassBufferH();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	const PxU32 tetrahedronCount =
-		mesh ? mesh->getNbTetrahedrons() : 0;
-	const PxVec3* convexVertices =
-		gSceneCpuRigidConvexMesh->getVertices();
-	const PxU32 convexVertexCount =
-		gSceneCpuRigidConvexMesh->getNbVertices();
-	if(!mesh || !positions || vertexCount == 0 ||
-		tetrahedronCount == 0 || !convexVertices ||
-		convexVertexCount == 0 ||
-		(useInitialPositions &&
-		 gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount))
-		return false;
-
-	const bool has16BitIndices =
-		mesh->getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	const PxU16* indices16 = has16BitIndices
-		? static_cast<const PxU16*>(mesh->getTetrahedrons())
-		: NULL;
-	const PxU32* indices32 = has16BitIndices
-		? NULL
-		: static_cast<const PxU32*>(mesh->getTetrahedrons());
-	if((has16BitIndices && !indices16) ||
-		(!has16BitIndices && !indices32))
-		return false;
-	const PxU32 faceEndpoints[4][3] =
-	{
-		{0, 2, 1},
-		{0, 1, 3},
-		{0, 3, 2},
-		{1, 2, 3}
-	};
-
-	faceSeparation = PX_MAX_F32;
-	for(PxU32 convexVertexIndex = 0;
-		convexVertexIndex < convexVertexCount;
-		++convexVertexIndex)
-	{
-		const PxVec3 point =
-			convexPose.transform(convexVertices[convexVertexIndex]);
-		if(!point.isFinite())
-			return false;
-		PxReal pointDistance = PX_MAX_F32;
-		bool pointInside = false;
-		for(PxU32 tetrahedronIndex = 0;
-			tetrahedronIndex < tetrahedronCount;
-			++tetrahedronIndex)
-		{
-			PxVec3 tetrahedron[4];
-			for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
-			{
-				const PxU32 flatIndex =
-					tetrahedronIndex * 4 + endpoint;
-				const PxU32 vertexIndex = has16BitIndices
-					? PxU32(indices16[flatIndex])
-					: indices32[flatIndex];
-				if(vertexIndex >= vertexCount)
-					return false;
-				tetrahedron[endpoint] = useInitialPositions
-					? gSceneCpuSphereReverseSweptInitialPositions[
-						vertexIndex]
-					: positions[vertexIndex].getXYZ();
-				if(!tetrahedron[endpoint].isFinite())
-					return false;
-			}
-
-			const PxVec3 edge0 =
-				tetrahedron[1] - tetrahedron[0];
-			const PxVec3 edge1 =
-				tetrahedron[2] - tetrahedron[0];
-			const PxVec3 edge2 =
-				tetrahedron[3] - tetrahedron[0];
-			const PxVec3 relative =
-				point - tetrahedron[0];
-			const PxReal determinant =
-				edge0.dot(edge1.cross(edge2));
-			if(PxAbs(determinant) > 1.0e-20f)
-			{
-				const PxReal inverseDeterminant =
-					1.0f / determinant;
-				const PxReal b1 =
-					relative.dot(edge1.cross(edge2)) *
-						inverseDeterminant;
-				const PxReal b2 =
-					edge0.dot(relative.cross(edge2)) *
-						inverseDeterminant;
-				const PxReal b3 =
-					edge0.dot(edge1.cross(relative)) *
-						inverseDeterminant;
-				const PxReal b0 = 1.0f - b1 - b2 - b3;
-				const PxReal tolerance = 1.0e-5f;
-				pointInside = pointInside ||
-					(b0 >= -tolerance &&
-					 b1 >= -tolerance &&
-					 b2 >= -tolerance &&
-					 b3 >= -tolerance);
-			}
-
-			for(PxU32 faceIndex = 0;
-				faceIndex < 4; ++faceIndex)
-			{
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						point,
-						tetrahedron[
-							faceEndpoints[faceIndex][0]],
-						tetrahedron[
-							faceEndpoints[faceIndex][1]],
-						tetrahedron[
-							faceEndpoints[faceIndex][2]]);
-				if(!closest.isFinite())
-					return false;
-				pointDistance = PxMin(
-					pointDistance,
-					(point - closest).magnitude());
-			}
-		}
-		if(!PxIsFinite(pointDistance) ||
-			pointDistance >= PX_MAX_F32)
-			return false;
-		faceSeparation = PxMin(
-			faceSeparation,
-			pointInside ? -pointDistance : pointDistance);
-	}
-	return PxIsFinite(faceSeparation) &&
-		faceSeparation < PX_MAX_F32;
-}
-
-static bool getSceneCpuVolumeRotationalConvexPointSweepSeparations(
-	const PxTransform& startPose,
-	const PxTransform& endPose,
-	PxReal& endpointMinSeparation,
-	PxReal& midSweepMinSeparation)
-{
-	if(!startPose.isValid() || !endPose.isValid() ||
-		!gSceneCpuRigidConvexMesh ||
-		gSceneCpuCapsuleRotationalSweptInitialPositions.empty())
-		return false;
-	const PxConvexMeshGeometry geometry(
-		gSceneCpuRigidConvexMesh);
-	endpointMinSeparation = PX_MAX_F32;
-	midSweepMinSeparation = PX_MAX_F32;
-	for(PxU32 vertexIndex = 0;
-		vertexIndex <
-			gSceneCpuCapsuleRotationalSweptInitialPositions.size();
-		++vertexIndex)
-	{
-		const PxVec3 point =
-			gSceneCpuCapsuleRotationalSweptInitialPositions[
-				vertexIndex];
-		if(!point.isFinite())
-			return false;
-		const PxReal startDistanceSq =
-			PxGeometryQuery::pointDistance(
-				point, geometry, startPose);
-		const PxReal endDistanceSq =
-			PxGeometryQuery::pointDistance(
-				point, geometry, endPose);
-		if(!PxIsFinite(startDistanceSq) ||
-			!PxIsFinite(endDistanceSq) ||
-			startDistanceSq < 0.0f ||
-			endDistanceSq < 0.0f)
-			return false;
-		endpointMinSeparation = PxMin(
-			endpointMinSeparation,
-			PxSqrt(PxMin(startDistanceSq, endDistanceSq)));
-		for(PxU32 sample = 1; sample < 64; ++sample)
-		{
-			const PxReal time =
-				PxReal(sample) / 64.0f;
-			const PxTransform samplePose(
-				startPose.p +
-					(endPose.p - startPose.p) * time,
-				PxSlerp(
-					time, startPose.q, endPose.q).
-						getNormalized());
-			const PxReal sampleDistanceSq =
-				PxGeometryQuery::pointDistance(
-					point, geometry, samplePose);
-			if(!PxIsFinite(sampleDistanceSq) ||
-				sampleDistanceSq < 0.0f)
-				return false;
-			midSweepMinSeparation = PxMin(
-				midSweepMinSeparation,
-				PxSqrt(sampleDistanceSq));
-		}
-	}
-	return PxIsFinite(endpointMinSeparation) &&
-		PxIsFinite(midSweepMinSeparation);
-}
-
-static bool getSceneCpuVolumeRotationalCapsuleReverseSweptSeparations(
-	PxDeformableVolume* volume,
-	const PxTransform& currentPose,
-	const PxTransform& startPose,
-	const PxTransform& endPose,
-	PxReal capsuleRadius,
-	PxReal capsuleHalfHeight,
-	PxReal& faceSeparation,
-	PxReal& minimumVertexSweepSeparation,
-	PxReal& endpointMinSeparation,
-	PxReal& midSweepMinSeparation)
-{
-	if(!volume || !currentPose.isValid() ||
-		!startPose.isValid() || !endPose.isValid() ||
-		!getSceneCpuVolumeCapsuleFaceSeparation(
-			volume, currentPose, capsuleRadius,
-			capsuleHalfHeight, false, faceSeparation))
-		return false;
-	PxReal startFaceSeparation = PX_MAX_F32;
-	PxReal endFaceSeparation = PX_MAX_F32;
-	if(!getSceneCpuVolumeCapsuleFaceSeparation(
-			volume, startPose, capsuleRadius,
-			capsuleHalfHeight, true, startFaceSeparation) ||
-		!getSceneCpuVolumeCapsuleFaceSeparation(
-			volume, endPose, capsuleRadius,
-			capsuleHalfHeight, true, endFaceSeparation))
-		return false;
-
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	if(vertexCount == 0 ||
-		gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount)
-		return false;
-	endpointMinSeparation =
-		PxMin(startFaceSeparation, endFaceSeparation);
-	midSweepMinSeparation = PX_MAX_F32;
-	minimumVertexSweepSeparation = PX_MAX_F32;
-	for(PxU32 sample = 0; sample <= 64; ++sample)
-	{
-		const PxReal time = PxReal(sample) / 64.0f;
-		const PxTransform samplePose(
-			startPose.p + (endPose.p - startPose.p) * time,
-			PxSlerp(
-				time, startPose.q, endPose.q).
-					getNormalized());
-		if(sample > 0 && sample < 64)
-		{
-			PxReal sampleFaceSeparation = PX_MAX_F32;
-			if(!getSceneCpuVolumeCapsuleFaceSeparation(
-					volume, samplePose, capsuleRadius,
-					capsuleHalfHeight, true,
-					sampleFaceSeparation))
-				return false;
-			midSweepMinSeparation = PxMin(
-				midSweepMinSeparation, sampleFaceSeparation);
-		}
-		for(PxU32 vertexIndex = 0;
-			vertexIndex < vertexCount;
-			++vertexIndex)
-		{
-			const PxVec3 point =
-				gSceneCpuSphereReverseSweptInitialPositions[
-					vertexIndex];
-			if(!point.isFinite())
-				return false;
-			minimumVertexSweepSeparation = PxMin(
-				minimumVertexSweepSeparation,
-				getCapsuleSignedSeparation(
-					point, samplePose,
-					capsuleRadius, capsuleHalfHeight));
-		}
-	}
-	return PxIsFinite(faceSeparation) &&
-		PxIsFinite(minimumVertexSweepSeparation) &&
-		PxIsFinite(endpointMinSeparation) &&
-		PxIsFinite(midSweepMinSeparation);
-}
-
-static bool getSceneCpuVolumeRotationalConvexReverseSweptSeparations(
-	PxDeformableVolume* volume,
-	const PxTransform& currentPose,
-	const PxTransform& startPose,
-	const PxTransform& endPose,
-	PxReal& faceSeparation,
-	PxReal& minimumVertexSweepSeparation,
-	PxReal& endpointMinSeparation,
-	PxReal& midSweepMinSeparation)
-{
-	if(!volume || !currentPose.isValid() ||
-		!startPose.isValid() || !endPose.isValid() ||
-		!gSceneCpuRigidConvexMesh ||
-		!getSceneCpuVolumeConvexFaceSeparation(
-			volume, currentPose, false, faceSeparation))
-		return false;
-	PxReal startFaceSeparation = PX_MAX_F32;
-	PxReal endFaceSeparation = PX_MAX_F32;
-	if(!getSceneCpuVolumeConvexFaceSeparation(
-			volume, startPose, true, startFaceSeparation) ||
-		!getSceneCpuVolumeConvexFaceSeparation(
-			volume, endPose, true, endFaceSeparation))
-		return false;
-
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxU32 vertexCount = mesh ? mesh->getNbVertices() : 0;
-	if(vertexCount == 0 ||
-		gSceneCpuSphereReverseSweptInitialPositions.size() !=
-			vertexCount)
-		return false;
-	const PxConvexMeshGeometry geometry(
-		gSceneCpuRigidConvexMesh);
-	endpointMinSeparation =
-		PxMin(startFaceSeparation, endFaceSeparation);
-	midSweepMinSeparation = PX_MAX_F32;
-	minimumVertexSweepSeparation = PX_MAX_F32;
-	for(PxU32 sample = 0; sample <= 64; ++sample)
-	{
-		const PxReal time = PxReal(sample) / 64.0f;
-		const PxTransform samplePose(
-			startPose.p + (endPose.p - startPose.p) * time,
-			PxSlerp(
-				time, startPose.q, endPose.q).
-					getNormalized());
-		if(sample > 0 && sample < 64)
-		{
-			PxReal sampleFaceSeparation = PX_MAX_F32;
-			if(!getSceneCpuVolumeConvexFaceSeparation(
-					volume, samplePose, true,
-					sampleFaceSeparation))
-				return false;
-			midSweepMinSeparation = PxMin(
-				midSweepMinSeparation, sampleFaceSeparation);
-		}
-		for(PxU32 vertexIndex = 0;
-			vertexIndex < vertexCount;
-			++vertexIndex)
-		{
-			const PxVec3 point =
-				gSceneCpuSphereReverseSweptInitialPositions[
-					vertexIndex];
-			if(!point.isFinite())
-				return false;
-			const PxReal squaredDistance =
-				PxGeometryQuery::pointDistance(
-					point, geometry, samplePose);
-			if(!PxIsFinite(squaredDistance) ||
-				squaredDistance < 0.0f)
-				return false;
-			minimumVertexSweepSeparation = PxMin(
-				minimumVertexSweepSeparation,
-				PxSqrt(squaredDistance));
-		}
-	}
-	return PxIsFinite(faceSeparation) &&
-		PxIsFinite(minimumVertexSweepSeparation) &&
-		PxIsFinite(endpointMinSeparation) &&
-		PxIsFinite(midSweepMinSeparation);
-}
-
-static bool getSceneCpuVolumeRotationalTriangleSurfaceSweepSeparations(
-	const PxTransform& startPose,
-	const PxTransform& endPose,
-	bool heightField, bool reverseCase,
-	PxReal& endpointMinSeparation,
-	PxReal& midSweepMinSeparation,
-	PxReal& minimumVertexSweepSeparation)
-{
-	if(!startPose.isValid() || !endPose.isValid() ||
-		gSceneCpuSphereReverseSweptInitialPositions.size() < 4)
-		return false;
-	const PxVec3 bladeLocal[4] =
-	{
-		heightField
-			? PxVec3(0.0f, 0.0f, 0.0f)
-			: PxVec3(-1.0f, 0.0f, -0.1f),
-		heightField
-			? PxVec3(0.0f, 0.0f, 0.2f)
-			: PxVec3(-1.0f, 0.0f, 0.1f),
-		heightField
-			? PxVec3(2.0f, 0.0f, 0.2f)
-			: PxVec3(1.0f, 0.0f, 0.1f),
-		heightField
-			? PxVec3(2.0f, 0.0f, 0.0f)
-			: PxVec3(1.0f, 0.0f, -0.1f)
-	};
-	auto getBladeWorld = [&](
-		PxReal time, PxVec3 world[4])
-	{
-		const PxVec3 center =
-			startPose.p + (endPose.p - startPose.p) * time;
-		const PxQuat rotation = PxSlerp(
-			time, startPose.q, endPose.q).getNormalized();
-		for(PxU32 vertex = 0; vertex < 4; ++vertex)
-			world[vertex] =
-				center + rotation.rotate(bladeLocal[vertex]);
-	};
-	auto getPointBladeDistance = [&](
-		const PxVec3& point, PxReal time)
-	{
-		PxVec3 world[4];
-		getBladeWorld(time, world);
-		const PxVec3 closest0 =
-			closestPointOnTriangleForGate(
-				point, world[0], world[1], world[2]);
-		const PxVec3 closest1 =
-			closestPointOnTriangleForGate(
-				point, world[0], world[2], world[3]);
-		return PxMin(
-			(point - closest0).magnitude(),
-			(point - closest1).magnitude());
-	};
-	const PxU32 boundaryFaces[4][3] =
-	{
-		{0, 2, 1},
-		{0, 1, 3},
-		{0, 3, 2},
-		{1, 2, 3}
-	};
-	endpointMinSeparation = PX_MAX_F32;
-	midSweepMinSeparation = PX_MAX_F32;
-	minimumVertexSweepSeparation = PX_MAX_F32;
-	for(PxU32 endpoint = 0; endpoint < 2; ++endpoint)
-	{
-		const PxReal time = PxReal(endpoint);
-		for(PxU32 softVertex = 0;
-			softVertex <
-				gSceneCpuSphereReverseSweptInitialPositions.size();
-			++softVertex)
-		{
-			const PxVec3 point =
-				gSceneCpuSphereReverseSweptInitialPositions[
-					softVertex];
-			if(!point.isFinite())
-				return false;
-			endpointMinSeparation = PxMin(
-				endpointMinSeparation,
-				getPointBladeDistance(point, time));
-		}
-		if(reverseCase)
-		{
-			PxVec3 world[4];
-			getBladeWorld(time, world);
-			for(PxU32 rigidVertex = 0;
-				rigidVertex < 4; ++rigidVertex)
-			{
-				for(PxU32 face = 0; face < 4; ++face)
-				{
-					const PxVec3& a =
-						gSceneCpuSphereReverseSweptInitialPositions[
-							boundaryFaces[face][0]];
-					const PxVec3& b =
-						gSceneCpuSphereReverseSweptInitialPositions[
-							boundaryFaces[face][1]];
-					const PxVec3& c =
-						gSceneCpuSphereReverseSweptInitialPositions[
-							boundaryFaces[face][2]];
-					const PxVec3 closest =
-						closestPointOnTriangleForGate(
-							world[rigidVertex], a, b, c);
-					endpointMinSeparation = PxMin(
-						endpointMinSeparation,
-						(world[rigidVertex] -
-							closest).magnitude());
-				}
-			}
-		}
-	}
-
-	const PxVec3& bottom0 =
-		gSceneCpuSphereReverseSweptInitialPositions[0];
-	const PxVec3& bottom1 =
-		gSceneCpuSphereReverseSweptInitialPositions[1];
-	const PxVec3& bottom2 =
-		gSceneCpuSphereReverseSweptInitialPositions[3];
-	for(PxU32 sample = 0; sample <= 256; ++sample)
-	{
-		const PxReal time = PxReal(sample) / 256.0f;
-		for(PxU32 softVertex = 0;
-			softVertex <
-				gSceneCpuSphereReverseSweptInitialPositions.size();
-			++softVertex)
-		{
-			const PxReal distance = getPointBladeDistance(
-				gSceneCpuSphereReverseSweptInitialPositions[
-					softVertex],
-				time);
-			if(!PxIsFinite(distance))
-				return false;
-			if(reverseCase)
-				minimumVertexSweepSeparation = PxMin(
-					minimumVertexSweepSeparation, distance);
-			else
-				midSweepMinSeparation = PxMin(
-					midSweepMinSeparation, distance);
-		}
-		if(reverseCase)
-		{
-			PxVec3 world[4];
-			getBladeWorld(time, world);
-			for(PxU32 rigidVertex = 0;
-				rigidVertex < 4; ++rigidVertex)
-			{
-				const PxVec3 projected(
-					world[rigidVertex].x,
-					bottom0.y,
-					world[rigidVertex].z);
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						projected,
-						bottom0, bottom1, bottom2);
-				if((projected - closest).magnitudeSquared() <=
-					1.0e-8f)
-					midSweepMinSeparation = PxMin(
-						midSweepMinSeparation,
-						bottom0.y -
-							world[rigidVertex].y);
-			}
-		}
-	}
-	if(!reverseCase)
-		minimumVertexSweepSeparation = PX_MAX_F32;
-	return PxIsFinite(endpointMinSeparation) &&
-		PxIsFinite(midSweepMinSeparation) &&
-		(!reverseCase ||
-		 PxIsFinite(minimumVertexSweepSeparation));
-}
-
-static bool getSceneCpuVolumeSmoothReverseSeparations(
-	PxDeformableVolume* volume,
-	const PxVec3& rigidCenter,
-	PxReal rigidRadius,
-	PxReal capsuleHalfHeight,
-	bool convexCase,
-	bool triangleMeshCase,
-	bool heightFieldCase,
-	PxReal& faceSeparation,
-	PxReal& minimumVertexSeparation)
-{
-	if(!volume || !volume->getCollisionMesh() ||
-		!rigidCenter.isFinite() ||
-		!PxIsFinite(rigidRadius) || rigidRadius <= 0.0f ||
-		!PxIsFinite(capsuleHalfHeight) ||
-		capsuleHalfHeight < 0.0f ||
-		(convexCase && !gSceneCpuRigidConvexMesh) ||
-		(triangleMeshCase && !gSceneCpuRigidTriangleMesh) ||
-		(heightFieldCase && !gSceneCpuRigidHeightField))
-		return false;
-	const PxTetrahedronMesh* mesh = volume->getCollisionMesh();
-	const PxVec4* positions =
-		volume->getPositionInvMassBufferH();
-	const PxU32 vertexCount = mesh->getNbVertices();
-	const PxU32 tetrahedronCount = mesh->getNbTetrahedrons();
-	if(!positions || vertexCount == 0 || tetrahedronCount == 0)
-		return false;
-
-	minimumVertexSeparation = PX_MAX_F32;
-	for(PxU32 vertexIndex = 0;
-		vertexIndex < vertexCount; ++vertexIndex)
-	{
-		const PxVec3 position = positions[vertexIndex].getXYZ();
-		if(!position.isFinite())
-			return false;
-		minimumVertexSeparation = PxMin(
-			minimumVertexSeparation,
-			[&]()
-			{
-				if(triangleMeshCase || heightFieldCase)
-				{
-					const PxTriangleMeshGeometry triangleGeometry(
-						gSceneCpuRigidTriangleMesh);
-					const PxHeightFieldGeometry heightGeometry(
-						gSceneCpuRigidHeightField,
-						PxMeshGeometryFlags(),
-						0.1f, 0.3f, 0.3f);
-					const PxU32 heightFieldTriangles[] =
-						{0, 1, 2, 3, 6, 7, 8, 9};
-					const PxU32 triangleCount =
-						triangleMeshCase
-							? gSceneCpuRigidTriangleMesh->
-								getNbTriangles()
-							: 8u;
-					PxReal minimumDistance = PX_MAX_F32;
-					for(PxU32 triangleIndex = 0;
-						triangleIndex < triangleCount;
-						++triangleIndex)
-					{
-						PxTriangle triangle;
-						if(triangleMeshCase)
-							PxMeshQuery::getTriangle(
-								triangleGeometry,
-								PxTransform(rigidCenter),
-								triangleIndex, triangle);
-						else
-							PxMeshQuery::getTriangle(
-								heightGeometry,
-								PxTransform(rigidCenter),
-								heightFieldTriangles[
-									triangleIndex],
-								triangle);
-						const PxVec3 closest =
-							closestPointOnTriangleForGate(
-								position,
-								triangle.verts[0],
-								triangle.verts[1],
-								triangle.verts[2]);
-						minimumDistance = PxMin(
-							minimumDistance,
-							(position - closest).magnitude());
-					}
-					return minimumDistance;
-				}
-				if(convexCase)
-				{
-					const PxReal squaredDistance =
-						PxGeometryQuery::pointDistance(
-							position,
-							PxConvexMeshGeometry(
-								gSceneCpuRigidConvexMesh),
-							PxTransform(rigidCenter));
-					return squaredDistance >= 0.0f
-						? PxSqrt(squaredDistance)
-						: -PX_MAX_F32;
-				}
-				PxVec3 radial = position - rigidCenter;
-				radial.x -= PxClamp(
-					radial.x,
-					-capsuleHalfHeight,
-					capsuleHalfHeight);
-				return radial.magnitude() - rigidRadius;
-			}());
-	}
-
-	const PxU32 faceEndpoints[4][3] =
-	{
-		{0, 2, 1},
-		{0, 1, 3},
-		{0, 3, 2},
-		{1, 2, 3}
-	};
-	const bool has16BitIndices =
-		mesh->getTetrahedronMeshFlags() &
-			PxTetrahedronMeshFlag::e16_BIT_INDICES;
-	const PxU16* indices16 = has16BitIndices
-		? static_cast<const PxU16*>(mesh->getTetrahedrons())
-		: NULL;
-	const PxU32* indices32 = has16BitIndices
-		? NULL
-		: static_cast<const PxU32*>(mesh->getTetrahedrons());
-	if((has16BitIndices && !indices16) ||
-		(!has16BitIndices && !indices32))
-		return false;
-
-	faceSeparation = PX_MAX_F32;
-	for(PxU32 tetrahedronIndex = 0;
-		tetrahedronIndex < tetrahedronCount;
-		++tetrahedronIndex)
-	{
-		PxU32 tetrahedron[4];
-		for(PxU32 endpoint = 0; endpoint < 4; ++endpoint)
-		{
-			const PxU32 flatIndex =
-				tetrahedronIndex * 4 + endpoint;
-			tetrahedron[endpoint] = has16BitIndices
-				? PxU32(indices16[flatIndex])
-				: indices32[flatIndex];
-			if(tetrahedron[endpoint] >= vertexCount)
-				return false;
-		}
-		for(PxU32 faceIndex = 0; faceIndex < 4; ++faceIndex)
-		{
-			const PxVec3 a =
-				positions[tetrahedron[
-					faceEndpoints[faceIndex][0]]].getXYZ();
-			const PxVec3 b =
-				positions[tetrahedron[
-					faceEndpoints[faceIndex][1]]].getXYZ();
-			const PxVec3 c =
-				positions[tetrahedron[
-					faceEndpoints[faceIndex][2]]].getXYZ();
-			const PxVec3 axisSamples[3] =
-			{
-				triangleMeshCase
-					? rigidCenter +
-						PxVec3(0.0f, 0.3f, 0.0f)
-					: heightFieldCase
-					? rigidCenter +
-						PxVec3(0.3f, 0.3f, 0.3f)
-					: convexCase
-					? rigidCenter +
-						PxVec3(0.0f, 0.3f, 0.0f)
-					: rigidCenter -
-						PxVec3(
-							capsuleHalfHeight,
-							0.0f, 0.0f),
-				rigidCenter,
-				rigidCenter +
-					PxVec3(capsuleHalfHeight, 0.0f, 0.0f)
-			};
-			for(PxU32 sampleIndex = 0;
-				sampleIndex <
-					((convexCase || triangleMeshCase ||
-					  heightFieldCase) ? 1u : 3u);
-				++sampleIndex)
-			{
-				const PxVec3 closest =
-					closestPointOnTriangleForGate(
-						axisSamples[sampleIndex], a, b, c);
-				if(!closest.isFinite())
-					return false;
-				faceSeparation = PxMin(
-					faceSeparation,
-					(closest - axisSamples[sampleIndex]).
-						magnitude() -
-						((convexCase || triangleMeshCase ||
-						  heightFieldCase)
-							? 0.0f : rigidRadius));
-			}
-		}
-	}
-	return PxIsFinite(faceSeparation) &&
-		faceSeparation < PX_MAX_F32 &&
-		PxIsFinite(minimumVertexSeparation) &&
-		minimumVertexSeparation < PX_MAX_F32;
-}
 
 static bool updateSceneSoftSleepWake()
 {
@@ -11442,13 +7112,13 @@ static bool initPhysicsInternal(
 		VolumeAvbdSkinningRenderData();
 	gVolumeSkinningMetrics = VolumeSkinningMetrics();
 	gSphereReverseFeatureMetrics =
-		SphereReverseFeatureMetrics();
+		ReverseFeatureMetrics();
 	gSphereReverseSweptMetrics =
-		SphereReverseSweptMetrics();
+		ReverseSweptMetrics();
 	gDeformingVolumeReverseSweptMetrics =
-		DeformingVolumeReverseSweptMetrics();
+		DeformingReverseSweptMetrics();
 	gCapsuleRotationalSweepMetrics =
-		CapsuleRotationalSweepMetrics();
+		RotationalSweepMetrics();
 	gSceneCpuDeformingReverseSweptFreeEndPositions.reset();
 	gSceneCpuCapsuleRotationalSweptInitialPositions.reset();
 	gSceneCpuVolumePartialProbe = PX_MAX_U32;
@@ -11513,7 +7183,10 @@ static bool initPhysicsInternal(
 	// keeps the two approach velocities exactly symmetric so a passing result
 	// measures local soft/rigid OGC response, not a later free-fall/ground
 	// event.  The public visual showcase remains gravity-driven.
-	sceneDesc.gravity = caseName == "scene-volume-ogc-sandwich"
+	sceneDesc.gravity =
+		caseName == "scene-volume-ogc-sandwich" ||
+		caseName == "scene-volume-element-filter" ||
+		caseName == "scene-volume-partial-element-filter"
 		? PxVec3(0.0f) : PxVec3(0.0f, -9.81f, 0.0f);
 	sceneDesc.solverType = interactive ?
 		PxSolverType::eAVBD : gHeadlessOptions.solverType;
@@ -11581,6 +7254,7 @@ static bool initPhysicsInternal(
 	{
 		if(caseName == "scene-volume-ground" ||
 			caseName == "scene-volume-taskgraph-world-plane" ||
+			caseName == "scene-volume-taskgraph-pipeline" ||
 			caseName == "scene-volume-element-filter" ||
 			caseName == "scene-volume-partial-element-filter" ||
 			caseName ==
@@ -11680,16 +7354,13 @@ static bool initPhysicsInternal(
 			const bool reverseFeature =
 				isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
 					caseName);
-			const bool staticTarget =
-				isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
-					caseName);
 			const bool heightField =
 				isSceneCpuVolumeHeightFieldSweptCcdCase(
 					caseName);
 			const bool rotationalTarget =
 				isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase(
 					caseName);
-			const PxReal startY = staticTarget ? 0.0f : -1.1f;
+			const PxReal startY = -1.1f;
 			const PxVec3 positiveCenter = rotationalTarget
 				? (reverseFeature
 					? (heightField
@@ -11736,10 +7407,6 @@ static bool initPhysicsInternal(
 				? !addSceneRotatingKinematicTriangleSurfacePair(
 					positiveCenter, negativeCenter,
 					heightField)
-				: staticTarget
-				? !addSceneStaticTriangleSurfacePair(
-					positiveCenter, negativeCenter,
-					heightField, reverseFeature)
 				: !addSceneMovingKinematicTriangleSurfacePair(
 					positiveCenter, negativeCenter, 1.1f,
 					heightField, reverseFeature))
@@ -12100,27 +7767,31 @@ static bool initPhysicsInternal(
 		else if(caseName ==
 			"scene-volume-dynamic-sphere-relative-swept-ccd")
 		{
+			// Keep both control endpoints strictly outside the soft volume.  The
+			// flag-off actor must tunnel completely through the body; an endpoint
+			// overlap would legitimately enter the current-pose OGC path and is not
+			// a valid negative control for swept response.
 			if(!addSceneDynamicFiniteSweepPair(
-					PxVec3(-1.5f, 2.8f, 0.5f),
-					PxVec3(1.5f, 2.8f, 0.5f),
-					0.8f, 0.0f, -132.0f))
+					PxVec3(-1.5f, 3.2f, 0.5f),
+					PxVec3(1.5f, 3.2f, 0.5f),
+					0.8f, 0.0f, -192.0f))
 				return false;
 		}
 		else if(caseName ==
 			"scene-volume-dynamic-capsule-relative-swept-ccd")
 		{
 			if(!addSceneDynamicFiniteSweepPair(
-					PxVec3(-1.5f, 3.1f, 0.5f),
-					PxVec3(1.5f, 3.1f, 0.5f),
-					0.8f, 0.3f, -150.0f))
+					PxVec3(-1.5f, 3.2f, 0.5f),
+					PxVec3(1.5f, 3.2f, 0.5f),
+					0.8f, 0.3f, -192.0f))
 				return false;
 		}
 		else if(caseName ==
 			"scene-volume-dynamic-rotating-capsule-relative-swept-ccd")
 		{
 			if(!addSceneDynamicRotatingCapsulePair(
-					PxVec3(-2.9f, 0.0f, 0.0f),
-					PxVec3(0.1f, 0.0f, 0.0f),
+					SCENE_CPU_DYNAMIC_ROTATING_CAPSULE_SWEEP_CENTER,
+					SCENE_CPU_DYNAMIC_ROTATING_CAPSULE_CONTROL_CENTER,
 					0.1f, 1.0f,
 					PxQuat(
 						-PxPi / 6.0f,
@@ -13091,15 +8762,8 @@ static bool updateSceneVolumeElementFilter()
 
 	const PxU32 churnFrame = PxMax<PxU32>(
 		1, 2 * gHeadlessOptions.frames / 5);
-	const bool partialElementFilterCase =
-		gHeadlessOptions.caseName ==
-			"scene-volume-partial-element-filter";
 	const PxU32 releaseFrame = PxMin<PxU32>(
-		gHeadlessOptions.frames - 1,
-		partialElementFilterCase
-			? churnFrame + 1
-			: PxMax<PxU32>(churnFrame + 1,
-				gHeadlessOptions.frames / 2));
+		gHeadlessOptions.frames - 1, churnFrame + 12);
 	if(gMetrics.completedFrames == churnFrame)
 	{
 		if(!gSceneCpuElementFilter ||
@@ -13111,47 +8775,20 @@ static bool updateSceneVolumeElementFilter()
 		gScene->addActor(*gSceneCpuVolume);
 		if(gSceneCpuVolume->getScene() != gScene)
 			return false;
-		PxVec4* velocities =
-			gSceneCpuVolume->getSimVelocityBufferH();
-		const PxU32 vertexCount =
-			gSceneCpuVolume->getSimulationMesh()->
-				getNbVertices();
-		for(PxU32 i = 0; i < vertexCount; ++i)
-			velocities[i] =
-				PxVec4(
-					0.0f,
-					gHeadlessOptions.caseName ==
-						"scene-volume-partial-element-filter"
-						? 0.0f : -2.0f,
-					0.0f, velocities[i].w);
-		gSceneCpuVolume->markDirty(
-			PxDeformableVolumeDataFlag::eSIM_VELOCITY);
-		gMetrics.sceneElementFilterActorReadded = 1;
-	}
-	if(gMetrics.completedFrames == releaseFrame)
-	{
-		if(!gSceneCpuElementFilter)
-			return false;
 		PxVec4* positions =
 			gSceneCpuVolume->getSimPositionInvMassBufferH();
 		PxVec4* velocities =
 			gSceneCpuVolume->getSimVelocityBufferH();
 		PxVec4* collisionPositions =
 			gSceneCpuVolume->getPositionInvMassBufferH();
-		const PxTetrahedronMesh* simulationMesh =
-			gSceneCpuVolume->getSimulationMesh();
-		const PxVec3* vertices = simulationMesh->getVertices();
-		const PxU32 vertexCount = simulationMesh->getNbVertices();
+		const PxU32 vertexCount =
+			gSceneCpuVolume->getSimulationMesh()->
+				getNbVertices();
 		for(PxU32 i = 0; i < vertexCount; ++i)
 		{
-			positions[i] = PxVec4(
-				vertices[i] + PxVec3(
-					0.0f,
-					gHeadlessOptions.caseName ==
-						"scene-volume-partial-element-filter"
-						? 1.0f : 4.0f,
-					0.0f),
-				positions[i].w);
+			positions[i].y -=
+				SCENE_CPU_ELEMENT_FILTER_INITIAL_CLEARANCE +
+				SCENE_CPU_ELEMENT_FILTER_TEST_PENETRATION;
 			velocities[i] =
 				PxVec4(0.0f, 0.0f, 0.0f, velocities[i].w);
 		}
@@ -13159,6 +8796,12 @@ static bool updateSceneVolumeElementFilter()
 			*gSceneCpuVolume, positions, collisionPositions);
 		gSceneCpuVolume->markDirty(
 			PxDeformableVolumeDataFlag::eALL);
+		gMetrics.sceneElementFilterActorReadded = 1;
+	}
+	if(gMetrics.completedFrames == releaseFrame)
+	{
+		if(!gSceneCpuElementFilter)
+			return false;
 		gSceneCpuElementFilter->release();
 		gSceneCpuElementFilter = NULL;
 		gMetrics.sceneElementFilterReleased = 1;
@@ -13471,11 +9114,11 @@ static bool stepPhysicsInternal(PxReal dt)
 		if(gHeadlessOptions.caseName == "scene-volume-visual-showcase")
 		{
 			if(!sampleSceneCpuVisualRotationMetrics(
-					gSceneCpuVisualRotationMetrics) ||
+					gSceneCpuVisualRotationMonitor) ||
 				!sampleSceneCpuVisualRotationMetrics(
-					gSceneCpuVisualPrimaryCubeRotationMetrics) ||
+					gSceneCpuVisualPrimaryCubeRotationMonitor) ||
 				!sampleSceneCpuVisualRotationMetrics(
-					gSceneCpuVisualSphereRotationMetrics) ||
+					gSceneCpuVisualSphereRotationMonitor) ||
 				!sampleSceneCpuVisualInteractionMetrics() ||
 				!sampleSceneCpuVolumeHealth())
 				return false;
@@ -13492,7 +9135,7 @@ static bool stepPhysicsInternal(PxReal dt)
 			"scene-volume-sphere-soft-soft-glancing")
 		{
 			if(!sampleSceneCpuVisualRotationMetrics(
-					gSceneCpuVisualSphereRotationMetrics) ||
+					gSceneCpuVisualSphereRotationMonitor) ||
 				!sampleSceneCpuSphereLongRollContactPhaseMetrics() ||
 				!sampleSceneCpuVolumeHealth())
 				return false;
@@ -13596,9 +9239,6 @@ static bool stepPhysicsInternal(PxReal dt)
 		const bool softPairAttachmentCase =
 			gHeadlessOptions.caseName ==
 				"scene-volume-volume-attachment";
-		const bool taskGraphSoftPairCase =
-			gHeadlessOptions.caseName ==
-				"scene-volume-taskgraph-soft-pair";
 		const bool motionControlsCase =
 			gHeadlessOptions.caseName ==
 				"scene-volume-motion-controls";
@@ -13610,9 +9250,6 @@ static bool stepPhysicsInternal(PxReal dt)
 				gHeadlessOptions.caseName);
 		const bool triangleSurfaceReverseSweptCcdCase =
 			isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool staticTriangleSurfaceSweptCcdCase =
-			isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
 				gHeadlessOptions.caseName);
 		const bool heightFieldSweptCcdCase =
 			isSceneCpuVolumeHeightFieldSweptCcdCase(
@@ -13754,8 +9391,7 @@ static bool stepPhysicsInternal(PxReal dt)
 			softChurnCase || softSoftWakeCase ||
 			softPairAttachmentCase || motionControlsCase ||
 			maxDepenetrationVelocityCase ||
-			speculativeCcdCase || smoothReverseFeatureCase ||
-			taskGraphSoftPairCase;
+			speculativeCcdCase || smoothReverseFeatureCase;
 		const bool softSleepWakeCase =
 			gHeadlessOptions.caseName ==
 				"scene-volume-sleep-wake";
@@ -13786,8 +9422,7 @@ static bool stepPhysicsInternal(PxReal dt)
 			dynamicFiniteRelativeSweptCcdCase ||
 			kinematicSphereReverseSweptCcdCase ||
 			dynamicSphereReverseSweptCcdCase ||
-			(triangleSurfaceSweptCcdCase &&
-			 !staticTriangleSurfaceSweptCcdCase);
+			triangleSurfaceSweptCcdCase;
 		const bool dynamicBoxCase =
 			gHeadlessOptions.caseName ==
 				"scene-volume-dynamic-box" ||
@@ -14044,7 +9679,8 @@ static bool stepPhysicsInternal(PxReal dt)
 			const bool finite =
 				positiveCentroid.isFinite() &&
 				negativeCentroid.isFinite() &&
-				getSceneCpuVolumeSmoothReverseSeparations(
+				getSceneCpuVolumeSweptGeometrySampler().
+					measureSmoothReverseSeparations(
 					gSceneCpuVolume, rigidCenter, rigidRadius,
 					capsuleHalfHeight,
 					convexReverseFeatureCase,
@@ -14055,40 +9691,12 @@ static bool stepPhysicsInternal(PxReal dt)
 			if(!finite)
 				gSphereReverseFeatureMetrics.nonFiniteSamples++;
 			else
-			{
-				gSphereReverseFeatureMetrics.
-					positiveDisplacement =
-						(positiveCentroid -
-							gSceneCpuSphereReversePositiveInitial).
-								magnitude();
-				gSphereReverseFeatureMetrics.positiveDrop =
-					gSceneCpuSphereReversePositiveInitial.y -
-						positiveCentroid.y;
-				gSphereReverseFeatureMetrics.negativeDrop =
-					gSceneCpuSphereReverseNegativeInitial.y -
-						negativeCentroid.y;
-				gSphereReverseFeatureMetrics.faceSeparation =
-					faceSeparation;
-				gSphereReverseFeatureMetrics.
-					minimumVertexSeparation =
-						minimumVertexSeparation;
-				gSphereReverseFeatureMetrics.vertexSdfExcluded =
-					minimumVertexSeparation > 0.10f ? 1u : 0u;
-				gSphereReverseFeatureMetrics.
-					negativeControlPassed =
-						gSphereReverseFeatureMetrics.
-							negativeDrop > 0.02f ? 1u : 0u;
-				gSphereReverseFeatureMetrics.
-					faceResponseObserved =
-						gSphereReverseFeatureMetrics.
-							positiveDisplacement > 1.0e-3f &&
-						faceSeparation > 0.02f &&
-						gSphereReverseFeatureMetrics.
-								positiveDrop + 0.01f <
-							gSphereReverseFeatureMetrics.
-								negativeDrop
-							? 1u : 0u;
-			}
+				updateReverseFeatureMetrics(
+					gSphereReverseFeatureMetrics, positiveCentroid,
+					negativeCentroid,
+					gSceneCpuSphereReversePositiveInitial,
+					gSceneCpuSphereReverseNegativeInitial,
+					faceSeparation, minimumVertexSeparation);
 
 			if(gSceneCpuVolume->getScene() == gScene)
 			{
@@ -14108,10 +9716,8 @@ static bool stepPhysicsInternal(PxReal dt)
 		}
 		else if(triangleSurfaceSweptCcdCase &&
 			gSceneCpuSecondVolume &&
-			(staticTriangleSurfaceSweptCcdCase
-				? gSceneCpuStaticActor != NULL
-				: (gSceneCpuDynamicActor &&
-				   gSceneCpuSecondDynamicActor)) &&
+			gSceneCpuDynamicActor &&
+			gSceneCpuSecondDynamicActor &&
 			gMetrics.completedFrames == 1)
 		{
 			const PxVec3 positiveCentroid =
@@ -14174,7 +9780,8 @@ static bool stepPhysicsInternal(PxReal dt)
 					const PxTransform endPose(
 						positivePose.p, endRotation);
 					const bool geometryFinite =
-						getSceneCpuVolumeRotationalTriangleSurfaceSweepSeparations(
+						getSceneCpuVolumeSweptGeometrySampler().
+							measureRotationalTriangleSurfaceSweepSeparations(
 							startPose, endPose,
 							heightFieldSweptCcdCase,
 							triangleSurfaceReverseSweptCcdCase,
@@ -14219,9 +9826,7 @@ static bool stepPhysicsInternal(PxReal dt)
 				}
 				else if(triangleSurfaceReverseSweptCcdCase)
 				{
-					const PxReal startY =
-						staticTriangleSurfaceSweptCcdCase
-							? 0.0f : -1.1f;
+					const PxReal startY = -1.1f;
 					const PxVec3 rigidCenter =
 						heightFieldSweptCcdCase
 							? PxVec3(
@@ -14267,33 +9872,20 @@ static bool stepPhysicsInternal(PxReal dt)
 					gSphereReverseSweptMetrics.
 							minimumVertexSweepSeparation > 0.05f
 						? 1u : 0u;
-				const PxReal staticControlSeparation =
-					triangleSurfaceReverseSweptCcdCase
-						? 0.01f : 0.10f;
 				const PxReal kinematicResponseThreshold =
 					rotationalTriangleSurfaceSweptCcdCase
 						? 2.0e-3f
 						: triangleSurfaceReverseSweptCcdCase
 							? 5.0e-3f : 0.02f;
 				gSphereReverseSweptMetrics.responseObserved =
-					staticTriangleSurfaceSweptCcdCase
-						? gSphereReverseSweptMetrics.positiveDrop +
-								staticControlSeparation <
-							gSphereReverseSweptMetrics.negativeDrop
-						: gSphereReverseSweptMetrics.
-								positiveDisplacement >
-									kinematicResponseThreshold &&
+					gSphereReverseSweptMetrics.positiveDisplacement >
+							kinematicResponseThreshold &&
 							gSphereReverseSweptMetrics.
 								negativeDisplacement < 1.0e-2f
 							? 1u : 0u;
 				gSphereReverseSweptMetrics.negativeControlPassed =
-					staticTriangleSurfaceSweptCcdCase
-						? gSphereReverseSweptMetrics.negativeDrop >
-							(triangleSurfaceReverseSweptCcdCase &&
-							 heightFieldSweptCcdCase
-								? 0.8f : 1.5f)
-						: gSphereReverseSweptMetrics.
-							negativeDisplacement < 1.0e-2f
+					gSphereReverseSweptMetrics.
+						negativeDisplacement < 1.0e-2f
 							? 1u : 0u;
 				gSphereReverseSweptMetrics.
 					twoSidedResponseObserved = 1;
@@ -14318,28 +9910,19 @@ static bool stepPhysicsInternal(PxReal dt)
 					gSceneCpuSecondVolume->getScene() == NULL
 						? 1u : 0u;
 			}
-			if(staticTriangleSurfaceSweptCcdCase)
+			if(gSceneCpuDynamicActor->getScene() == gScene)
 			{
-				if(gSceneCpuStaticActor->getScene() == gScene)
-					gScene->removeActor(*gSceneCpuStaticActor);
+				gScene->removeActor(*gSceneCpuDynamicActor);
+				gMetrics.sceneDynamicActorRemoved =
+					gSceneCpuDynamicActor->getScene() == NULL
+						? 1u : 0u;
 			}
-			else
+			if(gSceneCpuSecondDynamicActor->getScene() == gScene)
 			{
-				if(gSceneCpuDynamicActor->getScene() == gScene)
-				{
-					gScene->removeActor(*gSceneCpuDynamicActor);
-					gMetrics.sceneDynamicActorRemoved =
-						gSceneCpuDynamicActor->getScene() == NULL
-							? 1u : 0u;
-				}
-				if(gSceneCpuSecondDynamicActor->getScene() == gScene)
-				{
-					gScene->removeActor(
-						*gSceneCpuSecondDynamicActor);
-					gMetrics.sceneSecondDynamicActorRemoved =
-						gSceneCpuSecondDynamicActor->getScene() ==
-							NULL ? 1u : 0u;
-				}
+				gScene->removeActor(*gSceneCpuSecondDynamicActor);
+				gMetrics.sceneSecondDynamicActorRemoved =
+					gSceneCpuSecondDynamicActor->getScene() == NULL
+						? 1u : 0u;
 			}
 		}
 		else if(sphereReverseSweptCcdCase &&
@@ -14432,7 +10015,8 @@ static bool stepPhysicsInternal(PxReal dt)
 				positiveSphereCurrent.isFinite() &&
 				negativeSphereCurrent.isFinite() &&
 				(deformingReverseSweptCcdCase
-					? getSceneCpuVolumeDeformingReverseSweptProof(
+					? getSceneCpuVolumeSweptGeometrySampler().
+						measureDeformingReverseSweptProof(
 						gSceneCpuVolume,
 						positiveRigidPose,
 						convexReverseSweptCcdCase
@@ -14447,7 +10031,8 @@ static bool stepPhysicsInternal(PxReal dt)
 						minimumVertexSweepSeparation)
 				: rotationalFiniteReverseSweptCcdCase
 					? (rotationalConvexReverseSweptCcdCase
-						? getSceneCpuVolumeRotationalConvexReverseSweptSeparations(
+						? getSceneCpuVolumeSweptGeometrySampler().
+							measureRotationalConvexReverseSweptSeparations(
 							gSceneCpuVolume,
 							positiveRigidPose,
 							PxTransform(
@@ -14466,7 +10051,8 @@ static bool stepPhysicsInternal(PxReal dt)
 								endpointMinSeparation,
 							gCapsuleRotationalSweepMetrics.
 								midSweepMinSeparation)
-						: getSceneCpuVolumeRotationalCapsuleReverseSweptSeparations(
+						: getSceneCpuVolumeSweptGeometrySampler().
+							measureRotationalCapsuleReverseSweptSeparations(
 						gSceneCpuVolume,
 						positiveRigidPose,
 						PxTransform(
@@ -14486,7 +10072,8 @@ static bool stepPhysicsInternal(PxReal dt)
 							endpointMinSeparation,
 						gCapsuleRotationalSweepMetrics.
 							midSweepMinSeparation))
-					: getSceneCpuVolumeSphereReverseSweptSeparations(
+					: getSceneCpuVolumeSweptGeometrySampler().
+						measureSphereReverseSweptSeparations(
 						gSceneCpuVolume,
 						positiveSphereCurrent,
 						positiveSphereStart,
@@ -14737,14 +10324,17 @@ static bool stepPhysicsInternal(PxReal dt)
 					negativeAngularTravel =
 						getAngularTravel(negativeRigidPose.q);
 				const PxTransform startPose(
-					PxVec3(-2.9f, 0.0f, 0.0f),
+					dynamicRotatingCapsuleSpeculativeCcdCase
+						? SCENE_CPU_DYNAMIC_ROTATING_CAPSULE_SWEEP_CENTER
+						: PxVec3(-2.9f, 0.0f, 0.0f),
 					startRotation);
 				const PxTransform endPose(
 					startPose.p,
 					negativeRigidPose.q.getNormalized());
 				bool rotationalMetricsFinite =
 					dynamicRotatingConvexSpeculativeCcdCase
-						? getSceneCpuVolumeRotationalConvexPointSweepSeparations(
+						? getSceneCpuVolumeSweptGeometrySampler().
+							measureRotationalConvexPointSweepSeparations(
 							startPose, endPose,
 							gCapsuleRotationalSweepMetrics.
 								endpointMinSeparation,
@@ -14968,7 +10558,8 @@ static bool stepPhysicsInternal(PxReal dt)
 				const PxTransform midPose(rigidCenter);
 				bool rotationalMetricsFinite =
 					rotatingKinematicConvexSpeculativeCcdCase
-						? getSceneCpuVolumeRotationalConvexPointSweepSeparations(
+						? getSceneCpuVolumeSweptGeometrySampler().
+							measureRotationalConvexPointSweepSeparations(
 							startPose, endPose,
 							gCapsuleRotationalSweepMetrics.
 								endpointMinSeparation,
@@ -15919,8 +11510,10 @@ static bool stepPhysicsInternal(PxReal dt)
 					gMetrics.scenePartialFilterUnfilteredMinY = PxMin(
 						gMetrics.scenePartialFilterUnfilteredMinY,
 						collisionPosition.y);
-					if(collisionPosition.y > -0.05f &&
-						collisionPosition.y < 0.05f)
+					if(collisionPosition.y >=
+							-SCENE_CPU_ELEMENT_FILTER_SURFACE_TOLERANCE &&
+						collisionPosition.y <=
+							SCENE_CPU_ELEMENT_FILTER_CONTACT_OFFSET_LIMIT)
 						gMetrics.scenePartialFilterUnfilteredContactHeld = 1;
 				}
 			}
@@ -15935,7 +11528,8 @@ static bool stepPhysicsInternal(PxReal dt)
 					gMetrics.sceneElementFilterMinY = PxMin(
 						gMetrics.sceneElementFilterMinY,
 						frameMinY);
-				if(gMetrics.sceneElementFilterMinY < -0.2f)
+				if(gMetrics.sceneElementFilterMinY <=
+					-SCENE_CPU_ELEMENT_FILTER_MIN_SUPPRESSED_DEPTH)
 					gMetrics.sceneElementFilterSuppressedContact =
 						1;
 			}
@@ -16029,7 +11623,12 @@ static bool stepPhysicsInternal(PxReal dt)
 			gMetrics.finalDynamicSurfaceSeparation =
 				frameDynamicSurfaceSeparation;
 		}
-		if(dynamicActorInScene && gMetrics.rigidContactFrames == 0 &&
+		// The predictive OGC edge is the first contact-admission event. Once it
+		// wakes a sleeping target, offset-shell forces may move the rigid before
+		// any sampled soft vertex reaches the narrower visual proximity band;
+		// that is contact response, not gravity-free pre-contact drift.
+		if(dynamicActorInScene && !gMetrics.sceneDynamicWokeBySoft &&
+			gMetrics.rigidContactFrames == 0 &&
 			nearRigidParticles == 0 && dynamicBoxPose.isValid())
 		{
 			gMetrics.sceneDynamicPreContactMaxDrop = PxMax(
@@ -16266,14 +11865,9 @@ void cleanupPhysics(bool /*interactive*/)
 	// Keep the scalar visual metrics alive for the post-cleanup report, but
 	// release their PxArray-backed surface caches before the foundation goes
 	// away. The jaw pointers are no longer valid after the actor release below.
-	gSceneCpuVisualInteractionMetrics.upperJaw = NULL;
-	gSceneCpuVisualInteractionMetrics.lowerJaw = NULL;
-	gSceneCpuVisualInteractionMetrics.upperJawSurfaceTriangles.reset();
-	gSceneCpuVisualInteractionMetrics.lowerJawSurfaceTriangles.reset();
-	gSceneCpuOgcSandwichMetrics.upperJaw = NULL;
-	gSceneCpuOgcSandwichMetrics.lowerJaw = NULL;
-	gSceneCpuOgcSandwichMetrics.upperJawSurfaceTriangles.reset();
-	gSceneCpuOgcSandwichMetrics.lowerJawSurfaceTriangles.reset();
+	gSceneCpuVisualInteractionMonitor.releaseSources();
+	gSceneCpuOgcSandwichMonitor.releaseSources();
+	gSceneCpuSoftSoftTorqueMonitor.releaseSources();
 	if(gSceneCpuElementFilter)
 	{
 		gSceneCpuElementFilter->release();
@@ -16289,7 +11883,7 @@ void cleanupPhysics(bool /*interactive*/)
 		gSceneCpuRigidAttachment->release();
 		gSceneCpuRigidAttachment = NULL;
 	}
-	gSceneCpuVisualVolumeRestStates.reset();
+	gSceneCpuVolumeHealthMonitor.reset();
 	for(PxU32 volumeId = 0;
 		volumeId < gSceneCpuTaskGraphExtraVolumes.size(); ++volumeId)
 	{
@@ -16339,12 +11933,10 @@ void cleanupPhysics(bool /*interactive*/)
 		meshIndex < gSceneCpuVisualVolumeMeshes.size(); ++meshIndex)
 		PX_RELEASE(gSceneCpuVisualVolumeMeshes[meshIndex]);
 	gSceneCpuVisualVolumeMeshes.reset();
-	gSceneCpuVisualRotationMetrics.volume = NULL;
-	gSceneCpuVisualRotationMetrics.initialized = false;
-	gSceneCpuVisualPrimaryCubeRotationMetrics.volume = NULL;
-	gSceneCpuVisualPrimaryCubeRotationMetrics.initialized = false;
-	gSceneCpuVisualSphereRotationMetrics.volume = NULL;
-	gSceneCpuVisualSphereRotationMetrics.initialized = false;
+	gSceneCpuVisualRotationMonitor.releaseSource();
+	gSceneCpuVisualPrimaryCubeRotationMonitor.releaseSource();
+	gSceneCpuVisualSphereRotationMonitor.releaseSource();
+	gSceneCpuSoftContactPhaseMonitor.releaseSource();
 	PX_RELEASE(gSceneCpuVolumeMesh);
 	PX_RELEASE(gSceneCpuVolumeMaterial);
 	if(gSceneCpuAttachmentArticulation)
@@ -16444,7 +12036,7 @@ void cleanupPhysics(bool /*interactive*/)
 		gSceneCpuTaskGraphExtraVolumes.empty() &&
 		gSceneCpuTaskGraphExtraMeshes.empty() &&
 		gSceneCpuVisualVolumeMeshes.empty() &&
-		gSceneCpuVisualVolumeRestStates.empty() &&
+		gSceneCpuVolumeHealthMonitor.empty() &&
 		!gSceneCpuWorldAttachment &&
 		!gSceneCpuRigidAttachment &&
 		!gSceneCpuElementFilter &&
@@ -16494,7 +12086,6 @@ static bool isKnownCase(const std::string& caseName)
 		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
 			caseName) ||
 		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase(caseName) ||
-		caseName == "scene-volume-taskgraph-soft-pair" ||
 		isSceneCpuVolumeTaskGraphWriteBackCase(caseName) ||
 		caseName == "scene-volume-ground" ||
 		caseName == "scene-volume-ground-embedded-tet-probe" ||
@@ -16548,4595 +12139,68 @@ static bool isKnownCase(const std::string& caseName)
 		caseName == "current-all";
 }
 
-static bool validateHeadlessResult(const std::string& caseName)
+static Headless::HeadlessResultContext buildHeadlessResultContext()
 {
-	if(isSceneCpuVolumeCase(caseName))
-	{
-		const bool visualShowcaseCase =
-			caseName == "scene-volume-visual-showcase";
-		const bool ogcSandwichCase =
-			caseName == "scene-volume-ogc-sandwich";
-		const bool sphereLongRollCase =
-			caseName == "scene-volume-sphere-long-roll";
-		const bool sphereSoftSoftGlancingCase =
-			caseName == "scene-volume-sphere-soft-soft-glancing";
-		const bool softSoftTorqueCase =
-			caseName == "scene-volume-soft-soft-torque";
-		const bool groundEmbeddedTetProbeCase =
-			caseName == "scene-volume-ground-embedded-tet-probe";
-		const bool dynamicChurnCase =
-			caseName == "scene-volume-dynamic-churn";
-		const bool multiDynamicBoxCase =
-			caseName == "scene-volume-multi-dynamic-box";
-		const bool multiSoftIslandCase =
-			caseName == "scene-volume-multi-soft-islands";
-		const bool taskGraphPureSoftCase =
-			isSceneCpuVolumeTaskGraphPureSoftCase(caseName);
-		const bool taskGraphWorldPlaneCase =
-			caseName == "scene-volume-taskgraph-world-plane";
-		const bool taskGraphRigidBoxSdfCase =
-			caseName == "scene-volume-taskgraph-rigid-box-sdf";
-		const bool taskGraphRigidSphereSdfCase =
-			caseName == "scene-volume-taskgraph-rigid-sphere-sdf";
-		const bool taskGraphRigidCapsuleSdfCase =
-			caseName == "scene-volume-taskgraph-rigid-capsule-sdf";
-		const bool taskGraphRigidConvexSdfCase =
-			caseName == "scene-volume-taskgraph-rigid-convex-sdf";
-		const bool taskGraphRigidTriangleSurfaceCase =
-			caseName == "scene-volume-taskgraph-rigid-triangle-surface";
-		const bool taskGraphRigidTriangleSurfaceLargeCase =
-			isSceneCpuVolumeTaskGraphRigidTriangleSurfaceLargeCase(caseName);
-		const bool taskGraphRigidTriangleSurfaceFeatureOverlapCase =
-			isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
-				caseName);
-		const bool taskGraphRigidTriangleSurfaceThresholdCase =
-			isSceneCpuVolumeTaskGraphRigidTriangleSurfaceThresholdCase(caseName);
-		const bool taskGraphSoftPairCase =
-			caseName == "scene-volume-taskgraph-soft-pair";
-		const bool taskGraphWriteBackFourWayCase =
-			isSceneCpuVolumeTaskGraphWriteBackFourWayCase(caseName);
-		const bool taskGraphWriteBackCase =
-			isSceneCpuVolumeTaskGraphWriteBackCase(caseName);
-		const bool mixedSleepIslandCase =
-			caseName == "scene-volume-mixed-sleep-islands";
-		const bool softChurnCase =
-			caseName == "scene-volume-soft-churn";
-		const bool bufferMutationCase =
-			caseName == "scene-volume-buffer-mutation";
-		const bool worldPinCase =
-			caseName == "scene-volume-world-pin" ||
-			caseName == "scene-volume-world-element-attachment";
-		const bool rigidAttachmentCase =
-			caseName == "scene-volume-rigid-attachment" ||
-			caseName == "scene-volume-rigid-element-attachment";
-		const bool staticAttachmentCase =
-			caseName == "scene-volume-static-attachment" ||
-			caseName == "scene-volume-static-element-attachment";
-		const bool kinematicAttachmentCase =
-			caseName == "scene-volume-kinematic-attachment" ||
-			caseName ==
-				"scene-volume-kinematic-element-attachment";
-		const bool articulationAttachmentCase =
-			caseName == "scene-volume-articulation-attachment" ||
-			caseName ==
-				"scene-volume-articulation-element-attachment";
-		const bool attachmentCase =
-			rigidAttachmentCase || staticAttachmentCase ||
-			kinematicAttachmentCase ||
-			articulationAttachmentCase;
-		const bool partialElementFilterCase =
-			caseName ==
-				"scene-volume-partial-element-filter";
-		const bool elementFilterCase =
-			caseName == "scene-volume-element-filter" ||
-			partialElementFilterCase;
-		const bool kinematicBoxCase =
-			isSceneCpuVolumeKinematicRigidCase(caseName);
-		const bool multiSceneIsolationCase =
-			caseName == "scene-volume-multi-scene-isolation";
-		const bool softSoftWakeCase =
-			caseName == "scene-volume-soft-soft-wake";
-		const bool softPairAttachmentCase =
-			caseName == "scene-volume-volume-attachment";
-		const bool fullKinematicTargetCase =
-			caseName ==
-				"scene-volume-full-kinematic-target";
-		const bool partialKinematicTargetCase =
-			caseName ==
-				"scene-volume-partial-kinematic-target";
-		const bool volumeKinematicTargetCase =
-			fullKinematicTargetCase ||
-			partialKinematicTargetCase;
-		const bool motionControlsCase =
-			caseName == "scene-volume-motion-controls";
-		const bool maxDepenetrationVelocityCase =
-			caseName ==
-				"scene-volume-max-depenetration-velocity";
-		const bool triangleSurfaceSweptCcdCase =
-			isSceneCpuVolumeTriangleSurfaceSweptCcdCase(
-				caseName);
-		const bool rigidTriangleSteadyContactCase =
-			isSceneCpuVolumeRigidTriangleSteadyContactCase(caseName);
-		const bool triangleSurfaceReverseSweptCcdCase =
-			isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
-				caseName);
-		const bool staticTriangleSurfaceSweptCcdCase =
-			isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
-				caseName);
-		const bool heightFieldSweptCcdCase =
-			isSceneCpuVolumeHeightFieldSweptCcdCase(
-				caseName);
-		const bool rotationalTriangleSurfaceSweptCcdCase =
-			isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase(
-				caseName);
-		const bool sphereReverseSweptCcdCase =
-			isSceneCpuVolumeSphereReverseSweptCcdCase(caseName);
-		const bool deformingReverseSweptCcdCase =
-			isSceneCpuVolumeDeformingReverseSweptCcdCase(
-				caseName);
-		const bool capsuleReverseSweptCcdCase =
-			isSceneCpuVolumeCapsuleReverseSweptCcdCase(caseName);
-		const bool convexReverseSweptCcdCase =
-			isSceneCpuVolumeConvexReverseSweptCcdCase(caseName);
-		const bool rotationalCapsuleReverseSweptCcdCase =
-			isSceneCpuVolumeRotationalCapsuleReverseSweptCcdCase(
-				caseName);
-		const bool rotationalConvexReverseSweptCcdCase =
-			isSceneCpuVolumeRotationalConvexReverseSweptCcdCase(
-				caseName);
-		const bool rotationalFiniteReverseSweptCcdCase =
-			rotationalCapsuleReverseSweptCcdCase ||
-			rotationalConvexReverseSweptCcdCase;
-		const bool staticSphereReverseSweptCcdCase =
-			deformingReverseSweptCcdCase ||
-			caseName ==
-				"scene-volume-static-sphere-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-static-capsule-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-static-convex-reverse-swept-ccd";
-		const bool kinematicSphereReverseSweptCcdCase =
-			caseName ==
-				"scene-volume-kinematic-sphere-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-kinematic-capsule-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-rotating-kinematic-capsule-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-rotating-kinematic-convex-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-kinematic-convex-reverse-swept-ccd";
-		const bool dynamicSphereReverseSweptCcdCase =
-			caseName ==
-				"scene-volume-dynamic-sphere-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-dynamic-capsule-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-dynamic-rotating-capsule-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-dynamic-rotating-convex-reverse-swept-ccd" ||
-			caseName ==
-				"scene-volume-dynamic-convex-reverse-swept-ccd";
-		const bool speculativeCcdCase =
-			isSceneCpuVolumeSpeculativeCcdCase(caseName) ||
-			sphereReverseSweptCcdCase;
-		const bool planeSpeculativeCcdCase =
-			caseName == "scene-volume-plane-speculative-ccd";
-		const bool sphereSpeculativeCcdCase =
-			caseName == "scene-volume-sphere-speculative-ccd";
-		const bool capsuleSpeculativeCcdCase =
-			caseName == "scene-volume-capsule-speculative-ccd";
-		const bool convexSpeculativeCcdCase =
-			caseName == "scene-volume-convex-speculative-ccd";
-		const bool finiteSmoothSpeculativeCcdCase =
-			sphereSpeculativeCcdCase || capsuleSpeculativeCcdCase ||
-			convexSpeculativeCcdCase;
-		const bool rotatingKinematicCapsuleSpeculativeCcdCase =
-			caseName ==
-				"scene-volume-rotating-kinematic-capsule-speculative-ccd";
-		const bool rotatingKinematicConvexSpeculativeCcdCase =
-			caseName ==
-				"scene-volume-rotating-kinematic-convex-speculative-ccd";
-		const bool dynamicRotatingCapsuleSpeculativeCcdCase =
-			caseName ==
-				"scene-volume-dynamic-rotating-capsule-relative-swept-ccd";
-		const bool dynamicRotatingConvexSpeculativeCcdCase =
-			caseName ==
-				"scene-volume-dynamic-rotating-convex-relative-swept-ccd";
-		const bool movingKinematicFiniteSpeculativeCcdCase =
-			caseName ==
-				"scene-volume-moving-kinematic-sphere-speculative-ccd" ||
-			caseName ==
-				"scene-volume-moving-kinematic-capsule-speculative-ccd" ||
-			rotatingKinematicCapsuleSpeculativeCcdCase ||
-			rotatingKinematicConvexSpeculativeCcdCase ||
-			caseName ==
-				"scene-volume-moving-kinematic-convex-speculative-ccd";
-		const bool dynamicFiniteRelativeSweptCcdCase =
-			caseName ==
-				"scene-volume-dynamic-sphere-relative-swept-ccd" ||
-			caseName ==
-				"scene-volume-dynamic-capsule-relative-swept-ccd" ||
-			dynamicRotatingCapsuleSpeculativeCcdCase ||
-			dynamicRotatingConvexSpeculativeCcdCase ||
-			caseName ==
-				"scene-volume-dynamic-convex-relative-swept-ccd";
-		const bool sphereReverseFeatureCase =
-			caseName == "scene-volume-sphere-reverse-feature";
-		const bool capsuleReverseFeatureCase =
-			caseName == "scene-volume-capsule-reverse-feature";
-		const bool convexReverseFeatureCase =
-			caseName == "scene-volume-convex-reverse-feature";
-		const bool triangleMeshReverseFeatureCase =
-			caseName ==
-				"scene-volume-triangle-mesh-reverse-feature";
-		const bool heightFieldReverseFeatureCase =
-			caseName ==
-				"scene-volume-heightfield-reverse-feature";
-		const bool smoothReverseFeatureCase =
-			sphereReverseFeatureCase ||
-			capsuleReverseFeatureCase ||
-			convexReverseFeatureCase ||
-			triangleMeshReverseFeatureCase ||
-			heightFieldReverseFeatureCase;
-		const bool skinningCase =
-			caseName == "scene-volume-skinning";
-		const bool twoSoftVolumeCase =
-			sphereLongRollCase || sphereSoftSoftGlancingCase ||
-			softSoftTorqueCase || ogcSandwichCase ||
-			multiSoftIslandCase || mixedSleepIslandCase ||
-			softChurnCase || multiSceneIsolationCase ||
-			softSoftWakeCase || softPairAttachmentCase ||
-			motionControlsCase ||
-			maxDepenetrationVelocityCase ||
-			speculativeCcdCase || smoothReverseFeatureCase ||
-			taskGraphWriteBackCase || taskGraphSoftPairCase;
-		const PxU32 expectedSceneVolumeCount =
-			visualShowcaseCase ? 5u :
-			taskGraphSoftPairCase ? 3u :
-			taskGraphWriteBackFourWayCase ? 4u :
-			(twoSoftVolumeCase ? 2u : 1u);
-		const bool softSleepWakeCase =
-			caseName == "scene-volume-sleep-wake";
-		const bool softRigidWakeCase =
-			caseName == "scene-volume-rigid-wake";
-		const bool twoDynamicActorsCase =
-			multiDynamicBoxCase || multiSoftIslandCase ||
-			movingKinematicFiniteSpeculativeCcdCase ||
-			dynamicFiniteRelativeSweptCcdCase ||
-			kinematicSphereReverseSweptCcdCase ||
-			dynamicSphereReverseSweptCcdCase ||
-			(triangleSurfaceSweptCcdCase &&
-			 !staticTriangleSurfaceSweptCcdCase);
-		const bool dynamicBoxCase =
-			caseName == "scene-volume-dynamic-box" ||
-			caseName == "scene-volume-true-boundary-dynamic-box" ||
-			caseName == "scene-volume-dynamic-sphere" ||
-			caseName == "scene-volume-dynamic-capsule" ||
-			caseName == "scene-volume-dynamic-convex" ||
-			dynamicChurnCase || twoDynamicActorsCase;
-		const bool dynamicSphereCase =
-			caseName == "scene-volume-dynamic-sphere" ||
-			caseName == "scene-volume-dynamic-capsule";
-		const bool dynamicCapsuleCase =
-			caseName == "scene-volume-dynamic-capsule";
-		const bool dynamicConvexCase =
-			caseName == "scene-volume-dynamic-convex";
-		const bool dynamicSmoothCase =
-			dynamicSphereCase || dynamicConvexCase;
-		const bool commonPassed =
-			gMetrics.initialized == 1 &&
-			gMetrics.completedFrames == gHeadlessOptions.frames &&
-			gMetrics.fetchFailures == 0 &&
-			gMetrics.nonFiniteParticleSamples == 0 &&
-			gMetrics.sceneActorCreated == 1 &&
-			gMetrics.sceneShapeAttached == 1 &&
-			gMetrics.sceneSimulationMeshAttached == 1 &&
-			gMetrics.sceneHostBuffersInitialized == 1 &&
-			gMetrics.sceneActorAdded == 1 &&
-			gMetrics.sceneActorRemoved == 1 &&
-			gMetrics.sceneActorReleased == 1 &&
-			gMetrics.sceneBoundsFinite == 1 &&
-			gMetrics.sceneDynamics ==
-				(twoDynamicActorsCase ? 2u :
-					(visualShowcaseCase || ogcSandwichCase || dynamicBoxCase || softRigidWakeCase ||
-						kinematicBoxCase ||
-						rigidAttachmentCase ||
-						kinematicAttachmentCase ? 1u : 0u)) &&
-			gMetrics.sceneDeformableVolumes ==
-				expectedSceneVolumeCount &&
-			gMetrics.particles > 0 &&
-			gMetrics.softBodies ==
-				expectedSceneVolumeCount &&
-			gMetrics.tetElements > 0 &&
-			gMetrics.solverReadbackMatched &&
-			(softSleepWakeCase || softRigidWakeCase ||
-				mixedSleepIslandCase || softChurnCase ||
-				bufferMutationCase || worldPinCase ||
-				attachmentCase || elementFilterCase ||
-				kinematicBoxCase ||
-			multiSceneIsolationCase ||
-			softSoftWakeCase || sphereSoftSoftGlancingCase ||
-			softSoftTorqueCase ||
-			softPairAttachmentCase ||
-				volumeKinematicTargetCase ||
-				motionControlsCase ||
-				ogcSandwichCase ||
-			maxDepenetrationVelocityCase ||
-			taskGraphPureSoftCase ||
-			taskGraphRigidTriangleSurfaceFeatureOverlapCase ||
-			taskGraphWriteBackCase ||
-				taskGraphSoftPairCase ||
-				speculativeCcdCase ||
-				smoothReverseFeatureCase ||
-				gMetrics.maxCentroidDrop > 0.0001f) &&
-			PxIsFinite(gMetrics.finalMinY) &&
-			PxIsFinite(gMetrics.finalMaxY) &&
-			PxIsFinite(gMetrics.finalMaxParticleSpeed) &&
-			gErrorCallback.getFatalCount() == 0 &&
-			gMetrics.cleanupComplete == 1;
-		if(!commonPassed)
-			return false;
-		if(ogcSandwichCase)
-		{
-			const SceneCpuOgcSandwichMetrics& metrics =
-				gSceneCpuOgcSandwichMetrics;
-			const bool gateActive = gMetrics.completedFrames >=
-				SCENE_CPU_OGC_SANDWICH_GATE_MIN_FRAMES;
-			const bool surfaceSeparated = metrics.initialized &&
-				metrics.collisionTelemetryEnabled &&
-				PxIsFinite(metrics.minUpperJawSignedSdf) &&
-				PxIsFinite(metrics.minLowerJawSignedSdf) &&
-				!metrics.upperJawTrianglePenetrated &&
-				!metrics.lowerJawTrianglePenetrated &&
-				metrics.minUpperJawSignedSdf >=
-					-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION &&
-				metrics.minLowerJawSignedSdf >=
-					-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-			const bool jawsCompressed =
-				metrics.maxUpperCompression >=
-					SCENE_CPU_OGC_SANDWICH_MIN_JAW_COMPRESSION &&
-				metrics.maxLowerCompression >=
-					SCENE_CPU_OGC_SANDWICH_MIN_JAW_COMPRESSION;
-			const bool noEscape =
-				metrics.maxBoxLateralOffset <=
-					SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_OFFSET &&
-				metrics.maxBoxLateralSpeed <=
-					SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_SPEED &&
-				metrics.maxBoxNormalOffset <=
-					SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_OFFSET &&
-				metrics.maxBoxNormalSpeed <=
-					SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_SPEED;
-			const bool interactionObserved = !gateActive ||
-				(metrics.nativeIslandSteps >=
-					SCENE_CPU_OGC_SANDWICH_MIN_NATIVE_ISLAND_STEPS &&
-					jawsCompressed &&
-					surfaceSeparated && noEscape);
-			const bool volumeHealthPassed =
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) && gMetrics.minDetF >= 0.05f &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F;
-			return gMetrics.sceneStatics == 0 && gMetrics.sceneDynamics == 1 &&
-				gMetrics.sceneDeformableVolumes == 2 &&
-				gMetrics.surfaceTriangles == 2u * 192u &&
-				interactionObserved && volumeHealthPassed;
-		}
-		if(visualShowcaseCase)
-		{
-			const bool rotationGateActive =
-				gMetrics.completedFrames >=
-					SCENE_CPU_VISUAL_ROTATION_GATE_MIN_FRAMES;
-			const bool rotationPassed = !rotationGateActive ||
-				(gSceneCpuVisualPrimaryCubeRotationMetrics.maxOrientationChange >=
-					SCENE_CPU_VISUAL_MIN_ORIENTATION_CHANGE &&
-				 gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeed >=
-					SCENE_CPU_VISUAL_MIN_ANGULAR_SPEED &&
-				 gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeedFrame !=
-					PX_MAX_U32);
-			const bool sphereRollPassed = !rotationGateActive ||
-				(gSceneCpuVisualSphereRotationMetrics.
-					maxOrientationChange >=
-					SCENE_CPU_VISUAL_SPHERE_MIN_ORIENTATION_CHANGE &&
-				 gSceneCpuVisualSphereRotationMetrics.maxAngularSpeed >=
-					SCENE_CPU_VISUAL_SPHERE_MIN_ANGULAR_SPEED &&
-				 gSceneCpuVisualSphereRotationMetrics.
-					maxAngularSpeedFrame != PX_MAX_U32);
-			const bool sphereLongRunBounded =
-				isSceneCpuVisualSphereLongRunBounded();
-			const bool mixedInteractionGateActive =
-				gMetrics.completedFrames >=
-					SCENE_CPU_VISUAL_INTERACTION_GATE_MIN_FRAMES;
-			const bool dynamicFalling =
-				gMetrics.sceneDynamicInitiallySleeping == 0 &&
-				gMetrics.sceneDynamicMaxDrop > 0.25f &&
-				gMetrics.sceneDynamicMaxDownSpeed > 0.25f;
-			const bool dynamicSurfaceSeparated =
-				gSceneCpuVisualInteractionMetrics.initialized &&
-				gSceneCpuVisualInteractionMetrics.
-					collisionTelemetryEnabled &&
-				PxIsFinite(gSceneCpuVisualInteractionMetrics.
-					minUpperJawSignedSdf) &&
-				PxIsFinite(gSceneCpuVisualInteractionMetrics.
-					minLowerJawSignedSdf) &&
-				!gSceneCpuVisualInteractionMetrics.
-					upperJawTrianglePenetrated &&
-				!gSceneCpuVisualInteractionMetrics.
-					lowerJawTrianglePenetrated &&
-				gSceneCpuVisualInteractionMetrics.minUpperJawSignedSdf >=
-					-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION &&
-				gSceneCpuVisualInteractionMetrics.minLowerJawSignedSdf >=
-					-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-			const bool staticSurfaceSeparated =
-				gSceneCpuVisualInteractionMetrics.initialized &&
-				gSceneCpuVisualInteractionMetrics.
-					collisionTelemetryEnabled &&
-				isSceneCpuVisualSurfaceGapSeparated(
-					gSceneCpuVisualInteractionMetrics.
-						upperJawPedestalGap) &&
-				isSceneCpuVisualSurfaceGapSeparated(
-					gSceneCpuVisualInteractionMetrics.
-						lowerJawPedestalGap) &&
-				isSceneCpuVisualSurfaceGapSeparated(
-					gSceneCpuVisualInteractionMetrics.
-						upperJawGroundGap) &&
-				isSceneCpuVisualSurfaceGapSeparated(
-					gSceneCpuVisualInteractionMetrics.
-						lowerJawGroundGap);
-			const bool rigidSurfaceSeparated =
-				dynamicSurfaceSeparated && staticSurfaceSeparated;
-			// Native dynamic-rigid OGC contacts are consumed by the selected
-			// island before the public aggregate collision statistics are sampled.
-			// A native island step is therefore the authoritative interaction
-			// witness here; generatedSoftContacts is unrelated soft/soft telemetry.
-			const bool mixedInteractionPassed = rigidSurfaceSeparated &&
-				(!mixedInteractionGateActive ||
-					(gSceneCpuVisualInteractionMetrics.initialized &&
-					 gSceneCpuVisualInteractionMetrics.
-						collisionTelemetryEnabled &&
-					 gSceneCpuVisualInteractionMetrics.
-						nativeIslandSteps > 0 &&
-					 gMetrics.sceneDynamicActorAdded == 1 &&
-					 dynamicFalling &&
-					gMetrics.sceneDynamicActorRemoved == 1 &&
-				 gMetrics.sceneDynamicActorReleased == 1));
-			const bool volumeHealthPassed =
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) &&
-				gMetrics.minDetF >
-					SCENE_CPU_VISUAL_SHOWCASE_MIN_DET_F &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F &&
-				PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-				gMetrics.minBodyVolumeRatio >
-					SCENE_CPU_VISUAL_SHOWCASE_MIN_VOLUME_RATIO &&
-				PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-				gMetrics.maxBodyVolumeRatio <
-					SCENE_CPU_VISUAL_MAX_VOLUME_RATIO;
-			return gMetrics.sceneStatics == 2 &&
-				gMetrics.sceneDynamics == 1 &&
-				gMetrics.surfaceTriangles >=
-					SCENE_CPU_VISUAL_MIN_SURFACE_TRIANGLES &&
-				rotationPassed && sphereRollPassed &&
-				sphereLongRunBounded && staticSurfaceSeparated &&
-				mixedInteractionPassed &&
-				volumeHealthPassed;
-		}
-		if(sphereLongRollCase)
-		{
-			const bool rotationGateActive =
-				gMetrics.completedFrames >= 600;
-			// This isolated reproduction has a deliberately weaker glancing
-			// impulse than the five-body showcase.  Reusing the showcase's peak
-			// threshold made the dedicated regression fail even while its sphere
-			// was rolling with low contact-point slip.  Gate the behavior that the
-			// case actually owns: generated spin, visible orientation change and
-			// a bounded no-slip residual at the grounded contact point.
-			const bool sphereRollPassed = !rotationGateActive ||
-				isSceneCpuSphereRollingKinematicsValid();
-			const SceneCpuVisualBodyHealthMetrics& sphereHealth =
-				gSceneCpuVisualBodyHealthMetrics[1];
-			// The eccentric cube is only an impact generator in this isolated
-			// regression.  Its transient compression must remain finite and
-			// non-inverted (the common gate enforces both), but it must not mask a
-			// healthy grounded sphere with the showcase-wide 0.35 det(F) floor.
-			const bool volumeHealthPassed =
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(sphereHealth.minDetF) &&
-				sphereHealth.minDetF > SCENE_CPU_VISUAL_MIN_DET_F &&
-				PxIsFinite(sphereHealth.maxDetF) &&
-				sphereHealth.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F &&
-				PxIsFinite(sphereHealth.minVolumeRatio) &&
-				sphereHealth.minVolumeRatio >
-					SCENE_CPU_VISUAL_MIN_VOLUME_RATIO &&
-				PxIsFinite(sphereHealth.maxVolumeRatio) &&
-				sphereHealth.maxVolumeRatio <
-					SCENE_CPU_VISUAL_MAX_VOLUME_RATIO;
-			return gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneDeformableVolumes == 2 &&
-				gMetrics.surfaceTriangles == 576 &&
-				sphereRollPassed &&
-				isSceneCpuSphereLongRollRegressionPassed() &&
-				volumeHealthPassed;
-		}
-		if(sphereSoftSoftGlancingCase)
-		{
-			const SceneCpuSoftContactPhaseMetrics& phaseMetrics =
-				gSceneCpuSoftContactPhaseMetrics;
-			const bool contactGateActive =
-				gMetrics.completedFrames >=
-					SCENE_CPU_SPHERE_SOFT_SOFT_GLANCING_GATE_MIN_FRAMES;
-			const PxReal deltaAngularSpeed = PxMax(0.0f,
-				phaseMetrics.peakSoftContactAngularSpeed -
-					phaseMetrics.preSoftAngularSpeed);
-			const PxVec3 deltaAngularVelocity =
-				phaseMetrics.peakSoftContactAngularVelocity -
-				phaseMetrics.preSoftAngularVelocity;
-			const bool contactPhasePassed = !contactGateActive ||
-				(phaseMetrics.initialized &&
-				 phaseMetrics.contactTelemetryEnabled &&
-				 phaseMetrics.hasPreSoftContactSample &&
-				 phaseMetrics.firstSoftContactFrame != PX_MAX_U32 &&
-				 phaseMetrics.lastSoftContactFrame >=
-					phaseMetrics.firstSoftContactFrame &&
-				 phaseMetrics.softContactFrames > 0 &&
-				 phaseMetrics.generatedGroundContacts == 0 &&
-				 phaseMetrics.generatedSoftContacts > 0 &&
-				 phaseMetrics.peakSoftContactFrame >=
-					phaseMetrics.firstSoftContactFrame &&
-				 deltaAngularVelocity.isFinite() &&
-				 deltaAngularVelocity.magnitude() >=
-					SCENE_CPU_SPHERE_SOFT_SOFT_GLANCING_MIN_DELTA_SPEED &&
-				 deltaAngularSpeed >=
-					SCENE_CPU_SPHERE_SOFT_SOFT_GLANCING_MIN_DELTA_SPEED);
-			const bool volumeHealthPassed =
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) &&
-				gMetrics.minDetF > SCENE_CPU_VISUAL_MIN_DET_F &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F &&
-				PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-				gMetrics.minBodyVolumeRatio >
-					SCENE_CPU_VISUAL_MIN_VOLUME_RATIO &&
-				PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-				gMetrics.maxBodyVolumeRatio <
-					SCENE_CPU_VISUAL_MAX_VOLUME_RATIO;
-			return gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneDeformableVolumes == 2 &&
-				gMetrics.surfaceTriangles == 576 &&
-				contactPhasePassed && volumeHealthPassed;
-		}
-		if(softSoftTorqueCase)
-		{
-			const SceneCpuSoftSoftTorqueMetrics& torqueMetrics =
-				gSceneCpuSoftSoftTorqueMetrics;
-			const bool torqueGateActive =
-				gMetrics.completedFrames >=
-					SCENE_CPU_SOFT_SOFT_TORQUE_GATE_MIN_FRAMES;
-			const bool rotationPassed = !torqueGateActive ||
-				(torqueMetrics.softContactFrames > 0 &&
-				 torqueMetrics.firstContactFrame != PX_MAX_U32 &&
-				 torqueMetrics.firstRotationFrame != PX_MAX_U32 &&
-				 torqueMetrics.firstRotationFrame >=
-					torqueMetrics.firstContactFrame &&
-				 torqueMetrics.firstContactCentroidLeverArm >=
-					SCENE_CPU_SOFT_SOFT_TORQUE_MIN_LEVER_ARM &&
-				 torqueMetrics.maxAngularMomentum >=
-					SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_MOMENTUM &&
-				 torqueMetrics.maxAngularSpeed >=
-					SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED &&
-				 torqueMetrics.retainedRotationSamples >=
-					SCENE_CPU_SOFT_SOFT_TORQUE_MIN_RETENTION_SAMPLES);
-			// This is the no-ground, true-boundary torque authority fixture.  A
-			// nonzero angular response alone is insufficient: retain the same
-			// deformation-health envelope used by the glancing control so a
-			// candidate cannot buy torque by inverting or collapsing its volume.
-			const bool volumeHealthPassed =
-				gMetrics.nonFiniteParticleSamples == 0 &&
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) &&
-				gMetrics.minDetF > SCENE_CPU_VISUAL_MIN_DET_F &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F &&
-				PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-				gMetrics.minBodyVolumeRatio >
-					SCENE_CPU_VISUAL_MIN_VOLUME_RATIO &&
-				PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-				gMetrics.maxBodyVolumeRatio <
-					SCENE_CPU_VISUAL_MAX_VOLUME_RATIO;
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneDeformableVolumes == 2 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				torqueMetrics.initialized &&
-				torqueMetrics.isolatedConfiguration == 1 &&
-				torqueMetrics.targetDistinctCollisionSimulation == 1 &&
-				torqueMetrics.driverDistinctCollisionSimulation == 1 &&
-				torqueMetrics.supportExpansionInstrumentationAvailable == 0 &&
-				torqueMetrics.generatedGroundContacts == 0 &&
-				torqueMetrics.generatedRigidContacts == 0 &&
-				torqueMetrics.generatedSelfContacts == 0 &&
-				gMetrics.groundContactFrames == 0 &&
-				gMetrics.rigidContactFrames == 0 &&
-				rotationPassed && volumeHealthPassed;
-		}
-		if(taskGraphPureSoftCase)
-		{
-			// This fixture deliberately has neither gravity nor collision work.
-			// Its value is that every measured frame must traverse the Scene-owned
-			// task-graph authority path, either as a dispatcher task or through the
-			// explicitly forced serial task-graph mode.
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks &&
-				gPerformance.taskGraphPureSoftEligibleIslands ==
-					scheduledTasks &&
-				gPerformance.taskGraphPureSoftEligibleParticles ==
-					scheduledTasks * gMetrics.particles;
-		}
-		if(taskGraphWorldPlaneCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphRigidBoxSdfCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphRigidSphereSdfCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphRigidCapsuleSdfCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphRigidConvexSdfCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphRigidTriangleSurfaceCase ||
-			taskGraphRigidTriangleSurfaceLargeCase ||
-			taskGraphRigidTriangleSurfaceFeatureOverlapCase ||
-			taskGraphRigidTriangleSurfaceThresholdCase)
-		{
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			const bool taskGraphPassed =
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-			// P5.42's exact non-empty feature assertion belongs to its dedicated
-			// telemetry runner. Task leaves publish private collision statistics,
-			// so this always-on snippet gate must not infer feature activity from
-			// the parent-only aggregate.
-			return taskGraphPassed;
-		}
-		if(taskGraphSoftPairCase)
-		{
-			// The serial-oracle and soft-pair fan-in routes share this exact
-			// gravity-free three-volume Scene setup. The runner separately proves
-			// the fan-in telemetry, while this snippet gate stays valid for both
-			// routes and guards the Scene-taskgraph admission itself.
-			const PxU64 scheduledTasks =
-				gPerformance.taskGraphSubmittedSolveTasks +
-				gPerformance.taskGraphSerialSolveTasks;
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneDeformableVolumes == 3 &&
-				scheduledTasks > 0 &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					gPerformance.taskGraphSubmittedSolveTasks;
-		}
-		if(taskGraphWriteBackCase)
-		{
-			// P3's proof fixtures have two or four large detached CPU-AVBD
-			// volumes. Their nonlinear solve remains one Scene task, while the
-			// disjoint
-			// prediction and post-solve write-back ranges can independently fan
-			// out. A dispatcher with fewer than two workers is the explicit serial
-			// fallback for both stages. Submitted/completed counts prove ownership;
-			// the instantaneous active-task peak is scheduler timing, so correctness
-			// only requires it to remain inside the submitted task width.
-			const PxU64 expectedFrames = gPerformance.profiledFrames;
-			const PxU32 expectedEntryCount =
-				taskGraphWriteBackFourWayCase ? 4u : 2u;
-			const bool parallelP3StagesRequested =
-				gHeadlessOptions.execution == Snippets::eHEADLESS_PARALLEL &&
-				gHeadlessOptions.dispatcherThreads >= 2;
-			const PxU32 expectedStageTaskCount =
-				parallelP3StagesRequested ? PxMin(
-					gHeadlessOptions.dispatcherThreads, expectedEntryCount) : 0u;
-			const bool explicitSerialReference =
-				gHeadlessOptions.execution == Snippets::eHEADLESS_SEQUENTIAL;
-			const PxU64 expectedSubmittedSolveTasks =
-				explicitSerialReference ? 0u : expectedFrames;
-			const PxU64 expectedSerialSolveTasks =
-				explicitSerialReference ? expectedFrames : 0u;
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.particles >= expectedEntryCount * 1024u &&
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) &&
-				gMetrics.minDetF > 0.0f &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < 20.0f &&
-				PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-				gMetrics.minBodyVolumeRatio > 0.01f &&
-				PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-				gMetrics.maxBodyVolumeRatio < 20.0f &&
-				gMetrics.maxCentroidDrop > 0.01f &&
-				gMetrics.maxParticleSpeed > 0.1f &&
-				gMetrics.finalMaxParticleSpeed > 0.01f &&
-				gPerformance.taskGraphSubmittedSolveTasks ==
-					expectedSubmittedSolveTasks &&
-				gPerformance.taskGraphCompletedSolveTasks ==
-					expectedSubmittedSolveTasks &&
-				gPerformance.taskGraphSerialSolveTasks ==
-					expectedSerialSolveTasks &&
-				(parallelP3StagesRequested
-					? (gPerformance.taskGraphSubmittedPredictionTasks ==
-							expectedFrames * expectedStageTaskCount &&
-						gPerformance.taskGraphCompletedPredictionTasks ==
-							expectedFrames * expectedStageTaskCount &&
-						gPerformance.taskGraphPeakActivePredictionTasks > 0 &&
-						gPerformance.taskGraphPeakActivePredictionTasks <=
-							expectedStageTaskCount &&
-						gPerformance.taskGraphSerialPredictionStages == 0)
-					: (gPerformance.taskGraphSubmittedPredictionTasks == 0 &&
-						gPerformance.taskGraphCompletedPredictionTasks == 0 &&
-						gPerformance.taskGraphSerialPredictionStages ==
-							(explicitSerialReference ? 0u : expectedFrames))) &&
-				(parallelP3StagesRequested
-					? (gPerformance.taskGraphSubmittedWriteBackTasks ==
-							expectedFrames * expectedStageTaskCount &&
-						gPerformance.taskGraphCompletedWriteBackTasks ==
-							expectedFrames * expectedStageTaskCount &&
-						gPerformance.taskGraphPeakActiveWriteBackTasks > 0 &&
-						gPerformance.taskGraphPeakActiveWriteBackTasks <=
-							expectedStageTaskCount &&
-						gPerformance.taskGraphSerialWriteBackStages == 0)
-					: (gPerformance.taskGraphSubmittedWriteBackTasks == 0 &&
-						gPerformance.taskGraphCompletedWriteBackTasks == 0 &&
-						gPerformance.taskGraphSerialWriteBackStages ==
-							(explicitSerialReference ? 0u : expectedFrames)));
-		}
-		if(skinningCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gVolumeSkinningMetrics.initialized == 1 &&
-				gVolumeSkinningMetrics.evaluatedFrames ==
-					gHeadlessOptions.frames &&
-				gVolumeSkinningMetrics.finiteFrames ==
-					gHeadlessOptions.frames &&
-				gVolumeSkinningMetrics.vertices > 4 &&
-				gVolumeSkinningMetrics.triangles >= 4 &&
-				PxIsFinite(
-					gVolumeSkinningMetrics.maxDisplacement) &&
-				gVolumeSkinningMetrics.maxDisplacement > 0.05f;
-		}
-		if(motionControlsCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.motionMaxVelocityBounded == 1 &&
-				gMetrics.motionSettlingApplied == 1 &&
-				gMetrics.motionSettlingSlept == 1 &&
-				gMetrics.motionControlStayedAwake == 1 &&
-				gMetrics.
-					motionMaxVelocityFirstStepDisplacement <=
-						gHeadlessOptions.dt * 1.01f &&
-				gMetrics.motionMaxVelocityFirstStepSpeed <= 1.02f &&
-				gMetrics.motionSettlingFinalSpeed <= 1.0e-6f &&
-				gMetrics.motionControlFinalSpeed >= 0.07f &&
-				gMetrics.motionControlFinalSpeed <= 0.09f;
-		}
-		if(maxDepenetrationVelocityCase)
-		{
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.depenetrationLimitApplied == 1 &&
-				gMetrics.depenetrationFirstStepBounded == 1 &&
-				gMetrics.depenetrationControlSeparated == 1 &&
-				gMetrics.depenetrationGradualRecovery == 1 &&
-				gMetrics.depenetrationLimitedFirstStepRise >=
-					-1.0e-6f &&
-				gMetrics.depenetrationLimitedFirstStepRise <=
-					0.12f * gHeadlessOptions.dt * 1.25f &&
-				gMetrics.depenetrationLimitedMaxSpeed <=
-					0.25f;
-		}
-		if(smoothReverseFeatureCase)
-		{
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gSphereReverseFeatureMetrics.
-					faceResponseObserved == 1 &&
-				gSphereReverseFeatureMetrics.vertexSdfExcluded == 1 &&
-				gSphereReverseFeatureMetrics.
-					negativeControlPassed == 1 &&
-				gSphereReverseFeatureMetrics.nonFiniteSamples == 0 &&
-				PxIsFinite(
-					gSphereReverseFeatureMetrics.
-						positiveDisplacement) &&
-				gSphereReverseFeatureMetrics.
-					positiveDisplacement > 1.0e-3f &&
-				PxIsFinite(
-					gSphereReverseFeatureMetrics.positiveDrop) &&
-				PxIsFinite(
-					gSphereReverseFeatureMetrics.negativeDrop) &&
-				gSphereReverseFeatureMetrics.negativeDrop > 0.02f &&
-				gSphereReverseFeatureMetrics.positiveDrop + 0.01f <
-					gSphereReverseFeatureMetrics.negativeDrop &&
-				PxIsFinite(
-					gSphereReverseFeatureMetrics.faceSeparation) &&
-				gSphereReverseFeatureMetrics.faceSeparation > 0.02f &&
-				PxIsFinite(
-					gSphereReverseFeatureMetrics.
-						minimumVertexSeparation) &&
-				gSphereReverseFeatureMetrics.
-					minimumVertexSeparation > 0.10f;
-		}
-		if(rigidTriangleSteadyContactCase)
-		{
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneVolumeTargetBound == 1 &&
-				gMetrics.sceneVolumeTargetMutated == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneActorReleased == 1 &&
-				gMetrics.sceneBoundsFinite == 1 &&
-				gPerformance.profiledFrames > 0 &&
-				gPerformance.collision.
-					rigidTriangleSurfaceFaceTests > 0 &&
-				gPerformance.collision.
-					rigidTriangleSurfaceEdgeTests > 0 &&
-				gPerformance.collision.
-					rigidTriangleSurfaceVertexTests > 0;
-		}
-		if(triangleSurfaceSweptCcdCase)
-		{
-			const bool rigidLifecyclePassed =
-				staticTriangleSurfaceSweptCcdCase
-					? gMetrics.sceneStatics == 1 &&
-						gMetrics.sceneDynamics == 0
-					: gMetrics.sceneStatics == 0 &&
-						gMetrics.sceneDynamics == 2 &&
-						gMetrics.sceneDynamicActorAdded == 1 &&
-						gMetrics.sceneSecondDynamicActorAdded == 1 &&
-						gMetrics.sceneDynamicActorRemoved == 1 &&
-						gMetrics.sceneSecondDynamicActorRemoved == 1 &&
-						gMetrics.sceneDynamicActorReleased == 1 &&
-						gMetrics.sceneSecondDynamicActorReleased == 1;
-			return
-				rigidLifecyclePassed &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				gMetrics.speculativeCcdPreventedTunneling == 1 &&
-				gMetrics.speculativeCcdNegativeControlTunneled == 1 &&
-				gSphereReverseSweptMetrics.responseObserved == 1 &&
-				gSphereReverseSweptMetrics.
-					negativeControlPassed == 1 &&
-				gSphereReverseSweptMetrics.
-					twoSidedResponseObserved == 1 &&
-				gSphereReverseSweptMetrics.vertexSweepExcluded == 1 &&
-				gSphereReverseSweptMetrics.nonFiniteSamples == 0 &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						positiveDisplacement) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						negativeDisplacement) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.positiveDrop) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.negativeDrop) &&
-				(!triangleSurfaceReverseSweptCcdCase ||
-					(PxIsFinite(
-						gSphereReverseSweptMetrics.
-							minimumVertexSweepSeparation) &&
-					 gSphereReverseSweptMetrics.
-							minimumVertexSweepSeparation >
-							(rotationalTriangleSurfaceSweptCcdCase
-								? 0.10f : 0.05f))) &&
-				(!rotationalTriangleSurfaceSweptCcdCase ||
-					(gCapsuleRotationalSweepMetrics.
-							sweepIsolated == 1 &&
-					 gCapsuleRotationalSweepMetrics.
-							nonFiniteSamples == 0 &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation) &&
-					 gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation > 0.10f &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							positiveAngularTravel) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel) &&
-					 PxAbs(
-						gCapsuleRotationalSweepMetrics.
-							positiveAngularTravel -
-							2.0f * PxPi / 3.0f) < 0.002f &&
-					 PxAbs(
-						gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel -
-							2.0f * PxPi / 3.0f) < 0.002f)) &&
-				(staticTriangleSurfaceSweptCcdCase
-					? gSphereReverseSweptMetrics.negativeDrop >
-							(triangleSurfaceReverseSweptCcdCase &&
-							 heightFieldSweptCcdCase
-								? 0.8f : 1.5f) &&
-						gSphereReverseSweptMetrics.positiveDrop +
-								(triangleSurfaceReverseSweptCcdCase
-									? 0.01f : 0.10f) <
-							gSphereReverseSweptMetrics.negativeDrop
-					: gSphereReverseSweptMetrics.
-							positiveDisplacement >
-								(rotationalTriangleSurfaceSweptCcdCase
-									? 2.0e-3f
-									: triangleSurfaceReverseSweptCcdCase
-										? 5.0e-3f : 0.02f) &&
-						gSphereReverseSweptMetrics.
-							negativeDisplacement < 1.0e-2f);
-		}
-		if(sphereReverseSweptCcdCase)
-		{
-			// This fixture makes the deformable volume 100x heavier than
-			// the rigid body. Normalize its one-shot public verdict here,
-			// outside the measured step loop: a valid dynamic impact may be
-			// expressed mostly by arresting the rigid body.
-			if(dynamicSphereReverseSweptCcdCase &&
-				gSphereReverseSweptMetrics.responseObserved == 0 &&
-				gSphereReverseSweptMetrics.negativeDisplacement <
-					5.0e-3f &&
-				gSphereReverseSweptMetrics.faceSeparation > -0.15f &&
-				gSphereReverseSweptMetrics.positiveRigidDrop + 0.05f <
-					gSphereReverseSweptMetrics.negativeRigidDrop)
-			{
-				gSphereReverseSweptMetrics.responseObserved = 1;
-				gMetrics.speculativeCcdPreventedTunneling = 1;
-			}
-			const bool rigidLifecyclePassed =
-				staticSphereReverseSweptCcdCase
-					? gMetrics.sceneStatics == 1 &&
-						gMetrics.sceneDynamics == 0
-					: gMetrics.sceneStatics == 0 &&
-						gMetrics.sceneDynamics == 2 &&
-						gMetrics.sceneDynamicActorAdded == 1 &&
-						gMetrics.sceneSecondDynamicActorAdded == 1 &&
-						gMetrics.sceneDynamicActorRemoved == 1 &&
-						gMetrics.sceneSecondDynamicActorRemoved == 1 &&
-						gMetrics.sceneDynamicActorReleased == 1 &&
-						gMetrics.sceneSecondDynamicActorReleased == 1;
-			return
-				rigidLifecyclePassed &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				gMetrics.speculativeCcdPreventedTunneling == 1 &&
-				gMetrics.speculativeCcdNegativeControlTunneled == 1 &&
-				gSphereReverseSweptMetrics.responseObserved == 1 &&
-				gSphereReverseSweptMetrics.
-					negativeControlPassed == 1 &&
-				gSphereReverseSweptMetrics.
-					twoSidedResponseObserved == 1 &&
-				gSphereReverseSweptMetrics.vertexSweepExcluded == 1 &&
-				gSphereReverseSweptMetrics.nonFiniteSamples == 0 &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						positiveDisplacement) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						negativeDisplacement) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.positiveDrop) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.negativeDrop) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						positiveRigidDrop) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						negativeRigidDrop) &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.faceSeparation) &&
-				gSphereReverseSweptMetrics.faceSeparation >
-					-0.15f &&
-				PxIsFinite(
-					gSphereReverseSweptMetrics.
-						minimumVertexSweepSeparation) &&
-				gSphereReverseSweptMetrics.
-					minimumVertexSweepSeparation >
-						(rotationalFiniteReverseSweptCcdCase
-							? 0.10f :
-						((capsuleReverseSweptCcdCase ||
-						  convexReverseSweptCcdCase)
-							? 0.05f : 0.10f)) &&
-				(!deformingReverseSweptCcdCase ||
-					(gDeformingVolumeReverseSweptMetrics.
-							geometricSweepIsolated == 1 &&
-					 PxIsFinite(
-						gDeformingVolumeReverseSweptMetrics.
-							endpointMinSeparation) &&
-					 PxIsFinite(
-						gDeformingVolumeReverseSweptMetrics.
-							midSweepMinSeparation) &&
-					 PxIsFinite(
-						gDeformingVolumeReverseSweptMetrics.
-							responseDelta) &&
-					 gDeformingVolumeReverseSweptMetrics.
-							responseDelta > 0.01f)) &&
-				(!rotationalFiniteReverseSweptCcdCase ||
-					(gCapsuleRotationalSweepMetrics.sweepIsolated == 1 &&
-					 gCapsuleRotationalSweepMetrics.nonFiniteSamples == 0 &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							positiveAngularTravel) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel) &&
-					 (!kinematicSphereReverseSweptCcdCase ||
-						(PxAbs(
-							gCapsuleRotationalSweepMetrics.
-								positiveAngularTravel -
-							2.0f * PxPi / 3.0f) < 0.002f &&
-						 PxAbs(
-							gCapsuleRotationalSweepMetrics.
-								negativeAngularTravel -
-							2.0f * PxPi / 3.0f) < 0.002f)))) &&
-				(staticSphereReverseSweptCcdCase
-					? gSphereReverseSweptMetrics.negativeDrop >
-							(deformingReverseSweptCcdCase
-								? 0.15f : 0.8f) &&
-						gSphereReverseSweptMetrics.positiveDrop +
-								(deformingReverseSweptCcdCase
-									? 0.01f : 0.03f) <
-							gSphereReverseSweptMetrics.negativeDrop
-					: (gSphereReverseSweptMetrics.
-							positiveDisplacement >
-								(rotationalFiniteReverseSweptCcdCase
-									? 0.02f :
-								 dynamicSphereReverseSweptCcdCase
-									? 0.01f : 0.02f) ||
-					   (dynamicSphereReverseSweptCcdCase &&
-						gSphereReverseSweptMetrics.
-							positiveRigidDrop + 0.05f <
-						gSphereReverseSweptMetrics.
-							negativeRigidDrop)) &&
-						gSphereReverseSweptMetrics.
-							negativeDisplacement < 5.0e-3f) &&
-				(!dynamicSphereReverseSweptCcdCase ||
-					(gSphereReverseSweptMetrics.negativeRigidDrop >
-							(rotationalFiniteReverseSweptCcdCase
-								? 0.8f : 1.5f) &&
-					 gSphereReverseSweptMetrics.positiveRigidDrop +
-							0.05f <
-						gSphereReverseSweptMetrics.
-							negativeRigidDrop));
-		}
-		if(dynamicFiniteRelativeSweptCcdCase)
-		{
-			if(gMetrics.dynamicSphereSweepResponseObserved == 0 &&
-				gMetrics.dynamicSphereSweepNegativeSoftDisplacement <
-					5.0e-3f &&
-				gMetrics.dynamicSphereSweepPositiveMinSeparation >
-					-0.15f &&
-				gMetrics.dynamicSphereSweepPositiveRigidDrop + 0.05f <
-					gMetrics.dynamicSphereSweepNegativeRigidDrop)
-			{
-				gMetrics.dynamicSphereSweepResponseObserved = 1;
-				gMetrics.speculativeCcdPreventedTunneling = 1;
-			}
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 2 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneDynamicActorAdded == 1 &&
-				gMetrics.sceneSecondDynamicActorAdded == 1 &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneSecondDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReleased == 1 &&
-				gMetrics.sceneSecondDynamicActorReleased == 1 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				gMetrics.dynamicSphereSweepLaunched == 1 &&
-				gMetrics.dynamicSphereSweepResponseObserved == 1 &&
-				gMetrics.
-					dynamicSphereSweepNegativeControlTunneled == 1 &&
-				gMetrics.
-					dynamicSphereSweepTwoSidedResponseObserved == 1 &&
-				PxIsFinite(
-					gMetrics.
-						dynamicSphereSweepPositiveSoftDisplacement) &&
-				(gMetrics.
-					dynamicSphereSweepPositiveSoftDisplacement >
-						0.02f ||
-				 gMetrics.dynamicSphereSweepPositiveRigidDrop + 0.05f <
-					gMetrics.dynamicSphereSweepNegativeRigidDrop) &&
-				PxIsFinite(
-					gMetrics.
-						dynamicSphereSweepNegativeSoftDisplacement) &&
-				gMetrics.
-					dynamicSphereSweepNegativeSoftDisplacement <
-						5.0e-3f &&
-				PxIsFinite(
-					gMetrics.dynamicSphereSweepPositiveRigidDrop) &&
-				PxIsFinite(
-					gMetrics.dynamicSphereSweepNegativeRigidDrop) &&
-				gMetrics.dynamicSphereSweepNegativeRigidDrop >
-					((dynamicRotatingCapsuleSpeculativeCcdCase ||
-					  dynamicRotatingConvexSpeculativeCcdCase)
-						? 0.8f : 1.5f) &&
-				gMetrics.dynamicSphereSweepPositiveRigidDrop +
-						0.05f <
-					gMetrics.dynamicSphereSweepNegativeRigidDrop &&
-				PxIsFinite(
-					gMetrics.
-						dynamicSphereSweepPositiveMinSeparation) &&
-				gMetrics.dynamicSphereSweepPositiveMinSeparation >
-					-0.15f &&
-				gMetrics.dynamicSphereSweepPositiveMinSeparation <
-					PX_MAX_F32 &&
-				(!(dynamicRotatingCapsuleSpeculativeCcdCase ||
-				   dynamicRotatingConvexSpeculativeCcdCase) ||
-					(gCapsuleRotationalSweepMetrics.sweepIsolated == 1 &&
-					 gCapsuleRotationalSweepMetrics.nonFiniteSamples == 0 &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation) &&
-					 gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation > 0.05f &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation) &&
-					 gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation <
-								(dynamicRotatingConvexSpeculativeCcdCase
-									? 1.0e-5f : -0.05f) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							positiveAngularTravel) &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel) &&
-					 gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel > 0.8f &&
-					 gCapsuleRotationalSweepMetrics.
-								positiveAngularTravel +
-							0.05f <
-						gCapsuleRotationalSweepMetrics.
-							negativeAngularTravel));
-		}
-		if(movingKinematicFiniteSpeculativeCcdCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 2 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneDynamicActorAdded == 1 &&
-				gMetrics.sceneSecondDynamicActorAdded == 1 &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneSecondDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReleased == 1 &&
-				gMetrics.sceneSecondDynamicActorReleased == 1 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				gMetrics.movingSphereTargetIssued == 1 &&
-				gMetrics.movingSphereCcdResponseObserved == 1 &&
-				gMetrics.movingSphereNegativeControlHeld == 1 &&
-				PxIsFinite(
-					gMetrics.movingSpherePositiveDisplacement) &&
-				gMetrics.movingSpherePositiveDisplacement >
-					0.02f &&
-				PxIsFinite(
-					gMetrics.movingSphereNegativeDisplacement) &&
-				gMetrics.movingSphereNegativeDisplacement <
-					5.0e-3f &&
-				PxIsFinite(
-					gMetrics.
-						movingSpherePositiveMinSeparation) &&
-				gMetrics.movingSpherePositiveMinSeparation >
-					-0.10f &&
-				gMetrics.movingSpherePositiveMinSeparation <
-					PX_MAX_F32 &&
-				(!(rotatingKinematicCapsuleSpeculativeCcdCase ||
-				   rotatingKinematicConvexSpeculativeCcdCase) ||
-					(gCapsuleRotationalSweepMetrics.sweepIsolated == 1 &&
-					 gCapsuleRotationalSweepMetrics.nonFiniteSamples == 0 &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation) &&
-					 gCapsuleRotationalSweepMetrics.
-							endpointMinSeparation > 0.05f &&
-					 PxIsFinite(
-						gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation) &&
-					 gCapsuleRotationalSweepMetrics.
-							midSweepMinSeparation <
-								(rotatingKinematicConvexSpeculativeCcdCase
-									? 1.0e-5f : -0.05f)));
-		}
-		if(speculativeCcdCase)
-		{
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.speculativeCcdFlagApplied == 1 &&
-				gMetrics.speculativeCcdPreventedTunneling == 1 &&
-				(planeSpeculativeCcdCase ||
-					gMetrics.
-						speculativeCcdNegativeControlTunneled == 1) &&
-				PxIsFinite(
-					gMetrics.speculativeCcdPositiveMinY) &&
-				(finiteSmoothSpeculativeCcdCase
-					? PxIsFinite(
-						gMetrics.
-							speculativeCcdPositiveMinSeparation) &&
-						gMetrics.
-							speculativeCcdPositiveMinSeparation >=
-								-0.05f &&
-						gMetrics.
-							speculativeCcdPositiveMinSeparation <
-								PX_MAX_F32
-					: gMetrics.speculativeCcdPositiveMinY >=
-						(planeSpeculativeCcdCase
-							? 0.49f : 0.50f)) &&
-				PxIsFinite(
-					gMetrics.speculativeCcdNegativeMaxY) &&
-				(planeSpeculativeCcdCase ||
-					gMetrics.speculativeCcdNegativeMaxY <= 0.44f);
-		}
-		if(volumeKinematicTargetCase)
-		{
-			const bool commonTargetPassed =
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneVolumeTargetBound == 1 &&
-				gMetrics.sceneVolumeTargetMutated == 1 &&
-				gMetrics.sceneVolumeTargetWoke == 1 &&
-				gMetrics.sceneVolumeTargetReached == 1 &&
-				PxIsFinite(
-					gMetrics.
-						sceneVolumeTargetFinalMaxError) &&
-				gMetrics.sceneVolumeTargetFinalMaxError <=
-					5.0e-3f &&
-				gMetrics.
-					sceneVolumeTargetMaxDisplacement > 0.2f &&
-				gMetrics.maxParticleSpeed < 5.0f &&
-				gMetrics.finalMaxParticleSpeed < 0.5f;
-			if(!commonTargetPassed)
-				return false;
-			if(fullKinematicTargetCase)
-				return true;
-			return
-				gMetrics.
-					sceneVolumePartialInactiveIgnored == 1 &&
-				gMetrics.sceneVolumePartialActivated == 1 &&
-				gMetrics.
-					sceneVolumePartialActivatedReached == 1 &&
-				PxIsFinite(
-					gMetrics.
-						sceneVolumePartialInactiveDecoyDistance) &&
-				gMetrics.
-					sceneVolumePartialInactiveDecoyDistance >
-						2.0f;
-		}
-		if(multiSceneIsolationCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondSceneCreated == 1 &&
-				gMetrics.sceneSecondSceneSolverMatched == 1 &&
-				gMetrics.scenePrimarySceneReleased == 1 &&
-				gMetrics.sceneSecondSceneReleased == 1 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneSoftFirstSleepFrame < 60 &&
-				gMetrics.sceneMultiPrimaryStable == 1 &&
-				gMetrics.sceneMultiPrimaryDetachedStable == 1 &&
-				gMetrics.sceneMultiSecondaryUpdatedBeforeRelease == 1 &&
-				gMetrics.sceneMultiSecondaryUpdatedAfterRelease == 1 &&
-				gMetrics.sceneSecondVolumeMaxCentroidDrop > 0.1f &&
-				gMetrics.finalMinY > 3.5f &&
-				gMetrics.maxParticleSpeed < 0.3f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-6f;
-		}
-		if(softSoftWakeCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneSoftSoftBothSlept == 1 &&
-				gMetrics.sceneSoftSoftDriveIssued == 1 &&
-				gMetrics.sceneSoftSoftDriverWoke == 1 &&
-				gMetrics.sceneSoftSoftTargetWoke == 1 &&
-				gMetrics.sceneSoftSoftTargetWakeFrame >
-					gMetrics.sceneSoftFirstSleepFrame &&
-				gMetrics.sceneSoftSoftTargetWakeFrame <
-					gMetrics.completedFrames &&
-				gMetrics.sceneSoftSoftTargetMoved == 1 &&
-				gMetrics.sceneSoftSoftResetIssued == 1 &&
-				gMetrics.sceneSoftSoftBothFinalSlept == 1 &&
-				gMetrics.finalMinY > 3.5f &&
-				gMetrics.maxParticleSpeed < 10.0f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-6f;
-		}
-		if(softPairAttachmentCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneRigidAttachmentActorAdded == 1 &&
-				gMetrics.sceneRigidAttachmentCreated == 1 &&
-				gMetrics.sceneRigidAttachmentRigidWoke == 1 &&
-				gMetrics.sceneRigidAttachmentRigidMoved == 1 &&
-				gMetrics.
-					sceneRigidAttachmentHeldAcrossReadd == 1 &&
-				gMetrics.sceneRigidAttachmentReleased == 1 &&
-				gMetrics.
-					sceneRigidAttachmentSeparatedAfterRelease == 1 &&
-				gMetrics.sceneRigidAttachmentMaxDrift < 0.05f &&
-				gMetrics.sceneRigidAttachmentMaxRigidSpeed < 10.0f &&
-				gMetrics.
-					sceneRigidAttachmentMaxRigidDisplacement >
-						0.02f &&
-				gMetrics.
-					sceneRigidAttachmentReleasedSeparation > 0.2f &&
-				gMetrics.maxParticleSpeed < 10.0f &&
-				gMetrics.finalMaxParticleSpeed < 2.0f;
-		}
-		if(kinematicBoxCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneKinematicActorAdded == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneKinematicTargetIssued == 1 &&
-				gMetrics.sceneKinematicTargetReached == 1 &&
-				gMetrics.sceneKinematicSoftWoke == 1 &&
-				gMetrics.sceneKinematicSoftMoved == 1 &&
-				gMetrics.sceneKinematicContactObserved == 1 &&
-				gMetrics.sceneKinematicMaxPoseError <= 1.0e-4f &&
-				gMetrics.sceneKinematicSoftDisplacement > 0.02f &&
-				PxIsFinite(gMetrics.sceneKinematicFinalY) &&
-				PxAbs(
-					gMetrics.sceneKinematicFinalY - 4.10f) <=
-						1.0e-4f &&
-				gMetrics.maxParticleSpeed < 2.0f &&
-				gMetrics.finalMaxParticleSpeed < 0.5f &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReleased == 1;
-		}
-		if(dynamicBoxCase)
-		{
-			const bool dynamicPassed =
-				gMetrics.sceneStatics ==
-					(dynamicSmoothCase ? 1u : 0u) &&
-				gMetrics.rigidContactFrames > 0 &&
-				gMetrics.maxRigidContacts > 0 &&
-				gMetrics.maxCentroidDrop > 0.5f &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReleased == 1 &&
-				gMetrics.sceneDynamicInitiallySleeping == 1 &&
-				gMetrics.sceneDynamicWokeBySoft == 1 &&
-				gMetrics.sceneDynamicFirstWakeFrame != PX_MAX_U32 &&
-				PxIsFinite(gMetrics.sceneDynamicMinY) &&
-				PxIsFinite(gMetrics.sceneDynamicFinalY) &&
-				(dynamicConvexCase
-					? (gMetrics.sceneDynamicMaxDrop > 5.0e-4f &&
-					   gSceneCpuDynamicInitialY -
-						gMetrics.sceneDynamicFinalY > 5.0e-4f)
-					: (gMetrics.sceneDynamicMaxDrop > 0.05f &&
-					   gSceneCpuDynamicInitialY -
-						gMetrics.sceneDynamicFinalY > 0.05f)) &&
-				(dynamicCapsuleCase || dynamicConvexCase ||
-					gMetrics.sceneDynamicPreContactMaxDrop <
-						1.0e-4f) &&
-				gMetrics.sceneDynamicMaxDownSpeed >
-					(dynamicConvexCase ? 1.0e-4f : 0.01f) &&
-				PxIsFinite(
-					gMetrics.minDynamicSurfaceSeparation) &&
-				gMetrics.minDynamicSurfaceSeparation > -0.15f &&
-				PxIsFinite(
-					gMetrics.finalDynamicSurfaceSeparation) &&
-				gMetrics.finalDynamicSurfaceSeparation > -0.15f &&
-				(!dynamicSmoothCase ||
-					(dynamicConvexCase
-						? (gMetrics.finalMinY > -0.15f &&
-						   gMetrics.maxParticleSpeed < 10.0f &&
-						   gMetrics.finalMaxParticleSpeed < 0.75f &&
-						   gMetrics.sceneDynamicMaxDownSpeed < 5.0f &&
-						   gMetrics.sceneDynamicFinalY > 0.90f &&
-						   gMetrics.sceneDynamicFinalY < 1.10f)
-						: (gMetrics.finalMinY > -0.15f &&
-						   gMetrics.maxParticleSpeed < 10.0f &&
-						   gMetrics.finalMaxParticleSpeed < 0.5f &&
-						   gMetrics.sceneDynamicMaxDownSpeed < 5.0f &&
-						   gMetrics.sceneDynamicFinalY > 0.70f &&
-						   gMetrics.sceneDynamicFinalY < 0.90f)));
-			if(!dynamicPassed)
-				return false;
-			if(twoDynamicActorsCase)
-			{
-				const bool secondDynamicPassed =
-					gMetrics.sceneSecondDynamicActorAdded == 1 &&
-					gMetrics.sceneSecondDynamicActorRemoved == 1 &&
-					gMetrics.sceneSecondDynamicActorReleased == 1 &&
-					gMetrics.sceneSecondDynamicInitiallySleeping == 1 &&
-					gMetrics.sceneSecondDynamicWokeBySoft == 1 &&
-					gMetrics.sceneSecondDynamicFirstWakeFrame !=
-						PX_MAX_U32 &&
-					gMetrics.sceneSecondDynamicFirstWakeFrame ==
-						gMetrics.sceneDynamicFirstWakeFrame &&
-					PxIsFinite(gMetrics.sceneSecondDynamicMinY) &&
-					PxIsFinite(gMetrics.sceneSecondDynamicFinalY) &&
-					gMetrics.sceneSecondDynamicMaxDrop > 0.01f &&
-					gMetrics.sceneSecondDynamicPreContactMaxDrop <
-						1.0e-4f &&
-					gMetrics.sceneSecondDynamicMaxDownSpeed > 0.01f &&
-					gMetrics.sceneDynamicMaxDownSpeed < 6.0f &&
-					gMetrics.sceneSecondDynamicMaxDownSpeed < 6.0f;
-				if(!secondDynamicPassed)
-					return false;
-				if(!multiSoftIslandCase)
-					return true;
-				return
-					gMetrics.sceneSecondVolumeActorCreated == 1 &&
-					gMetrics.
-						sceneSecondVolumeHostBuffersInitialized == 1 &&
-					gMetrics.sceneSecondVolumeActorAdded == 1 &&
-					gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-					gMetrics.sceneSecondVolumeActorReleased == 1 &&
-					gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-					gMetrics.
-						sceneSecondVolumeMaxCentroidDrop > 0.5f &&
-					PxIsFinite(
-						gMetrics.
-							sceneSecondVolumeFinalCentroidY) &&
-					gMetrics.finalMinY > -10.0f &&
-					gMetrics.finalMaxParticleSpeed < 1.0e-4f;
-			}
-			if(!dynamicChurnCase)
-				return true;
-			return
-				gMetrics.sceneDynamicShapeDetached == 1 &&
-				gMetrics.sceneDynamicShapeReattached == 1 &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReadded == 1 &&
-				gMetrics.sceneDynamicReaddedSleeping == 1 &&
-				gMetrics.sceneDynamicRewokeBySoft == 1 &&
-				gMetrics.sceneDynamicSecondWakeFrame >
-					gMetrics.sceneDynamicFirstWakeFrame &&
-				gMetrics.sceneDynamicSecondWakeFrame <
-					gMetrics.completedFrames;
-		}
-		if(softSleepWakeCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneSoftInitiallyAwake == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneSoftFirstSleepFrame <
-					gMetrics.completedFrames &&
-				gMetrics.sceneSoftSleepWakeCounterZero == 1 &&
-				gMetrics.sceneSoftSleepVelocitiesZero == 1 &&
-				gMetrics.sceneSoftStableWhileSleeping == 1 &&
-				gMetrics.sceneSoftCounterWakeIssued == 1 &&
-				gMetrics.sceneSoftWokeByCounter == 1 &&
-				gMetrics.sceneSoftCounterWakeFrame >
-					gMetrics.sceneSoftFirstSleepFrame &&
-				gMetrics.sceneSoftSecondSlept == 1 &&
-				gMetrics.sceneSoftSecondSleepFrame >
-					gMetrics.sceneSoftCounterWakeFrame &&
-				gMetrics.sceneSoftVelocityWakeIssued == 1 &&
-				gMetrics.sceneSoftWokeByVelocity == 1 &&
-				gMetrics.sceneSoftVelocityWakeFrame >
-					gMetrics.sceneSoftSecondSleepFrame &&
-				gMetrics.sceneSoftMovedAfterVelocityWake == 1 &&
-				gMetrics.sceneSoftVelocityStopIssued == 1 &&
-				gMetrics.sceneSoftFinalSlept == 1 &&
-				gMetrics.sceneSoftFinalSleepFrame >
-					gMetrics.sceneSoftVelocityWakeFrame &&
-				gMetrics.maxParticleSpeed < 3.0f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-6f;
-		}
-		if(softRigidWakeCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneSoftInitiallyAwake == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneSoftFirstSleepFrame <
-					gMetrics.completedFrames &&
-				gMetrics.sceneSoftSleepWakeCounterZero == 1 &&
-				gMetrics.sceneSoftSleepVelocitiesZero == 1 &&
-				gMetrics.sceneSoftStableWhileSleeping == 1 &&
-				gMetrics.sceneSoftRigidWakeActorAdded == 1 &&
-				gMetrics.sceneDynamicActorAdded == 1 &&
-				gMetrics.sceneDynamicInitiallySleeping == 0 &&
-				gMetrics.sceneSoftWokeByRigid == 1 &&
-				gMetrics.sceneSoftRigidWakeFrame >
-					gMetrics.sceneSoftFirstSleepFrame &&
-				gMetrics.sceneSoftVelocityStopIssued == 1 &&
-				gMetrics.sceneSoftFinalSlept == 1 &&
-				gMetrics.sceneSoftFinalSleepFrame >
-					gMetrics.sceneSoftRigidWakeFrame &&
-				gMetrics.rigidContactFrames > 0 &&
-				gMetrics.maxRigidContacts > 0 &&
-				gMetrics.finalMinY > 3.5f &&
-				gMetrics.maxParticleSpeed < 2.0f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-6f &&
-				gMetrics.sceneDynamicActorRemoved == 1 &&
-				gMetrics.sceneDynamicActorReleased == 1;
-		}
-		if(bufferMutationCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSoftInitiallyAwake == 1 &&
-				gMetrics.sceneSoftFirstSlept == 1 &&
-				gMetrics.sceneSoftFirstSleepFrame <
-					gMetrics.completedFrames &&
-				gMetrics.sceneSoftSleepWakeCounterZero == 1 &&
-				gMetrics.sceneSoftSleepVelocitiesZero == 1 &&
-				gMetrics.sceneSoftStableWhileSleeping == 1 &&
-				gMetrics.sceneBufferMutationIssued == 1 &&
-				gMetrics.sceneBufferMutationWoke == 1 &&
-				gMetrics.sceneBufferMutationApplied == 1 &&
-				gMetrics.sceneBufferDriveIssued == 1 &&
-				gMetrics.sceneBufferPinHeld == 1 &&
-				gMetrics.sceneBufferDynamicMoved == 1 &&
-				gMetrics.sceneBufferInvMassRestored == 1 &&
-				gMetrics.sceneBufferRestoredMoved == 1 &&
-				gMetrics.sceneBufferResetIssued == 1 &&
-				gMetrics.sceneSoftFinalSlept == 1 &&
-				gMetrics.sceneSoftFinalSleepFrame >
-					gMetrics.sceneSoftFirstSleepFrame &&
-				gMetrics.sceneSoftFinalSleepFrame <
-					gMetrics.completedFrames &&
-				gMetrics.finalMinY > 4.0f &&
-				gMetrics.maxParticleSpeed < 3.0f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-6f;
-		}
-		if(worldPinCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneWorldPinCreated == 1 &&
-				gMetrics.sceneWorldPinHeld == 1 &&
-				gMetrics.sceneWorldPinActorReadded == 1 &&
-				gMetrics.sceneWorldPinReleased == 1 &&
-				gMetrics.sceneWorldPinMovedAfterRelease == 1 &&
-				gMetrics.sceneWorldPinMaxDrift <= 1.0e-4f &&
-				gMetrics.
-					sceneWorldPinReleasedMaxDisplacement >
-						1.0e-3f;
-		}
-		if(attachmentCase)
-		{
-			if(articulationAttachmentCase)
-			{
-				return
-					gMetrics.sceneStatics == 0 &&
-					gMetrics.sceneDynamics == 0 &&
-					gMetrics.sceneArticulationCreated == 1 &&
-					gMetrics.sceneArticulationAdded == 1 &&
-					gMetrics.sceneArticulationInitiallySleeping == 1 &&
-					gMetrics.sceneArticulationWoke == 1 &&
-					gMetrics.sceneArticulationJointSubspaceHeld == 1 &&
-					gMetrics.sceneArticulationRootStable == 1 &&
-					gMetrics.sceneRigidAttachmentActorAdded == 1 &&
-					gMetrics.
-						sceneRigidAttachmentInitiallySleeping == 1 &&
-					gMetrics.sceneRigidAttachmentCreated == 1 &&
-					gMetrics.sceneRigidAttachmentRigidMoved == 1 &&
-					gMetrics.
-						sceneRigidAttachmentHeldAcrossReadd == 1 &&
-					gMetrics.sceneRigidAttachmentReleased == 1 &&
-					gMetrics.
-						sceneRigidAttachmentSeparatedAfterRelease == 1 &&
-					gMetrics.sceneRigidAttachmentMaxDrift < 0.05f &&
-					gMetrics.sceneRigidAttachmentMaxRigidSpeed < 5.0f &&
-					gMetrics.
-						sceneRigidAttachmentMaxRigidDisplacement >
-							0.02f &&
-					gMetrics.
-						sceneRigidAttachmentReleasedSeparation > 0.2f &&
-					gMetrics.
-						sceneArticulationRootMaxDisplacement <=
-							1.0e-4f &&
-					gMetrics.
-						sceneArticulationChildMaxForbiddenDisplacement <=
-							1.0e-3f &&
-					gMetrics.
-						sceneArticulationChildMaxAngularDisplacement <=
-							1.0e-3f &&
-					gMetrics.maxParticleSpeed < 20.0f &&
-					gMetrics.finalMaxParticleSpeed < 2.0f;
-			}
-			return
-				gMetrics.sceneStatics ==
-					(staticAttachmentCase ? 1u : 0u) &&
-				gMetrics.sceneDynamics ==
-					(staticAttachmentCase ? 0u : 1u) &&
-				gMetrics.sceneRigidAttachmentActorAdded == 1 &&
-				gMetrics.
-					sceneRigidAttachmentInitiallySleeping == 1 &&
-				gMetrics.sceneRigidAttachmentCreated == 1 &&
-				(!rigidAttachmentCase ||
-					gMetrics.sceneRigidAttachmentRigidWoke == 1) &&
-				gMetrics.sceneRigidAttachmentRigidMoved == 1 &&
-				gMetrics.
-					sceneRigidAttachmentHeldAcrossReadd == 1 &&
-				gMetrics.sceneRigidAttachmentReleased == 1 &&
-				gMetrics.
-					sceneRigidAttachmentSeparatedAfterRelease == 1 &&
-				gMetrics.sceneRigidAttachmentMaxDrift < 0.05f &&
-				gMetrics.sceneRigidAttachmentMaxRigidSpeed < 5.0f &&
-				gMetrics.sceneRigidAttachmentMaxRigidDisplacement >
-					0.02f &&
-				(!(kinematicAttachmentCase ||
-					staticAttachmentCase) ||
-					(gMetrics.sceneKinematicActorAdded == 1 &&
-					 gMetrics.sceneSoftFirstSlept == 1 &&
-					 gMetrics.sceneKinematicTargetIssued == 1 &&
-					 gMetrics.sceneKinematicTargetReached == 1 &&
-					 gMetrics.sceneKinematicSoftWoke == 1 &&
-					 gMetrics.sceneKinematicSoftMoved == 1 &&
-					 gMetrics.sceneKinematicMaxPoseError <=
-						1.0e-4f &&
-					 gMetrics.sceneKinematicSoftDisplacement >
-						0.02f &&
-					 gMetrics.maxParticleSpeed < 20.0f &&
-					 gMetrics.finalMaxParticleSpeed < 2.0f)) &&
-				gMetrics.
-					sceneRigidAttachmentReleasedSeparation > 0.2f &&
-				(staticAttachmentCase ||
-				 (gMetrics.sceneDynamicActorRemoved == 1 &&
-				  gMetrics.sceneDynamicActorReleased == 1));
-		}
-		if(elementFilterCase)
-		{
-			gMetrics.sceneElementFilterContactRestored =
-				gMetrics.sceneElementFilterReleased == 1 &&
-				PxIsFinite(gMetrics.sceneElementFilterFinalMinY) &&
-				gMetrics.sceneElementFilterFinalMinY > -0.05f &&
-				gMetrics.sceneElementFilterFinalMinY < 0.05f &&
-				gMetrics.finalMaxParticleSpeed < 0.1f
-					? 1u : 0u;
-			gMetrics.scenePartialFilterExactOwnership =
-				partialElementFilterCase &&
-				gMetrics.sceneElementFilterSuppressedContact == 1 &&
-				gMetrics.
-					scenePartialFilterUnfilteredContactHeld == 1 &&
-				PxIsFinite(
-					gMetrics.scenePartialFilterUnfilteredMinY) &&
-				gMetrics.scenePartialFilterUnfilteredMinY > -0.05f
-					? 1u : 0u;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneElementFilterCreated == 1 &&
-				gMetrics.sceneElementFilterActorReadded == 1 &&
-				gMetrics.
-					sceneElementFilterSuppressedContact == 1 &&
-				gMetrics.sceneElementFilterReleased == 1 &&
-				gMetrics.sceneElementFilterContactRestored == 1 &&
-				gMetrics.sceneElementFilterMinY < -0.2f &&
-				gMetrics.sceneElementFilterFinalMinY > -0.05f &&
-				gMetrics.sceneElementFilterFinalMinY < 0.05f &&
-				(!partialElementFilterCase ||
-					(gMetrics.
-						scenePartialFilterExactOwnership == 1 &&
-					 gMetrics.
-						scenePartialFilterUnfilteredMinY > -0.05f));
-		}
-		if(mixedSleepIslandCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneMixedFirstSlept == 1 &&
-				gMetrics.sceneMixedFirstSleepFrame <
-					gMetrics.completedFrames &&
-				gMetrics.sceneMixedFirstStable == 1 &&
-				gMetrics.sceneMixedSecondStayedAwake == 1 &&
-				gMetrics.sceneMixedSecondMoved == 1 &&
-				gMetrics.finalMinY > 3.5f &&
-				gMetrics.finalMaxParticleSpeed < 0.3f;
-		}
-		if(softChurnCase)
-		{
-			return
-				gMetrics.sceneStatics == 0 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneSecondVolumeActorCreated == 1 &&
-				gMetrics.
-					sceneSecondVolumeHostBuffersInitialized == 1 &&
-				gMetrics.sceneSecondVolumeActorAdded == 1 &&
-				gMetrics.sceneSecondVolumeActorRemoved == 1 &&
-				gMetrics.sceneSecondVolumeActorReleased == 1 &&
-				gMetrics.sceneSecondVolumeBoundsFinite == 1 &&
-				gMetrics.sceneSoftChurnCycles > 0 &&
-				gMetrics.sceneSoftChurnRemoveCount ==
-					2 * gMetrics.sceneSoftChurnCycles &&
-				gMetrics.sceneSoftChurnReaddCount ==
-					2 * gMetrics.sceneSoftChurnCycles &&
-				gMetrics.sceneSoftChurnPostCompactMoveCount ==
-					2 * gMetrics.sceneSoftChurnCycles &&
-				gMetrics.sceneSoftChurnStable == 1 &&
-				gMetrics.finalMinY > 3.5f &&
-				gMetrics.finalMaxParticleSpeed < 1.0e-4f;
-		}
-		if(caseName == "scene-volume-lifecycle" ||
-			caseName == "scene-volume-corotational")
-			return gMetrics.sceneStatics == 0;
-		if(caseName == "scene-volume-ground")
-		{
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.groundContactFrames > 0 &&
-				gMetrics.maxGroundContacts > 0 &&
-				gMetrics.maxCentroidDrop > 2.0f &&
-				gMetrics.finalMinY > -0.1f;
-		}
-		if(groundEmbeddedTetProbeCase)
-		{
-			const SceneCpuGroundEmbeddedTetProbeMetrics& probeMetrics =
-				gSceneCpuGroundEmbeddedTetProbeMetrics;
-			const bool volumeHealthPassed =
-				gMetrics.nonFiniteParticleSamples == 0 &&
-				gMetrics.invertedElementSamples == 0 &&
-				PxIsFinite(gMetrics.minDetF) &&
-				gMetrics.minDetF > 0.05f &&
-				PxIsFinite(gMetrics.maxDetF) &&
-				gMetrics.maxDetF < 20.0f &&
-				PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-				gMetrics.minBodyVolumeRatio > 0.05f &&
-				PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-				gMetrics.maxBodyVolumeRatio < 20.0f;
-			const bool rotationEvidence =
-				probeMetrics.contactTelemetryEnabled == 1 &&
-				probeMetrics.hasPreGroundSample == 1 &&
-				probeMetrics.firstGroundContactFrame != PX_MAX_U32 &&
-				probeMetrics.lastGroundContactFrame >=
-					probeMetrics.firstGroundContactFrame &&
-				probeMetrics.peakGroundRollFrame >=
-					probeMetrics.firstGroundContactFrame &&
-				probeMetrics.peakGroundRollFrame <=
-					probeMetrics.lastGroundContactFrame &&
-				probeMetrics.groundContactWindowFrames > 0 &&
-				probeMetrics.generatedGroundContacts > 0 &&
-				probeMetrics.generatedRigidContacts == 0 &&
-				probeMetrics.generatedSoftContacts == 0 &&
-				probeMetrics.generatedSelfContacts == 0 &&
-				probeMetrics.initialMass > 0.0f &&
-				probeMetrics.initialRmsRadius > 0.0f &&
-				probeMetrics.launchSpeed > 0.0f &&
-				probeMetrics.preGroundAngularMomentum.isFinite() &&
-				probeMetrics.preGroundAngularVelocity.isFinite() &&
-				probeMetrics.peakDeltaAngularMomentum.isFinite() &&
-				probeMetrics.peakDeltaAngularVelocity.isFinite() &&
-				PxIsFinite(probeMetrics.peakNormalizedRollMomentum) &&
-				PxIsFinite(probeMetrics.peakNormalizedRollOmega) &&
-				probeMetrics.peakNormalizedRollMomentum >
-					SCENE_CPU_GROUND_EMBEDDED_TET_PROBE_MIN_NORMALIZED_ROLL &&
-				probeMetrics.peakNormalizedRollOmega >
-					SCENE_CPU_GROUND_EMBEDDED_TET_PROBE_MIN_NORMALIZED_ROLL;
-			return
-				gMetrics.sceneStatics == 1 &&
-				gMetrics.sceneDynamics == 0 &&
-				gMetrics.sceneDeformableVolumes == 1 &&
-				gMetrics.particles == 4 &&
-				gMetrics.softBodies == 1 &&
-				gMetrics.tetElements == 1 &&
-				gMetrics.surfaceTriangles == 4 &&
-				probeMetrics.initialized &&
-				probeMetrics.distinctCollisionSimulation == 1 &&
-				probeMetrics.strictInteriorEmbedding == 1 &&
-				probeMetrics.selfCollisionDisabled == 1 &&
-				probeMetrics.speculativeCcdDisabled == 1 &&
-				gMetrics.groundContactFrames > 0 &&
-				gMetrics.maxGroundContacts > 0 &&
-				gMetrics.rigidContactFrames == 0 &&
-				gMetrics.softContactFrames == 0 &&
-				gMetrics.maxCentroidDrop > 0.2f &&
-				rotationEvidence && volumeHealthPassed;
-		}
-		const bool staticBoxPassed =
-			gMetrics.sceneStatics == 1 &&
-			gMetrics.rigidContactFrames > 0 &&
-			gMetrics.maxRigidContacts > 0 &&
-			gMetrics.maxCentroidDrop > 2.0f &&
-			gMetrics.finalMinY > 0.7f;
-		if(!staticBoxPassed)
-			return false;
-		if(caseName != "scene-volume-static-churn")
-			return true;
-		return
-			gMetrics.sceneStaticShapeDetached == 1 &&
-			gMetrics.sceneStaticShapeReattached == 1 &&
-			gMetrics.sceneStaticActorRemoved == 1 &&
-			gMetrics.sceneStaticActorReadded == 1;
-	}
-
-	const bool denseNoContactCase =
-		isComponentDenseNoContactCase(caseName);
-	const bool manySmallNoContactCase =
-		isComponentManySmallNoContactCase(caseName);
-	const bool noContactCase = denseNoContactCase || manySmallNoContactCase;
-	bool passed =
-		gMetrics.initialized == 1 &&
-		gMetrics.completedFrames == gHeadlessOptions.frames &&
-		gMetrics.fetchFailures == 0 &&
-		gMetrics.nonFiniteParticleSamples == 0 &&
-		gMetrics.invertedElementSamples == 0 &&
-		gMetrics.invalidContactSourceSamples == 0 &&
-		gMetrics.particles > 0 &&
-		gMetrics.softBodies > 0 &&
-		gMetrics.tetElements > 0 &&
-		gMetrics.surfaceTriangles > 0 &&
-		gMetrics.sceneStatics == gMetrics.rigidBoxes +
-			(noContactCase ? 0u : 1u) &&
-		gMetrics.sceneDynamics == 0 &&
-		gMetrics.sceneDeformableVolumes == 0 &&
-		gMetrics.solverReadbackMatched &&
-		gMetrics.cleanupComplete == 1 &&
-		PxIsFinite(gMetrics.minDetF) && gMetrics.minDetF > 0.0f &&
-		PxIsFinite(gMetrics.maxDetF) && gMetrics.maxDetF < 20.0f &&
-		PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-		gMetrics.minBodyVolumeRatio > 0.01f &&
-		PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-		gMetrics.maxBodyVolumeRatio < 20.0f &&
-		PxIsFinite(gMetrics.minY) && gMetrics.minY > -0.25f &&
-		PxIsFinite(gMetrics.maxY) && gMetrics.maxY < 100.0f &&
-		PxIsFinite(gMetrics.maxParticleSpeed) &&
-		gMetrics.maxParticleSpeed < 250.0f &&
-		gErrorCallback.getFatalCount() == 0;
-
-	if(noContactCase)
-	{
-		passed = passed &&
-			gMetrics.softBodies ==
-				(manySmallNoContactCase ? 16u : 1u) &&
-			gMetrics.rigidBoxes == 0 &&
-			gMetrics.groundContactFrames == 0 &&
-			gMetrics.rigidContactFrames == 0 &&
-			gMetrics.softContactFrames == 0 &&
-			gMetrics.maxCentroidDrop <= 1.0e-5f &&
-			gMetrics.maxParticleSpeed <= 1.0e-4f;
-	}
-	else if(caseName == "volume-ground")
-	{
-		passed = passed &&
-			gMetrics.softBodies == 1 &&
-			gMetrics.rigidBoxes == 0 &&
-			gMetrics.groundContactFrames > 0 &&
-			gMetrics.maxGroundContacts > 0 &&
-			gMetrics.rigidContactFrames == 0 &&
-			gMetrics.softContactFrames == 0 &&
-			gMetrics.maxCentroidDrop > 1.0f;
-	}
-	else if(caseName == "volume-static-box")
-	{
-		passed = passed &&
-			gMetrics.softBodies == 1 &&
-			gMetrics.rigidBoxes == 1 &&
-			gMetrics.rigidContactFrames > 0 &&
-			gMetrics.maxRigidContacts > 0 &&
-			gMetrics.softContactFrames == 0 &&
-			gMetrics.maxCentroidDrop > 1.0f &&
-			gMetrics.finalMinY > 0.70f;
-	}
-	else if(caseName == "soft-soft")
-	{
-		passed = passed &&
-			gMetrics.softBodies == 2 &&
-			gMetrics.rigidBoxes == 0 &&
-			gMetrics.softContactFrames > 0 &&
-			gMetrics.maxSoftContacts > 0 &&
-			gMetrics.finalInsideParticles == 0 &&
-			gMetrics.maxCentroidDrop > 1.0f;
-	}
-	else if(caseName == "cone-ground")
-	{
-		passed = passed &&
-			gMetrics.softBodies == 1 &&
-			gMetrics.rigidBoxes == 0 &&
-			gMetrics.groundContactFrames > 0 &&
-			gMetrics.maxGroundContacts > 0 &&
-			gMetrics.rigidContactFrames == 0 &&
-			gMetrics.softContactFrames == 0 &&
-			gMetrics.maxCentroidDrop > 5.0f;
-	}
-	else
-	{
-		passed = passed &&
-			gMetrics.softBodies == 5 &&
-			gMetrics.rigidBoxes == 1 &&
-			gMetrics.groundContactFrames > 0 &&
-			gMetrics.rigidContactFrames > 0 &&
-			gMetrics.softContactFrames > 0 &&
-			gMetrics.maxCentroidDrop > 1.0f;
-	}
-	return passed;
-}
-
-static void finalizePerformanceMetrics()
-{
-	if(gPerformance.stepSamplesMs.empty())
-		return;
-	PxF64 sumStepMs = 0.0;
-	for(PxU32 i = 0; i < gPerformance.stepSamplesMs.size(); ++i)
-		sumStepMs += gPerformance.stepSamplesMs[i];
-	PxSort(
-		gPerformance.stepSamplesMs.begin(),
-		gPerformance.stepSamplesMs.size());
-	gPerformance.avgStepMs = PxReal(
-		sumStepMs / PxF64(gPerformance.stepSamplesMs.size()));
-	const PxU32 last = gPerformance.stepSamplesMs.size() - 1;
-	gPerformance.p50StepMs =
-		gPerformance.stepSamplesMs[PxU32(PxCeil(0.5f * PxReal(last)))];
-	gPerformance.p95StepMs =
-		gPerformance.stepSamplesMs[PxU32(PxCeil(0.95f * PxReal(last)))];
-	gPerformance.maxStepMs = gPerformance.stepSamplesMs[last];
-}
-
-static const char* getAvbdCpuIsaModeName(PxU32 mode)
-{
-	return mode == 0u ? "auto" :
-		(mode == 1u ? "sse2" : (mode == 2u ? "avx2fma" : "invalid"));
-}
-
-static const char* getAvbdCpuIsaCompiledBackendNames(PxU32 mask)
-{
-	return (mask & 2u) ? "sse2,avx2fma" : "sse2";
-}
-
-static void printPerformanceResult()
-{
-#if PX_DEBUG
-	const char* buildProfile = "debug";
-#elif PX_CHECKED
-	const char* buildProfile = "checked";
-#elif PX_PROFILE
-	const char* buildProfile = "profile";
-#else
-	const char* buildProfile = "release";
-#endif
-	const PxU32 physicalCores = PxThread::getNbPhysicalCores();
-	const bool taskGraphObserved =
-		gPerformance.taskGraphSubmittedSolveTasks > 0 ||
-		gPerformance.taskGraphSerialSolveTasks > 0;
-	const PxU32 peakActiveSoftWorkers = PxMax(
-		gPerformance.taskGraphPeakActiveSolveTasks,
-		gPerformance.taskGraphPeakActiveCausalLayerTasks);
-	const bool softParallel = peakActiveSoftWorkers > 1;
-	const char* softExecution = softParallel ? "parallel" : "serial";
-	const PxU32 softWorkers = softParallel
-		? peakActiveSoftWorkers : 1u;
-	const PxU32 actualSoftWorkers = taskGraphObserved
-		? PxMax(peakActiveSoftWorkers, 1u) : 1u;
-	const char* softScheduler = taskGraphObserved
-		? "sceneTaskgraph" : "componentSerial";
-	const PxF64 divisor = gPerformance.profiledFrames ?
-		PxF64(gPerformance.profiledFrames) : 1.0;
-	const AvbdSoftBodyStepStats& stages = gPerformance.solverStages;
-	const PxF64 solverStageMs =
-		stages.predictionMs + stages.contactIndexMs +
-		stages.bodyPrecomputeMs + stages.bodySolveMs +
-		stages.particleSolveMs + stages.projectionMs + stages.dualMs +
-		stages.redetectMs + stages.velocityMs + stages.frictionMs;
-	const PxF64 closureMs =
-		gPerformance.initialContactMs + gPerformance.solverMs +
-		gPerformance.sceneMs + gPerformance.metricsMs;
-	const PxF64 rigidTriangleSurfaceTaskOverlapProxy =
-		gPerformance.taskGraphRigidTriangleSurfaceContactFanInSpanNanos ?
-			PxF64(gPerformance.taskGraphRigidTriangleSurfaceContactTaskWallNanos) /
-				PxF64(gPerformance.taskGraphRigidTriangleSurfaceContactFanInSpanNanos) :
-			0.0;
-	// A component-serial fixture has no PxScene statistics instance.  Query the
-	// same once-selected process dispatch directly so every AVBD execution path
-	// reports actual rather than Scene-only/default ISA telemetry.
-	PxAvbdCpuIsaTelemetry cpuIsa;
-	PxGetAvbdCpuIsaTelemetry(cpuIsa);
-	const char* requestedIsa = getAvbdCpuIsaModeName(cpuIsa.requestedIsa);
-	const char* selectedIsa = getAvbdCpuIsaModeName(cpuIsa.selectedIsa);
-	const char* compiledIsaBackends =
-		getAvbdCpuIsaCompiledBackendNames(cpuIsa.compiledBackendMask);
-
-	printf(
-		"[AVBD_PERF] schema=2 snippet=" AVBD_VOLUME_SNIPPET_NAME " "
-		"case=%s buildProfile=%s requestedIsa=%s selectedIsa=%s "
-		"compiledIsaBackends=%s fmaSupported=%u fmaUsed=%u "
-		"forceIsaRejected=%u isaKernelSelfTest=%s isaProbeValue=%.9g sceneExecution=%s "
-		"dispatcherThreads=%u physicalCores=%u "
-		"softScheduler=%s softExecution=%s softWorkers=%u "
-		"actualSoftWorkers=%u componentFallbackSteps=%llu "
-		"nativeIslandSteps=%llu "
-		"nativeIslandComponentFallbackOverlapFrames=%llu "
-		"nativeIslandCausalLayerTaskOverlapFrames=%llu "
-		"taskCount=%llu chunkCount=0 barrierCount=%llu "
-		"taskGraphRequestedWorkers=%u taskGraphCompletedTasks=%llu "
-		"taskGraphSerialTasks=%llu taskGraphPureSoftEligibleIslands=%llu "
-		"taskGraphPureSoftEligibleParticles=%llu "
-		"predictionTaskCount=%llu predictionCompletedTasks=%llu "
-		"predictionPeakActiveTasks=%u predictionSerialStages=%llu "
-		"writeBackTaskCount=%llu writeBackCompletedTasks=%llu "
-		"writeBackPeakActiveTasks=%u writeBackSerialStages=%llu "
-		"causalLayerTaskCount=%llu causalLayerCompletedTasks=%llu "
-		"causalLayerPeakActiveTasks=%u causalLayerFanIns=%llu "
-		"causalLayerSerialFallbacks=%llu causalLayerMaxOccupancy=%u "
-		"causalLayerTotalOccupancy=%llu causalLayerParentReductionMs=%.9g "
-		"causalLayerTaskPoolGrowthEvents=%llu "
-		"causalLayerTaskPoolGrowthBytes=%llu "
-		"worldPlaneContactTaskCount=%llu "
-		"worldPlaneContactCompletedTasks=%llu "
-		"worldPlaneContactPeakActiveTasks=%u "
-		"worldPlaneContactFanIns=%llu "
-		"worldPlaneContactSerialFallbacks=%llu "
-		"rigidBoxSdfContactTaskCount=%llu "
-		"rigidBoxSdfContactCompletedTasks=%llu "
-		"rigidBoxSdfContactPeakActiveTasks=%u "
-		"rigidBoxSdfContactFanIns=%llu "
-		"rigidBoxSdfContactSerialFallbacks=%llu "
-		"rigidSphereSdfContactTaskCount=%llu "
-		"rigidSphereSdfContactCompletedTasks=%llu "
-		"rigidSphereSdfContactPeakActiveTasks=%u "
-		"rigidSphereSdfContactFanIns=%llu "
-		"rigidSphereSdfContactSerialFallbacks=%llu "
-		"rigidCapsuleSdfContactTaskCount=%llu "
-		"rigidCapsuleSdfContactCompletedTasks=%llu "
-		"rigidCapsuleSdfContactPeakActiveTasks=%u "
-		"rigidCapsuleSdfContactFanIns=%llu "
-		"rigidCapsuleSdfContactSerialFallbacks=%llu "
-		"rigidConvexSdfContactTaskCount=%llu "
-		"rigidConvexSdfContactCompletedTasks=%llu "
-		"rigidConvexSdfContactPeakActiveTasks=%u "
-		"rigidConvexSdfContactFanIns=%llu "
-		"rigidConvexSdfContactSerialFallbacks=%llu "
-		"rigidTriangleSurfaceContactTaskCount=%llu "
-		"rigidTriangleSurfaceContactCompletedTasks=%llu "
-		"rigidTriangleSurfaceContactPeakActiveTasks=%u "
-		"rigidTriangleSurfaceContactFanIns=%llu "
-		"rigidTriangleSurfaceContactSerialFallbacks=%llu "
-		"rigidTriangleSurfaceCurrentSdfParticleWorkItems=%llu "
-		"rigidTriangleSurfaceSweptSdfParticleWorkItems=%llu "
-		"rigidTriangleSurfaceFeaturePlanRows=%llu "
-		"rigidTriangleSurfaceFeatureEdgePairWorkItems=%llu "
-		"rigidTriangleSurfaceFeatureFacePairWorkItems=%llu "
-		"rigidTriangleSurfaceFeatureNonEmptyTaskRanges=%llu "
-		"rigidTriangleSurfaceFeatureMaxRowsPerTaskRange=%u "
-		"rigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask=%llu "
-		"rigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask=%llu "
-		"rigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask=%llu "
-		"rigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask=%llu "
-		"rigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask=%llu "
-		"rigidTriangleSurfaceTaskPoolGrowthEvents=%llu "
-		"rigidTriangleSurfaceTaskPoolGrowthBytes=%llu "
-		"rigidTriangleSurfaceOutputGrowthEvents=%llu "
-		"rigidTriangleSurfaceOutputGrowthBytes=%llu "
-		"rigidTriangleSurfaceQueryScratchGrowthEvents=%llu "
-		"rigidTriangleSurfaceQueryScratchGrowthBytes=%llu "
-		"rigidTriangleSurfaceTaskPoolResidentPayloadBytes=%llu "
-		"rigidTriangleSurfaceOutputResidentPayloadBytes=%llu "
-		"rigidTriangleSurfaceQueryScratchResidentPayloadBytes=%llu "
-		"rigidTriangleSurfaceTaskWallMs=%.9g "
-		"rigidTriangleSurfaceMaxTaskWallMs=%.9g "
-		"rigidTriangleSurfaceFanInSpanMs=%.9g "
-		"rigidTriangleSurfaceMaxFanInSpanMs=%.9g "
-		"rigidTriangleSurfaceTaskWallOverlapProxy=%.9g "
-		"rigidTriangleSurfaceSerialTransactionMs=%.9g "
-		"rigidTriangleSurfaceParentCompletionMs=%.9g "
-		"rigidTriangleSurfacePostContinuationMs=%.9g "
-		"rigidTriangleSurfaceTaskSubmissionMs=%.9g "
-		"rigidTriangleSurfacePostSubmitWaitMs=%.9g "
-		"rigidTriangleSurfaceCurrentSdfTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxCurrentSdfTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceSweptSdfTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxSweptSdfTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxFeatureTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptEdgeTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxFeatureSweptEdgeTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptTriangleTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxFeatureSweptTriangleTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureDiscreteEdgeTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxFeatureDiscreteEdgeTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureDiscreteTriangleTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceMaxFeatureDiscreteTriangleTaskLeafMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptEdgeForwardOwnerMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptEdgeBvhRecoveryMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptEdgeNarrowPhaseMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptTriangleForwardOwnerMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptTriangleBvhRecoveryMs=%.9g "
-		"rigidTriangleSurfaceFeatureSweptTriangleNarrowPhaseMs=%.9g "
-		"rigidTriangleSurfaceFeatureForwardOwnerQueryCalls=%llu "
-		"rigidTriangleSurfaceFeatureForwardOwnerUniqueQueries=%llu "
-		"rigidTriangleSurfaceFeatureForwardOwnerCacheHits=%llu "
-		"rigidTriangleSurfaceFeatureForwardOwnerCacheMisses=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates=%llu "
-		"rigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries=%llu "
-		"rigidTriangleSurfaceFeatureRoundRobinTaskFanIns=%llu "
-		"rigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns=%llu "
-		"softPairContactTaskCount=%llu "
-		"softPairContactCompletedTasks=%llu "
-		"softPairContactPeakActiveTasks=%u "
-		"softPairContactFanIns=%llu "
-		"softPairContactSerialFallbacks=%llu "
-		"taskWorkMs=0 longestTaskMs=0 staticColorCount=0 dynamicColorCount=0 "
-		"p4ColorPlanCount=%u p4DynamicAccessGroupCount=%u "
-		"p4ColoredSerialSweeps=%llu p4ColoredSerialFallbackSweeps=%llu "
-		"p8CensusParticleSolves=%llu p8CensusTriEvaluations=%llu "
-		"p8CensusCorotationalTetEvaluations=%llu "
-		"p8CensusNeoHookeanTetEvaluations=%llu "
-		"p8CensusBendingEvaluations=%llu p8CensusContactEvaluations=%llu "
-		"p8CensusTetPacket8FullPackets=%llu "
-		"p8CensusTetPacket8TailLanes=%llu "
-		"p8TetIrBodies=%llu p8TetIrPackets=%llu "
-		"p8TetIrActiveLanes=%llu p8TetIrTailLanes=%llu "
-		"p8TetIrActiveTailLanes=%llu "
-		"p8TetIrInvalidBodies=%llu hostWritebackMeasured=0 "
-		"cpuSkinningMs=0 cpuSkinningMeasured=0 "
-		"topologySoftBodies=%llu topologySoftParticles=%llu "
-		"topologyTriElements=%llu topologyTetElements=%llu "
-		"topologyBendElements=%llu topologySurfaceTriangles=%llu "
-		"topologySurfaceVertices=%llu topologySurfaceEdges=%llu "
-		"topologyRigidBoxes=%llu topologyRigidTriangleMeshTriangles=%llu "
-		"warmupFrames=%u profileFrames=%u "
-		"avgStepMs=%.9g p50StepMs=%.9g p95StepMs=%.9g maxStepMs=%.9g "
-		"initialContactMs=%.9g solverMs=%.9g sceneMs=%.9g metricsMs=%.9g "
-		"predictionMs=%.9g contactIndexMs=%.9g bodyPrecomputeMs=%.9g "
-		"bodySolveMs=%.9g particleSolveMs=%.9g projectionMs=%.9g "
-		"dualMs=%.9g redetectMs=%.9g velocityMs=%.9g frictionMs=%.9g "
-		"solverUnattributedMs=%.9g closureMs=%.9g "
-		"requestedOuterIterations=%llu requestedInnerIterations=%llu "
-		"executedOuterIterations=%llu executedInnerIterations=%llu "
-		"particleSweeps=%llu "
-		"convergenceAuthority=localSolveResidualConsecutive "
-		"convergenceTolerance=0.0001 convergenceSweeps=2 "
-		"trustRegionLimitedParticleSteps=%llu "
-		"positiveJLimitedParticleSteps=%llu "
-		"positiveJRejectedParticleSteps=%llu "
-		"nonFiniteRejectedParticleSteps=%llu "
-		"tetLinearizationCacheFallbackParticleSteps=%llu "
-		"legacyAppliedConvergedOuterIterations=%llu "
-		"residualConvergedOuterIterations=%llu "
-		"unsafeAppliedConvergenceCandidates=%llu "
-		"budgetExhaustedOuterIterations=%llu "
-		"shadowResidual1e5ConvergedOuterIterations=%llu "
-		"shadowResidual1e5SavedInnerIterations=%llu "
-		"shadowResidual1e4ConvergedOuterIterations=%llu "
-		"shadowResidual1e4SavedInnerIterations=%llu "
-		"workspaceGrowthEvents=%llu "
-		"workspaceGrowthBytes=%llu contactWorkspaceGrowthEvents=%llu "
-		"contactWorkspaceGrowthBytes=%llu contactOutputGrowthEvents=%llu "
-		"contactOutputGrowthBytes=%llu finalMaxDisplacement=%.9g "
-		"finalMaxLocalSolveDisplacement=%.9g "
-		"finalMaxAppliedDisplacement=%.9g "
-		"detectionCalls=%llu bodyPairs=%llu overlappingBodyPairs=%llu "
-		"particleSurfaceCandidates=%llu insideTriangleTests=%llu "
-		"closestTriangleTests=%llu selfTriangleTests=%llu "
-		"rigidParticleBoxTests=%llu rigidParticleTests=%llu "
-		"rigidTriangleFaceCandidates=%llu rigidTriangleFaceTests=%llu "
-		"rigidTriangleEdgeCandidates=%llu rigidTriangleEdgeTests=%llu "
-		"rigidTriangleVertexCandidates=%llu rigidTriangleVertexTests=%llu "
-		"generatedGroundContacts=%llu "
-		"generatedRigidContacts=%llu generatedSoftContacts=%llu "
-		"generatedSelfContacts=%llu rigidParticleSphereTests=%llu "
-		"rigidParticleCapsuleTests=%llu rigidParticleConvexTests=%llu "
-		"rigidParticleTriangleSurfaceTests=%llu\n",
-		gHeadlessOptions.caseName.c_str(), buildProfile,
-		requestedIsa, selectedIsa, compiledIsaBackends,
-		(cpuIsa.capabilityMask & PxAvbdCpuIsaCapabilityFlag::eFMA) ? 1u : 0u,
-		cpuIsa.fmaUsed,
-		cpuIsa.forceModeRejected,
-		cpuIsa.kernelSelfTestPassed ? "pass" : "fail",
-		double(cpuIsa.kernelSelfTestValue),
-		Snippets::getExecutionName(gHeadlessOptions.execution),
-		gHeadlessOptions.dispatcherThreads, physicalCores,
-		softScheduler, softExecution, softWorkers, actualSoftWorkers,
-		static_cast<unsigned long long>(gPerformance.componentFallbackSteps),
-		static_cast<unsigned long long>(gPerformance.nativeIslandSteps),
-		static_cast<unsigned long long>(
-			gPerformance.nativeIslandComponentFallbackOverlapFrames),
-		static_cast<unsigned long long>(
-			gPerformance.nativeIslandCausalLayerTaskOverlapFrames),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedSolveTasks),
-		static_cast<unsigned long long>(gPerformance.taskGraphBarrierTasks),
-		gPerformance.taskGraphRequestedDispatcherWorkers,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedSolveTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialSolveTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphPureSoftEligibleIslands),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphPureSoftEligibleParticles),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedPredictionTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedPredictionTasks),
-		gPerformance.taskGraphPeakActivePredictionTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialPredictionStages),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedWriteBackTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedWriteBackTasks),
-		gPerformance.taskGraphPeakActiveWriteBackTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialWriteBackStages),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedCausalLayerTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedCausalLayerTasks),
-		gPerformance.taskGraphPeakActiveCausalLayerTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCausalLayerFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialCausalLayerFallbacks),
-		gPerformance.taskGraphMaxCausalLayerOccupancy,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphTotalCausalLayerOccupancy),
-		double(gPerformance.taskGraphCausalLayerParentReductionNanos) /
-			1.0e6,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCausalLayerTaskPoolGrowthEvents),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCausalLayerTaskPoolGrowthBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedWorldPlaneContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedWorldPlaneContactTasks),
-		gPerformance.taskGraphPeakActiveWorldPlaneContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphWorldPlaneContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialWorldPlaneContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedRigidBoxSdfContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedRigidBoxSdfContactTasks),
-		gPerformance.taskGraphPeakActiveRigidBoxSdfContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidBoxSdfContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialRigidBoxSdfContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedRigidSphereSdfContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedRigidSphereSdfContactTasks),
-		gPerformance.taskGraphPeakActiveRigidSphereSdfContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidSphereSdfContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialRigidSphereSdfContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedRigidCapsuleSdfContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedRigidCapsuleSdfContactTasks),
-		gPerformance.taskGraphPeakActiveRigidCapsuleSdfContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidCapsuleSdfContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialRigidCapsuleSdfContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedRigidConvexSdfContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedRigidConvexSdfContactTasks),
-		gPerformance.taskGraphPeakActiveRigidConvexSdfContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidConvexSdfContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialRigidConvexSdfContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedRigidTriangleSurfaceContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedRigidTriangleSurfaceContactTasks),
-		gPerformance.taskGraphPeakActiveRigidTriangleSurfaceContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialRigidTriangleSurfaceContactFallbacks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeaturePlanRows),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureFacePairWorkItems),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges),
-		gPerformance.taskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceTaskPoolGrowthEvents),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceTaskPoolGrowthBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceOutputGrowthEvents),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceOutputGrowthBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceQueryScratchGrowthEvents),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceQueryScratchGrowthBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceOutputResidentPayloadBytes),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes),
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactTaskWallNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxTaskWallNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFanInSpanNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos) /
-			1.0e6,
-		double(rigidTriangleSurfaceTaskOverlapProxy),
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactSerialTransactionNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactParentCompletionNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactPostContinuationNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactTaskSubmissionNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos) /
-			1.0e6,
-		double(gPerformance.taskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos) /
-			1.0e6,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSubmittedSoftPairContactTasks),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphCompletedSoftPairContactTasks),
-		gPerformance.taskGraphPeakActiveSoftPairContactTasks,
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSoftPairContactFanIns),
-		static_cast<unsigned long long>(
-			gPerformance.taskGraphSerialSoftPairContactFallbacks),
-		stages.particlePrimalColorCount,
-		stages.particlePrimalDynamicAccessGroupCount,
-		static_cast<unsigned long long>(
-			stages.particlePrimalColoredSerialSweeps),
-		static_cast<unsigned long long>(
-			stages.particlePrimalColoredSerialFallbackSweeps),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusDynamicParticleSolves),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusTriangleEvaluations),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusCorotationalTetEvaluations),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusNeoHookeanTetEvaluations),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusBendingEvaluations),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusContactEvaluations),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusTetPacket8FullPackets),
-		static_cast<unsigned long long>(
-			stages.particlePrimalCensusTetPacket8TailLanes),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrBodies),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrPackets),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrActiveLanes),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrTailLanes),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrActiveTailLanes),
-		static_cast<unsigned long long>(
-			stages.particlePrimalTetPacketIrInvalidBodies),
-		static_cast<unsigned long long>(gPerformance.topologySoftBodies),
-		static_cast<unsigned long long>(gPerformance.topologySoftParticles),
-		static_cast<unsigned long long>(gPerformance.topologyTriElements),
-		static_cast<unsigned long long>(gPerformance.topologyTetElements),
-		static_cast<unsigned long long>(gPerformance.topologyBendElements),
-		static_cast<unsigned long long>(gPerformance.topologySurfaceTriangles),
-		static_cast<unsigned long long>(gPerformance.topologySurfaceVertices),
-		static_cast<unsigned long long>(gPerformance.topologySurfaceEdges),
-		static_cast<unsigned long long>(gPerformance.topologyRigidBoxes),
-		static_cast<unsigned long long>(
-			gPerformance.topologyRigidTriangleMeshTriangles),
-		gPerformance.warmupFrames,
-		gPerformance.profiledFrames, double(gPerformance.avgStepMs),
-		double(gPerformance.p50StepMs),
-		double(gPerformance.p95StepMs), double(gPerformance.maxStepMs),
-		double(gPerformance.initialContactMs / divisor),
-		double(gPerformance.solverMs / divisor),
-		double(gPerformance.sceneMs / divisor),
-		double(gPerformance.metricsMs / divisor),
-		double(stages.predictionMs / divisor),
-		double(stages.contactIndexMs / divisor),
-		double(stages.bodyPrecomputeMs / divisor),
-		double(stages.bodySolveMs / divisor),
-		double(stages.particleSolveMs / divisor),
-		double(stages.projectionMs / divisor),
-		double(stages.dualMs / divisor),
-		double(stages.redetectMs / divisor),
-		double(stages.velocityMs / divisor),
-		double(stages.frictionMs / divisor),
-		double((gPerformance.solverMs - solverStageMs) / divisor),
-		double(closureMs / divisor),
-		static_cast<unsigned long long>(stages.requestedOuterIterations),
-		static_cast<unsigned long long>(stages.requestedInnerIterations),
-		static_cast<unsigned long long>(stages.executedOuterIterations),
-		static_cast<unsigned long long>(stages.executedInnerIterations),
-		static_cast<unsigned long long>(stages.particleSweeps),
-		static_cast<unsigned long long>(
-			stages.trustRegionLimitedParticleSteps),
-		static_cast<unsigned long long>(
-			stages.positiveJLimitedParticleSteps),
-		static_cast<unsigned long long>(
-			stages.positiveJRejectedParticleSteps),
-		static_cast<unsigned long long>(
-			stages.nonFiniteRejectedParticleSteps),
-		static_cast<unsigned long long>(
-			stages.tetLinearizationCacheFallbackParticleSteps),
-		static_cast<unsigned long long>(
-			stages.legacyAppliedConvergedOuterIterations),
-		static_cast<unsigned long long>(
-			stages.residualConvergedOuterIterations),
-		static_cast<unsigned long long>(
-			stages.unsafeAppliedConvergenceCandidates),
-		static_cast<unsigned long long>(
-			stages.budgetExhaustedOuterIterations),
-		static_cast<unsigned long long>(
-			stages.shadowResidual1e5ConvergedOuterIterations),
-		static_cast<unsigned long long>(
-			stages.shadowResidual1e5SavedInnerIterations),
-		static_cast<unsigned long long>(
-			stages.shadowResidual1e4ConvergedOuterIterations),
-		static_cast<unsigned long long>(
-			stages.shadowResidual1e4SavedInnerIterations),
-		static_cast<unsigned long long>(stages.workspaceGrowthEvents),
-		static_cast<unsigned long long>(stages.workspaceGrowthBytes),
-		static_cast<unsigned long long>(
-			stages.contactWorkspaceGrowthEvents),
-		static_cast<unsigned long long>(
-			stages.contactWorkspaceGrowthBytes),
-		static_cast<unsigned long long>(
-			stages.contactOutputGrowthEvents),
-		static_cast<unsigned long long>(
-			stages.contactOutputGrowthBytes),
-		double(stages.finalMaxDisplacement),
-		double(stages.finalMaxLocalSolveDisplacement),
-		double(stages.finalMaxAppliedDisplacement),
-		static_cast<unsigned long long>(
-			gPerformance.collision.detectionCalls),
-		static_cast<unsigned long long>(gPerformance.collision.bodyPairs),
-		static_cast<unsigned long long>(
-			gPerformance.collision.overlappingBodyPairs),
-		static_cast<unsigned long long>(
-			gPerformance.collision.particleSurfaceCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.collision.insideTriangleTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.closestTriangleTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.selfTriangleTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidParticleBoxTests),
-		static_cast<unsigned long long>(
-			gPerformance.collisionRigidParticleTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceFaceCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceFaceTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceEdgeCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceEdgeTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceVertexCandidates),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidTriangleSurfaceVertexTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.generatedGroundContacts),
-		static_cast<unsigned long long>(
-			gPerformance.collision.generatedRigidContacts),
-		static_cast<unsigned long long>(
-			gPerformance.collision.generatedSoftContacts),
-		static_cast<unsigned long long>(
-			gPerformance.collision.generatedSelfContacts),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidParticleSphereTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidParticleCapsuleTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidParticleConvexTests),
-		static_cast<unsigned long long>(
-			gPerformance.collision.rigidParticleTriangleSurfaceTests));
-	printf(
-		"[AVBD_WORLD_STATIC_TANGENT_OWNER] rows=%llu appliedRows=%llu\n",
-		static_cast<unsigned long long>(
-			stages.worldStaticVelocityTangentOwnerRows),
-		static_cast<unsigned long long>(
-			stages.worldStaticVelocityTangentAppliedRows));
-}
-
-static void printSceneCpuSphereKinematics(
-	const char* marker, const SceneCpuVisualRotationMetrics& metrics)
-{
-	printf(
-		"[%s] linearVelocity=(%.9g,%.9g,%.9g) "
-		"angularVelocity=(%.9g,%.9g,%.9g) "
-		"lowestOffset=(%.9g,%.9g,%.9g) rigidRollSlipSpeed=%.9g "
-		"groundEpisodes=%u firstGroundFrame=%u secondGroundFrame=%u "
-		"groundActive=%u rollingKinematicsValid=%u\n",
-		marker,
-		double(metrics.finalLinearVelocity.x),
-		double(metrics.finalLinearVelocity.y),
-		double(metrics.finalLinearVelocity.z),
-		double(metrics.finalAngularVelocity.x),
-		double(metrics.finalAngularVelocity.y),
-		double(metrics.finalAngularVelocity.z),
-		double(metrics.finalLowestCollisionOffset.x),
-		double(metrics.finalLowestCollisionOffset.y),
-		double(metrics.finalLowestCollisionOffset.z),
-		double(metrics.finalRigidRollSlipSpeed),
-		metrics.groundContactEpisodes, metrics.firstGroundContactFrame,
-		metrics.secondGroundContactFrame,
-		metrics.groundContactActive ? 1u : 0u,
-		isSceneCpuSphereRollingKinematicsValid() ? 1u : 0u);
-}
-
-static void printHeadlessResult(bool passed)
-{
-	if(gHeadlessOptions.caseName == "scene-volume-sphere-long-roll")
-	{
-		const SceneCpuVisualRotationMetrics& metrics =
-			gSceneCpuVisualSphereRotationMetrics;
-		const PxReal windowMinimum = metrics.windowSampleCount > 0
-			? metrics.windowMinAngularSpeed : 0.0f;
-		const PxF64 windowMean = metrics.windowSampleCount > 0
-			? metrics.windowAngularSpeedSum /
-				PxF64(metrics.windowSampleCount)
-			: 0.0;
-		const PxReal windowLinearMinimum = metrics.windowSampleCount > 0
-			? metrics.windowMinLinearSpeed : 0.0f;
-		const PxF64 windowLinearMean = metrics.windowSampleCount > 0
-			? metrics.windowLinearSpeedSum /
-				PxF64(metrics.windowSampleCount)
-			: 0.0;
-		printf(
-			"[AVBD_SPHERE_LONG_ROLL] frames=%u "
-			"maxOrientationChange=%.9g maxAngularSpeed=%.9g "
-			"maxAngularSpeedFrame=%u finalAngularSpeed=%.9g "
-			"windowBegin=%u windowEnd=%u windowSamples=%u "
-			"windowMinAngularSpeed=%.9g windowMeanAngularSpeed=%.9g "
-			"windowMaxAngularSpeed=%.9g finalLinearSpeed=%.9g "
-			"windowMinLinearSpeed=%.9g windowMeanLinearSpeed=%.9g "
-			"windowMaxLinearSpeed=%.9g longRunBounded=%u "
-			"regressionBounded=%u result=%s\n",
-			gHeadlessOptions.frames,
-			double(metrics.maxOrientationChange),
-			double(metrics.maxAngularSpeed),
-			metrics.maxAngularSpeedFrame,
-			double(metrics.finalAngularSpeed),
-			SCENE_CPU_SPHERE_ROLL_WINDOW_BEGIN_FRAME,
-			SCENE_CPU_SPHERE_ROLL_WINDOW_END_FRAME,
-			metrics.windowSampleCount,
-			double(windowMinimum), double(windowMean),
-			double(metrics.windowMaxAngularSpeed),
-			double(metrics.finalLinearSpeed),
-			double(windowLinearMinimum), double(windowLinearMean),
-			double(metrics.windowMaxLinearSpeed),
-			isSceneCpuVisualSphereLongRunBounded() ? 1u : 0u,
-			isSceneCpuSphereLongRollRegressionPassed() ? 1u : 0u,
-			passed ? "PASS" : "FAIL");
-		printSceneCpuSphereKinematics(
-			"AVBD_SPHERE_LONG_ROLL_KINEMATICS", metrics);
-		for(PxU32 bodyIndex = 0; bodyIndex < 2u; ++bodyIndex)
-		{
-			const SceneCpuVisualBodyHealthMetrics& bodyMetrics =
-				gSceneCpuVisualBodyHealthMetrics[bodyIndex];
-			printf(
-				"[AVBD_SPHERE_LONG_ROLL_BODY_HEALTH] body=%s index=%u "
-				"minDetF=%.9g maxDetF=%.9g minVolumeRatio=%.9g "
-				"maxVolumeRatio=%.9g finalMinDetF=%.9g "
-				"finalMaxDetF=%.9g finalVolumeRatio=%.9g\n",
-				bodyIndex == 0u ? "impactor" : "sphere", bodyIndex,
-				double(bodyMetrics.minDetF), double(bodyMetrics.maxDetF),
-				double(bodyMetrics.minVolumeRatio),
-				double(bodyMetrics.maxVolumeRatio),
-				double(bodyMetrics.finalMinDetF),
-				double(bodyMetrics.finalMaxDetF),
-				double(bodyMetrics.finalVolumeRatio));
-		}
-		for(PxU32 checkpointIndex = 0;
-			checkpointIndex < SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT;
-			++checkpointIndex)
-		{
-			const PxU32 checkpointFrame =
-				(checkpointIndex + 1) *
-					SCENE_CPU_SPHERE_ROLL_CHECKPOINT_INTERVAL;
-			if(checkpointFrame > gMetrics.completedFrames)
-				break;
-			printf(
-				"[AVBD_SPHERE_LONG_ROLL_CHECKPOINT] frame=%u "
-				"angularSpeed=%.9g linearSpeed=%.9g centroidY=%.9g\n",
-				checkpointFrame,
-				double(metrics.checkpointAngularSpeeds[checkpointIndex]),
-				double(metrics.checkpointLinearSpeeds[checkpointIndex]),
-				double(metrics.checkpointCentroidY[checkpointIndex]));
-		}
-		const SceneCpuSoftContactPhaseMetrics& phaseMetrics =
-			gSceneCpuSoftContactPhaseMetrics;
-		const PxReal deltaAngularMomentum = PxMax(0.0f,
-			phaseMetrics.peakSoftContactAngularMomentum -
-				phaseMetrics.preSoftAngularMomentum);
-		const PxReal deltaAngularSpeed = PxMax(0.0f,
-			phaseMetrics.peakSoftContactAngularSpeed -
-				phaseMetrics.preSoftAngularSpeed);
-		printf(
-			"[AVBD_SPHERE_LONG_ROLL_CONTACT_PHASE] initialized=%u "
-			"contactTelemetry=%s preSoftContactSample=%u "
-			"firstSoftContactFrame=%u lastSoftContactFrame=%u "
-			"peakSoftContactFrame=%u softContactFrames=%u "
-			"generatedGroundContacts=%llu generatedSoftContacts=%llu "
-			"preSoftAngularMomentum=%.9g preSoftAngularSpeed=%.9g "
-			"peakSoftContactAngularMomentum=%.9g "
-			"peakSoftContactAngularSpeed=%.9g "
-			"lastSoftContactAngularMomentum=%.9g "
-			"lastSoftContactAngularSpeed=%.9g "
-			"finalPostSoftAngularMomentum=%.9g "
-			"finalPostSoftAngularSpeed=%.9g "
-			"deltaAngularMomentum=%.9g deltaAngularSpeed=%.9g\n",
-			phaseMetrics.initialized ? 1u : 0u,
-			phaseMetrics.contactTelemetryEnabled ? "enabled" : "disabled",
-			phaseMetrics.hasPreSoftContactSample ? 1u : 0u,
-			phaseMetrics.firstSoftContactFrame,
-			phaseMetrics.lastSoftContactFrame,
-			phaseMetrics.peakSoftContactFrame,
-			phaseMetrics.softContactFrames,
-			static_cast<unsigned long long>(
-				phaseMetrics.generatedGroundContacts),
-			static_cast<unsigned long long>(
-				phaseMetrics.generatedSoftContacts),
-			double(phaseMetrics.preSoftAngularMomentum),
-			double(phaseMetrics.preSoftAngularSpeed),
-			double(phaseMetrics.peakSoftContactAngularMomentum),
-			double(phaseMetrics.peakSoftContactAngularSpeed),
-			double(phaseMetrics.lastSoftContactAngularMomentum),
-			double(phaseMetrics.lastSoftContactAngularSpeed),
-			double(phaseMetrics.finalPostSoftAngularMomentum),
-			double(phaseMetrics.finalPostSoftAngularSpeed),
-			double(deltaAngularMomentum), double(deltaAngularSpeed));
-	}
-	if(gHeadlessOptions.caseName ==
-		"scene-volume-sphere-soft-soft-glancing")
-	{
-		const SceneCpuVisualRotationMetrics& metrics =
-			gSceneCpuVisualSphereRotationMetrics;
-		const SceneCpuSoftContactPhaseMetrics& phaseMetrics =
-			gSceneCpuSoftContactPhaseMetrics;
-		const PxReal deltaAngularMomentum = PxMax(0.0f,
-			phaseMetrics.peakSoftContactAngularMomentum -
-				phaseMetrics.preSoftAngularMomentum);
-		const PxReal deltaAngularSpeed = PxMax(0.0f,
-			phaseMetrics.peakSoftContactAngularSpeed -
-				phaseMetrics.preSoftAngularSpeed);
-		const PxVec3 deltaAngularVelocity =
-			phaseMetrics.peakSoftContactAngularVelocity -
-				phaseMetrics.preSoftAngularVelocity;
-		printf(
-			"[AVBD_SPHERE_SOFT_SOFT_GLANCING] frames=%u "
-			"contactTelemetry=%s preSoftContactSample=%u "
-			"firstSoftContactFrame=%u "
-			"lastSoftContactFrame=%u peakSoftContactFrame=%u "
-			"softContactFrames=%u generatedGroundContacts=%llu "
-			"generatedSoftContacts=%llu preSoftAngularMomentum=%.9g "
-			"preSoftAngularSpeed=%.9g preSoftAngularVelocityX=%.9g "
-			"preSoftAngularVelocityY=%.9g preSoftAngularVelocityZ=%.9g "
-			"peakSoftContactAngularMomentum=%.9g "
-			"peakSoftContactAngularSpeed=%.9g "
-			"peakSoftContactAngularVelocityX=%.9g "
-			"peakSoftContactAngularVelocityY=%.9g "
-			"peakSoftContactAngularVelocityZ=%.9g "
-			"deltaAngularMomentum=%.9g deltaAngularSpeed=%.9g "
-			"deltaAngularVelocityX=%.9g deltaAngularVelocityY=%.9g "
-			"deltaAngularVelocityZ=%.9g maxOrientationChange=%.9g "
-			"maxAngularSpeed=%.9g maxAngularSpeedFrame=%u result=%s\n",
-			gHeadlessOptions.frames,
-			phaseMetrics.contactTelemetryEnabled ? "enabled" : "disabled",
-			phaseMetrics.hasPreSoftContactSample ? 1u : 0u,
-			phaseMetrics.firstSoftContactFrame,
-			phaseMetrics.lastSoftContactFrame,
-			phaseMetrics.peakSoftContactFrame,
-			phaseMetrics.softContactFrames,
-			static_cast<unsigned long long>(
-				phaseMetrics.generatedGroundContacts),
-			static_cast<unsigned long long>(
-				phaseMetrics.generatedSoftContacts),
-			double(phaseMetrics.preSoftAngularMomentum),
-			double(phaseMetrics.preSoftAngularSpeed),
-			double(phaseMetrics.preSoftAngularVelocity.x),
-			double(phaseMetrics.preSoftAngularVelocity.y),
-			double(phaseMetrics.preSoftAngularVelocity.z),
-			double(phaseMetrics.peakSoftContactAngularMomentum),
-			double(phaseMetrics.peakSoftContactAngularSpeed),
-			double(phaseMetrics.peakSoftContactAngularVelocity.x),
-			double(phaseMetrics.peakSoftContactAngularVelocity.y),
-			double(phaseMetrics.peakSoftContactAngularVelocity.z),
-			double(deltaAngularMomentum), double(deltaAngularSpeed),
-			double(deltaAngularVelocity.x),
-			double(deltaAngularVelocity.y),
-			double(deltaAngularVelocity.z),
-			double(metrics.maxOrientationChange),
-			double(metrics.maxAngularSpeed), metrics.maxAngularSpeedFrame,
-			passed ? "PASS" : "FAIL");
-	}
-	if(gHeadlessOptions.caseName == "scene-volume-soft-soft-torque")
-	{
-		const SceneCpuSoftSoftTorqueMetrics& metrics =
-			gSceneCpuSoftSoftTorqueMetrics;
-		const bool retentionPassed =
-			metrics.firstRotationFrame != PX_MAX_U32 &&
-			metrics.retainedRotationSamples >=
-				SCENE_CPU_SOFT_SOFT_TORQUE_MIN_RETENTION_SAMPLES;
-		printf(
-			"[AVBD_SOFT_SOFT_TORQUE] frames=%u isolated=%u "
-			"targetDistinctCollisionSimulation=%u "
-			"driverDistinctCollisionSimulation=%u "
-			"targetSimulationVertices=%u targetCollisionVertices=%u "
-			"driverSimulationVertices=%u driverCollisionVertices=%u "
-			"supportEvidence=embeddedCollisionSimulationTopology "
-			"supportExpansionInstrumentation=%s "
-			"softContactFrames=%u generatedSoftContacts=%llu "
-			"generatedGroundContacts=%llu generatedRigidContacts=%llu "
-			"generatedSelfContacts=%llu firstContactFrame=%u "
-			"firstRotationFrame=%u firstContactCentroidLeverArm=%.9g "
-			"maxCentroidLeverArm=%.9g targetMaxAngularMomentum=%.9g "
-			"targetFinalAngularMomentum=%.9g targetMaxAngularSpeed=%.9g "
-			"targetFinalAngularSpeed=%.9g retainedRotationSamples=%u "
-			"retentionPassed=%u result=%s\n",
-			gHeadlessOptions.frames, metrics.isolatedConfiguration,
-			metrics.targetDistinctCollisionSimulation,
-			metrics.driverDistinctCollisionSimulation,
-			metrics.targetSimulationVertices,
-			metrics.targetCollisionVertices,
-			metrics.driverSimulationVertices,
-			metrics.driverCollisionVertices,
-			metrics.supportExpansionInstrumentationAvailable
-				? "available" : "unavailable",
-			metrics.softContactFrames,
-			static_cast<unsigned long long>(metrics.generatedSoftContacts),
-			static_cast<unsigned long long>(metrics.generatedGroundContacts),
-			static_cast<unsigned long long>(metrics.generatedRigidContacts),
-			static_cast<unsigned long long>(metrics.generatedSelfContacts),
-			metrics.firstContactFrame, metrics.firstRotationFrame,
-			double(metrics.firstContactCentroidLeverArm),
-			double(metrics.maxCentroidLeverArm),
-			double(metrics.maxAngularMomentum),
-			double(metrics.finalAngularMomentum),
-			double(metrics.maxAngularSpeed),
-			double(metrics.finalAngularSpeed),
-			metrics.retainedRotationSamples, retentionPassed ? 1u : 0u,
-			passed ? "PASS" : "FAIL");
-	}
-	if(gHeadlessOptions.caseName ==
-		"scene-volume-ground-embedded-tet-probe")
-	{
-		const SceneCpuGroundEmbeddedTetProbeMetrics& probeMetrics =
-			gSceneCpuGroundEmbeddedTetProbeMetrics;
-		const PxReal preGroundAngularMomentum =
-			probeMetrics.preGroundAngularMomentum.magnitude();
-		const PxReal preGroundAngularSpeed =
-			probeMetrics.preGroundAngularVelocity.magnitude();
-		const bool volumeHealthPassed =
-			gMetrics.nonFiniteParticleSamples == 0 &&
-			gMetrics.invertedElementSamples == 0 &&
-			PxIsFinite(gMetrics.minDetF) && gMetrics.minDetF > 0.05f &&
-			PxIsFinite(gMetrics.maxDetF) && gMetrics.maxDetF < 20.0f &&
-			PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-			gMetrics.minBodyVolumeRatio > 0.05f &&
-			PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-			gMetrics.maxBodyVolumeRatio < 20.0f;
-		printf(
-			"[AVBD_GROUND_EMBEDDED_TET_PROBE] frames=%u "
-			"simVertices=%u simTetrahedra=%u "
-			"collisionVertices=%u collisionTetrahedra=%u "
-			"distinctCollisionSimulation=%u strictInteriorEmbedding=%u "
-			"selfCollisionDisabled=%u speculativeCcdDisabled=%u "
-			"contactTelemetryEnabled=%u preGroundSample=%u "
-			"firstGroundContactFrame=%u lastGroundContactFrame=%u "
-			"peakGroundRollFrame=%u groundContactWindowFrames=%u "
-			"generatedGroundContacts=%llu generatedRigidContacts=%llu "
-			"generatedSoftContacts=%llu generatedSelfContacts=%llu "
-			"launchSpeed=%.9g initialMass=%.9g initialRmsRadius=%.9g "
-			"preGroundAngularMomentum=%.9g preGroundAngularSpeed=%.9g "
-			"peakDeltaAngularMomentumX=%.9g "
-			"peakDeltaAngularMomentumY=%.9g "
-			"peakDeltaAngularMomentumZ=%.9g "
-			"peakDeltaAngularVelocityX=%.9g "
-			"peakDeltaAngularVelocityY=%.9g "
-			"peakDeltaAngularVelocityZ=%.9g "
-			"peakExpectedRollAngularMomentum=%.9g "
-			"peakExpectedRollAngularSpeed=%.9g "
-			"peakNormalizedRollMomentum=%.9g "
-			"peakNormalizedRollOmega=%.9g "
-			"groundContactFrames=%u maxGroundContacts=%u "
-			"groundTetPatchGroundRows=%llu "
-			"groundTetPatchFourSupportRows=%llu "
-			"groundTetPatchSingleTetRows=%llu "
-			"groundTetPatchActiveRows=%llu "
-			"velocityTangentOwnerRows=%llu "
-			"velocityTangentAppliedRows=%llu "
-			"minDetF=%.9g maxDetF=%.9g "
-			"minBodyVolumeRatio=%.9g maxBodyVolumeRatio=%.9g "
-			"health=%s result=%s\n",
-			gHeadlessOptions.frames, probeMetrics.simulationVertices,
-			probeMetrics.simulationTetrahedra,
-			probeMetrics.collisionVertices,
-			probeMetrics.collisionTetrahedra,
-			probeMetrics.distinctCollisionSimulation,
-			probeMetrics.strictInteriorEmbedding,
-			probeMetrics.selfCollisionDisabled,
-			probeMetrics.speculativeCcdDisabled,
-			probeMetrics.contactTelemetryEnabled,
-			probeMetrics.hasPreGroundSample,
-			probeMetrics.firstGroundContactFrame,
-			probeMetrics.lastGroundContactFrame,
-			probeMetrics.peakGroundRollFrame,
-			probeMetrics.groundContactWindowFrames,
-			static_cast<unsigned long long>(
-				probeMetrics.generatedGroundContacts),
-			static_cast<unsigned long long>(
-				probeMetrics.generatedRigidContacts),
-			static_cast<unsigned long long>(
-				probeMetrics.generatedSoftContacts),
-			static_cast<unsigned long long>(
-				probeMetrics.generatedSelfContacts),
-			double(probeMetrics.launchSpeed), double(probeMetrics.initialMass),
-			double(probeMetrics.initialRmsRadius),
-			double(preGroundAngularMomentum), double(preGroundAngularSpeed),
-			double(probeMetrics.peakDeltaAngularMomentum.x),
-			double(probeMetrics.peakDeltaAngularMomentum.y),
-			double(probeMetrics.peakDeltaAngularMomentum.z),
-			double(probeMetrics.peakDeltaAngularVelocity.x),
-			double(probeMetrics.peakDeltaAngularVelocity.y),
-			double(probeMetrics.peakDeltaAngularVelocity.z),
-			double(probeMetrics.peakExpectedRollAngularMomentum),
-			double(probeMetrics.peakExpectedRollAngularSpeed),
-			double(probeMetrics.peakNormalizedRollMomentum),
-			double(probeMetrics.peakNormalizedRollOmega),
-			gMetrics.groundContactFrames, gMetrics.maxGroundContacts,
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.groundTetPatchGroundPositionAlRows),
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.groundTetPatchFourSupportRows),
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.groundTetPatchSingleTetRows),
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.groundTetPatchActiveRows),
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.
-					worldStaticVelocityTangentOwnerRows),
-			static_cast<unsigned long long>(
-				gPerformance.solverStages.
-					worldStaticVelocityTangentAppliedRows),
-			double(gMetrics.minDetF), double(gMetrics.maxDetF),
-			double(gMetrics.minBodyVolumeRatio),
-			double(gMetrics.maxBodyVolumeRatio),
-			volumeHealthPassed ? "PASS" : "FAIL",
-			passed ? "PASS" : "FAIL");
-	}
-	if(gHeadlessOptions.caseName == "scene-volume-ogc-sandwich")
-	{
-		const SceneCpuOgcSandwichMetrics& metrics =
-			gSceneCpuOgcSandwichMetrics;
-		const bool surfaceSeparated = metrics.initialized &&
-			metrics.collisionTelemetryEnabled &&
-			PxIsFinite(metrics.minUpperJawSignedSdf) &&
-			PxIsFinite(metrics.minLowerJawSignedSdf) &&
-			!metrics.upperJawTrianglePenetrated &&
-			!metrics.lowerJawTrianglePenetrated &&
-			metrics.minUpperJawSignedSdf >=
-				-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION &&
-			metrics.minLowerJawSignedSdf >=
-				-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-		const bool jawsCompressed =
-			metrics.maxUpperCompression >=
-				SCENE_CPU_OGC_SANDWICH_MIN_JAW_COMPRESSION &&
-			metrics.maxLowerCompression >=
-				SCENE_CPU_OGC_SANDWICH_MIN_JAW_COMPRESSION;
-		const bool noEscape =
-			metrics.maxBoxLateralOffset <=
-				SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_OFFSET &&
-			metrics.maxBoxLateralSpeed <=
-				SCENE_CPU_OGC_SANDWICH_MAX_LATERAL_SPEED &&
-			metrics.maxBoxNormalOffset <=
-				SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_OFFSET &&
-			metrics.maxBoxNormalSpeed <=
-				SCENE_CPU_OGC_SANDWICH_MAX_NORMAL_SPEED;
-		printf(
-			"[AVBD_OGC_SANDWICH] pressureDriveFrames=%u "
-			"nativeIslandSteps=%llu "
-			"generatedRigidContacts=%llu "
-			"minUpperVertexSdf=%.9g minLowerVertexSdf=%.9g "
-			"upperTrianglePenetrationFrames=%u "
-			"lowerTrianglePenetrationFrames=%u "
-			"maxUpperCompression=%.9g maxLowerCompression=%.9g "
-			"upperMinDetF=%.9g lowerMinDetF=%.9g "
-			"maxBoxLateralOffset=%.9g maxBoxLateralSpeed=%.9g "
-			"maxBoxNormalOffset=%.9g maxBoxNormalSpeed=%.9g "
-			"surfaceSeparated=%u jawsCompressed=%u noEscape=%u "
-			"result=%s\n",
-			SCENE_CPU_OGC_SANDWICH_PRESSURE_DRIVE_FRAMES,
-			static_cast<unsigned long long>(metrics.nativeIslandSteps),
-			static_cast<unsigned long long>(metrics.generatedRigidContacts),
-			double(metrics.minUpperJawSignedSdf),
-			double(metrics.minLowerJawSignedSdf),
-			metrics.upperJawTrianglePenetrationFrames,
-			metrics.lowerJawTrianglePenetrationFrames,
-			double(metrics.maxUpperCompression),
-			double(metrics.maxLowerCompression),
-			double(metrics.upperJawMinDetF),
-			double(metrics.lowerJawMinDetF),
-			double(metrics.maxBoxLateralOffset),
-			double(metrics.maxBoxLateralSpeed),
-			double(metrics.maxBoxNormalOffset),
-			double(metrics.maxBoxNormalSpeed),
-			surfaceSeparated ? 1u : 0u, jawsCompressed ? 1u : 0u,
-			noEscape ? 1u : 0u, passed ? "PASS" : "FAIL");
-	}
-	if(gHeadlessOptions.caseName == "scene-volume-visual-showcase")
-	{
-		const bool primaryCubeRotationPassed =
-			gSceneCpuVisualPrimaryCubeRotationMetrics.maxOrientationChange >=
-				SCENE_CPU_VISUAL_MIN_ORIENTATION_CHANGE &&
-			gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeed >=
-				SCENE_CPU_VISUAL_MIN_ANGULAR_SPEED &&
-			gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeedFrame !=
-				PX_MAX_U32;
-		const bool volumeHealthPassed =
-			gMetrics.nonFiniteParticleSamples == 0 &&
-			gMetrics.invertedElementSamples == 0 &&
-			PxIsFinite(gMetrics.minDetF) &&
-			gMetrics.minDetF >
-				SCENE_CPU_VISUAL_SHOWCASE_MIN_DET_F &&
-			PxIsFinite(gMetrics.maxDetF) &&
-			gMetrics.maxDetF < SCENE_CPU_VISUAL_MAX_DET_F &&
-			PxIsFinite(gMetrics.minBodyVolumeRatio) &&
-			gMetrics.minBodyVolumeRatio >
-				SCENE_CPU_VISUAL_SHOWCASE_MIN_VOLUME_RATIO &&
-			PxIsFinite(gMetrics.maxBodyVolumeRatio) &&
-			gMetrics.maxBodyVolumeRatio <
-				SCENE_CPU_VISUAL_MAX_VOLUME_RATIO;
-		printf(
-			"[AVBD_VISUAL_ROTATION] body=primaryCube "
-			"maxOrientationChange=%.9g "
-			"maxAngularSpeed=%.9g finalAngularSpeed=%.9g "
-			"maxAngularSpeedFrame=%u result=%s\n",
-			double(gSceneCpuVisualPrimaryCubeRotationMetrics.
-				maxOrientationChange),
-			double(gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeed),
-			double(gSceneCpuVisualPrimaryCubeRotationMetrics.finalAngularSpeed),
-			gSceneCpuVisualPrimaryCubeRotationMetrics.maxAngularSpeedFrame,
-			primaryCubeRotationPassed ? "PASS" : "FAIL");
-		printf(
-			"[AVBD_VISUAL_PRIMARY_GROUND_EPISODES] episodes=%u "
-			"firstFrame=%u secondFrame=%u active=%u "
-			"finalMinY=%.9g minSecondEpisodeAngularSpeed=%.9g\n",
-			gSceneCpuVisualPrimaryCubeRotationMetrics.groundContactEpisodes,
-			gSceneCpuVisualPrimaryCubeRotationMetrics.firstGroundContactFrame,
-			gSceneCpuVisualPrimaryCubeRotationMetrics.secondGroundContactFrame,
-			gSceneCpuVisualPrimaryCubeRotationMetrics.groundContactActive
-				? 1u : 0u,
-			double(gSceneCpuVisualPrimaryCubeRotationMetrics.
-				finalMinCollisionY),
-			double(gSceneCpuVisualPrimaryCubeRotationMetrics.
-				minSecondGroundEpisodeAngularSpeed));
-		printf(
-			"[AVBD_VISUAL_UPPER_JAW_ROTATION] "
-			"maxOrientationChange=%.9g maxAngularSpeed=%.9g "
-			"finalAngularSpeed=%.9g maxAngularSpeedFrame=%u\n",
-			double(gSceneCpuVisualRotationMetrics.maxOrientationChange),
-			double(gSceneCpuVisualRotationMetrics.maxAngularSpeed),
-			double(gSceneCpuVisualRotationMetrics.finalAngularSpeed),
-			gSceneCpuVisualRotationMetrics.maxAngularSpeedFrame);
-		const bool sphereRollPassed =
-			gSceneCpuVisualSphereRotationMetrics.maxOrientationChange >=
-				SCENE_CPU_VISUAL_SPHERE_MIN_ORIENTATION_CHANGE &&
-			gSceneCpuVisualSphereRotationMetrics.maxAngularSpeed >=
-				SCENE_CPU_VISUAL_SPHERE_MIN_ANGULAR_SPEED &&
-			gSceneCpuVisualSphereRotationMetrics.maxAngularSpeedFrame !=
-				PX_MAX_U32;
-		printf(
-			"[AVBD_VISUAL_SPHERE_ROLL] maxOrientationChange=%.9g "
-			"maxAngularSpeed=%.9g finalAngularSpeed=%.9g "
-			"earlyMaxAngularSpeed=%.9g lateMaxAngularSpeed=%.9g "
-			"maxAngularSpeedFrame=%u longRunBounded=%u result=%s\n",
-			double(gSceneCpuVisualSphereRotationMetrics.
-				maxOrientationChange),
-			double(gSceneCpuVisualSphereRotationMetrics.maxAngularSpeed),
-			double(gSceneCpuVisualSphereRotationMetrics.finalAngularSpeed),
-			double(gSceneCpuVisualSphereRotationMetrics.
-				earlyMaxAngularSpeed),
-			double(gSceneCpuVisualSphereRotationMetrics.
-				lateMaxAngularSpeed),
-			gSceneCpuVisualSphereRotationMetrics.maxAngularSpeedFrame,
-			isSceneCpuVisualSphereLongRunBounded() ? 1u : 0u,
-			sphereRollPassed && isSceneCpuVisualSphereLongRunBounded()
-				? "PASS" : "FAIL");
-		printSceneCpuSphereKinematics(
-			"AVBD_VISUAL_SPHERE_KINEMATICS",
-			gSceneCpuVisualSphereRotationMetrics);
-		const bool dynamicFalling =
-			gMetrics.sceneDynamicInitiallySleeping == 0 &&
-			gMetrics.sceneDynamicMaxDrop > 0.25f &&
-			gMetrics.sceneDynamicMaxDownSpeed > 0.25f;
-		const bool dynamicSurfaceSeparated =
-			gSceneCpuVisualInteractionMetrics.initialized &&
-			gSceneCpuVisualInteractionMetrics.collisionTelemetryEnabled &&
-			PxIsFinite(gSceneCpuVisualInteractionMetrics.
-				minUpperJawSignedSdf) &&
-			PxIsFinite(gSceneCpuVisualInteractionMetrics.
-				minLowerJawSignedSdf) &&
-			!gSceneCpuVisualInteractionMetrics.
-				upperJawTrianglePenetrated &&
-			!gSceneCpuVisualInteractionMetrics.
-				lowerJawTrianglePenetrated &&
-			gSceneCpuVisualInteractionMetrics.minUpperJawSignedSdf >=
-				-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION &&
-			gSceneCpuVisualInteractionMetrics.minLowerJawSignedSdf >=
-				-SCENE_CPU_VISUAL_MAX_RIGID_SURFACE_PENETRATION;
-		const bool staticSurfaceSeparated =
-			gSceneCpuVisualInteractionMetrics.initialized &&
-			gSceneCpuVisualInteractionMetrics.collisionTelemetryEnabled &&
-			isSceneCpuVisualSurfaceGapSeparated(
-				gSceneCpuVisualInteractionMetrics.upperJawPedestalGap) &&
-			isSceneCpuVisualSurfaceGapSeparated(
-				gSceneCpuVisualInteractionMetrics.lowerJawPedestalGap) &&
-			isSceneCpuVisualSurfaceGapSeparated(
-				gSceneCpuVisualInteractionMetrics.upperJawGroundGap) &&
-			isSceneCpuVisualSurfaceGapSeparated(
-				gSceneCpuVisualInteractionMetrics.lowerJawGroundGap);
-		const bool rigidSurfaceSeparated =
-			dynamicSurfaceSeparated && staticSurfaceSeparated;
-		const bool mixedInteractionsObserved =
-			dynamicSurfaceSeparated &&
-			gSceneCpuVisualInteractionMetrics.initialized &&
-			gSceneCpuVisualInteractionMetrics.collisionTelemetryEnabled &&
-			gSceneCpuVisualInteractionMetrics.nativeIslandSteps > 0 &&
-			gMetrics.sceneDynamicActorAdded == 1 &&
-			dynamicFalling &&
-			gMetrics.sceneDynamicActorRemoved == 1 &&
-			gMetrics.sceneDynamicActorReleased == 1;
-		const bool mixedInteractionGateActive =
-			gMetrics.completedFrames >=
-				SCENE_CPU_VISUAL_INTERACTION_GATE_MIN_FRAMES;
-		printf(
-			"[AVBD_VISUAL_INTERACTIONS] dynamicRigid=falling-box "
-			"gateActive=%u nativeOgcObserved=%u initiallyAwake=%u "
-			"falling=%u dynamicSurfaceSeparated=%u "
-			"staticSurfaceSeparated=%u surfaceSeparated=%u "
-			"nativeIslandSteps=%llu generatedRigidContacts=%llu "
-			"generatedSoftContacts=%llu "
-			"rigidContactFrames=%u softContactFrames=%u result=%s\n",
-			mixedInteractionGateActive ? 1u : 0u,
-			mixedInteractionsObserved ? 1u : 0u,
-			gMetrics.sceneDynamicInitiallySleeping == 0 ? 1u : 0u,
-			dynamicFalling ? 1u : 0u,
-			dynamicSurfaceSeparated ? 1u : 0u,
-			staticSurfaceSeparated ? 1u : 0u,
-			rigidSurfaceSeparated ? 1u : 0u,
-			static_cast<unsigned long long>(
-				gSceneCpuVisualInteractionMetrics.nativeIslandSteps),
-			static_cast<unsigned long long>(
-				gSceneCpuVisualInteractionMetrics.generatedRigidContacts),
-			static_cast<unsigned long long>(
-				gSceneCpuVisualInteractionMetrics.generatedSoftContacts),
-			gMetrics.rigidContactFrames, gMetrics.softContactFrames,
-			(rigidSurfaceSeparated &&
-				(!mixedInteractionGateActive || mixedInteractionsObserved)) ?
-				"PASS" : "FAIL");
-		printf(
-			"[AVBD_VISUAL_RIGID_GAP] "
-			"initialUpperVertexSignedSdf=%.9g "
-			"initialLowerVertexSignedSdf=%.9g "
-			"minUpperVertexSignedSdf=%.9g "
-			"minLowerVertexSignedSdf=%.9g "
-			"finalUpperVertexSignedSdf=%.9g "
-			"finalLowerVertexSignedSdf=%.9g "
-			"maxUpperVertexPenetration=%.9g "
-			"maxLowerVertexPenetration=%.9g "
-			"trianglePenetrationFramesUpper=%u "
-			"trianglePenetrationFramesLower=%u "
-			"trianglePenetrationFirstFrameUpper=%u "
-			"trianglePenetrationFirstFrameLower=%u\n",
-			double(gSceneCpuVisualInteractionMetrics.
-				initialUpperJawSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				initialLowerJawSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.minUpperJawSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.minLowerJawSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.finalUpperJawSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.finalLowerJawSignedSdf),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				minUpperJawSignedSdf, 0.0f)),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				minLowerJawSignedSdf, 0.0f)),
-			gSceneCpuVisualInteractionMetrics.
-				upperJawTrianglePenetrationFrames,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawTrianglePenetrationFrames,
-			gSceneCpuVisualInteractionMetrics.
-				upperJawTrianglePenetrationFirstFrame,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawTrianglePenetrationFirstFrame);
-		printf(
-			"[AVBD_VISUAL_STATIC_GAP] "
-			"initialUpperPedestalVertexSignedSdf=%.9g "
-			"initialLowerPedestalVertexSignedSdf=%.9g "
-			"minUpperPedestalVertexSignedSdf=%.9g "
-			"minLowerPedestalVertexSignedSdf=%.9g "
-			"finalUpperPedestalVertexSignedSdf=%.9g "
-			"finalLowerPedestalVertexSignedSdf=%.9g "
-			"maxUpperPedestalPenetration=%.9g "
-			"maxLowerPedestalPenetration=%.9g "
-			"pedestalTrianglePenetratedUpper=%u "
-			"pedestalTrianglePenetratedLower=%u "
-			"pedestalTrianglePenetrationFramesUpper=%u "
-			"pedestalTrianglePenetrationFramesLower=%u "
-			"initialUpperGroundVertexSignedSdf=%.9g "
-			"initialLowerGroundVertexSignedSdf=%.9g "
-			"minUpperGroundVertexSignedSdf=%.9g "
-			"minLowerGroundVertexSignedSdf=%.9g "
-			"finalUpperGroundVertexSignedSdf=%.9g "
-			"finalLowerGroundVertexSignedSdf=%.9g "
-			"maxUpperGroundPenetration=%.9g "
-			"maxLowerGroundPenetration=%.9g "
-			"groundPlanePenetratedUpper=%u "
-			"groundPlanePenetratedLower=%u "
-			"groundPlanePenetrationFramesUpper=%u "
-			"groundPlanePenetrationFramesLower=%u "
-			"staticSurfaceSeparated=%u\n",
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.initialSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.initialSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.minSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.minSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.finalSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.finalSignedSdf),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.minSignedSdf, 0.0f)),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.minSignedSdf, 0.0f)),
-			gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.penetrated ? 1u : 0u,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.penetrated ? 1u : 0u,
-			gSceneCpuVisualInteractionMetrics.
-				upperJawPedestalGap.penetrationFrames,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawPedestalGap.penetrationFrames,
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.initialSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.initialSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.minSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.minSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.finalSignedSdf),
-			double(gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.finalSignedSdf),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.minSignedSdf, 0.0f)),
-			double(PxMax(-gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.minSignedSdf, 0.0f)),
-			gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.penetrated ? 1u : 0u,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.penetrated ? 1u : 0u,
-			gSceneCpuVisualInteractionMetrics.
-				upperJawGroundGap.penetrationFrames,
-			gSceneCpuVisualInteractionMetrics.
-				lowerJawGroundGap.penetrationFrames,
-			staticSurfaceSeparated ? 1u : 0u);
-		printf(
-			"[AVBD_VISUAL_VOLUME_HEALTH] nonFiniteSamples=%u "
-			"invertedSamples=%u minDetF=%.9g maxDetF=%.9g "
-			"minBodyVolumeRatio=%.9g maxBodyVolumeRatio=%.9g "
-			"result=%s\n",
-			gMetrics.nonFiniteParticleSamples,
-			gMetrics.invertedElementSamples,
-			double(gMetrics.minDetF), double(gMetrics.maxDetF),
-			double(gMetrics.minBodyVolumeRatio),
-			double(gMetrics.maxBodyVolumeRatio),
-			volumeHealthPassed ? "PASS" : "FAIL");
-		static const char* bodyNames[5] =
-			{"primaryCube", "sphere", "cone", "tiltedCube", "followerCube"};
-		for(PxU32 bodyIndex = 0; bodyIndex < 5; ++bodyIndex)
-		{
-			const SceneCpuVisualBodyHealthMetrics& bodyMetrics =
-				gSceneCpuVisualBodyHealthMetrics[bodyIndex];
-			printf(
-				"[AVBD_VISUAL_VOLUME_BODY] body=%s index=%u "
-				"minDetF=%.9g minDetFFrame=%u maxDetF=%.9g "
-				"maxDetFFrame=%u minVolumeRatio=%.9g "
-				"minVolumeRatioFrame=%u finalMinDetF=%.9g "
-				"finalMaxDetF=%.9g finalVolumeRatio=%.9g\n",
-				bodyNames[bodyIndex], bodyIndex,
-				double(bodyMetrics.minDetF), bodyMetrics.minDetFFrame,
-				double(bodyMetrics.maxDetF), bodyMetrics.maxDetFFrame,
-				double(bodyMetrics.minVolumeRatio),
-				bodyMetrics.minVolumeRatioFrame,
-				double(bodyMetrics.finalMinDetF),
-				double(bodyMetrics.finalMaxDetF),
-				double(bodyMetrics.finalVolumeRatio));
-		}
-	}
-	if(gHeadlessOptions.caseName == "scene-volume-skinning")
-	{
-		printf(
-			"[AVBD_CPU_SKINNING] schema=1 snippet=%s "
-			"kind=volume vertices=%u triangles=%u "
-			"evaluatedFrames=%u finiteFrames=%u "
-			"maxDisplacement=%.9g status=%s\n",
-			AVBD_VOLUME_SNIPPET_NAME,
-			gVolumeSkinningMetrics.vertices,
-			gVolumeSkinningMetrics.triangles,
-			gVolumeSkinningMetrics.evaluatedFrames,
-			gVolumeSkinningMetrics.finiteFrames,
-			double(gVolumeSkinningMetrics.maxDisplacement),
-			passed ? "PASS" : "FAIL");
-	}
-	if(isSceneCpuVolumeRigidTriangleSteadyContactCase(
-			gHeadlessOptions.caseName))
-	{
-		printf(
-			"[AVBD_RIGID_TRIANGLE_STEADY_CONTACT] frames=%u "
-			"profileFrames=%u faceTests=%llu edgeTests=%llu "
-			"vertexTests=%llu result=%s\n",
-			gHeadlessOptions.frames, gPerformance.profiledFrames,
-			static_cast<unsigned long long>(
-				gPerformance.collision.
-					rigidTriangleSurfaceFaceTests),
-			static_cast<unsigned long long>(
-				gPerformance.collision.
-					rigidTriangleSurfaceEdgeTests),
-			static_cast<unsigned long long>(
-				gPerformance.collision.
-					rigidTriangleSurfaceVertexTests),
-			passed ? "PASS" : "FAIL");
-	}
-	if(isSceneCpuVolumeTriangleSurfaceSweptCcdCase(
-			gHeadlessOptions.caseName))
-	{
-		const bool reverseCase =
-			isSceneCpuVolumeTriangleSurfaceReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool staticTarget =
-			isSceneCpuVolumeStaticTriangleSurfaceSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool heightField =
-			isSceneCpuVolumeHeightFieldSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool rotationalCase =
-			isSceneCpuVolumeRotationalTriangleSurfaceSweptCcdCase(
-				gHeadlessOptions.caseName);
-		printf(
-			"[%s] frames=%u target=%s geometry=%s "
-			"responseObserved=%u negativeControlPassed=%u "
-			"vertexSweepExcluded=%u nonFiniteSamples=%u "
-			"positiveDisplacement=%.9g negativeDisplacement=%.9g "
-			"positiveDrop=%.9g negativeDrop=%.9g "
-			"minimumVertexSweepSeparation=%.9g result=%s\n",
-			reverseCase
-				? "AVBD_TRIANGLE_SURFACE_REVERSE_SWEPT"
-				: "AVBD_TRIANGLE_SURFACE_FORWARD_SWEPT",
-			gHeadlessOptions.frames,
-			staticTarget ? "static" : "kinematic",
-			heightField ? "heightfield" : "triangle-mesh",
-			gSphereReverseSweptMetrics.responseObserved,
-			gSphereReverseSweptMetrics.negativeControlPassed,
-			gSphereReverseSweptMetrics.vertexSweepExcluded,
-			gSphereReverseSweptMetrics.nonFiniteSamples,
-			double(
-				gSphereReverseSweptMetrics.
-					positiveDisplacement),
-			double(
-				gSphereReverseSweptMetrics.
-					negativeDisplacement),
-			double(gSphereReverseSweptMetrics.positiveDrop),
-			double(gSphereReverseSweptMetrics.negativeDrop),
-			double(
-				gSphereReverseSweptMetrics.
-					minimumVertexSweepSeparation),
-			passed ? "PASS" : "FAIL");
-		if(rotationalCase)
-		{
-			printf(
-				"[AVBD_TRIANGLE_SURFACE_ROTATIONAL_SWEPT] "
-				"frames=%u target=kinematic geometry=%s owner=%s "
-				"responseObserved=%u negativeControlPassed=%u "
-				"vertexSweepExcluded=%u "
-				"endpointMinSeparation=%.9g "
-				"midSweepMinSeparation=%.9g "
-				"minimumVertexSweepSeparation=%.9g "
-				"positiveDisplacement=%.9g "
-				"negativeDisplacement=%.9g "
-				"positiveAngularTravel=%.9g "
-				"negativeAngularTravel=%.9g result=%s\n",
-				gHeadlessOptions.frames,
-				heightField ? "heightfield" : "triangle-mesh",
-				reverseCase ? "reverse" : "forward",
-				gSphereReverseSweptMetrics.responseObserved,
-				gSphereReverseSweptMetrics.
-					negativeControlPassed,
-				gSphereReverseSweptMetrics.vertexSweepExcluded,
-				double(
-					gCapsuleRotationalSweepMetrics.
-						endpointMinSeparation),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						midSweepMinSeparation),
-				double(
-					gSphereReverseSweptMetrics.
-						minimumVertexSweepSeparation),
-				double(
-					gSphereReverseSweptMetrics.
-						positiveDisplacement),
-				double(
-					gSphereReverseSweptMetrics.
-						negativeDisplacement),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						positiveAngularTravel),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						negativeAngularTravel),
-				passed ? "PASS" : "FAIL");
-		}
-	}
-	if(isSceneCpuVolumeSphereReverseSweptCcdCase(
-			gHeadlessOptions.caseName))
-	{
-		const bool deformingSoftTarget =
-			isSceneCpuVolumeDeformingReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool capsuleTarget =
-			isSceneCpuVolumeCapsuleReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool convexTarget =
-			isSceneCpuVolumeConvexReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const char* target =
-			deformingSoftTarget ||
-			gHeadlessOptions.caseName ==
-					"scene-volume-static-sphere-reverse-swept-ccd" ||
-				gHeadlessOptions.caseName ==
-					"scene-volume-static-capsule-reverse-swept-ccd" ||
-				gHeadlessOptions.caseName ==
-					"scene-volume-static-convex-reverse-swept-ccd"
-				? "static"
-				: (gHeadlessOptions.caseName ==
-						"scene-volume-kinematic-sphere-reverse-swept-ccd" ||
-				   gHeadlessOptions.caseName ==
-						"scene-volume-kinematic-capsule-reverse-swept-ccd" ||
-				   gHeadlessOptions.caseName ==
-						"scene-volume-rotating-kinematic-capsule-reverse-swept-ccd" ||
-				   gHeadlessOptions.caseName ==
-						"scene-volume-rotating-kinematic-convex-reverse-swept-ccd" ||
-				   gHeadlessOptions.caseName ==
-						"scene-volume-kinematic-convex-reverse-swept-ccd")
-					? "kinematic"
-					: "dynamic";
-		printf(
-			"[%s] frames=%u target=%s "
-			"responseObserved=%u negativeControlPassed=%u "
-			"twoSidedResponseObserved=%u vertexSweepExcluded=%u "
-			"nonFiniteSamples=%u positiveDisplacement=%.9g "
-			"negativeDisplacement=%.9g positiveDrop=%.9g "
-			"negativeDrop=%.9g positiveRigidDrop=%.9g "
-			"negativeRigidDrop=%.9g faceSeparation=%.9g "
-			"minimumVertexSweepSeparation=%.9g result=%s\n",
-			convexTarget
-				? "AVBD_CONVEX_REVERSE_SWEPT"
-				: capsuleTarget
-				? "AVBD_CAPSULE_REVERSE_SWEPT"
-				: "AVBD_SPHERE_REVERSE_SWEPT",
-			gHeadlessOptions.frames, target,
-			gSphereReverseSweptMetrics.responseObserved,
-			gSphereReverseSweptMetrics.negativeControlPassed,
-			gSphereReverseSweptMetrics.twoSidedResponseObserved,
-			gSphereReverseSweptMetrics.vertexSweepExcluded,
-			gSphereReverseSweptMetrics.nonFiniteSamples,
-			double(gSphereReverseSweptMetrics.positiveDisplacement),
-			double(gSphereReverseSweptMetrics.negativeDisplacement),
-			double(gSphereReverseSweptMetrics.positiveDrop),
-			double(gSphereReverseSweptMetrics.negativeDrop),
-			double(gSphereReverseSweptMetrics.positiveRigidDrop),
-			double(gSphereReverseSweptMetrics.negativeRigidDrop),
-			double(gSphereReverseSweptMetrics.faceSeparation),
-			double(
-				gSphereReverseSweptMetrics.
-					minimumVertexSweepSeparation),
-			passed ? "PASS" : "FAIL");
-		if(deformingSoftTarget)
-		{
-			printf(
-				"[AVBD_DEFORMING_VOLUME_REVERSE_SWEPT] "
-				"frames=%u geometry=%s target=static owner=reverse "
-				"responseObserved=%u negativeControlPassed=%u "
-				"geometricSweepIsolated=%u "
-				"vertexSweepExcluded=%u nonFiniteSamples=%u "
-				"endpointMinSeparation=%.9g "
-				"midSweepMinSeparation=%.9g "
-				"minimumVertexSweepSeparation=%.9g "
-				"responseDelta=%.9g positiveDrop=%.9g "
-				"negativeDrop=%.9g result=%s\n",
-				gHeadlessOptions.frames,
-				convexTarget ? "convex" :
-					(capsuleTarget ? "capsule" : "sphere"),
-				gSphereReverseSweptMetrics.responseObserved,
-				gSphereReverseSweptMetrics.
-					negativeControlPassed,
-				gDeformingVolumeReverseSweptMetrics.
-					geometricSweepIsolated,
-				gSphereReverseSweptMetrics.vertexSweepExcluded,
-				gSphereReverseSweptMetrics.nonFiniteSamples,
-				double(
-					gDeformingVolumeReverseSweptMetrics.
-						endpointMinSeparation),
-				double(
-					gDeformingVolumeReverseSweptMetrics.
-						midSweepMinSeparation),
-				double(
-					gSphereReverseSweptMetrics.
-						minimumVertexSweepSeparation),
-				double(
-					gDeformingVolumeReverseSweptMetrics.
-						responseDelta),
-				double(gSphereReverseSweptMetrics.positiveDrop),
-				double(gSphereReverseSweptMetrics.negativeDrop),
-				passed ? "PASS" : "FAIL");
-		}
-		const bool rotationalCapsuleTarget =
-			isSceneCpuVolumeRotationalCapsuleReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		const bool rotationalConvexTarget =
-			isSceneCpuVolumeRotationalConvexReverseSweptCcdCase(
-				gHeadlessOptions.caseName);
-		if(rotationalCapsuleTarget || rotationalConvexTarget)
-		{
-			printf(
-				"[%s] "
-				"frames=%u target=%s owner=reverse "
-				"responseObserved=%u negativeControlPassed=%u "
-				"twoSidedResponseObserved=%u vertexSweepExcluded=%u "
-				"endpointMinSeparation=%.9g "
-				"midSweepMinSeparation=%.9g "
-				"positiveDisplacement=%.9g "
-				"negativeDisplacement=%.9g "
-				"positiveAngularTravel=%.9g "
-				"negativeAngularTravel=%.9g result=%s\n",
-				rotationalConvexTarget
-					? "AVBD_CONVEX_ROTATIONAL_REVERSE_SWEPT"
-					: "AVBD_CAPSULE_ROTATIONAL_REVERSE_SWEPT",
-				gHeadlessOptions.frames, target,
-				gSphereReverseSweptMetrics.responseObserved,
-				gSphereReverseSweptMetrics.negativeControlPassed,
-				gSphereReverseSweptMetrics.twoSidedResponseObserved,
-				gSphereReverseSweptMetrics.vertexSweepExcluded,
-				double(
-					gCapsuleRotationalSweepMetrics.
-						endpointMinSeparation),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						midSweepMinSeparation),
-				double(
-					gSphereReverseSweptMetrics.
-						positiveDisplacement),
-				double(
-					gSphereReverseSweptMetrics.
-						negativeDisplacement),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						positiveAngularTravel),
-				double(
-					gCapsuleRotationalSweepMetrics.
-						negativeAngularTravel),
-				passed ? "PASS" : "FAIL");
-		}
-	}
-	if(gHeadlessOptions.caseName ==
-			"scene-volume-rotating-kinematic-capsule-speculative-ccd" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-rotating-kinematic-convex-speculative-ccd")
-	{
-		printf(
-			"[%s] "
-			"frames=%u target=kinematic owner=forward "
-			"responseObserved=%u negativeControlPassed=%u "
-			"endpointMinSeparation=%.9g "
-			"midSweepMinSeparation=%.9g "
-			"positiveDisplacement=%.9g "
-			"negativeDisplacement=%.9g result=%s\n",
-			gHeadlessOptions.caseName ==
-				"scene-volume-rotating-kinematic-convex-speculative-ccd"
-				? "AVBD_CONVEX_ROTATIONAL_SWEPT"
-				: "AVBD_CAPSULE_ROTATIONAL_SWEPT",
-			gHeadlessOptions.frames,
-			gMetrics.movingSphereCcdResponseObserved,
-			gMetrics.movingSphereNegativeControlHeld,
-			double(
-				gCapsuleRotationalSweepMetrics.
-					endpointMinSeparation),
-			double(
-				gCapsuleRotationalSweepMetrics.
-					midSweepMinSeparation),
-			double(gMetrics.movingSpherePositiveDisplacement),
-			double(gMetrics.movingSphereNegativeDisplacement),
-			passed ? "PASS" : "FAIL");
-	}
-	if(gHeadlessOptions.caseName ==
-			"scene-volume-dynamic-rotating-capsule-relative-swept-ccd" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-dynamic-rotating-convex-relative-swept-ccd")
-	{
-		printf(
-			"[%s] "
-			"frames=%u target=dynamic owner=forward "
-			"responseObserved=%u negativeControlPassed=%u "
-			"twoSidedResponseObserved=%u "
-			"endpointMinSeparation=%.9g "
-			"midSweepMinSeparation=%.9g "
-			"positiveDisplacement=%.9g "
-			"negativeDisplacement=%.9g "
-			"positiveAngularTravel=%.9g "
-			"negativeAngularTravel=%.9g result=%s\n",
-			gHeadlessOptions.caseName ==
-				"scene-volume-dynamic-rotating-convex-relative-swept-ccd"
-				? "AVBD_CONVEX_DYNAMIC_ROTATIONAL_SWEPT"
-				: "AVBD_CAPSULE_DYNAMIC_ROTATIONAL_SWEPT",
-			gHeadlessOptions.frames,
-			gMetrics.dynamicSphereSweepResponseObserved,
-			gMetrics.dynamicSphereSweepNegativeControlTunneled,
-			gMetrics.dynamicSphereSweepTwoSidedResponseObserved,
-			double(
-				gCapsuleRotationalSweepMetrics.
-					endpointMinSeparation),
-			double(
-				gCapsuleRotationalSweepMetrics.
-					midSweepMinSeparation),
-			double(
-				gMetrics.
-					dynamicSphereSweepPositiveSoftDisplacement),
-			double(
-				gMetrics.
-					dynamicSphereSweepNegativeSoftDisplacement),
-			double(
-				gCapsuleRotationalSweepMetrics.
-					positiveAngularTravel),
-			double(
-				gCapsuleRotationalSweepMetrics.
-					negativeAngularTravel),
-			passed ? "PASS" : "FAIL");
-	}
-	const bool capsuleReverseFeatureOutput =
-		gHeadlessOptions.caseName ==
-			"scene-volume-capsule-reverse-feature";
-	const bool convexReverseFeatureOutput =
-		gHeadlessOptions.caseName ==
-			"scene-volume-convex-reverse-feature";
-	const bool triangleMeshReverseFeatureOutput =
-		gHeadlessOptions.caseName ==
-			"scene-volume-triangle-mesh-reverse-feature";
-	const bool heightFieldReverseFeatureOutput =
-		gHeadlessOptions.caseName ==
-			"scene-volume-heightfield-reverse-feature";
-	if(gHeadlessOptions.caseName ==
-			"scene-volume-sphere-reverse-feature" ||
-		capsuleReverseFeatureOutput ||
-		convexReverseFeatureOutput ||
-		triangleMeshReverseFeatureOutput ||
-		heightFieldReverseFeatureOutput)
-	{
-		const char* reverseFeatureTag =
-			triangleMeshReverseFeatureOutput
-				? "AVBD_TRIANGLE_MESH_REVERSE_FEATURE"
-				: heightFieldReverseFeatureOutput
-				? "AVBD_HEIGHTFIELD_REVERSE_FEATURE"
-				: convexReverseFeatureOutput
-				? "AVBD_CONVEX_REVERSE_FEATURE"
-				: capsuleReverseFeatureOutput
-				? "AVBD_CAPSULE_REVERSE_FEATURE"
-				: "AVBD_SPHERE_REVERSE_FEATURE";
-		printf(
-			"[%s] frames=%u "
-			"faceResponseObserved=%u vertexSdfExcluded=%u "
-			"negativeControlPassed=%u nonFiniteSamples=%u "
-			"positiveDisplacement=%.9g positiveDrop=%.9g "
-			"negativeDrop=%.9g faceSeparation=%.9g "
-			"minimumVertexSeparation=%.9g result=%s\n",
-			reverseFeatureTag, gHeadlessOptions.frames,
-			gSphereReverseFeatureMetrics.faceResponseObserved,
-			gSphereReverseFeatureMetrics.vertexSdfExcluded,
-			gSphereReverseFeatureMetrics.negativeControlPassed,
-			gSphereReverseFeatureMetrics.nonFiniteSamples,
-			double(
-				gSphereReverseFeatureMetrics.
-					positiveDisplacement),
-			double(gSphereReverseFeatureMetrics.positiveDrop),
-			double(gSphereReverseFeatureMetrics.negativeDrop),
-			double(gSphereReverseFeatureMetrics.faceSeparation),
-			double(
-				gSphereReverseFeatureMetrics.
-					minimumVertexSeparation),
-			passed ? "PASS" : "FAIL");
-	}
-	const bool sceneLifecycle =
-		gHeadlessOptions.caseName == "scene-volume-lifecycle" ||
-		gHeadlessOptions.caseName == "scene-volume-corotational";
-	const bool sceneVisualShowcase =
-		gHeadlessOptions.caseName == "scene-volume-visual-showcase";
-	const bool sceneOgcSandwich =
-		gHeadlessOptions.caseName == "scene-volume-ogc-sandwich";
-	const bool sceneSphereLongRoll =
-		gHeadlessOptions.caseName == "scene-volume-sphere-long-roll";
-	const bool sceneSphereSoftSoftGlancing =
-		gHeadlessOptions.caseName ==
-		"scene-volume-sphere-soft-soft-glancing";
-	const bool sceneSoftSoftTorque =
-		gHeadlessOptions.caseName == "scene-volume-soft-soft-torque";
-	const bool sceneTaskGraphPureSoft =
-		isSceneCpuVolumeTaskGraphPureSoftCase(gHeadlessOptions.caseName);
-	const bool sceneTaskGraphRigidTriangleSurfaceFeatureOverlap =
-		isSceneCpuVolumeTaskGraphRigidTriangleSurfaceFeatureOverlapCase(
-			gHeadlessOptions.caseName);
-	const bool sceneTaskGraphWriteBack =
-		isSceneCpuVolumeTaskGraphWriteBackCase(gHeadlessOptions.caseName);
-	const bool sceneGround =
-		gHeadlessOptions.caseName == "scene-volume-ground";
-	const bool sceneGroundEmbeddedTetProbe =
-		gHeadlessOptions.caseName ==
-			"scene-volume-ground-embedded-tet-probe";
-	const bool sceneMaxDepenetrationVelocity =
-		gHeadlessOptions.caseName ==
-			"scene-volume-max-depenetration-velocity";
-	const bool sceneRigidTriangleSteadyContact =
-		isSceneCpuVolumeRigidTriangleSteadyContactCase(
-			gHeadlessOptions.caseName);
-	const bool sceneSpeculativeCcd =
-		isSceneCpuVolumeSpeculativeCcdCase(
-			gHeadlessOptions.caseName) ||
-		isSceneCpuVolumeSphereReverseSweptCcdCase(
-			gHeadlessOptions.caseName);
-	const bool sceneSphereReverseFeature =
-		gHeadlessOptions.caseName ==
-			"scene-volume-sphere-reverse-feature";
-	const bool sceneCapsuleReverseFeature =
-		gHeadlessOptions.caseName ==
-			"scene-volume-capsule-reverse-feature";
-	const bool sceneConvexReverseFeature =
-		gHeadlessOptions.caseName ==
-			"scene-volume-convex-reverse-feature";
-	const bool sceneTriangleMeshReverseFeature =
-		gHeadlessOptions.caseName ==
-			"scene-volume-triangle-mesh-reverse-feature";
-	const bool sceneHeightFieldReverseFeature =
-		gHeadlessOptions.caseName ==
-			"scene-volume-heightfield-reverse-feature";
-	const bool sceneStaticChurn =
-		gHeadlessOptions.caseName == "scene-volume-static-churn";
-	const bool sceneStaticBox =
-		gHeadlessOptions.caseName == "scene-volume-static-box" ||
-		sceneStaticChurn;
-	const bool sceneStatic =
-		sceneGround || sceneGroundEmbeddedTetProbe || sceneStaticBox ||
-		sceneMaxDepenetrationVelocity ||
-		sceneRigidTriangleSteadyContact ||
-		sceneSpeculativeCcd ||
-		sceneSphereReverseFeature ||
-		sceneCapsuleReverseFeature ||
-		sceneConvexReverseFeature ||
-		sceneTriangleMeshReverseFeature ||
-		sceneHeightFieldReverseFeature;
-	const bool sceneDynamicChurn =
-		gHeadlessOptions.caseName == "scene-volume-dynamic-churn";
-	const bool sceneMultiDynamic =
-		gHeadlessOptions.caseName ==
-			"scene-volume-multi-dynamic-box";
-	const bool sceneMultiSoft =
-		gHeadlessOptions.caseName ==
-			"scene-volume-multi-soft-islands";
-	const bool sceneSoftSleepWake =
-		gHeadlessOptions.caseName ==
-			"scene-volume-sleep-wake";
-	const bool sceneSoftRigidWake =
-		gHeadlessOptions.caseName ==
-			"scene-volume-rigid-wake";
-	const bool sceneMixedSleepIslands =
-		gHeadlessOptions.caseName ==
-			"scene-volume-mixed-sleep-islands";
-	const bool sceneSoftChurn =
-		gHeadlessOptions.caseName ==
-			"scene-volume-soft-churn";
-	const bool sceneBufferMutation =
-		gHeadlessOptions.caseName ==
-			"scene-volume-buffer-mutation";
-	const bool sceneWorldPin =
-		gHeadlessOptions.caseName ==
-			"scene-volume-world-pin" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-world-element-attachment";
-	const bool sceneRigidAttachment =
-		gHeadlessOptions.caseName ==
-			"scene-volume-rigid-attachment" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-rigid-element-attachment";
-	const bool sceneStaticAttachment =
-		gHeadlessOptions.caseName ==
-			"scene-volume-static-attachment" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-static-element-attachment";
-	const bool sceneKinematicAttachment =
-		gHeadlessOptions.caseName ==
-			"scene-volume-kinematic-attachment" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-kinematic-element-attachment";
-	const bool sceneArticulationAttachment =
-		gHeadlessOptions.caseName ==
-			"scene-volume-articulation-attachment" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-articulation-element-attachment";
-	const bool scenePartialElementFilter =
-		gHeadlessOptions.caseName ==
-			"scene-volume-partial-element-filter";
-	const bool sceneElementFilter =
-		gHeadlessOptions.caseName ==
-			"scene-volume-element-filter" ||
-		scenePartialElementFilter;
-	const bool sceneKinematicBox =
-		isSceneCpuVolumeKinematicRigidCase(
-			gHeadlessOptions.caseName);
-	const bool sceneMultiSceneIsolation =
-		gHeadlessOptions.caseName ==
-			"scene-volume-multi-scene-isolation";
-	const bool sceneSoftSoftWake =
-		gHeadlessOptions.caseName ==
-			"scene-volume-soft-soft-wake";
-	const bool sceneSoftPairAttachment =
-		gHeadlessOptions.caseName ==
-			"scene-volume-volume-attachment";
-	const bool sceneMotionControls =
-		gHeadlessOptions.caseName ==
-			"scene-volume-motion-controls";
-	const bool sceneSkinning =
-		gHeadlessOptions.caseName ==
-			"scene-volume-skinning";
-	const bool sceneVolumeKinematicTarget =
-		gHeadlessOptions.caseName ==
-			"scene-volume-full-kinematic-target" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-partial-kinematic-target";
-	const bool sceneDynamic =
-		sceneOgcSandwich ||
-		gHeadlessOptions.caseName == "scene-volume-dynamic-box" ||
-		gHeadlessOptions.caseName ==
-			"scene-volume-true-boundary-dynamic-box" ||
-		gHeadlessOptions.caseName == "scene-volume-dynamic-sphere" ||
-		gHeadlessOptions.caseName == "scene-volume-dynamic-capsule" ||
-		gHeadlessOptions.caseName == "scene-volume-dynamic-convex" ||
-		sceneDynamicChurn || sceneMultiDynamic ||
-		sceneMultiSoft || sceneRigidAttachment ||
-		sceneKinematicAttachment;
-	const bool sceneIntegrated =
-		sceneVisualShowcase || sceneOgcSandwich || sceneSphereLongRoll ||
-		sceneSphereSoftSoftGlancing || sceneSoftSoftTorque ||
-		sceneLifecycle ||
-		sceneTaskGraphPureSoft ||
-		sceneTaskGraphRigidTriangleSurfaceFeatureOverlap ||
-		sceneTaskGraphWriteBack ||
-		sceneStatic || sceneDynamic ||
-		sceneSoftSleepWake || sceneSoftRigidWake ||
-		sceneMixedSleepIslands || sceneSoftChurn ||
-		sceneBufferMutation || sceneWorldPin ||
-		sceneRigidAttachment || sceneStaticAttachment ||
-		sceneKinematicAttachment ||
-		sceneArticulationAttachment ||
-		sceneElementFilter ||
-		sceneKinematicBox ||
-		sceneMultiSceneIsolation ||
-		sceneSoftSoftWake ||
-		sceneSoftPairAttachment ||
-		sceneVolumeKinematicTarget ||
-		sceneSkinning ||
-		sceneMotionControls ||
-		sceneMaxDepenetrationVelocity ||
-		sceneSpeculativeCcd;
-	const char* validation =
-		sceneTaskGraphPureSoft ? "SCENE_TASKGRAPH_PURE_SOFT_GATED" :
-		(sceneSkinning ? "SCENE_CPU_SKINNING_GATED" :
-		(sceneMotionControls ?
-			"SCENE_DEFORMABLE_MOTION_CONTROLS_GATED" :
-		sceneVolumeKinematicTarget ?
-			"SCENE_VOLUME_KINEMATIC_TARGET_GATED" :
-		(sceneArticulationAttachment ?
-			"SCENE_ARTICULATION_ATTACHMENT_GATED" :
-		(sceneStaticAttachment ?
-			"SCENE_STATIC_ATTACHMENT_GATED" :
-		(sceneKinematicAttachment ?
-			"SCENE_KINEMATIC_ATTACHMENT_GATED" :
-		(sceneRigidAttachment ? "SCENE_RIGID_ATTACHMENT_GATED" :
-		(sceneSoftPairAttachment ?
-			"SCENE_SOFT_PAIR_ATTACHMENT_GATED" :
-		(sceneSoftSoftWake ? "SCENE_SOFT_SOFT_WAKE_GATED" :
-		(sceneMultiSceneIsolation ?
-			"SCENE_MULTI_SCENE_ISOLATION_GATED" :
-		(sceneKinematicBox ? "SCENE_KINEMATIC_COUPLING_GATED" :
-		(sceneElementFilter ?
-			(scenePartialElementFilter ?
-				"SCENE_PARTIAL_ELEMENT_FILTER_GATED" :
-				"SCENE_ELEMENT_FILTER_GATED") :
-		(sceneWorldPin ? "SCENE_WORLD_PIN_GATED" :
-		(sceneBufferMutation ? "SCENE_BUFFER_MUTATION_GATED" :
-		(sceneSoftChurn ? "SCENE_SOFT_CHURN_GATED" :
-		(sceneMixedSleepIslands ?
-			"SCENE_MIXED_SLEEP_ISLANDS_GATED" :
-		(sceneSoftRigidWake ? "SCENE_SOFT_RIGID_WAKE_GATED" :
-		(sceneSoftSleepWake ? "SCENE_SOFT_SLEEP_WAKE_GATED" :
-		(sceneLifecycle ? "SCENE_LIFECYCLE_GATED" :
-			(sceneDynamicChurn ?
-				"SCENE_DYNAMIC_LIFECYCLE_GATED" :
-			(sceneMultiSoft ?
-				"SCENE_MULTI_SOFT_ISLANDS_GATED" :
-			(sceneMultiDynamic ?
-				"SCENE_MULTI_DYNAMIC_COUPLING_GATED" :
-			(sceneDynamic ? "SCENE_DYNAMIC_COUPLING_GATED" :
-				(sceneStaticChurn ?
-					"SCENE_STATIC_LIFECYCLE_GATED" :
-					(sceneStatic ? "SCENE_STATIC_CONTACT_GATED" :
-						"COMPONENT_GATED"))))))))))))))))))))))));
-	if(sceneTaskGraphWriteBack)
-		validation = "SCENE_TASKGRAPH_WRITEBACK_GATED";
-	if(sceneVisualShowcase)
-		validation = "SCENE_VISUAL_SHOWCASE_GATED";
-	if(sceneOgcSandwich)
-		validation = "SCENE_OGC_SANDWICH_GATED";
-	if(sceneSphereLongRoll)
-		validation = "SCENE_SPHERE_LONG_ROLL_GATED";
-	if(sceneSphereSoftSoftGlancing)
-		validation = "SCENE_SPHERE_SOFT_SOFT_GLANCING_GATED";
-	if(sceneSoftSoftTorque)
-		validation = "SCENE_SOFT_SOFT_TORQUE_GATED";
-	if(sceneGroundEmbeddedTetProbe)
-		validation = "SCENE_GROUND_EMBEDDED_TET_PROBE_GATED";
-	if(sceneTaskGraphRigidTriangleSurfaceFeatureOverlap)
-		validation =
-			"SCENE_TASKGRAPH_RIGID_TRIANGLE_FEATURE_OVERLAP_GATED";
-	if(sceneMaxDepenetrationVelocity)
-		validation =
-			"SCENE_MAX_DEPENETRATION_VELOCITY_GATED";
-	if(sceneRigidTriangleSteadyContact)
-		validation = "SCENE_RIGID_TRIANGLE_STEADY_CONTACT_GATED";
-	if(sceneSpeculativeCcd)
-		validation =
-			"SCENE_SPECULATIVE_CCD_GATED";
-	if(sceneSphereReverseFeature)
-		validation =
-			"SCENE_SPHERE_REVERSE_FEATURE_GATED";
-	if(sceneCapsuleReverseFeature)
-		validation =
-			"SCENE_CAPSULE_REVERSE_FEATURE_GATED";
-	if(sceneConvexReverseFeature)
-		validation =
-			"SCENE_CONVEX_REVERSE_FEATURE_GATED";
-	printf(
-		"[AVBD_GATE] schema=1 snippet=" AVBD_VOLUME_SNIPPET_NAME " "
-		"case=%s solver=%s validation=%s "
-		"sceneSoftIntegration=%u status=%s initialized=%u "
-		"frames=%u fetchFailures=%u particles=%u softBodies=%u "
-		"tetElements=%u surfaceTriangles=%u rigidBoxes=%u "
-		"sceneStatics=%u sceneDynamics=%u sceneDeformableVolumes=%u "
-		"sceneActorCreated=%u sceneShapeAttached=%u "
-		"sceneSimulationMeshAttached=%u "
-		"sceneHostBuffersInitialized=%u sceneActorAdded=%u "
-		"sceneActorRemoved=%u sceneActorReleased=%u "
-		"sceneBoundsFinite=%u "
-		"sceneSecondVolumeActorCreated=%u "
-		"sceneSecondVolumeHostBuffersInitialized=%u "
-		"sceneSecondVolumeActorAdded=%u "
-		"sceneSecondVolumeActorRemoved=%u "
-		"sceneSecondVolumeActorReleased=%u "
-		"sceneSecondVolumeBoundsFinite=%u "
-		"sceneSoftInitiallyAwake=%u "
-		"sceneSoftFirstSlept=%u "
-		"sceneSoftFirstSleepFrame=%u "
-		"sceneSoftSleepWakeCounterZero=%u "
-		"sceneSoftSleepVelocitiesZero=%u "
-		"sceneSoftStableWhileSleeping=%u "
-		"sceneSoftCounterWakeIssued=%u "
-		"sceneSoftWokeByCounter=%u "
-		"sceneSoftCounterWakeFrame=%u "
-		"sceneSoftSecondSlept=%u "
-		"sceneSoftSecondSleepFrame=%u "
-		"sceneSoftVelocityWakeIssued=%u "
-		"sceneSoftWokeByVelocity=%u "
-		"sceneSoftVelocityWakeFrame=%u "
-		"sceneSoftMovedAfterVelocityWake=%u "
-		"sceneSoftVelocityStopIssued=%u "
-		"sceneSoftFinalSlept=%u "
-		"sceneSoftFinalSleepFrame=%u "
-		"sceneSoftRigidWakeActorAdded=%u "
-		"sceneSoftWokeByRigid=%u "
-		"sceneSoftRigidWakeFrame=%u "
-		"sceneSoftMovedAfterRigidWake=%u "
-		"sceneMixedFirstSlept=%u "
-		"sceneMixedFirstSleepFrame=%u "
-		"sceneMixedFirstStable=%u "
-		"sceneMixedSecondStayedAwake=%u "
-		"sceneMixedSecondMoved=%u "
-		"sceneSoftChurnRemoveCount=%u "
-		"sceneSoftChurnReaddCount=%u "
-		"sceneSoftChurnCycles=%u "
-		"sceneSoftChurnPostCompactMoveCount=%u "
-		"sceneSoftChurnStable=%u "
-		"sceneBufferMutationIssued=%u "
-		"sceneBufferMutationWoke=%u "
-		"sceneBufferMutationApplied=%u "
-		"sceneBufferDriveIssued=%u "
-		"sceneBufferPinHeld=%u "
-		"sceneBufferDynamicMoved=%u "
-		"sceneBufferInvMassRestored=%u "
-		"sceneBufferRestoredMoved=%u "
-		"sceneBufferResetIssued=%u "
-		"sceneWorldPinCreated=%u sceneWorldPinHeld=%u "
-		"sceneWorldPinActorReadded=%u "
-		"sceneWorldPinReleased=%u "
-		"sceneWorldPinMovedAfterRelease=%u "
-		"sceneRigidAttachmentActorAdded=%u "
-		"sceneRigidAttachmentInitiallySleeping=%u "
-		"sceneRigidAttachmentCreated=%u "
-		"sceneRigidAttachmentRigidWoke=%u "
-		"sceneRigidAttachmentRigidMoved=%u "
-		"sceneRigidAttachmentHeldAcrossReadd=%u "
-		"sceneRigidAttachmentReleased=%u "
-		"sceneRigidAttachmentSeparatedAfterRelease=%u "
-		"sceneArticulationCreated=%u "
-		"sceneArticulationAdded=%u "
-		"sceneArticulationInitiallySleeping=%u "
-		"sceneArticulationWoke=%u "
-		"sceneArticulationJointSubspaceHeld=%u "
-		"sceneArticulationRootStable=%u "
-		"sceneElementFilterCreated=%u "
-		"sceneElementFilterActorReadded=%u "
-		"sceneElementFilterSuppressedContact=%u "
-		"sceneElementFilterReleased=%u "
-		"sceneElementFilterContactRestored=%u "
-		"scenePartialFilterUnfilteredContactHeld=%u "
-		"scenePartialFilterExactOwnership=%u "
-		"sceneKinematicActorAdded=%u "
-		"sceneKinematicTargetIssued=%u "
-		"sceneKinematicTargetReached=%u "
-		"sceneKinematicSoftWoke=%u "
-		"sceneKinematicSoftMoved=%u "
-		"sceneKinematicContactObserved=%u "
-		"sceneVolumeTargetBound=%u "
-		"sceneVolumeTargetMutated=%u "
-		"sceneVolumeTargetWoke=%u "
-		"sceneVolumeTargetReached=%u "
-		"sceneVolumePartialInactiveIgnored=%u "
-		"sceneVolumePartialActivated=%u "
-		"sceneVolumePartialActivatedReached=%u "
-		"sceneSecondSceneCreated=%u "
-		"sceneSecondSceneSolverMatched=%u "
-		"scenePrimarySceneReleased=%u "
-		"sceneSecondSceneReleased=%u "
-		"sceneMultiPrimaryStable=%u "
-		"sceneMultiPrimaryDetachedStable=%u "
-		"sceneMultiSecondaryUpdatedBeforeRelease=%u "
-		"sceneMultiSecondaryUpdatedAfterRelease=%u "
-		"sceneSoftSoftBothSlept=%u "
-		"sceneSoftSoftDriveIssued=%u "
-		"sceneSoftSoftDriverWoke=%u "
-		"sceneSoftSoftTargetWoke=%u "
-		"sceneSoftSoftTargetWakeFrame=%u "
-		"sceneSoftSoftTargetMoved=%u "
-		"sceneSoftSoftResetIssued=%u "
-		"sceneSoftSoftBothFinalSlept=%u "
-		"motionMaxVelocityBounded=%u "
-		"motionSettlingApplied=%u "
-		"motionSettlingSlept=%u "
-		"motionControlStayedAwake=%u "
-		"depenetrationLimitApplied=%u "
-		"depenetrationFirstStepBounded=%u "
-		"depenetrationControlSeparated=%u "
-		"depenetrationGradualRecovery=%u "
-		"speculativeCcdFlagApplied=%u "
-		"speculativeCcdPreventedTunneling=%u "
-		"speculativeCcdNegativeControlTunneled=%u "
-		"movingSphereTargetIssued=%u "
-		"movingSphereCcdResponseObserved=%u "
-		"movingSphereNegativeControlHeld=%u "
-		"dynamicSphereSweepLaunched=%u "
-		"dynamicSphereSweepResponseObserved=%u "
-		"dynamicSphereSweepNegativeControlTunneled=%u "
-		"dynamicSphereSweepTwoSidedResponseObserved=%u "
-		"sceneStaticShapeDetached=%u "
-		"sceneStaticShapeReattached=%u "
-		"sceneStaticActorRemoved=%u sceneStaticActorReadded=%u "
-		"sceneDynamicActorAdded=%u "
-		"sceneDynamicActorRemoved=%u "
-		"sceneDynamicActorReleased=%u "
-		"sceneDynamicInitiallySleeping=%u "
-		"sceneDynamicWokeBySoft=%u "
-		"sceneDynamicFirstWakeFrame=%u "
-		"sceneDynamicShapeDetached=%u "
-		"sceneDynamicShapeReattached=%u "
-		"sceneDynamicActorReadded=%u "
-		"sceneDynamicReaddedSleeping=%u "
-		"sceneDynamicRewokeBySoft=%u "
-		"sceneDynamicSecondWakeFrame=%u "
-		"sceneSecondDynamicActorAdded=%u "
-		"sceneSecondDynamicActorRemoved=%u "
-		"sceneSecondDynamicActorReleased=%u "
-		"sceneSecondDynamicInitiallySleeping=%u "
-		"sceneSecondDynamicWokeBySoft=%u "
-		"sceneSecondDynamicFirstWakeFrame=%u "
-		"groundContactFrames=%u rigidContactFrames=%u "
-		"softContactFrames=%u maxGroundContacts=%u "
-		"maxRigidContacts=%u maxSoftContacts=%u "
-		"invalidContactSourceSamples=%u finalInsideParticles=%u "
-		"nonFiniteParticleSamples=%u "
-		"invertedElementSamples=%u firstInversionFrame=%u "
-		"firstInversionBody=%u firstInversionElement=%u "
-		"invertedBodiesMask=%u minDetF=%.9g maxDetF=%.9g "
-		"minBodyVolumeRatio=%.9g maxBodyVolumeRatio=%.9g "
-		"minY=%.9g maxY=%.9g finalMinY=%.9g finalMaxY=%.9g "
-		"maxParticleSpeed=%.9g finalMaxParticleSpeed=%.9g "
-		"maxCentroidDrop=%.9g "
-		"sceneSecondVolumeMaxCentroidDrop=%.9g "
-		"sceneSecondVolumeFinalCentroidY=%.9g "
-		"sceneWorldPinMaxDrift=%.9g "
-		"sceneWorldPinReleasedMaxDisplacement=%.9g "
-		"sceneRigidAttachmentMaxDrift=%.9g "
-		"sceneRigidAttachmentMaxRigidDisplacement=%.9g "
-		"sceneRigidAttachmentMaxRigidSpeed=%.9g "
-		"sceneRigidAttachmentReleasedSeparation=%.9g "
-		"sceneArticulationRootMaxDisplacement=%.9g "
-		"sceneArticulationChildMaxForbiddenDisplacement=%.9g "
-		"sceneArticulationChildMaxAngularDisplacement=%.9g "
-		"sceneElementFilterMinY=%.9g "
-		"sceneElementFilterFinalMinY=%.9g "
-		"scenePartialFilterUnfilteredMinY=%.9g "
-		"sceneKinematicMaxPoseError=%.9g "
-		"sceneKinematicSoftDisplacement=%.9g "
-		"sceneKinematicFinalY=%.9g "
-		"sceneVolumeTargetFinalMaxError=%.9g "
-		"sceneVolumeTargetMaxDisplacement=%.9g "
-		"sceneVolumePartialInactiveDecoyDistance=%.9g "
-		"sceneDynamicInitialY=%.9g "
-		"sceneDynamicMinY=%.9g sceneDynamicFinalY=%.9g "
-		"sceneDynamicMaxDrop=%.9g "
-		"sceneDynamicPreContactMaxDrop=%.9g "
-		"sceneDynamicMaxDownSpeed=%.9g "
-		"sceneSecondDynamicInitialY=%.9g "
-		"sceneSecondDynamicMinY=%.9g "
-		"sceneSecondDynamicFinalY=%.9g "
-		"sceneSecondDynamicMaxDrop=%.9g "
-		"sceneSecondDynamicPreContactMaxDrop=%.9g "
-		"sceneSecondDynamicMaxDownSpeed=%.9g "
-		"minDynamicSurfaceSeparation=%.9g "
-		"finalDynamicSurfaceSeparation=%.9g "
-		"motionMaxVelocityFirstStepDisplacement=%.9g "
-		"motionMaxVelocityFirstStepSpeed=%.9g "
-		"motionSettlingFinalSpeed=%.9g "
-		"motionControlFinalSpeed=%.9g "
-		"depenetrationLimitedFirstStepRise=%.9g "
-		"depenetrationControlFirstStepRise=%.9g "
-		"depenetrationLimitedFinalRise=%.9g "
-		"depenetrationLimitedMaxSpeed=%.9g "
-		"speculativeCcdPositiveMinY=%.9g "
-		"speculativeCcdPositiveMinSeparation=%.9g "
-		"speculativeCcdNegativeMaxY=%.9g "
-		"movingSpherePositiveDisplacement=%.9g "
-		"movingSphereNegativeDisplacement=%.9g "
-		"movingSpherePositiveMinSeparation=%.9g "
-		"dynamicSphereSweepPositiveSoftDisplacement=%.9g "
-		"dynamicSphereSweepNegativeSoftDisplacement=%.9g "
-		"dynamicSphereSweepPositiveRigidDrop=%.9g "
-		"dynamicSphereSweepNegativeRigidDrop=%.9g "
-		"dynamicSphereSweepPositiveMinSeparation=%.9g "
-		"solverReadbackMatched=%u "
-		"fatalErrors=%u warningErrors=%u cleanupComplete=%u\n",
-		gHeadlessOptions.caseName.c_str(),
-		Snippets::getSolverTypeName(gHeadlessOptions.solverType),
-		validation,
-		sceneIntegrated ? 1u : 0u,
-		passed ? "PASS" : "FAIL", gMetrics.initialized,
-		gMetrics.completedFrames, gMetrics.fetchFailures,
-		gMetrics.particles, gMetrics.softBodies, gMetrics.tetElements,
-		gMetrics.surfaceTriangles, gMetrics.rigidBoxes,
-		gMetrics.sceneStatics, gMetrics.sceneDynamics,
-		gMetrics.sceneDeformableVolumes,
-		gMetrics.sceneActorCreated, gMetrics.sceneShapeAttached,
-		gMetrics.sceneSimulationMeshAttached,
-		gMetrics.sceneHostBuffersInitialized, gMetrics.sceneActorAdded,
-		gMetrics.sceneActorRemoved, gMetrics.sceneActorReleased,
-		gMetrics.sceneBoundsFinite,
-		gMetrics.sceneSecondVolumeActorCreated,
-		gMetrics.sceneSecondVolumeHostBuffersInitialized,
-		gMetrics.sceneSecondVolumeActorAdded,
-		gMetrics.sceneSecondVolumeActorRemoved,
-		gMetrics.sceneSecondVolumeActorReleased,
-		gMetrics.sceneSecondVolumeBoundsFinite,
-		gMetrics.sceneSoftInitiallyAwake,
-		gMetrics.sceneSoftFirstSlept,
-		gMetrics.sceneSoftFirstSleepFrame,
-		gMetrics.sceneSoftSleepWakeCounterZero,
-		gMetrics.sceneSoftSleepVelocitiesZero,
-		gMetrics.sceneSoftStableWhileSleeping,
-		gMetrics.sceneSoftCounterWakeIssued,
-		gMetrics.sceneSoftWokeByCounter,
-		gMetrics.sceneSoftCounterWakeFrame,
-		gMetrics.sceneSoftSecondSlept,
-		gMetrics.sceneSoftSecondSleepFrame,
-		gMetrics.sceneSoftVelocityWakeIssued,
-		gMetrics.sceneSoftWokeByVelocity,
-		gMetrics.sceneSoftVelocityWakeFrame,
-		gMetrics.sceneSoftMovedAfterVelocityWake,
-		gMetrics.sceneSoftVelocityStopIssued,
-		gMetrics.sceneSoftFinalSlept,
-		gMetrics.sceneSoftFinalSleepFrame,
-		gMetrics.sceneSoftRigidWakeActorAdded,
-		gMetrics.sceneSoftWokeByRigid,
-		gMetrics.sceneSoftRigidWakeFrame,
-		gMetrics.sceneSoftMovedAfterRigidWake,
-		gMetrics.sceneMixedFirstSlept,
-		gMetrics.sceneMixedFirstSleepFrame,
-		gMetrics.sceneMixedFirstStable,
-		gMetrics.sceneMixedSecondStayedAwake,
-		gMetrics.sceneMixedSecondMoved,
-		gMetrics.sceneSoftChurnRemoveCount,
-		gMetrics.sceneSoftChurnReaddCount,
-		gMetrics.sceneSoftChurnCycles,
-		gMetrics.sceneSoftChurnPostCompactMoveCount,
-		gMetrics.sceneSoftChurnStable,
-		gMetrics.sceneBufferMutationIssued,
-		gMetrics.sceneBufferMutationWoke,
-		gMetrics.sceneBufferMutationApplied,
-		gMetrics.sceneBufferDriveIssued,
-		gMetrics.sceneBufferPinHeld,
-		gMetrics.sceneBufferDynamicMoved,
-		gMetrics.sceneBufferInvMassRestored,
-		gMetrics.sceneBufferRestoredMoved,
-		gMetrics.sceneBufferResetIssued,
-		gMetrics.sceneWorldPinCreated,
-		gMetrics.sceneWorldPinHeld,
-		gMetrics.sceneWorldPinActorReadded,
-		gMetrics.sceneWorldPinReleased,
-		gMetrics.sceneWorldPinMovedAfterRelease,
-		gMetrics.sceneRigidAttachmentActorAdded,
-		gMetrics.sceneRigidAttachmentInitiallySleeping,
-		gMetrics.sceneRigidAttachmentCreated,
-		gMetrics.sceneRigidAttachmentRigidWoke,
-		gMetrics.sceneRigidAttachmentRigidMoved,
-		gMetrics.sceneRigidAttachmentHeldAcrossReadd,
-		gMetrics.sceneRigidAttachmentReleased,
-		gMetrics.sceneRigidAttachmentSeparatedAfterRelease,
-		gMetrics.sceneArticulationCreated,
-		gMetrics.sceneArticulationAdded,
-		gMetrics.sceneArticulationInitiallySleeping,
-		gMetrics.sceneArticulationWoke,
-		gMetrics.sceneArticulationJointSubspaceHeld,
-		gMetrics.sceneArticulationRootStable,
-		gMetrics.sceneElementFilterCreated,
-		gMetrics.sceneElementFilterActorReadded,
-		gMetrics.sceneElementFilterSuppressedContact,
-		gMetrics.sceneElementFilterReleased,
-		gMetrics.sceneElementFilterContactRestored,
-		gMetrics.scenePartialFilterUnfilteredContactHeld,
-		gMetrics.scenePartialFilterExactOwnership,
-		gMetrics.sceneKinematicActorAdded,
-		gMetrics.sceneKinematicTargetIssued,
-		gMetrics.sceneKinematicTargetReached,
-		gMetrics.sceneKinematicSoftWoke,
-		gMetrics.sceneKinematicSoftMoved,
-		gMetrics.sceneKinematicContactObserved,
-		gMetrics.sceneVolumeTargetBound,
-		gMetrics.sceneVolumeTargetMutated,
-		gMetrics.sceneVolumeTargetWoke,
-		gMetrics.sceneVolumeTargetReached,
-		gMetrics.sceneVolumePartialInactiveIgnored,
-		gMetrics.sceneVolumePartialActivated,
-		gMetrics.sceneVolumePartialActivatedReached,
-		gMetrics.sceneSecondSceneCreated,
-		gMetrics.sceneSecondSceneSolverMatched,
-		gMetrics.scenePrimarySceneReleased,
-		gMetrics.sceneSecondSceneReleased,
-		gMetrics.sceneMultiPrimaryStable,
-		gMetrics.sceneMultiPrimaryDetachedStable,
-		gMetrics.sceneMultiSecondaryUpdatedBeforeRelease,
-		gMetrics.sceneMultiSecondaryUpdatedAfterRelease,
-		gMetrics.sceneSoftSoftBothSlept,
-		gMetrics.sceneSoftSoftDriveIssued,
-		gMetrics.sceneSoftSoftDriverWoke,
-		gMetrics.sceneSoftSoftTargetWoke,
-		gMetrics.sceneSoftSoftTargetWakeFrame,
-		gMetrics.sceneSoftSoftTargetMoved,
-		gMetrics.sceneSoftSoftResetIssued,
-		gMetrics.sceneSoftSoftBothFinalSlept,
-		gMetrics.motionMaxVelocityBounded,
-		gMetrics.motionSettlingApplied,
-		gMetrics.motionSettlingSlept,
-		gMetrics.motionControlStayedAwake,
-		gMetrics.depenetrationLimitApplied,
-		gMetrics.depenetrationFirstStepBounded,
-		gMetrics.depenetrationControlSeparated,
-		gMetrics.depenetrationGradualRecovery,
-		gMetrics.speculativeCcdFlagApplied,
-		gMetrics.speculativeCcdPreventedTunneling,
-		gMetrics.speculativeCcdNegativeControlTunneled,
-		gMetrics.movingSphereTargetIssued,
-		gMetrics.movingSphereCcdResponseObserved,
-		gMetrics.movingSphereNegativeControlHeld,
-		gMetrics.dynamicSphereSweepLaunched,
-		gMetrics.dynamicSphereSweepResponseObserved,
-		gMetrics.dynamicSphereSweepNegativeControlTunneled,
-		gMetrics.dynamicSphereSweepTwoSidedResponseObserved,
-		gMetrics.sceneStaticShapeDetached,
-		gMetrics.sceneStaticShapeReattached,
-		gMetrics.sceneStaticActorRemoved,
-		gMetrics.sceneStaticActorReadded,
-		gMetrics.sceneDynamicActorAdded,
-		gMetrics.sceneDynamicActorRemoved,
-		gMetrics.sceneDynamicActorReleased,
-		gMetrics.sceneDynamicInitiallySleeping,
-		gMetrics.sceneDynamicWokeBySoft,
-		gMetrics.sceneDynamicFirstWakeFrame,
-		gMetrics.sceneDynamicShapeDetached,
-		gMetrics.sceneDynamicShapeReattached,
-		gMetrics.sceneDynamicActorReadded,
-		gMetrics.sceneDynamicReaddedSleeping,
-		gMetrics.sceneDynamicRewokeBySoft,
-		gMetrics.sceneDynamicSecondWakeFrame,
-		gMetrics.sceneSecondDynamicActorAdded,
-		gMetrics.sceneSecondDynamicActorRemoved,
-		gMetrics.sceneSecondDynamicActorReleased,
-		gMetrics.sceneSecondDynamicInitiallySleeping,
-		gMetrics.sceneSecondDynamicWokeBySoft,
-		gMetrics.sceneSecondDynamicFirstWakeFrame,
-		gMetrics.groundContactFrames,
-		gMetrics.rigidContactFrames, gMetrics.softContactFrames,
-		gMetrics.maxGroundContacts, gMetrics.maxRigidContacts,
-		gMetrics.maxSoftContacts, gMetrics.invalidContactSourceSamples,
-		gMetrics.finalInsideParticles,
-		gMetrics.nonFiniteParticleSamples, gMetrics.invertedElementSamples,
-		gMetrics.firstInversionFrame, gMetrics.firstInversionBody,
-		gMetrics.firstInversionElement, gMetrics.invertedBodiesMask,
-		double(gMetrics.minDetF), double(gMetrics.maxDetF),
-		double(gMetrics.minBodyVolumeRatio),
-		double(gMetrics.maxBodyVolumeRatio), double(gMetrics.minY),
-		double(gMetrics.maxY), double(gMetrics.finalMinY),
-		double(gMetrics.finalMaxY), double(gMetrics.maxParticleSpeed),
-		double(gMetrics.finalMaxParticleSpeed),
-		double(gMetrics.maxCentroidDrop),
-		double(gMetrics.sceneSecondVolumeMaxCentroidDrop),
-		double(gMetrics.sceneSecondVolumeFinalCentroidY),
-		double(gMetrics.sceneWorldPinMaxDrift),
-		double(gMetrics.sceneWorldPinReleasedMaxDisplacement),
-		double(gMetrics.sceneRigidAttachmentMaxDrift),
-		double(gMetrics.sceneRigidAttachmentMaxRigidDisplacement),
-		double(gMetrics.sceneRigidAttachmentMaxRigidSpeed),
-		double(gMetrics.sceneRigidAttachmentReleasedSeparation),
-		double(gMetrics.sceneArticulationRootMaxDisplacement),
-		double(
-			gMetrics.sceneArticulationChildMaxForbiddenDisplacement),
-		double(
-			gMetrics.sceneArticulationChildMaxAngularDisplacement),
-		double(gMetrics.sceneElementFilterMinY),
-		double(gMetrics.sceneElementFilterFinalMinY),
-		double(gMetrics.scenePartialFilterUnfilteredMinY),
-		double(gMetrics.sceneKinematicMaxPoseError),
-		double(gMetrics.sceneKinematicSoftDisplacement),
-		double(gMetrics.sceneKinematicFinalY),
-		double(gMetrics.sceneVolumeTargetFinalMaxError),
-		double(gMetrics.sceneVolumeTargetMaxDisplacement),
-		double(
-			gMetrics.
-				sceneVolumePartialInactiveDecoyDistance),
-		double(gSceneCpuDynamicInitialY),
-		double(gMetrics.sceneDynamicMinY),
-		double(gMetrics.sceneDynamicFinalY),
-		double(gMetrics.sceneDynamicMaxDrop),
-		double(gMetrics.sceneDynamicPreContactMaxDrop),
-		double(gMetrics.sceneDynamicMaxDownSpeed),
-		double(gSceneCpuSecondDynamicInitialY),
-		double(gMetrics.sceneSecondDynamicMinY),
-		double(gMetrics.sceneSecondDynamicFinalY),
-		double(gMetrics.sceneSecondDynamicMaxDrop),
-		double(gMetrics.sceneSecondDynamicPreContactMaxDrop),
-		double(gMetrics.sceneSecondDynamicMaxDownSpeed),
-		double(gMetrics.minDynamicSurfaceSeparation),
-		double(gMetrics.finalDynamicSurfaceSeparation),
-		double(gMetrics.motionMaxVelocityFirstStepDisplacement),
-		double(gMetrics.motionMaxVelocityFirstStepSpeed),
-		double(gMetrics.motionSettlingFinalSpeed),
-		double(gMetrics.motionControlFinalSpeed),
-		double(gMetrics.depenetrationLimitedFirstStepRise),
-		double(gMetrics.depenetrationControlFirstStepRise),
-		double(gMetrics.depenetrationLimitedFinalRise),
-		double(gMetrics.depenetrationLimitedMaxSpeed),
-		double(gMetrics.speculativeCcdPositiveMinY),
-		double(gMetrics.speculativeCcdPositiveMinSeparation),
-		double(gMetrics.speculativeCcdNegativeMaxY),
-		double(gMetrics.movingSpherePositiveDisplacement),
-		double(gMetrics.movingSphereNegativeDisplacement),
-		double(gMetrics.movingSpherePositiveMinSeparation),
-		double(gMetrics.dynamicSphereSweepPositiveSoftDisplacement),
-		double(gMetrics.dynamicSphereSweepNegativeSoftDisplacement),
-		double(gMetrics.dynamicSphereSweepPositiveRigidDrop),
-		double(gMetrics.dynamicSphereSweepNegativeRigidDrop),
-		double(gMetrics.dynamicSphereSweepPositiveMinSeparation),
-		gMetrics.solverReadbackMatched ? 1u : 0u,
-		gErrorCallback.getFatalCount(), gErrorCallback.getWarningCount(),
-		gMetrics.cleanupComplete);
+	Headless::HeadlessResultContext context;
+	context.caseName = &gHeadlessOptions.caseName;
+	context.solverName =
+		Snippets::getSolverTypeName(gHeadlessOptions.solverType);
+	context.frames = gHeadlessOptions.frames;
+	context.dt = gHeadlessOptions.dt;
+	context.dispatcherThreads = gHeadlessOptions.dispatcherThreads;
+	context.parallelExecution =
+		gHeadlessOptions.execution == Snippets::eHEADLESS_PARALLEL;
+	context.sequentialExecution =
+		gHeadlessOptions.execution == Snippets::eHEADLESS_SEQUENTIAL;
+	context.metrics = &gMetrics;
+	context.performance = &gPerformance;
+	context.ogcSandwichMetrics =
+		&gSceneCpuOgcSandwichMonitor.getMetrics();
+	context.visualRotationMetrics = &gSceneCpuVisualRotationMetrics;
+	context.visualPrimaryCubeRotationMetrics =
+		&gSceneCpuVisualPrimaryCubeRotationMetrics;
+	context.visualSphereRotationMetrics =
+		&gSceneCpuVisualSphereRotationMetrics;
+	context.visualInteractionMetrics =
+		&gSceneCpuVisualInteractionMetrics;
+	context.softContactPhaseMetrics = &gSceneCpuSoftContactPhaseMetrics;
+	context.softSoftTorqueMetrics = &gSceneCpuSoftSoftTorqueMetrics;
+	context.groundEmbeddedTetMetrics =
+		&gSceneCpuGroundEmbeddedTetProbeMetrics;
+	context.volumeHealthMonitor = &gSceneCpuVolumeHealthMonitor;
+	context.volumeSkinningMetrics = &gVolumeSkinningMetrics;
+	context.reverseFeatureMetrics = &gSphereReverseFeatureMetrics;
+	context.reverseSweptMetrics = &gSphereReverseSweptMetrics;
+	context.deformingReverseSweptMetrics =
+		&gDeformingVolumeReverseSweptMetrics;
+	context.rotationalSweepMetrics = &gCapsuleRotationalSweepMetrics;
+	context.kinematicFiniteSweptMetrics = getKinematicFiniteSweptMetrics();
+	context.dynamicFiniteSweptMetrics = getDynamicFiniteSweptMetrics();
+	context.dynamicInitialY = gSceneCpuDynamicInitialY;
+	context.secondDynamicInitialY = gSceneCpuSecondDynamicInitialY;
+	context.visualSphereLongRunBounded =
+		isSceneCpuVisualSphereLongRunBounded();
+	context.sphereRollingKinematicsValid =
+		isSceneCpuSphereRollingKinematicsValid();
+	context.sphereLongRollRegressionPassed =
+		isSceneCpuSphereLongRollRegressionPassed();
+	context.sphereRollWindowBeginFrame =
+		SCENE_CPU_SPHERE_ROLL_WINDOW_BEGIN_FRAME;
+	context.sphereRollWindowEndFrame =
+		SCENE_CPU_SPHERE_ROLL_WINDOW_END_FRAME;
+	context.sphereRollCheckpointCount =
+		SCENE_CPU_SPHERE_ROLL_CHECKPOINT_COUNT;
+	context.sphereRollCheckpointInterval =
+		SCENE_CPU_SPHERE_ROLL_CHECKPOINT_INTERVAL;
+	context.ogcPressureDriveFrames =
+		SCENE_CPU_OGC_SANDWICH_PRESSURE_DRIVE_FRAMES;
+	context.softSoftTorqueMinAngularMomentum =
+		SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_MOMENTUM;
+	context.softSoftTorqueMinAngularSpeed =
+		SCENE_CPU_SOFT_SOFT_TORQUE_MIN_ANGULAR_SPEED;
+	context.fatalErrors = gErrorCallback.getFatalCount();
+	context.warningErrors = gErrorCallback.getWarningCount();
+	return context;
 }
 
 int snippetMain(int argc, const char*const* argv)
@@ -21235,14 +12299,22 @@ int snippetMain(int argc, const char*const* argv)
 					break;
 			}
 			finalizeMetrics();
-			finalizePerformanceMetrics();
+			finalizePerformanceMetrics(gPerformance);
 		}
 		cleanupPhysics(false);
+		Headless::HeadlessResultContext resultContext =
+			buildHeadlessResultContext();
 		const bool passed =
 			initialized &&
-			validateHeadlessResult(gHeadlessOptions.caseName);
-		printPerformanceResult();
-		printHeadlessResult(passed);
+			Headless::validateHeadlessResult(resultContext);
+		PerformanceReportConfig performanceConfig;
+		performanceConfig.caseName = gHeadlessOptions.caseName.c_str();
+		performanceConfig.executionName =
+			Snippets::getExecutionName(gHeadlessOptions.execution);
+		performanceConfig.dispatcherThreads =
+			gHeadlessOptions.dispatcherThreads;
+		printPerformanceResult(gPerformance, performanceConfig);
+		Headless::printHeadlessResult(resultContext, passed);
 		return passed ?
 			Snippets::eHEADLESS_PASS : Snippets::eHEADLESS_GATE_FAILED;
 	}

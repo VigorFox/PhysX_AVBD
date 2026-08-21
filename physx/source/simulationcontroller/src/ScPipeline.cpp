@@ -65,7 +65,7 @@
 #include "ScConstraintCore.h"
 #include "ScConstraintSim.h"
 #include "DyIslandManager.h"
-#include "DyAvbdDynamics.h"
+#include "avbd/pipeline/DyAvbdDynamics.h"
 
 using namespace physx;
 using namespace Cm;
@@ -2566,10 +2566,6 @@ void Sc::Scene::postSolver(PxBaseTask* continuation)
 void Sc::Scene::avbdCpuSoftComponentStep(PxBaseTask* continuation)
 {
 	PX_PROFILE_ZONE("Sc::Scene::avbdCpuSoftComponentStep", mContextId);
-	Dy::AvbdDynamicsContext* const avbdContext =
-		static_cast<Dy::AvbdDynamicsContext*>(mDynamicsContext);
-	PX_ASSERT(avbdContext);
-	avbdContext->beginSolveTask();
 	const bool componentStepPrepared =
 		prepareAvbdCpuDeformableVolumesSolve();
 	if(componentStepPrepared &&
@@ -2579,7 +2575,7 @@ void Sc::Scene::avbdCpuSoftComponentStep(PxBaseTask* continuation)
 	bool componentStepCompleted = false;
 	if(componentStepPrepared)
 	{
-		avbdContext->recordSerialPredictionStage();
+		recordAvbdCpuSoftSerialPredictionStage();
 		predictAvbdCpuDeformableVolumes();
 		bool causalLayerTaskReady = false;
 		bool worldPlaneContactTaskReady = false;
@@ -2635,14 +2631,13 @@ void Sc::Scene::avbdCpuSoftComponentStep(PxBaseTask* continuation)
 	// the root returns.  Close it here as well for an empty/failed prepare;
 	// the telemetry operation is idempotent after a normal completion.
 	finishAvbdCpuSoftComponentNoOpTask();
-	avbdContext->endSolveTask();
 	if(componentStepCompleted &&
 		scheduleAvbdCpuSoftComponentWriteBack(continuation))
 		return;
 
 	if(componentStepCompleted)
 	{
-		avbdContext->recordSerialWriteBackStage();
+		recordAvbdCpuSoftSerialWriteBackStage();
 		writeBackAvbdCpuDeformableVolumes();
 		finishAvbdCpuDeformableVolumesStandaloneStep();
 	}
@@ -2654,9 +2649,6 @@ void Sc::Scene::avbdCpuSoftComponentPredictionFinish(
 {
 	PX_PROFILE_ZONE("Sc::Scene::avbdCpuSoftComponentPredictionFinish",
 		mContextId);
-	Dy::AvbdDynamicsContext* const avbdContext =
-		static_cast<Dy::AvbdDynamicsContext*>(mDynamicsContext);
-	PX_ASSERT(avbdContext);
 	bool causalLayerTaskReady = false;
 	bool worldPlaneContactTaskReady = false;
 	bool rigidBoxSdfContactTaskReady = false;
@@ -2707,14 +2699,13 @@ void Sc::Scene::avbdCpuSoftComponentPredictionFinish(
 		componentStepCompleted =
 			finishAvbdCpuSoftComponentCausalLayerSerialFallback();
 	finishAvbdCpuSoftComponentNoOpTask();
-	avbdContext->endSolveTask();
 	if(componentStepCompleted &&
 		scheduleAvbdCpuSoftComponentWriteBack(continuation))
 		return;
 
 	if(componentStepCompleted)
 	{
-		avbdContext->recordSerialWriteBackStage();
+		recordAvbdCpuSoftSerialWriteBackStage();
 		writeBackAvbdCpuDeformableVolumes();
 		finishAvbdCpuDeformableVolumesStandaloneStep();
 	}

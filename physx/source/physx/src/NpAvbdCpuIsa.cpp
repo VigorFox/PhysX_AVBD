@@ -25,7 +25,7 @@
 // Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
 
 #include "PxAvbdCpuIsa.h"
-#include "../../lowleveldynamics/src/DyAvbdCpuIsa.h"
+#include "../../lowleveldynamics/src/avbd/backend/cpu/DyAvbdCpuIsa.h"
 
 #include <cstring>
 
@@ -86,6 +86,12 @@ extern "C" PX_PHYSX_CORE_API AvbdCpuIsaCorotationalTetPacket8Fn
 PX_CALL_CONV PxAvbdCpuIsaCorotationalTetPacket8FunctionInternal()
 {
 	return getAvbdCpuIsaFunctionTable().corotationalTetPacket8;
+}
+
+extern "C" PX_PHYSX_CORE_API AvbdCpuIsaNeoHookeanTetPacket8Fn
+PX_CALL_CONV PxAvbdCpuIsaNeoHookeanTetPacket8FunctionInternal()
+{
+	return getAvbdCpuIsaFunctionTable().neoHookeanTetPacket8;
 }
 
 } // namespace Dy

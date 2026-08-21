@@ -537,9 +537,6 @@ struct SurfacePerformanceMetrics
 	PxU64 taskGraphSerialCausalLayerFallbacks;
 	PxU32 taskGraphMaxCausalLayerOccupancy;
 	PxU64 taskGraphTotalCausalLayerOccupancy;
-	PxU64 taskGraphCausalLayerParentReductionNanos;
-	PxU64 taskGraphCausalLayerTaskPoolGrowthEvents;
-	PxU64 taskGraphCausalLayerTaskPoolGrowthBytes;
 	PxU64 taskGraphSubmittedSelfBvhContactTasks;
 	PxU64 taskGraphCompletedSelfBvhContactTasks;
 	PxU32 taskGraphPeakActiveSelfBvhContactTasks;
@@ -624,9 +621,6 @@ struct SurfacePerformanceMetrics
 		  taskGraphSerialCausalLayerFallbacks(0),
 		  taskGraphMaxCausalLayerOccupancy(0),
 		  taskGraphTotalCausalLayerOccupancy(0),
-		  taskGraphCausalLayerParentReductionNanos(0),
-		  taskGraphCausalLayerTaskPoolGrowthEvents(0),
-		  taskGraphCausalLayerTaskPoolGrowthBytes(0),
 		  taskGraphSubmittedSelfBvhContactTasks(0),
 		  taskGraphCompletedSelfBvhContactTasks(0),
 		  taskGraphPeakActiveSelfBvhContactTasks(0),
@@ -846,12 +840,6 @@ static bool simulateSurfaceScene(
 			sceneStatistics.avbdCpuTaskGraphMaxCausalLayerOccupancy);
 		gSurfacePerformance.taskGraphTotalCausalLayerOccupancy +=
 			sceneStatistics.avbdCpuTaskGraphTotalCausalLayerOccupancy;
-		gSurfacePerformance.taskGraphCausalLayerParentReductionNanos +=
-			sceneStatistics.avbdCpuTaskGraphCausalLayerParentReductionNanos;
-		gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthEvents +=
-			sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents;
-		gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthBytes +=
-			sceneStatistics.avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes;
 		gSurfacePerformance.taskGraphSubmittedSelfBvhContactTasks +=
 			sceneStatistics.avbdCpuTaskGraphSubmittedSelfBvhContactTasks;
 		gSurfacePerformance.taskGraphCompletedSelfBvhContactTasks +=
@@ -9717,7 +9705,7 @@ static void printSurfacePerformanceResult(
 		"forceIsaRejected=%u isaKernelSelfTest=%s isaProbeValue=%.9g sceneExecution=%s "
 		"dispatcherThreads=%u physicalCores=%u "
 		"softScheduler=%s softExecution=serial softWorkers=1 "
-		"actualSoftWorkers=%u taskCount=%llu chunkCount=0 barrierCount=%llu "
+		"actualSoftWorkers=%u taskCount=%llu barrierCount=%llu "
 		"taskGraphRequestedWorkers=%u taskGraphCompletedTasks=%llu "
 		"taskGraphSerialTasks=%llu taskGraphPureSoftEligibleIslands=%llu "
 		"taskGraphPureSoftEligibleParticles=%llu "
@@ -9728,15 +9716,12 @@ static void printSurfacePerformanceResult(
 		"causalLayerTaskCount=%llu causalLayerCompletedTasks=%llu "
 		"causalLayerPeakActiveTasks=%u causalLayerFanIns=%llu "
 		"causalLayerSerialFallbacks=%llu causalLayerMaxOccupancy=%u "
-		"causalLayerTotalOccupancy=%llu causalLayerParentReductionMs=%.9g "
-		"causalLayerTaskPoolGrowthEvents=%llu "
-		"causalLayerTaskPoolGrowthBytes=%llu "
+		"causalLayerTotalOccupancy=%llu "
 		"selfBvhContactTaskCount=%llu "
 		"selfBvhContactCompletedTasks=%llu "
 		"selfBvhContactPeakActiveTasks=%u "
 		"selfBvhContactFanIns=%llu "
 		"selfBvhContactSerialFallbacks=%llu "
-		"taskWorkMs=0 longestTaskMs=0 staticColorCount=0 dynamicColorCount=0 "
 		"p4ColorPlanCount=%u p4DynamicAccessGroupCount=%u "
 		"p4ColoredSerialSweeps=%llu p4ColoredSerialFallbackSweeps=%llu "
 		"p8CensusParticleSolves=%llu p8CensusTriEvaluations=%llu "
@@ -9748,15 +9733,14 @@ static void printSurfacePerformanceResult(
 		"p8TetIrBodies=%llu p8TetIrPackets=%llu "
 		"p8TetIrActiveLanes=%llu p8TetIrTailLanes=%llu "
 		"p8TetIrActiveTailLanes=%llu "
-		"p8TetIrInvalidBodies=%llu hostWritebackMeasured=0 "
-		"cpuSkinningMs=0 cpuSkinningMeasured=0 "
+		"p8TetIrInvalidBodies=%llu "
 		"topologySoftBodies=%u topologySoftParticles=%llu "
-		"topologyTriElements=%llu topologyTetElements=0 topologyBendElements=0 "
+		"topologyTriElements=%llu "
 		"topologySurfaceTriangles=%llu topologySurfaceVertices=%llu "
-		"topologySurfaceEdges=0 topologyRigidBoxes=0 topologyRigidActors=%llu "
+		"topologyRigidActors=%llu "
 		"warmupFrames=%u profileFrames=%u "
 		"avgStepMs=%.9g p50StepMs=%.9g p95StepMs=%.9g maxStepMs=%.9g "
-		"initialContactMs=0 solverMs=0 sceneMs=%.9g metricsMs=0 "
+		"sceneMs=%.9g "
 		"workspaceGrowthEvents=%llu workspaceGrowthBytes=%llu "
 		"contactWorkspaceGrowthEvents=%llu contactWorkspaceGrowthBytes=%llu "
 		"contactSweepScratchGrowthEvents=%llu "
@@ -9785,8 +9769,7 @@ static void printSurfacePerformanceResult(
 		"collisionGeneratedRigidContacts=%llu "
 		"collisionGeneratedSoftContacts=%llu "
 		"collisionGeneratedSelfContacts=%llu "
-		"componentFallbackSteps=%llu nativeIslandSteps=%llu "
-		"sceneStepMeasured=1 solverMeasured=0 status=%s\n",
+		"componentFallbackSteps=%llu nativeIslandSteps=%llu status=%s\n",
 		options.caseName.c_str(), buildProfile,
 		getAvbdCpuIsaModeName(cpuIsa.requestedIsa),
 		getAvbdCpuIsaModeName(cpuIsa.selectedIsa),
@@ -9838,12 +9821,6 @@ static void printSurfacePerformanceResult(
 		gSurfacePerformance.taskGraphMaxCausalLayerOccupancy,
 		static_cast<unsigned long long>(
 			gSurfacePerformance.taskGraphTotalCausalLayerOccupancy),
-		double(gSurfacePerformance.taskGraphCausalLayerParentReductionNanos) /
-			1.0e6,
-		static_cast<unsigned long long>(
-			gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthEvents),
-		static_cast<unsigned long long>(
-			gSurfacePerformance.taskGraphCausalLayerTaskPoolGrowthBytes),
 		static_cast<unsigned long long>(
 			gSurfacePerformance.taskGraphSubmittedSelfBvhContactTasks),
 		static_cast<unsigned long long>(

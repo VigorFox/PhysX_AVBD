@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+
+#ifndef DY_AVBD_SOFT_BODY_POLICY_H
+#define DY_AVBD_SOFT_BODY_POLICY_H
+
+#include "avbd/backend/cpu/DyAvbdCpuIsa.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyScheduling.h"
+
+namespace physx
+{
+namespace Dy
+{
+
+#if !defined(PX_PHYSX_STATIC_LIB) && PX_WINDOWS_FAMILY && \
+	defined(DY_AVBD_SOFT_BODY_COMPONENT_EXPORTS)
+	#define DY_AVBD_SOFT_BODY_POLICY_API __declspec(dllexport)
+#elif PX_UNIX_FAMILY
+	#define DY_AVBD_SOFT_BODY_POLICY_API PX_UNIX_EXPORT
+#else
+	#define DY_AVBD_SOFT_BODY_POLICY_API
+#endif
+
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSoftElasticProximal();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSoftAdaptivePrimalInitialization();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSoftRigidPrimalInitialization();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseGroundTetPatchProbe();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseVelocityTangentOwner();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseParticlePrimalWorkCensus();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseCorotationalTetPacketKernel();
+DY_AVBD_SOFT_BODY_POLICY_API AvbdCpuIsaCorotationalTetPacket8Fn
+avbdGetCorotationalTetPacketKernel();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseNeoHookeanTetPacketKernel();
+DY_AVBD_SOFT_BODY_POLICY_API AvbdCpuIsaNeoHookeanTetPacket8Fn
+avbdGetNeoHookeanTetPacketKernel();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseTetMaterialPacketIr();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSurfaceTriangleBvh();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSurfaceEdgeBvh();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceBvh();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceContactTaskFanIn();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureRoundRobinTaskPlan();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureRowPrivateOutputTaskPlan();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureSweptSubstageTiming();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureForwardOwnerQueryStats();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureDiscreteQueryStats();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureDiscreteBodyLocalBoundsCull();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdDisableRigidTriangleSurfaceFeatureDiscreteBodyLocalBoundsCull();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseRigidTriangleSurfaceFeatureForwardOwnerResultCache();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdDisableRigidTriangleSurfaceFeatureForwardOwnerResultCache();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdUseSelfBvhContactTaskFanIn();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdForceSelfBvhContactTaskFanIn();
+DY_AVBD_SOFT_BODY_POLICY_API bool avbdValidateParticlePrimalAccessPlan();
+DY_AVBD_SOFT_BODY_POLICY_API AvbdParticlePrimalSchedule
+avbdGetConfiguredParticlePrimalSchedule();
+DY_AVBD_SOFT_BODY_POLICY_API AvbdParticlePrimalSchedule
+avbdGetParticlePrimalSchedule();
+
+#undef DY_AVBD_SOFT_BODY_POLICY_API
+
+} // namespace Dy
+} // namespace physx
+
+#endif // DY_AVBD_SOFT_BODY_POLICY_H

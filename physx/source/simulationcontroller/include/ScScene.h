@@ -515,6 +515,8 @@ namespace Sc
 					void						writeBackAvbdCpuDeformableVolumes();
 					void						finishAvbdCpuDeformableVolumesStandaloneStep();
 					void						finishAvbdCpuSoftComponentNoOpTask();
+					void						recordAvbdCpuSoftSerialPredictionStage();
+					void						recordAvbdCpuSoftSerialWriteBackStage();
 					bool						scheduleAvbdCpuSoftComponentStep(PxBaseTask* continuation);
 					bool						scheduleAvbdCpuSoftComponentPrediction(PxBaseTask* continuation);
 					bool						scheduleAvbdCpuSoftComponentCausalLayer(PxBaseTask* continuation);

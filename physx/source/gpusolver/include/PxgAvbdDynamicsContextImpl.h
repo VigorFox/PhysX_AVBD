@@ -5,7 +5,7 @@
 
 #include "PxgAvbdDynamicsContext.h"
 #include "PxgAvbdOwnerWaveSolverCore.h"
-#include "DyAvbdGpuWaveBackend.h"
+#include "avbd/backend/gpu/DyAvbdGpuWaveBackend.h"
 #include "foundation/PxMutex.h"
 
 namespace physx

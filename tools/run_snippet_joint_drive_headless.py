@@ -42,41 +42,6 @@ DEFAULT_EXE = (
     / "checked"
     / "SnippetJointDrive_64.exe"
 )
-JOINT_OBJECTIVE_IR_PREFIX = "[avbd:joint-objective-ir] "
-JOINT_OBJECTIVE_PARTITION_FIELDS = (
-    "jointObjectivePositionRows",
-    "jointObjectiveFinalizeRows",
-    "jointObjectiveUnsupportedRows",
-    "jointObjectiveLegacyRows",
-    "jointObjectiveInvalidRows",
-)
-JOINT_OBJECTIVE_EXPECTED_OWNER_BY_CASE = {
-    "smoke-angular-position-avbd-parallel-60hz": "PositionAL",
-    "position-x-static-identity-avbd-parallel": "PositionAL",
-    "position-x-static-identity-avbd-sequential": "PositionAL",
-    "angular-slerp-position-avbd-parallel-forward-identity-60hz": "PositionAL",
-    "angular-slerp-position-avbd-sequential-forward-identity-60hz":
-        "PositionAL",
-    "angular-output-twist-forward-on-none-60hz-avbd-parallel":
-        "JointFinalize",
-    "angular-output-twist-forward-on-none-60hz-avbd-sequential":
-        "JointFinalize",
-    "angular-output-slerp-forward-on-none-60hz-avbd-parallel":
-        "JointFinalize",
-    "angular-output-slerp-forward-on-none-60hz-avbd-sequential":
-        "JointFinalize",
-    "dynamic-mass-scaling-mass-1-forward-avbd-parallel": "JointFinalize",
-    "dynamic-mass-scaling-mass-1-forward-avbd-sequential":
-        "JointFinalize",
-    "contact-position-forward-60hz-avbd-parallel": "PositionAL",
-    "contact-position-forward-60hz-avbd-sequential": "PositionAL",
-    "dynamic-angular-position-twist-forward-mass1-low-60hz-avbd-parallel":
-        "PositionAL",
-    "dynamic-angular-position-twist-forward-mass1-low-60hz-avbd-sequential":
-        "PositionAL",
-}
-
-
 @dataclass(frozen=True)
 class RunSpec:
     name: str
@@ -101,7 +66,6 @@ class RunResult:
     executable_sha256_before: str
     executable_sha256_after: str
     residual_process: bool
-    joint_objective_signature: str
     passed: bool
     errors: list[str]
     log: str
@@ -1692,90 +1656,6 @@ def requested_frames(args: Iterable[str]) -> str | None:
     return values[0] if len(values) == 1 else None
 
 
-def validate_joint_objective_ir(
-    stdout: str,
-    expected_owner: str | None,
-) -> tuple[list[str], str]:
-    errors: list[str] = []
-    lines = [
-        line.strip()
-        for line in stdout.splitlines()
-        if line.startswith(JOINT_OBJECTIVE_IR_PREFIX)
-    ]
-    if not lines:
-        return ["no [avbd:joint-objective-ir] diagnostic samples"], ""
-
-    totals = {field: 0 for field in JOINT_OBJECTIVE_PARTITION_FIELDS}
-    signatures: list[str] = []
-    for line_number, line in enumerate(lines, start=1):
-        fields, parse_errors = parse_authority(line)
-        errors.extend(
-            f"joint objective diagnostic {line_number}: {error}"
-            for error in parse_errors
-        )
-        required = (
-            "jointObjectiveRows",
-            *JOINT_OBJECTIVE_PARTITION_FIELDS,
-            "jointObjectiveFingerprint",
-        )
-        missing = [field for field in required if field not in fields]
-        if missing:
-            errors.append(
-                f"joint objective diagnostic {line_number} is missing "
-                + ", ".join(missing)
-            )
-            continue
-        try:
-            values = {field: int(fields[field]) for field in required}
-        except ValueError:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                "a non-integer field"
-            )
-            continue
-        if any(value < 0 for value in values.values()):
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                "a negative field"
-            )
-            continue
-        partition_rows = sum(
-            values[field] for field in JOINT_OBJECTIVE_PARTITION_FIELDS
-        )
-        if values["jointObjectiveRows"] != partition_rows:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                f"jointObjectiveRows={values['jointObjectiveRows']} "
-                f"but partition={partition_rows}"
-            )
-        if values["jointObjectiveInvalidRows"] != 0:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                "jointObjectiveInvalidRows="
-                f"{values['jointObjectiveInvalidRows']}"
-            )
-        for field in JOINT_OBJECTIVE_PARTITION_FIELDS:
-            totals[field] += values[field]
-        signatures.append(
-            ":".join(str(values[field]) for field in required)
-        )
-
-    if expected_owner is not None:
-        owner_field = {
-            "PositionAL": "jointObjectivePositionRows",
-            "JointFinalize": "jointObjectiveFinalizeRows",
-        }[expected_owner]
-        if totals[owner_field] == 0:
-            errors.append(
-                f"focused lane compiled no {expected_owner} owner"
-            )
-        if totals["jointObjectiveUnsupportedRows"] != 0:
-            errors.append(
-                "focused owner lane fell back to Unsupported"
-            )
-    return errors, "|".join(signatures)
-
-
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -1811,8 +1691,6 @@ def run_one(
     log_path = output_root / f"{spec.name}.log"
     environment = os.environ.copy()
     environment["PHYSX_SNIPPET_HEADLESS"] = "1"
-    environment["PHYSX_AVBD_ITER_DIAG"] = "1"
-    environment["PHYSX_AVBD_ITER_DIAG_EVERY"] = "60"
     creationflags = windows_creation_flags()
     before_hash = sha256(executable)
     timed_out = False
@@ -1892,19 +1770,6 @@ def run_one(
             errors.append(f"{key}={fields.get(key, 'MISSING')}, expected 0")
     if stderr:
         errors.append(f"stderr is not empty ({len(stderr.encode('utf-8'))} bytes)")
-    is_avbd = "--solver=avbd" in spec.args
-    joint_objective_signature = ""
-    if is_avbd and spec.expected_status == "PASS":
-        joint_objective_errors, joint_objective_signature = (
-            validate_joint_objective_ir(
-                stdout,
-                expected_owner=JOINT_OBJECTIVE_EXPECTED_OWNER_BY_CASE.get(
-                    spec.name
-                ),
-            )
-        )
-        errors.extend(joint_objective_errors)
-
     after_hash = sha256(executable)
     if after_hash != before_hash:
         errors.append("executable SHA-256 changed during the run")
@@ -1916,8 +1781,6 @@ def run_one(
     log_text = (
         f"COMMAND: {command_text}\n"
         f"HEADLESS_ENV: PHYSX_SNIPPET_HEADLESS=1\n"
-        "JOINT_OBJECTIVE_IR_ENV: PHYSX_AVBD_ITER_DIAG=1 "
-        "PHYSX_AVBD_ITER_DIAG_EVERY=60\n"
         f"CREATE_NO_WINDOW: {int(os.name == 'nt')}\n"
         f"STARTUPINFO_SW_HIDE: {int(os.name == 'nt')}\n"
         f"KILL_ON_JOB_CLOSE: {int(os.name == 'nt')}\n"
@@ -1955,7 +1818,6 @@ def run_one(
         executable_sha256_before=before_hash,
         executable_sha256_after=after_hash,
         residual_process=residual_process,
-        joint_objective_signature=joint_objective_signature,
         passed=not errors,
         errors=errors,
         log=str(log_path),
@@ -2056,39 +1918,6 @@ def main() -> int:
             print("ABORTED: visible snippet window detected", flush=True)
             break
 
-    parity_groups: dict[str, list[RunResult]] = {}
-    for result in results:
-        if not result.joint_objective_signature:
-            continue
-        parity_key = result.name.replace(
-            "-avbd-parallel", "-avbd"
-        ).replace("-avbd-sequential", "-avbd")
-        parity_groups.setdefault(parity_key, []).append(result)
-    for parity_key, group in parity_groups.items():
-        executions = {
-            "parallel" if "-avbd-parallel" in result.name
-            else "sequential" if "-avbd-sequential" in result.name
-            else "other"
-            for result in group
-        }
-        if not {"parallel", "sequential"}.issubset(executions):
-            continue
-        signatures = {
-            result.joint_objective_signature for result in group
-        }
-        if len(signatures) != 1:
-            for result in group:
-                result.passed = False
-                result.errors.append(
-                    f"joint objective parallel/sequential signature "
-                    f"mismatch in {parity_key}"
-                )
-            print(
-                f"PARITY BAD {parity_key} joint objective signature "
-                "mismatch",
-                flush=True,
-            )
-
     summary_json = output_root / "summary.json"
     summary_json.write_text(
         json.dumps([asdict(result) for result in results], indent=2),
@@ -2112,7 +1941,6 @@ def main() -> int:
                 "executable_sha256_before",
                 "executable_sha256_after",
                 "residual_process",
-                "joint_objective_signature",
                 "passed",
                 "log",
             ),

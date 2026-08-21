@@ -394,11 +394,6 @@ public:
 	PxU32	avbdCpuTaskGraphSerialCausalLayerFallbacks;
 	PxU32	avbdCpuTaskGraphMaxCausalLayerOccupancy;
 	PxU64	avbdCpuTaskGraphTotalCausalLayerOccupancy;
-	PxU64	avbdCpuTaskGraphCausalLayerParentReductionNanos;
-	/** Parent-side persistent causal-layer task/observation pool capacity
-	   growth for this step. Payload bytes exclude allocator bookkeeping. */
-	PxU32	avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents;
-	PxU64	avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes;
 	/** AVBD P5.3b world-plane candidate task/fan-in telemetry. */
 	PxU32	avbdCpuTaskGraphSubmittedWorldPlaneContactTasks;
 	PxU32	avbdCpuTaskGraphCompletedWorldPlaneContactTasks;
@@ -435,85 +430,6 @@ public:
 	PxU32	avbdCpuTaskGraphPeakActiveRigidTriangleSurfaceContactTasks;
 	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceContactFanIns;
 	PxU32	avbdCpuTaskGraphSerialRigidTriangleSurfaceContactFallbacks;
-	/** AVBD P5.18a static-triangle task work and persistent-storage telemetry.
-	   These are explicit work/capacity observations, not timing or speedup data. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeaturePlanRows;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureFacePairWorkItems;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange;
-	/** AVBD P5.18c largest single child-family capacity/work bounds. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthEvents;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthBytes;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthEvents;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthBytes;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthEvents;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthBytes;
-	/** AVBD P5.18b static-triangle transaction resident capacity-model bytes.
-	   These exclude allocator bookkeeping and are not timing measurements. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceOutputResidentPayloadBytes;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes;
-	/** AVBD P5.18d dispatcher wall-clock overlap proxy; not CPU-time telemetry. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactTaskWallNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxTaskWallNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFanInSpanNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos;
-	/** AVBD P5.23 Scene-owned rigid-triangle transaction diagnostic wall-clock intervals. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactSerialTransactionNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactParentCompletionNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactPostContinuationNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactTaskSubmissionNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries;
-	/** AVBD P5.32 default-off forward-owner result-cache outcomes. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses;
-	/** AVBD P5.38 discrete OGC query-funnel diagnostics. */
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates;
-	PxU64	avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns;
-	PxU32	avbdCpuTaskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns;
-	/** AVBD P5.9d soft-pair OGC plan-range task/fan-in telemetry. */
-	PxU32	avbdCpuTaskGraphSubmittedSoftPairContactTasks;
-	PxU32	avbdCpuTaskGraphCompletedSoftPairContactTasks;
-	PxU32	avbdCpuTaskGraphPeakActiveSoftPairContactTasks;
-	PxU32	avbdCpuTaskGraphSoftPairContactFanIns;
-	PxU32	avbdCpuTaskGraphSerialSoftPairContactFallbacks;
 	/** AVBD P5.10b self-BVH VF/EE task/fan-in telemetry. */
 	PxU32	avbdCpuTaskGraphSubmittedSelfBvhContactTasks;
 	PxU32	avbdCpuTaskGraphCompletedSelfBvhContactTasks;
@@ -829,9 +745,6 @@ public:
 		avbdCpuTaskGraphSerialCausalLayerFallbacks(0),
 		avbdCpuTaskGraphMaxCausalLayerOccupancy(0),
 		avbdCpuTaskGraphTotalCausalLayerOccupancy(0),
-		avbdCpuTaskGraphCausalLayerParentReductionNanos(0),
-		avbdCpuTaskGraphCausalLayerTaskPoolGrowthEvents(0),
-		avbdCpuTaskGraphCausalLayerTaskPoolGrowthBytes(0),
 		avbdCpuTaskGraphSubmittedWorldPlaneContactTasks(0),
 		avbdCpuTaskGraphCompletedWorldPlaneContactTasks(0),
 		avbdCpuTaskGraphPeakActiveWorldPlaneContactTasks(0),
@@ -862,75 +775,6 @@ public:
 		avbdCpuTaskGraphPeakActiveRigidTriangleSurfaceContactTasks(0),
 		avbdCpuTaskGraphRigidTriangleSurfaceContactFanIns(0),
 		avbdCpuTaskGraphSerialRigidTriangleSurfaceContactFallbacks(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceCurrentSdfParticleWorkItems(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceSweptSdfParticleWorkItems(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeaturePlanRows(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureEdgePairWorkItems(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureFacePairWorkItems(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureNonEmptyTaskRanges(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureMaxRowsPerTaskRange(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceMaxCurrentSdfParticleWorkItemsPerTask(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceMaxSweptSdfParticleWorkItemsPerTask(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureEdgePairWorkItemsPerTask(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeatureFacePairWorkItemsPerTask(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceMaxFeaturePairWorkItemsPerTask(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthEvents(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolGrowthBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthEvents(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceOutputGrowthBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthEvents(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchGrowthBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceTaskPoolResidentPayloadBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceOutputResidentPayloadBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceQueryScratchResidentPayloadBytes(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactTaskWallNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxTaskWallNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFanInSpanNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFanInSpanNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactSerialTransactionNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactParentCompletionNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactPostContinuationNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactTaskSubmissionNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactPostSubmitWaitNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactCurrentSdfTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxCurrentSdfTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactSweptSdfTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxSweptSdfTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptEdgeTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureSweptTriangleTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteEdgeTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteEdgeTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureDiscreteTriangleTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactMaxFeatureDiscreteTriangleTaskLeafNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeForwardOwnerNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeBvhRecoveryNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptEdgeNarrowPhaseNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleForwardOwnerNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleBvhRecoveryNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceContactFeatureSweptTriangleNarrowPhaseNanos(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerQueryCalls(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerUniqueQueries(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheHits(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureForwardOwnerCacheMisses(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhQueries(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeBvhTriangleCandidates(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFeatureCandidates(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteEdgeFallbackQueries(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhQueries(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleBvhTriangleCandidates(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFeatureCandidates(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureDiscreteTriangleFallbackQueries(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureRoundRobinTaskFanIns(0),
-		avbdCpuTaskGraphRigidTriangleSurfaceFeatureRowPrivateOutputTaskFanIns(0),
-		avbdCpuTaskGraphSubmittedSoftPairContactTasks(0),
-		avbdCpuTaskGraphCompletedSoftPairContactTasks(0),
-		avbdCpuTaskGraphPeakActiveSoftPairContactTasks(0),
-		avbdCpuTaskGraphSoftPairContactFanIns(0),
-		avbdCpuTaskGraphSerialSoftPairContactFallbacks(0),
 		avbdCpuTaskGraphSubmittedSelfBvhContactTasks(0),
 		avbdCpuTaskGraphCompletedSelfBvhContactTasks(0),
 		avbdCpuTaskGraphPeakActiveSelfBvhContactTasks(0),

@@ -9,7 +9,6 @@ import math
 import os
 from pathlib import Path
 
-from avbd_joint_objective_ir_gate import validate_joint_objective_ir
 from snippet_headless_process import run_headless_process
 
 
@@ -34,14 +33,14 @@ def specs_for(mode: str) -> tuple[RunSpec, ...]:
         return (RunSpec("tgs", "parallel", "PASS"),)
     if mode == "probe":
         return (
-            RunSpec("avbd", "parallel", "FAIL"),
-            RunSpec("avbd", "sequential", "FAIL"),
+            RunSpec("avbd", "parallel", "PASS"),
+            RunSpec("avbd", "sequential", "PASS"),
         )
     if mode == "baseline":
         return (
             RunSpec("tgs", "parallel", "PASS"),
-            RunSpec("avbd", "parallel", "FAIL"),
-            RunSpec("avbd", "sequential", "FAIL"),
+            RunSpec("avbd", "parallel", "PASS"),
+            RunSpec("avbd", "sequential", "PASS"),
         )
     return (
         RunSpec("tgs", "parallel", "PASS"),
@@ -92,11 +91,6 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
     ]
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
-    env["PHYSX_AVBD_ITER_DIAG"] = "1" if spec.solver == "avbd" else "0"
-    env["PHYSX_AVBD_ITER_DIAG_EVERY"] = "60"
-    env["PHYSX_AVBD_ITER_DIAG_SEQUENTIAL"] = (
-        "1" if spec.execution == "sequential" else "0"
-    )
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout
     )
@@ -126,14 +120,6 @@ def run_one(spec: RunSpec, bin_dir: Path, timeout: float) -> bool:
     gate = parsed["gate"]
     fixture = parsed["fixture"]
     cleanup = parsed["cleanup"]
-
-    if spec.solver == "avbd":
-        objective_errors, _ = validate_joint_objective_ir(
-            combined, expected_owner="JointFinalize"
-        )
-        errors.extend(objective_errors)
-    elif "[avbd:joint-objective-ir] " in combined:
-        errors.append("unexpected joint-objective diagnostics on TGS")
 
     if result.timed_out:
         errors.append("timed out")

@@ -1,0 +1,3216 @@
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//  * Neither the name of NVIDIA CORPORATION nor the names of its
+//    contributors may be used to endorse or promote products derived
+//    from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ''AS IS'' AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+// OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Copyright (c) 2008-2026 NVIDIA Corporation. All rights reserved.
+
+#ifndef DY_AVBD_CONSTRAINT_H
+#define DY_AVBD_CONSTRAINT_H
+
+#include "foundation/PxMat33.h"
+#include "foundation/PxSimpleTypes.h"
+#include "foundation/PxVec3.h"
+
+#include "avbd/core/DyAvbdTypes.h"
+
+#pragma warning(push)
+#pragma warning(disable                                                        \
+                : 4324) // Structure was padded due to alignment specifier
+
+namespace physx {
+
+namespace Dy {
+
+// Forward declarations
+struct AvbdSolverBody;
+
+/**
+ * @brief Constraint type enumeration for AVBD solver
+ */
+struct AvbdConstraintType {
+  enum Enum {
+    eNONE = 0,        //!< Invalid/uninitialized constraint
+    eCONTACT,         //!< Contact constraint (inequality, unilateral)
+    eFRICTION,        //!< Friction constraint
+    eJOINT_SPHERICAL, //!< Spherical (ball) joint
+    eJOINT_REVOLUTE,  //!< Revolute (hinge) joint
+    eJOINT_PRISMATIC, //!< Prismatic (slider) joint
+    eJOINT_FIXED,     //!< Fixed joint (all DOF locked)
+    eJOINT_D6,        //!< Configurable 6-DOF joint
+    eJOINT_WELD,      //!< Weld joint (optimized for runtime attachment, e.g.,
+                      //!< "Ultrahand")
+    eJOINT_CUSTOM_1D, //!< One hard row emitted by PxConstraintSolverPrep
+    eJOINT_GEAR, //!< Gear joint (angular ratio constraint between two hinges)
+    eSOFT_DISTANCE, //!< Soft body distance constraint
+    eSOFT_VOLUME,   //!< Soft body volume preservation
+
+    eCOUNT
+  };
+};
+
+/**
+ * @brief Base structure for AVBD constraints
+ *
+ * AVBD constraints are fundamentally different from PhysX's Jacobian-based
+ * constraints. Instead of velocity-level Jacobian rows, AVBD constraints
+ * define position-level energy functions and their derivatives.
+ *
+ * The constraint energy has the form:
+ *   E(x) = 0.5 * compliance^-1 * C(x)^2 + lambda * C(x)
+ *
+ * Where:
+ *   - C(x) is the constraint function (violation)
+ *   - compliance is the inverse stiffness
+ *   - lambda is the Augmented Lagrangian multiplier
+ */
+struct PX_ALIGN_PREFIX(16) AvbdConstraintHeader {
+  physx::PxU32 bodyIndexA; //!< Index of first body (PX_MAX_U32 if world)
+  physx::PxU32 bodyIndexB; //!< Index of second body (PX_MAX_U32 if world)
+  physx::PxU16 type;       //!< Constraint type (AvbdConstraintType::Enum)
+  physx::PxU16 flags;      //!< Constraint flags
+
+  physx::PxReal compliance; //!< Constraint compliance (inverse stiffness), 0
+                            //!< for hard constraint
+  physx::PxReal damping; //!< Damping coefficient for velocity-dependent forces
+  physx::PxReal lambda;  //!< Augmented Lagrangian multiplier
+  physx::PxReal
+      rho; //!< Fixed penalty parameter (material stiffness upper bound)
+  physx::PxReal penalty; //!< Adaptive penalty parameter (grows via beta*|C|,
+                         //!< ref AVBD3D Eq.16)
+
+  physx::PxU16 colorGroup; //!< Color group for parallel solving
+  physx::PxU16 padding0;   //!< Padding for alignment
+
+  PX_FORCE_INLINE AvbdConstraintHeader()
+      : bodyIndexA(0xFFFFFFFF), bodyIndexB(0xFFFFFFFF),
+        type(AvbdConstraintType::eNONE), flags(0), compliance(0.0f),
+        damping(0.0f), lambda(0.0f), rho(0.0f), penalty(0.0f), colorGroup(0),
+        padding0(0) {}
+} PX_ALIGN_SUFFIX(16);
+
+/** One island body dynamic, the other world/static (triangle mesh ground). */
+PX_FORCE_INLINE bool isBodyVsStaticContact(physx::PxU32 bodyAIdx,
+                                           physx::PxU32 bodyBIdx,
+                                           physx::PxU32 numBodies) {
+  const bool dynA = bodyAIdx < numBodies;
+  const bool dynB = bodyBIdx < numBodies;
+  return dynA != dynB;
+}
+
+/**
+ * The one stage that owns a compiled velocity objective.
+ *
+ * This is intentionally not a bit mask: one physical objective cannot be
+ * consumed by more than one stage in the same substep.
+ */
+enum class AvbdVelocityObjectiveOwner : physx::PxU8 {
+  PositionAL,
+  PointFinalize,
+  ManifoldFinalize,
+  ComponentFinalize,
+  JointFinalize,
+  Unsupported
+};
+
+/** Physical material objective represented by one compiled record. */
+enum class AvbdVelocityObjectiveKind : physx::PxU8 {
+  None,
+  GeometryNormal,
+  TangentTarget,
+  PassiveFriction,
+  MaterialNormal,
+  Invalid
+};
+
+/** Rows atomically consumed by the compiled objective. */
+enum class AvbdVelocityObjectiveSpan : physx::PxU8 {
+  None,
+  Normal,
+  TangentCone,
+  NormalAndTangentCone
+};
+
+/**
+ * Physical contact-objective slots.
+ *
+ * These are not scalar Jacobian rows. Geometry and material normal objectives
+ * legitimately share the contact normal direction while remaining distinct
+ * objectives with independent owners.
+ */
+enum AvbdContactObjectiveSourceSlot : physx::PxU8 {
+  eCONTACT_SOURCE_GEOMETRY_NORMAL = 1u << 0,
+  eCONTACT_SOURCE_MATERIAL_NORMAL = 1u << 1,
+  eCONTACT_SOURCE_MATERIAL_TANGENT = 1u << 2,
+  eCONTACT_SOURCE_ALL = eCONTACT_SOURCE_GEOMETRY_NORMAL |
+                        eCONTACT_SOURCE_MATERIAL_NORMAL |
+                        eCONTACT_SOURCE_MATERIAL_TANGENT
+};
+
+/** Velocity state from which the unique owner evaluates its objective. */
+enum class AvbdVelocityObjectiveReconstruction : physx::PxU8 {
+  PoseDerived,
+  SolveStartInertial,
+  NormalResponseSpan
+};
+
+/**
+ * Compiled IR attached to each physical contact row.
+ *
+ * Rows in one manifold/component share objectiveKey.  Kind::None is the
+ * explicit not-yet-compiled legacy state; Kind::Invalid is fail-closed after
+ * a conflicting assignment.  Consumers dispatch on owner instead of
+ * reconstructing ownership from combinations of flags.
+ */
+struct AvbdCompiledVelocityObjective {
+  AvbdVelocityObjectiveOwner owner;
+  AvbdVelocityObjectiveKind kind;
+  AvbdVelocityObjectiveSpan span;
+  AvbdVelocityObjectiveReconstruction reconstruction;
+  physx::PxU8 sourceSlotMask;
+  physx::PxU8 padding[3];
+  physx::PxU32 objectiveRowCount;
+  physx::PxU64 objectiveKey;
+
+  PX_FORCE_INLINE AvbdCompiledVelocityObjective()
+      : owner(AvbdVelocityObjectiveOwner::Unsupported),
+        kind(AvbdVelocityObjectiveKind::None),
+        span(AvbdVelocityObjectiveSpan::None),
+        reconstruction(
+            AvbdVelocityObjectiveReconstruction::PoseDerived),
+        sourceSlotMask(0), padding{0, 0, 0}, objectiveRowCount(0),
+        objectiveKey(0) {}
+};
+
+/**
+ * Prep-compiled objective program for one contact row.
+ *
+ * Capacity three is the physical upper bound: geometry normal, material
+ * normal, and material tangent. A composite material entry may claim the last
+ * two slots atomically.
+ */
+struct AvbdCompiledContactObjectiveProgram {
+  enum { eMAX_OBJECTIVES = 3 };
+  // The high bit is a terminal producer-owned validity cache.  It reuses the
+  // existing byte so the contact ABI and hot-structure size do not grow.
+  enum { eVALIDATED = 0x80u };
+
+  AvbdCompiledVelocityObjective entries[eMAX_OBJECTIVES];
+  physx::PxU8 authoredSourceSlotMask;
+  physx::PxU8 legacySourceSlotMask;
+  physx::PxU8 entryCount;
+  physx::PxU8 invalid;
+
+  PX_FORCE_INLINE AvbdCompiledContactObjectiveProgram()
+      : authoredSourceSlotMask(0), legacySourceSlotMask(0),
+        entryCount(0), invalid(0) {}
+};
+
+PX_FORCE_INLINE void resetAvbdContactObjectiveProgram(
+    AvbdCompiledContactObjectiveProgram &program) {
+  for (physx::PxU32 i = 0;
+       i < AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES; ++i)
+    program.entries[i] = AvbdCompiledVelocityObjective();
+  program.authoredSourceSlotMask = 0;
+  program.legacySourceSlotMask = 0;
+  program.entryCount = 0;
+  program.invalid = 0;
+}
+
+PX_FORCE_INLINE void markAvbdContactObjectiveProgramValidated(
+    AvbdCompiledContactObjectiveProgram &program) {
+  // Only the final solve-island classification may publish this bit.  All
+  // mutating helpers clear it before changing the program.
+  program.invalid = AvbdCompiledContactObjectiveProgram::eVALIDATED;
+}
+
+PX_FORCE_INLINE physx::PxU8 getAvbdContactObjectiveSourceSlots(
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span) {
+  if (kind == AvbdVelocityObjectiveKind::GeometryNormal &&
+      span == AvbdVelocityObjectiveSpan::Normal)
+    return eCONTACT_SOURCE_GEOMETRY_NORMAL;
+  if (kind == AvbdVelocityObjectiveKind::MaterialNormal &&
+      span == AvbdVelocityObjectiveSpan::Normal)
+    return eCONTACT_SOURCE_MATERIAL_NORMAL;
+  if (span == AvbdVelocityObjectiveSpan::TangentCone)
+    return eCONTACT_SOURCE_MATERIAL_TANGENT;
+  if (span == AvbdVelocityObjectiveSpan::NormalAndTangentCone)
+    return eCONTACT_SOURCE_MATERIAL_NORMAL |
+           eCONTACT_SOURCE_MATERIAL_TANGENT;
+  return 0;
+}
+
+PX_FORCE_INLINE bool isSameAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU8 sourceSlotMask,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  return compiled.owner == owner && compiled.kind == kind &&
+         compiled.span == span &&
+         compiled.reconstruction == reconstruction &&
+         compiled.sourceSlotMask == sourceSlotMask &&
+         compiled.objectiveRowCount == objectiveRowCount &&
+         compiled.objectiveKey == objectiveKey;
+}
+
+PX_FORCE_INLINE bool canAssignAvbdVelocityObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  const physx::PxU8 sourceSlotMask =
+      getAvbdContactObjectiveSourceSlots(kind, span);
+  // eVALIDATED is a cache publication bit, not a rejection state.  Joint and
+  // mixed-island compilers may probe a program after solveIsland has published
+  // that cache, before a mutating helper has an opportunity to clear it.
+  if ((program.invalid &
+       physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED)) != 0 ||
+      kind == AvbdVelocityObjectiveKind::None ||
+      kind == AvbdVelocityObjectiveKind::Invalid ||
+      sourceSlotMask == 0 || objectiveRowCount == 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (isSameAvbdVelocityObjective(
+            compiled, owner, kind, span, reconstruction, sourceSlotMask,
+            objectiveRowCount, objectiveKey))
+      return true;
+    if ((compiled.sourceSlotMask & sourceSlotMask) != 0)
+      return false;
+  }
+  return program.entryCount <
+         AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES;
+}
+
+PX_FORCE_INLINE void invalidateAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program) {
+  const physx::PxU8 authoredSourceSlotMask =
+      program.authoredSourceSlotMask;
+  resetAvbdContactObjectiveProgram(program);
+  program.authoredSourceSlotMask = authoredSourceSlotMask;
+  program.invalid = 1;
+}
+
+PX_FORCE_INLINE bool assignAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind,
+    AvbdVelocityObjectiveSpan span,
+    AvbdVelocityObjectiveReconstruction reconstruction,
+    physx::PxU32 objectiveRowCount,
+    physx::PxU64 objectiveKey) {
+  program.invalid = physx::PxU8(
+      program.invalid &
+      physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED));
+  const physx::PxU8 sourceSlotMask =
+      getAvbdContactObjectiveSourceSlots(kind, span);
+  if (!canAssignAvbdVelocityObjective(
+          program, owner, kind, span, reconstruction,
+          objectiveRowCount, objectiveKey)) {
+    invalidateAvbdVelocityObjective(program);
+    return false;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    if (isSameAvbdVelocityObjective(
+            program.entries[i], owner, kind, span, reconstruction,
+            sourceSlotMask, objectiveRowCount, objectiveKey))
+      return true;
+  }
+  AvbdCompiledVelocityObjective &compiled =
+      program.entries[program.entryCount++];
+  compiled.owner = owner;
+  compiled.kind = kind;
+  compiled.span = span;
+  compiled.reconstruction = reconstruction;
+  compiled.sourceSlotMask = sourceSlotMask;
+  compiled.objectiveRowCount = objectiveRowCount;
+  compiled.objectiveKey = objectiveKey;
+  program.authoredSourceSlotMask = physx::PxU8(
+      program.authoredSourceSlotMask | sourceSlotMask);
+  program.legacySourceSlotMask =
+      physx::PxU8(program.legacySourceSlotMask & ~sourceSlotMask);
+  return true;
+}
+
+PX_FORCE_INLINE void setAvbdContactObjectiveLegacySources(
+    AvbdCompiledContactObjectiveProgram &program,
+    physx::PxU8 authoredSourceSlotMask) {
+  program.invalid = physx::PxU8(
+      program.invalid &
+      physx::PxU8(~AvbdCompiledContactObjectiveProgram::eVALIDATED));
+  program.authoredSourceSlotMask =
+      physx::PxU8(authoredSourceSlotMask & eCONTACT_SOURCE_ALL);
+  if (program.invalid) {
+    program.legacySourceSlotMask = 0;
+    return;
+  }
+  physx::PxU8 compiledSourceSlotMask = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    compiledSourceSlotMask = physx::PxU8(
+        compiledSourceSlotMask | program.entries[i].sourceSlotMask);
+  program.legacySourceSlotMask = physx::PxU8(
+      authoredSourceSlotMask & ~compiledSourceSlotMask);
+}
+
+PX_FORCE_INLINE bool isValidAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled) {
+  if (compiled.kind == AvbdVelocityObjectiveKind::None) {
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported &&
+           compiled.span == AvbdVelocityObjectiveSpan::None &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::PoseDerived &&
+           compiled.sourceSlotMask == 0 &&
+           compiled.objectiveRowCount == 0 &&
+           compiled.objectiveKey == 0;
+  }
+  if (compiled.kind == AvbdVelocityObjectiveKind::Invalid) {
+    return false;
+  }
+  if (compiled.objectiveRowCount == 0)
+    return false;
+  switch (compiled.owner) {
+  case AvbdVelocityObjectiveOwner::PositionAL:
+    return ((compiled.kind ==
+                 AvbdVelocityObjectiveKind::GeometryNormal &&
+             compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_GEOMETRY_NORMAL) ||
+            (compiled.kind ==
+                 AvbdVelocityObjectiveKind::PassiveFriction &&
+             compiled.span ==
+                 AvbdVelocityObjectiveSpan::TangentCone &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_MATERIAL_TANGENT) ||
+            (compiled.kind ==
+                 AvbdVelocityObjectiveKind::MaterialNormal &&
+             compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+             compiled.sourceSlotMask ==
+                 eCONTACT_SOURCE_MATERIAL_NORMAL)) &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::PoseDerived;
+  case AvbdVelocityObjectiveOwner::PointFinalize:
+    return (compiled.kind ==
+                AvbdVelocityObjectiveKind::TangentTarget &&
+            (compiled.span ==
+                 AvbdVelocityObjectiveSpan::TangentCone ||
+             compiled.span ==
+                 AvbdVelocityObjectiveSpan::
+                     NormalAndTangentCone) &&
+            (compiled.reconstruction ==
+                 AvbdVelocityObjectiveReconstruction::PoseDerived ||
+             compiled.reconstruction ==
+                 AvbdVelocityObjectiveReconstruction::
+                     NormalResponseSpan)) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal &&
+            compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_NORMAL &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial);
+  case AvbdVelocityObjectiveOwner::ManifoldFinalize:
+    return ((compiled.kind ==
+                 AvbdVelocityObjectiveKind::TangentTarget ||
+             compiled.kind ==
+                 AvbdVelocityObjectiveKind::PassiveFriction) &&
+            compiled.span ==
+                AvbdVelocityObjectiveSpan::
+                    NormalAndTangentCone &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal &&
+            compiled.span == AvbdVelocityObjectiveSpan::Normal &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_NORMAL &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::
+                    SolveStartInertial) ||
+           (compiled.kind ==
+                AvbdVelocityObjectiveKind::PassiveFriction &&
+            compiled.span ==
+                AvbdVelocityObjectiveSpan::TangentCone &&
+            compiled.sourceSlotMask ==
+                eCONTACT_SOURCE_MATERIAL_TANGENT &&
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::PoseDerived);
+  case AvbdVelocityObjectiveOwner::ComponentFinalize:
+    return compiled.kind ==
+               AvbdVelocityObjectiveKind::PassiveFriction &&
+           compiled.span ==
+               AvbdVelocityObjectiveSpan::
+                   NormalAndTangentCone &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::
+                   SolveStartInertial;
+  case AvbdVelocityObjectiveOwner::JointFinalize:
+    return compiled.kind ==
+               AvbdVelocityObjectiveKind::PassiveFriction &&
+           compiled.span ==
+               AvbdVelocityObjectiveSpan::
+                   NormalAndTangentCone &&
+           compiled.reconstruction ==
+               AvbdVelocityObjectiveReconstruction::
+                   SolveStartInertial;
+  case AvbdVelocityObjectiveOwner::Unsupported:
+    return (compiled.kind ==
+                AvbdVelocityObjectiveKind::TangentTarget ||
+            compiled.kind ==
+                AvbdVelocityObjectiveKind::PassiveFriction ||
+            compiled.kind ==
+                AvbdVelocityObjectiveKind::MaterialNormal) &&
+           compiled.span != AvbdVelocityObjectiveSpan::None &&
+           (compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::PoseDerived ||
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::SolveStartInertial ||
+            compiled.reconstruction ==
+                AvbdVelocityObjectiveReconstruction::NormalResponseSpan);
+  }
+  return false;
+}
+
+PX_FORCE_INLINE bool isValidAvbdContactObjectiveProgram(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (program.invalid == AvbdCompiledContactObjectiveProgram::eVALIDATED)
+    return true;
+  if (program.invalid ||
+      program.entryCount >
+          AvbdCompiledContactObjectiveProgram::eMAX_OBJECTIVES)
+    return false;
+  physx::PxU8 sourceSlotMask = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (!isValidAvbdVelocityObjective(compiled) ||
+        (sourceSlotMask & compiled.sourceSlotMask) != 0)
+      return false;
+    sourceSlotMask =
+        physx::PxU8(sourceSlotMask | compiled.sourceSlotMask);
+  }
+  if ((sourceSlotMask & program.legacySourceSlotMask) != 0 ||
+      ((sourceSlotMask | program.legacySourceSlotMask) &
+       ~eCONTACT_SOURCE_ALL) != 0 ||
+      physx::PxU8(sourceSlotMask |
+                  program.legacySourceSlotMask) !=
+          program.authoredSourceSlotMask)
+    return false;
+  return true;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdVelocityObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner == owner && compiled.kind == kind)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE AvbdCompiledVelocityObjective *
+findAvbdVelocityObjective(
+    AvbdCompiledContactObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdVelocityObjectiveKind kind) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner == owner && compiled.kind == kind)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdCompleteManifoldObjective(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if (compiled.owner ==
+            AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.span ==
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdContactMaterialObjective(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return NULL;
+  // Preserve the established compatibility diagnostic: when the physical
+  // program contains independent normal and tangent records, report the
+  // tangent material objective first. Composite entries still match here.
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_TANGENT) != 0)
+      return &compiled;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask &
+         eCONTACT_SOURCE_MATERIAL_NORMAL) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE const AvbdCompiledVelocityObjective *
+findAvbdContactSourceObjective(
+    const AvbdCompiledContactObjectiveProgram &program,
+    physx::PxU8 sourceSlot) {
+  if (!isValidAvbdContactObjectiveProgram(program) ||
+      sourceSlot == 0 ||
+      (sourceSlot & physx::PxU8(sourceSlot - 1u)) != 0)
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    if ((compiled.sourceSlotMask & sourceSlot) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdVelocityObjective(
+    const AvbdCompiledVelocityObjective &compiled) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  // Identity keys intentionally encode body/contact numbering and can change
+  // under actor-order reversal. Group completeness validates them within one
+  // compiled island; this cross-run fingerprint covers semantic allocation.
+  hash = (hash ^ compiled.objectiveRowCount) * prime;
+  hash = (hash ^ compiled.sourceSlotMask) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.owner)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.kind)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.span)) * prime;
+  hash =
+      (hash ^ static_cast<physx::PxU8>(compiled.reconstruction)) * prime;
+  return hash;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdContactObjectiveProgram(
+    const AvbdCompiledContactObjectiveProgram &program) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ program.entryCount) * prime;
+  hash = (hash ^ program.invalid) * prime;
+  hash = (hash ^ program.authoredSourceSlotMask) * prime;
+  hash = (hash ^ program.legacySourceSlotMask) * prime;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    hash += fingerprintAvbdVelocityObjective(program.entries[i]);
+  return hash;
+}
+
+/** Orthogonal contact state flags; velocity ownership lives in typed IR. */
+struct AvbdContactConstraintFlags {
+  enum Enum : physx::PxU16 {
+    eNONE = 0,
+    eDEFORMABLE_STATIC_ANCHOR = 1u << 0,
+    eKINEMATIC_SHELL_ANCHOR = 1u << 1,
+    /** Last dual step was inside Coulomb cone (static μ for next evaluation). */
+    eFRICTION_STICK = 1u << 2,
+  };
+};
+
+// -----------------------------------------------------------------------------
+// Coulomb friction (aligned with avbd-demo3d manifold.cpp / standalone
+// avbd_friction_semantics.h). Bound uses normal force F_n, not raw λ alone;
+// tangents are projected as a 2D cone, not independent axis clamps.
+// -----------------------------------------------------------------------------
+static constexpr physx::PxReal AVBD_FRICTION_STICK_THRESH = 1e-5f;
+
+PX_FORCE_INLINE physx::PxReal avbdCoulombMu(physx::PxReal staticMu,
+                                            physx::PxReal dynamicMu,
+                                            bool stick) {
+  const physx::PxReal muS = staticMu > 0.0f ? staticMu : dynamicMu;
+  const physx::PxReal muD = dynamicMu > 0.0f ? dynamicMu : staticMu;
+  if (muS <= 0.0f && muD <= 0.0f)
+    return 0.0f;
+  // Prefer dynamic μ unless truly sticking. Using μ_s while stick is sticky
+  // but still warm from impact over-damps HelloWorld ball-shot stacks.
+  // Cap static boost: never more than 1.25× dynamic for the dual cone.
+  if (!stick)
+    return muD;
+  const physx::PxReal muStick = physx::PxMin(muS, muD * 1.25f);
+  return muStick > 0.0f ? muStick : muD;
+}
+
+PX_FORCE_INLINE void avbdProjectCoulombCone(physx::PxReal Fn, physx::PxReal mu,
+                                            physx::PxReal &Ft0,
+                                            physx::PxReal &Ft1) {
+  if (mu <= 0.0f) {
+    Ft0 = 0.0f;
+    Ft1 = 0.0f;
+    return;
+  }
+  const physx::PxReal bounds = physx::PxAbs(Fn) * mu;
+  const physx::PxReal len = physx::PxSqrt(Ft0 * Ft0 + Ft1 * Ft1);
+  if (len > bounds && len > 1e-20f) {
+    const physx::PxReal s = bounds / len;
+    Ft0 *= s;
+    Ft1 *= s;
+  }
+}
+
+/** Returns pre-projection ||Ft|| for penalty growth / stick tests. */
+PX_FORCE_INLINE physx::PxReal avbdEvaluateContactForcesCone(
+    physx::PxReal penN, physx::PxReal Cn, physx::PxReal lambdaN,
+    physx::PxReal penT0, physx::PxReal Ct0, physx::PxReal lambdaT0,
+    physx::PxReal penT1, physx::PxReal Ct1, physx::PxReal lambdaT1,
+    physx::PxReal mu, physx::PxReal &Fn, physx::PxReal &Ft0,
+    physx::PxReal &Ft1) {
+  Fn = penN * Cn + lambdaN;
+  if (Fn > 0.0f)
+    Fn = 0.0f;
+  Ft0 = penT0 * Ct0 + lambdaT0;
+  Ft1 = penT1 * Ct1 + lambdaT1;
+  const physx::PxReal preLen = physx::PxSqrt(Ft0 * Ft0 + Ft1 * Ft1);
+  // Capacity: max(|Fn|, |prior compressive λ|) so brief separation does not
+  // zero the Coulomb bound while dual still carries normal force.
+  const physx::PxReal priorCompress = (lambdaN < 0.0f) ? -lambdaN : 0.0f;
+  const physx::PxReal nCap = physx::PxMax(-Fn, priorCompress);
+  avbdProjectCoulombCone(-nCap, mu, Ft0, Ft1);
+  return preLen;
+}
+
+PX_FORCE_INLINE bool avbdFrictionStickFromDual(
+    physx::PxReal nForceCap, physx::PxReal mu, physx::PxReal preTangentForceLen,
+    physx::PxReal Ct0, physx::PxReal Ct1,
+    physx::PxReal stickThresh = AVBD_FRICTION_STICK_THRESH) {
+  const physx::PxReal bounds = physx::PxAbs(nForceCap) * mu;
+  if (preTangentForceLen > bounds)
+    return false;
+  const physx::PxReal cLen = physx::PxSqrt(Ct0 * Ct0 + Ct1 * Ct1);
+  return cLen < stickThresh;
+}
+
+PX_FORCE_INLINE void avbdProjectImpulseCone(physx::PxReal jMax,
+                                            physx::PxReal &j0,
+                                            physx::PxReal &j1) {
+  if (jMax <= 0.0f) {
+    j0 = 0.0f;
+    j1 = 0.0f;
+    return;
+  }
+  const physx::PxReal len = physx::PxSqrt(j0 * j0 + j1 * j1);
+  if (len > jMax && len > 1e-20f) {
+    const physx::PxReal s = jMax / len;
+    j0 *= s;
+    j1 *= s;
+  }
+}
+
+PX_FORCE_INLINE bool isDeformableStaticAnchorContact(bool bodyVsStatic,
+                                                     physx::PxReal restDistance) {
+  return bodyVsStatic && restDistance < -0.05f;
+}
+
+/**
+ * @brief Contact constraint for AVBD solver
+ *
+ * Represents a unilateral (inequality) contact constraint:
+ *   C(x) = (pA - pB) . n - d >= 0
+ *
+ * Where:
+ *   - pA, pB are contact points on bodies A and B
+ *   - n is the contact normal (from B to A)
+ *   - d is the rest distance (usually 0)
+ */
+struct PX_ALIGN_PREFIX(16) AvbdContactConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Contact geometry
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 contactPointA;    //!< Contact point on body A (local space)
+  physx::PxReal penetrationDepth; //!< Contact separation from narrow phase
+                                  //!< (negative = penetrating)
+
+  physx::PxVec3 contactPointB; //!< Contact point on body B (local space)
+  /**
+   * Combined coefficient of restitution from NP patch (material combine done
+   * upstream). Consumed in post-AL material normal response (rigid bounce).
+   * e < 0 (PhysX compliant) treated as inelastic for now.
+   */
+  physx::PxReal restitution;
+
+  physx::PxVec3 contactNormal; //!< Contact normal (world space, from B to A)
+  physx::PxReal friction;      //!< Dynamic friction μ_d (NP-combined)
+
+  /**
+   * Desired body0-minus-body1 contact-point velocity supplied by
+   * PxContactModifyCallback, plus the per-point normal impulse limit.
+   */
+  physx::PxVec3 targetVelocity;
+  physx::PxReal maxImpulse;
+
+  /**
+   * Contact-local response scales from the modifiable patch.  Zero makes the
+   * corresponding body infinite-mass/inertia for this contact only.
+   */
+  physx::PxReal invMassScaleA;
+  physx::PxReal invMassScaleB;
+  physx::PxReal invInertiaScaleA;
+  physx::PxReal invInertiaScaleB;
+
+  //-------------------------------------------------------------------------
+  // Friction tangents
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 tangent0;       //!< First friction tangent direction
+  physx::PxReal tangentLambda0; //!< Lambda for first friction direction
+
+  physx::PxVec3 tangent1;       //!< Second friction tangent direction
+  physx::PxReal tangentLambda1; //!< Lambda for second friction direction
+
+  physx::PxReal staticFriction; //!< Static friction μ_s (NP-combined)
+
+  //-------------------------------------------------------------------------
+  // Per-row penalty for 3-row AL friction model (ref: AVBD3D)
+  // Each constraint row (normal + 2 tangent) has its own penalty that
+  // grows independently via beta*|C| in the dual update.
+  //-------------------------------------------------------------------------
+
+  physx::PxReal tangentPenalty0; //!< Adaptive penalty for tangent direction 0
+  physx::PxReal tangentPenalty1; //!< Adaptive penalty for tangent direction 1
+
+  //-------------------------------------------------------------------------
+  // Lambda warm-starting cache index
+  //-------------------------------------------------------------------------
+
+  physx::PxU32 cacheIndex; //!< Index into lambda cache for warm-starting
+                           //!< (PX_MAX_U32 = not cached)
+  physx::PxU64 cacheKey;   //!< Contact identity expected in the cache slot
+
+  /**
+   * Narrow-phase scalar impulse slot consumed by contact reports.
+   *
+   * The AVBD normal multiplier is a force (penalty [N/m] times violation
+   * [m]); solver writeback converts its compressive magnitude to impulse by
+   * multiplying by dt. NULL means the pair did not request force data.
+   */
+  physx::PxReal *contactImpulseWriteback;
+
+  /**
+   * Standard contact-report friction anchor slot selected during NP stream
+   * ingestion. Multiple AVBD contact rows may accumulate into one of the two
+   * public PxFrictionPatch anchors. NULL means friction reporting was not
+   * requested or the patch has no usable anchor.
+   */
+  physx::PxVec3 *frictionImpulseWriteback;
+
+  /**
+   * Actual tangential impulse applied by the decoupled body-static friction
+   * sweeps, expressed as the impulse on contact body A. Dynamic-dynamic
+   * tangential AL force is converted to impulse during report writeback.
+   */
+  physx::PxVec3 frictionSweepImpulse;
+
+  /**
+   * Actual normal impulse owned by a strict velocity complementarity block.
+   * Negative means the ordinary position multiplier remains the writeback
+   * source. This never replaces the position lambda or its warm-start cache.
+   */
+  physx::PxReal velocityNormalImpulse;
+
+  /** Prep-compiled physical-objective program for this contact row. */
+  AvbdCompiledContactObjectiveProgram objectiveProgram;
+
+  //-------------------------------------------------------------------------
+  // Alpha-blending for Baumgarte stabilization (ref: AVBD3D manifold.cpp)
+  //-------------------------------------------------------------------------
+
+  physx::PxReal C0; //!< Initial normal constraint violation at step start
+
+  /** Previous-frame world contact on static/deformable partner (friction). */
+  physx::PxVec3 staticPrevWorldPoint;
+
+  /** Persistent contact-manager state used for normal ownership. */
+  physx::PxU8 contactManagerEstablished;
+
+  /**
+   * Support classification for surface-motion and friction policy.
+   * Filled in post-AL friction prep.
+   */
+  physx::PxU8 supportClass;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  //-------------------------------------------------------------------------
+  // Constraint violation design:
+  //
+  //   The solver uses TWO constraint evaluations for different purposes:
+  //
+  //   1. computeViolation() = (worldPointA - worldPointB).dot(n)
+  //      Pure geometric signed gap. Utility function for sub-components.
+  //
+  //   2. computeFullViolation() = computeViolation() + penetrationDepth
+  //      Geometric gap + narrow-phase offset. This is the CANONICAL
+  //      constraint function C(x) used consistently by:
+  //        - Inner solve position correction (all paths)
+  //        - AL multiplier update: lambda = max(0, lambda - rho * C)
+  //        - 6x6 path Hessian/gradient
+  //        - Constraint energy computation
+  //
+  //   IMPORTANT: The AL update and inner solve MUST use the same violation
+  //   function. If AL uses computeViolation() while the inner solve uses
+  //   computeFullViolation(), the inner solve drives fullViolation->0 which
+  //   leaves geometricViolation ~= -penetrationDepth > 0. The AL then sees
+  //   a positive violation and clamps lambda to 0 every iteration, making
+  //   the Augmented Lagrangian mechanism completely non-functional.
+  //
+  //   The inner solve correction targets C(x) = lambda/rho (not 0):
+  //     correctionMag = -(C(x) - lambda/rho) / w * baumgarte
+  //   This lets lambda act as a "contact force memory" that accumulates
+  //   across complete AVBD iterations, enabling convergence with fewer passes.
+  //
+  //   Sign convention:
+  //     contactNormal points from B toward A
+  //     C < 0 => penetration (violated); C >= 0 => separated (satisfied)
+  //     Inequality enforced: C >= 0
+  //     AL update: lambda = max(0, lambda - rho * C_full)
+  //       C < 0 (penetrating) => lambda increases (builds contact force)
+  //       C > 0 (separated)   => lambda decreases toward 0
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Compute geometric constraint gap (no penetrationDepth bias)
+   *
+   * C_geom(x) = (worldPointA - worldPointB).dot(n)
+   *
+   * Sub-component of computeFullViolation(). On its own, this only gives
+   * the geometric gap without the narrow-phase offset. Most solver paths
+   * should use computeFullViolation() instead.
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                   const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldPointA = posA + rotA.rotate(contactPointA);
+    physx::PxVec3 worldPointB = posB + rotB.rotate(contactPointB);
+    return (worldPointA - worldPointB).dot(contactNormal);
+  }
+
+  /**
+   * @brief Compute full constraint violation including penetrationDepth
+   *
+   * C_full(x) = (worldPointA - worldPointB).dot(n) + penetrationDepth
+   *
+   * Used by inner solve paths (fast, slow, 6x6) that need the initial
+   * offset for penetration detection and correction computation.
+   *
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
+   * @return Full violation (negative = penetrating)
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeFullViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                       const physx::PxVec3 &posB,
+                       const physx::PxQuat &rotB) const {
+    return computeViolation(posA, rotA, posB, rotB) + penetrationDepth;
+  }
+
+  /**
+   * @brief Compute gradient of constraint function
+   * @param rotA World rotation of body A
+   * @param rotB World rotation of body B
+   * @param[out] gradPosA Gradient w.r.t. position of A
+   * @param[out] gradPosB Gradient w.r.t. position of B
+   * @param[out] gradRotA Gradient w.r.t. rotation of A (as angular)
+   * @param[out] gradRotB Gradient w.r.t. rotation of B (as angular)
+   */
+  PX_FORCE_INLINE void
+  computeGradient(const physx::PxQuat &rotA, const physx::PxQuat &rotB,
+                  physx::PxVec3 &gradPosA, physx::PxVec3 &gradPosB,
+                  physx::PxVec3 &gradRotA, physx::PxVec3 &gradRotB) const {
+    // Gradient w.r.t. position is simply the contact normal
+    gradPosA = contactNormal;
+    gradPosB = -contactNormal;
+
+    // Gradient w.r.t. rotation: d(R*r)/dq contributes to the constraint
+    physx::PxVec3 rA = rotA.rotate(contactPointA);
+    physx::PxVec3 rB = rotB.rotate(contactPointB);
+
+    gradRotA = rA.cross(contactNormal);
+    gradRotB = -rB.cross(contactNormal);
+  }
+
+  /**
+   * @brief Check if this is an active (penetrating or has multiplier) contact
+   * Uses full violation C(x) = dot(xA-xB, n) + penetrationDepth
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
+   */
+  PX_FORCE_INLINE bool isActive(const physx::PxVec3 &posA,
+                                const physx::PxQuat &rotA,
+                                const physx::PxVec3 &posB,
+                                const physx::PxQuat &rotB) const {
+    return computeFullViolation(posA, rotA, posB, rotB) < 0.0f ||
+           header.lambda > 0.0f;
+  }
+
+  /**
+   * @brief Compute augmented Lagrangian energy
+   * E = 0.5 * rho * C^2 + lambda * C
+   */
+  PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
+    physx::PxReal violation = computeViolation(posA, rotA, posB, rotB);
+
+    // For inequality constraint (contact), only penalize if violating
+    if (violation >= 0.0f && header.lambda <= 0.0f) {
+      return 0.0f;
+    }
+
+    // Augmented Lagrangian energy: E = 0.5 * rho * C^2 + lambda * C
+    physx::PxReal rho = header.rho;
+    physx::PxReal lambda = header.lambda;
+
+    return 0.5f * rho * violation * violation + lambda * violation;
+  }
+
+  /**
+   * @brief Compute energy gradient w.r.t. body positions and rotations
+   */
+  PX_FORCE_INLINE void
+  computeEnergyGradient(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                        const physx::PxVec3 &posB, const physx::PxQuat &rotB,
+                        physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
+                        physx::PxVec3 &gradPosB,
+                        physx::PxVec3 &gradRotB) const {
+
+    physx::PxReal violation = computeViolation(posA, rotA, posB, rotB);
+
+    // Constraint force: F = rho * C + lambda
+    physx::PxReal force = header.rho * violation + header.lambda;
+
+    // For inequality constraint, only apply if active
+    if (violation >= 0.0f && header.lambda <= 0.0f) {
+      gradPosA = physx::PxVec3(0.0f);
+      gradRotA = physx::PxVec3(0.0f);
+      gradPosB = physx::PxVec3(0.0f);
+      gradRotB = physx::PxVec3(0.0f);
+      return;
+    }
+
+    // Gradient = force * Jacobian
+    computeGradient(rotA, rotB, gradPosA, gradPosB, gradRotA, gradRotB);
+    gradPosA *= force;
+    gradRotA *= force;
+    gradPosB *= force;
+    gradRotB *= force;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+PX_FORCE_INLINE bool hasKinematicShellAnchor(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags & AvbdContactConstraintFlags::eKINEMATIC_SHELL_ANCHOR) !=
+         0;
+}
+
+PX_FORCE_INLINE bool hasDeformableStaticAnchor(
+    const AvbdContactConstraint &c) {
+  return (c.header.flags &
+          AvbdContactConstraintFlags::eDEFORMABLE_STATIC_ANCHOR) != 0;
+}
+
+PX_FORCE_INLINE bool hasFrictionStick(const AvbdContactConstraint &c) {
+  return (c.header.flags & AvbdContactConstraintFlags::eFRICTION_STICK) != 0;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetOwner(
+    const AvbdContactConstraint &c) {
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PointFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL ||
+         findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ManifoldFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetNormalSpan(
+    const AvbdContactConstraint &c) {
+  const AvbdCompiledVelocityObjective *point =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::PointFinalize,
+          AvbdVelocityObjectiveKind::TangentTarget);
+  const AvbdCompiledVelocityObjective *manifold =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::TangentTarget);
+  const AvbdCompiledVelocityObjective *objective =
+      point ? point : manifold;
+  return objective &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::NormalResponseSpan;
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentTargetManifoldOwner(
+    const AvbdContactConstraint &c) {
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ManifoldFinalize,
+             AvbdVelocityObjectiveKind::TangentTarget) != NULL;
+}
+
+PX_FORCE_INLINE bool hasVelocityPassiveFrictionManifoldOwner(
+    const AvbdContactConstraint &c) {
+  const AvbdCompiledVelocityObjective *objective =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::PassiveFriction);
+  return objective &&
+         objective->span ==
+             AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::SolveStartInertial;
+}
+
+PX_FORCE_INLINE bool hasVelocityBodyStaticFrictionSweepOwner(
+    const AvbdContactConstraint &c) {
+  const AvbdCompiledVelocityObjective *objective =
+      findAvbdVelocityObjective(
+          c.objectiveProgram,
+          AvbdVelocityObjectiveOwner::ManifoldFinalize,
+          AvbdVelocityObjectiveKind::PassiveFriction);
+  return objective &&
+         objective->span ==
+             AvbdVelocityObjectiveSpan::TangentCone &&
+         objective->reconstruction ==
+             AvbdVelocityObjectiveReconstruction::PoseDerived;
+}
+
+PX_FORCE_INLINE bool hasVelocityPassiveFrictionComponentOwner(
+    const AvbdContactConstraint &c) {
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::ComponentFinalize,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
+}
+
+PX_FORCE_INLINE bool hasVelocityFrictionManifoldOwner(
+    const AvbdContactConstraint &c) {
+  return hasVelocityPassiveFrictionManifoldOwner(c) ||
+         hasVelocityPassiveFrictionComponentOwner(c) ||
+         hasVelocityTangentTargetManifoldOwner(c);
+}
+
+PX_FORCE_INLINE bool hasVelocityTangentMaterialOwner(
+    const AvbdContactConstraint &c) {
+  // This predicate is queried from the per-contact dual and post-AL loops.
+  // The previous composition called four find helpers, each of which
+  // revalidated the complete objective program before scanning its entries.
+  // Validate once and scan the bounded three-entry program once instead.
+  // No arithmetic or objective precedence changes: this is exactly the union
+  // of the four owner/kind pairs above, with the same fail-closed validation.
+  const AvbdCompiledContactObjectiveProgram &program =
+      c.objectiveProgram;
+  if (!isValidAvbdContactObjectiveProgram(program))
+    return false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledVelocityObjective &compiled = program.entries[i];
+    const bool tangentTarget =
+        compiled.kind == AvbdVelocityObjectiveKind::TangentTarget &&
+        (compiled.owner == AvbdVelocityObjectiveOwner::PointFinalize ||
+         compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize);
+    const bool manifoldPassive =
+        compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction &&
+        compiled.span ==
+            AvbdVelocityObjectiveSpan::NormalAndTangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::SolveStartInertial;
+    const bool bodyStaticSweep =
+        compiled.owner == AvbdVelocityObjectiveOwner::ManifoldFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction &&
+        compiled.span == AvbdVelocityObjectiveSpan::TangentCone &&
+        compiled.reconstruction ==
+            AvbdVelocityObjectiveReconstruction::PoseDerived;
+    const bool componentPassive =
+        compiled.owner == AvbdVelocityObjectiveOwner::ComponentFinalize &&
+        compiled.kind == AvbdVelocityObjectiveKind::PassiveFriction;
+    if (tangentTarget || manifoldPassive || bodyStaticSweep ||
+        componentPassive) {
+      return true;
+    }
+  }
+  return false;
+}
+
+PX_FORCE_INLINE bool hasVelocityJointFinalizeOwner(
+    const AvbdContactConstraint &c) {
+  return findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::JointFinalize,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
+}
+
+PX_FORCE_INLINE bool hasDeformablePositionTangentOwner(
+    const AvbdContactConstraint &c) {
+  return hasDeformableStaticAnchor(c) &&
+         findAvbdVelocityObjective(
+             c.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PositionAL,
+             AvbdVelocityObjectiveKind::PassiveFriction) != NULL;
+}
+
+/**
+ * Compile ordinary rigid contact material sources that remain unclaimed after
+ * specialized target/component/joint programs have been built.
+ *
+ * Call ordering is the ownership priority: contact-only islands invoke this
+ * after their strict manifold/component compilers; joint islands invoke it
+ * after contact-coupled motor compilation. Existing material source records
+ * are never replaced.
+ */
+PX_FORCE_INLINE void compileAvbdOrdinaryRigidContactObjectives(
+    AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxU32 numBodies,
+    const AvbdBodyConstraintMap *contactMap = nullptr) {
+  if (!contacts || numContacts == 0 || numBodies == 0)
+    return;
+
+  // Body-static material normal is reconstructed once per rigid body.
+  // Passive tangents are consumed by the pose-derived body manifold sweep.
+  for (physx::PxU32 bodyIndex = 0; bodyIndex < numBodies; ++bodyIndex) {
+    bool found = false;
+    bool supported = true;
+    physx::PxU32 normalRowCount = 0;
+    physx::PxU32 tangentRowCount = 0;
+    physx::PxU64 normalObjectiveKey = ~physx::PxU64(0);
+    physx::PxU64 tangentObjectiveKey = ~physx::PxU64(0);
+    const physx::PxU32 *mapIndices = nullptr;
+    physx::PxU32 mapCount = 0;
+    const bool hasMapRange =
+        contactMap && contactMap->constraintOffsets &&
+        contactMap->constraintCounts && bodyIndex < contactMap->numBodies;
+    if (hasMapRange)
+      contactMap->getBodyConstraints(bodyIndex, mapIndices, mapCount);
+    const physx::PxU32 loopCount = hasMapRange ? mapCount : numContacts;
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
+      const AvbdContactConstraint &contact = contacts[c];
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
+        continue;
+      found = true;
+      const bool dynamicIsA = contact.header.bodyIndexA == bodyIndex;
+      const physx::PxReal linearScale =
+          dynamicIsA ? contact.invMassScaleA : contact.invMassScaleB;
+      const physx::PxReal angularScale =
+          dynamicIsA ? contact.invInertiaScaleA : contact.invInertiaScaleB;
+      const bool hasPassiveTangent =
+          contact.friction > 0.0f || contact.staticFriction > 0.0f;
+      if (hasDeformableStaticAnchor(contact) ||
+          hasKinematicShellAnchor(contact) ||
+          contact.targetVelocity.magnitudeSquared() > 1.0e-12f ||
+          !physx::PxIsFinite(contact.restitution) ||
+          contact.restitution < 0.0f ||
+          contact.restitution > 1.0f ||
+          contact.maxImpulse < PX_MAX_REAL ||
+          !physx::PxIsFinite(linearScale) ||
+          !physx::PxIsFinite(angularScale) ||
+          linearScale < 0.0f || angularScale < 0.0f ||
+          findAvbdContactSourceObjective(
+              contact.objectiveProgram,
+              eCONTACT_SOURCE_MATERIAL_NORMAL) ||
+          (hasPassiveTangent &&
+           findAvbdContactSourceObjective(
+               contact.objectiveProgram,
+               eCONTACT_SOURCE_MATERIAL_TANGENT))) {
+        supported = false;
+        break;
+      }
+      normalObjectiveKey =
+          physx::PxMin(normalObjectiveKey, contact.cacheKey);
+      ++normalRowCount;
+      if (hasPassiveTangent) {
+        tangentObjectiveKey =
+            physx::PxMin(tangentObjectiveKey, contact.cacheKey);
+        ++tangentRowCount;
+      }
+    }
+    if (!found || !supported || normalRowCount == 0)
+      continue;
+
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
+      const AvbdContactConstraint &contact = contacts[c];
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
+        continue;
+      const bool hasPassiveTangent =
+          contact.friction > 0.0f || contact.staticFriction > 0.0f;
+      if (!canAssignAvbdVelocityObjective(
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::ManifoldFinalize,
+              AvbdVelocityObjectiveKind::MaterialNormal,
+              AvbdVelocityObjectiveSpan::Normal,
+              AvbdVelocityObjectiveReconstruction::
+                  SolveStartInertial,
+              normalRowCount, normalObjectiveKey) ||
+          (hasPassiveTangent &&
+           !canAssignAvbdVelocityObjective(
+               contact.objectiveProgram,
+               AvbdVelocityObjectiveOwner::ManifoldFinalize,
+               AvbdVelocityObjectiveKind::PassiveFriction,
+               AvbdVelocityObjectiveSpan::TangentCone,
+               AvbdVelocityObjectiveReconstruction::PoseDerived,
+               tangentRowCount, tangentObjectiveKey))) {
+        supported = false;
+        break;
+      }
+    }
+    if (!supported) {
+      for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+        const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
+        AvbdContactConstraint &contact = contacts[c];
+        if (isBodyVsStaticContact(contact.header.bodyIndexA,
+                                  contact.header.bodyIndexB, numBodies) &&
+            (hasMapRange || contact.header.bodyIndexA == bodyIndex ||
+             contact.header.bodyIndexB == bodyIndex))
+          invalidateAvbdVelocityObjective(
+              contact.objectiveProgram);
+      }
+      continue;
+    }
+    for (physx::PxU32 loopIndex = 0; loopIndex < loopCount; ++loopIndex) {
+      const physx::PxU32 c = hasMapRange ? mapIndices[loopIndex] : loopIndex;
+      AvbdContactConstraint &contact = contacts[c];
+      if (!isBodyVsStaticContact(contact.header.bodyIndexA,
+                                 contact.header.bodyIndexB, numBodies) ||
+          (!hasMapRange && contact.header.bodyIndexA != bodyIndex &&
+           contact.header.bodyIndexB != bodyIndex))
+        continue;
+      assignAvbdVelocityObjective(
+              contact.objectiveProgram,
+              AvbdVelocityObjectiveOwner::ManifoldFinalize,
+              AvbdVelocityObjectiveKind::MaterialNormal,
+              AvbdVelocityObjectiveSpan::Normal,
+              AvbdVelocityObjectiveReconstruction::SolveStartInertial,
+              normalRowCount, normalObjectiveKey);
+      if (contact.friction > 0.0f || contact.staticFriction > 0.0f) {
+        assignAvbdVelocityObjective(
+               contact.objectiveProgram,
+               AvbdVelocityObjectiveOwner::ManifoldFinalize,
+               AvbdVelocityObjectiveKind::PassiveFriction,
+               AvbdVelocityObjectiveSpan::TangentCone,
+               AvbdVelocityObjectiveReconstruction::PoseDerived,
+               tangentRowCount, tangentObjectiveKey);
+      }
+    }
+  }
+
+  // Dynamic-dynamic geometry and passive tangents are position AL. Positive
+  // restitution owns only material normal in point finalize.
+  for (physx::PxU32 c = 0; c < numContacts; ++c) {
+    AvbdContactConstraint &contact = contacts[c];
+    const bool dynamicA = contact.header.bodyIndexA < numBodies;
+    const bool dynamicB = contact.header.bodyIndexB < numBodies;
+    if (!dynamicA || !dynamicB ||
+        contact.targetVelocity.magnitudeSquared() > 1.0e-12f ||
+        !physx::PxIsFinite(contact.restitution) ||
+        contact.restitution < 0.0f ||
+        contact.restitution > 1.0f ||
+        !physx::PxIsFinite(contact.maxImpulse) ||
+        !physx::PxIsFinite(contact.invMassScaleA) ||
+        !physx::PxIsFinite(contact.invInertiaScaleA) ||
+        !physx::PxIsFinite(contact.invMassScaleB) ||
+        !physx::PxIsFinite(contact.invInertiaScaleB) ||
+        contact.invMassScaleA < 0.0f ||
+        contact.invInertiaScaleA < 0.0f ||
+        contact.invMassScaleB < 0.0f ||
+        contact.invInertiaScaleB < 0.0f ||
+        findAvbdContactSourceObjective(
+            contact.objectiveProgram,
+            eCONTACT_SOURCE_MATERIAL_NORMAL) ||
+        findAvbdContactSourceObjective(
+            contact.objectiveProgram,
+            eCONTACT_SOURCE_MATERIAL_TANGENT))
+      continue;
+
+    const bool hasPassiveTangent =
+        contact.friction > 0.0f || contact.staticFriction > 0.0f;
+    const AvbdVelocityObjectiveOwner normalOwner =
+        contact.restitution > 0.0f
+            ? AvbdVelocityObjectiveOwner::PointFinalize
+            : AvbdVelocityObjectiveOwner::PositionAL;
+    const AvbdVelocityObjectiveReconstruction normalReconstruction =
+        contact.restitution > 0.0f
+            ? AvbdVelocityObjectiveReconstruction::SolveStartInertial
+            : AvbdVelocityObjectiveReconstruction::PoseDerived;
+    if (!canAssignAvbdVelocityObjective(
+            contact.objectiveProgram, normalOwner,
+            AvbdVelocityObjectiveKind::MaterialNormal,
+            AvbdVelocityObjectiveSpan::Normal,
+            normalReconstruction, 1u, contact.cacheKey) ||
+        (hasPassiveTangent &&
+         !canAssignAvbdVelocityObjective(
+             contact.objectiveProgram,
+             AvbdVelocityObjectiveOwner::PositionAL,
+             AvbdVelocityObjectiveKind::PassiveFriction,
+             AvbdVelocityObjectiveSpan::TangentCone,
+             AvbdVelocityObjectiveReconstruction::PoseDerived,
+             1u, contact.cacheKey)))
+      continue;
+
+    assignAvbdVelocityObjective(
+        contact.objectiveProgram, normalOwner,
+        AvbdVelocityObjectiveKind::MaterialNormal,
+        AvbdVelocityObjectiveSpan::Normal,
+        normalReconstruction, 1u, contact.cacheKey);
+    if (hasPassiveTangent) {
+      assignAvbdVelocityObjective(
+          contact.objectiveProgram,
+          AvbdVelocityObjectiveOwner::PositionAL,
+          AvbdVelocityObjectiveKind::PassiveFriction,
+          AvbdVelocityObjectiveSpan::TangentCone,
+          AvbdVelocityObjectiveReconstruction::PoseDerived,
+          1u, contact.cacheKey);
+    }
+  }
+}
+
+PX_FORCE_INLINE void setFrictionStick(AvbdContactConstraint &c, bool stick) {
+  if (stick)
+    c.header.flags =
+        physx::PxU16(c.header.flags | AvbdContactConstraintFlags::eFRICTION_STICK);
+  else
+    c.header.flags = physx::PxU16(
+        c.header.flags & ~AvbdContactConstraintFlags::eFRICTION_STICK);
+}
+
+PX_FORCE_INLINE physx::PxReal contactCoulombMu(const AvbdContactConstraint &c) {
+  return avbdCoulombMu(c.staticFriction, c.friction, hasFrictionStick(c));
+}
+
+/** Primal-only: never stack body-static tangents in multi-contact 6x6. */
+PX_FORCE_INLINE bool useBodyVsStaticFrictionIn6x6(
+    physx::PxU32 bodyAIdx, physx::PxU32 bodyBIdx, physx::PxU32 numBodies) {
+  return !isBodyVsStaticContact(bodyAIdx, bodyBIdx, numBodies);
+}
+
+/** Body-static tangents in 6x6: one dominant contact, or all if N<=4 on body. */
+PX_FORCE_INLINE bool useBodyVsStaticTangentPrimalIn6x6(
+    bool bodyVsStatic, physx::PxU32 contactIdx,
+    physx::PxU32 dominantBodyStaticContactIdx,
+    physx::PxU32 staticContactsOnBody) {
+  if (!bodyVsStatic)
+    return true;
+  if (staticContactsOnBody <= 8u)
+    return true;
+  return contactIdx == dominantBodyStaticContactIdx;
+}
+
+PX_FORCE_INLINE void getBodyVsStaticWorldContact(
+    const AvbdContactConstraint &c, physx::PxU32 numBodies,
+    physx::PxVec3 &worldNow, physx::PxVec3 &worldPrev) {
+  if (c.header.bodyIndexA < numBodies) {
+    worldNow = c.contactPointB;
+  } else {
+    worldNow = c.contactPointA;
+  }
+  worldPrev = c.staticPrevWorldPoint;
+}
+
+PX_FORCE_INLINE physx::PxVec3 computeBodyVsStaticRelDisp(
+    const physx::PxVec3 &worldPosA, const physx::PxVec3 &prevWorldPosA,
+    const physx::PxVec3 &worldPosB, const physx::PxVec3 &prevWorldPosB,
+    const AvbdContactConstraint &c, physx::PxU32 numBodies) {
+  physx::PxVec3 staticNow, staticPrev;
+  getBodyVsStaticWorldContact(c, numBodies, staticNow, staticPrev);
+  if (c.header.bodyIndexA < numBodies)
+    return (worldPosA - prevWorldPosA) - (staticNow - staticPrev);
+  return (worldPosB - prevWorldPosB) - (staticNow - staticPrev);
+}
+
+PX_FORCE_INLINE physx::PxReal finalizeBodyVsStaticViolation(
+    physx::PxReal violation, physx::PxReal penetrationDepth) {
+  if (violation >= 0.0f)
+    return violation;
+  // penetrationDepth follows the PhysX separation convention after the
+  // deformable rest-distance adjustment: negative means penetrating.  Keep
+  // that captured depth as the lower bound while the row is active.  Negating
+  // it loses real negative depth and turns positive separation into a false
+  // penetration impulse.
+  return physx::PxMin(violation, penetrationDepth);
+}
+
+/**
+ * @brief Weld joint constraint for AVBD solver (Unified Fixed/Weld Joint)
+ *
+ * This is the primary constraint for locking all 6 DOF between two bodies.
+ * Optimized for both:
+ *   1. Pre-authored fixed joints (scene setup)
+ *   2. Runtime attachment scenarios ("Ultrahand" style)
+ *
+ * Key features:
+ *   - Handles large mass ratios gracefully (small object on large object)
+ *   - Uses mass-weighted corrections for stability
+ *   - Supports "breakable" mode with force threshold
+ *   - Optimized for frequent creation/destruction
+ *   - Pre-computed effective mass for faster solving
+ *
+ * Constraint functions:
+ *   C_pos(x) = pA + R_A * anchorA - pB - R_B * anchorB = 0
+ *   C_rot(x) = relative rotation error = 0
+ *
+ * Note: eJOINT_FIXED and eJOINT_WELD both map to this constraint type.
+ *       Use eJOINT_FIXED for pre-authored joints, eJOINT_WELD for runtime
+ * creation.
+ */
+struct PX_ALIGN_PREFIX(16) AvbdWeldJointConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Joint anchors (in local coordinates of each body)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 anchorA;    //!< Weld point on body A (local space)
+  physx::PxReal massRatioA; //!< Cached mass contribution ratio for body A
+
+  physx::PxVec3 anchorB;    //!< Weld point on body B (local space)
+  physx::PxReal massRatioB; //!< Cached mass contribution ratio for body B
+
+  //-------------------------------------------------------------------------
+  // Relative orientation at weld time
+  //-------------------------------------------------------------------------
+
+  physx::PxQuat
+      relativeRotation; //!< Target relative rotation (B relative to A)
+
+  //-------------------------------------------------------------------------
+  // Lagrangian multipliers (6 DOF)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 lambdaPosition; //!< Position constraint multipliers
+  physx::PxReal breakForce; //!< Force threshold for breaking (0 = unbreakable)
+
+  physx::PxVec3 lambdaRotation; //!< Rotation constraint multipliers
+  physx::PxReal
+      breakTorque; //!< Torque threshold for breaking (0 = unbreakable)
+
+  //-------------------------------------------------------------------------
+  // Pre-computed effective mass (for faster solving)
+  //-------------------------------------------------------------------------
+
+  physx::PxReal effectiveLinearMass;  //!< Combined effective mass for position
+  physx::PxReal effectiveAngularMass; //!< Combined effective mass for rotation
+  physx::PxReal accumulatedForce;  //!< Accumulated constraint force magnitude
+                                   //!< (for break check)
+  physx::PxReal accumulatedTorque; //!< Accumulated constraint torque magnitude
+                                   //!< (for break check)
+
+  //-------------------------------------------------------------------------
+  // Flags
+  //-------------------------------------------------------------------------
+
+  physx::PxU16 isBreakable;    //!< Whether this weld can break
+  physx::PxU16 isBroken;       //!< Whether this weld has broken
+  physx::PxU16 isNewlyCreated; //!< Flag for first-frame handling
+  physx::PxU16 padding0;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Initialize as a fixed joint (pre-authored, equal mass distribution)
+   *
+   * Use this for scene-authored fixed joints where mass ratios are not
+   * critical.
+   */
+  PX_FORCE_INLINE void initFixed(
+      const physx::PxVec3 &localAnchorA, const physx::PxVec3 &localAnchorB,
+      const physx::PxQuat &localFrameA = physx::PxQuat(physx::PxIdentity),
+      const physx::PxQuat &localFrameB = physx::PxQuat(physx::PxIdentity)) {
+
+    header.type = AvbdConstraintType::eJOINT_FIXED;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+
+    anchorA = localAnchorA;
+    anchorB = localAnchorB;
+
+    // For fixed joints, use target relative rotation from local frames
+    relativeRotation = localFrameA.getConjugate() * localFrameB;
+
+    // Equal mass distribution for pre-authored joints
+    massRatioA = 0.5f;
+    massRatioB = 0.5f;
+    effectiveLinearMass = 0.0f;
+    effectiveAngularMass = 1.0f;
+
+    lambdaPosition = physx::PxVec3(0.0f);
+    lambdaRotation = physx::PxVec3(0.0f);
+
+    // Fixed joints are not breakable by default
+    breakForce = 0.0f;
+    breakTorque = 0.0f;
+    isBreakable = 0;
+    isBroken = 0;
+    isNewlyCreated = 0;
+    accumulatedForce = 0.0f;
+    accumulatedTorque = 0.0f;
+    padding0 = 0;
+  }
+
+  /**
+   * @brief Initialize weld constraint between two bodies at runtime
+   *
+   * Use this for "Ultrahand" style runtime attachment.
+   *
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param invMassA Inverse mass of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
+   * @param invMassB Inverse mass of body B
+   * @param worldWeldPoint World-space point where bodies are welded
+   */
+  PX_FORCE_INLINE void
+  initializeWeld(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                 physx::PxReal invMassA, const physx::PxVec3 &posB,
+                 const physx::PxQuat &rotB, physx::PxReal invMassB,
+                 const physx::PxVec3 &worldWeldPoint) {
+
+    header.type = AvbdConstraintType::eJOINT_WELD;
+    header.compliance = 0.0f; // Hard constraint
+    header.rho = 1e5f;        // Higher rho for stiffer welds
+
+    // Convert world weld point to local coordinates
+    anchorA = rotA.rotateInv(worldWeldPoint - posA);
+    anchorB = rotB.rotateInv(worldWeldPoint - posB);
+
+    // Store relative rotation at weld time
+    relativeRotation = rotA.getConjugate() * rotB;
+
+    // Compute mass ratios for stable correction distribution
+    // The heavier object moves less
+    physx::PxReal totalInvMass = invMassA + invMassB;
+    if (totalInvMass > 1e-10f) {
+      massRatioA = invMassA / totalInvMass;
+      massRatioB = invMassB / totalInvMass;
+    } else {
+      massRatioA = 0.5f;
+      massRatioB = 0.5f;
+    }
+
+    // Pre-compute effective mass
+    if (totalInvMass > 1e-10f) {
+      effectiveLinearMass = 1.0f / totalInvMass;
+    } else {
+      effectiveLinearMass = 0.0f;
+    }
+    effectiveAngularMass = 1.0f; // Simplified, could be computed from inertias
+
+    // Initialize multipliers
+    lambdaPosition = physx::PxVec3(0.0f);
+    lambdaRotation = physx::PxVec3(0.0f);
+
+    // Default: unbreakable
+    breakForce = 0.0f;
+    breakTorque = 0.0f;
+    isBreakable = 0;
+    isBroken = 0;
+    isNewlyCreated = 1;
+
+    accumulatedForce = 0.0f;
+    accumulatedTorque = 0.0f;
+    padding0 = 0;
+  }
+
+  /**
+   * @brief Set breakable parameters
+   */
+  PX_FORCE_INLINE void setBreakable(physx::PxReal maxForce,
+                                    physx::PxReal maxTorque) {
+    breakForce = maxForce;
+    breakTorque = maxTorque;
+    isBreakable = (maxForce > 0.0f || maxTorque > 0.0f) ? 1 : 0;
+  }
+
+  /**
+   * @brief Compute position constraint violation (3 components)
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computePositionViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                           const physx::PxVec3 &posB,
+                           const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
+    physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
+    return worldAnchorA - worldAnchorB;
+  }
+
+  /**
+   * @brief Compute rotation constraint violation (3 components as angular
+   * error)
+   *
+   * We want: rotA.inverse() * rotB == relativeRotation
+   * Error: rotA * relativeRotation * rotB.inverse()
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computeRotationViolation(const physx::PxQuat &rotA,
+                           const physx::PxQuat &rotB) const {
+
+    // Compute rotation error in WORLD frame.
+    // Target world rotation of B: rotA * relativeRotation
+    // Error: target * rotB^-1  (world frame)
+    //
+    // IMPORTANT: The Jacobian for this constraint uses world-frame axes
+    // (gradRot = e_k * sign), so the error MUST also be in world frame.
+    // Using body-A local frame (rotA^-1 * rotB * relRot^-1) would cause
+    // a frame mismatch leading to chaotic oscillation.
+    physx::PxQuat target = rotA * relativeRotation;
+    physx::PxQuat errorQ = target * rotB.getConjugate();
+    if (errorQ.w < 0.0f) {
+      errorQ = -errorQ; // Shortest path
+    }
+
+    // Convert to axis-angle (small angle approximation)
+    return physx::PxVec3(errorQ.x, errorQ.y, errorQ.z) * 2.0f;
+  }
+
+  /**
+   * @brief Compute position corrections with mass-weighted distribution
+   *
+   * This is the key optimization for "Ultrahand" scenarios:
+   * - Light objects move more, heavy objects move less
+   * - Prevents small attached objects from destabilizing large structures
+   */
+  PX_FORCE_INLINE void
+  computeMassWeightedCorrections(const physx::PxVec3 &violation,
+                                 physx::PxVec3 &correctionA,
+                                 physx::PxVec3 &correctionB) const {
+
+    // Body A gets correction proportional to its inverse mass ratio
+    // (heavier bodies have lower inverse mass, so they move less)
+    correctionA = -violation * massRatioA;
+    correctionB = violation * massRatioB;
+  }
+
+  /**
+   * @brief Check if weld should break based on accumulated forces
+   * @return true if weld is broken
+   */
+  PX_FORCE_INLINE bool checkBreak(physx::PxReal forceThisFrame,
+                                  physx::PxReal torqueThisFrame) {
+    if (!isBreakable || isBroken) {
+      return isBroken != 0;
+    }
+
+    // Accumulate forces (with some smoothing)
+    accumulatedForce = accumulatedForce * 0.9f + forceThisFrame * 0.1f;
+    accumulatedTorque = accumulatedTorque * 0.9f + torqueThisFrame * 0.1f;
+
+    // Check break threshold
+    if ((breakForce > 0.0f && accumulatedForce > breakForce) ||
+        (breakTorque > 0.0f && accumulatedTorque > breakTorque)) {
+      isBroken = 1;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * @brief Compute total constraint energy
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeEnergy(const physx::PxVec3 &posViolation,
+                const physx::PxVec3 &rotViolation) const {
+    physx::PxReal invCompliance =
+        (header.compliance > 0.0f) ? (1.0f / header.compliance) : header.rho;
+
+    // Quadratic penalty + Lagrangian term
+    physx::PxReal posEnergy =
+        0.5f * invCompliance * posViolation.magnitudeSquared() +
+        lambdaPosition.dot(posViolation);
+    physx::PxReal rotEnergy =
+        0.5f * invCompliance * rotViolation.magnitudeSquared() +
+        lambdaRotation.dot(rotViolation);
+
+    return posEnergy + rotEnergy;
+  }
+
+  /**
+   * @brief Compute augmented Lagrangian energy
+   */
+  PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
+    if (isBroken)
+      return 0.0f;
+
+    physx::PxVec3 posViolation =
+        computePositionViolation(posA, rotA, posB, rotB);
+    physx::PxVec3 rotViolation = computeRotationViolation(rotA, rotB);
+
+    return computeEnergy(posViolation, rotViolation);
+  }
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_FIXED;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    anchorA = physx::PxVec3(0.0f);
+    anchorB = physx::PxVec3(0.0f);
+    massRatioA = 0.5f;
+    massRatioB = 0.5f;
+    relativeRotation = physx::PxQuat(physx::PxIdentity);
+    lambdaPosition = physx::PxVec3(0.0f);
+    lambdaRotation = physx::PxVec3(0.0f);
+    breakForce = 0.0f;
+    breakTorque = 0.0f;
+    effectiveLinearMass = 0.0f;
+    effectiveAngularMass = 1.0f;
+    accumulatedForce = 0.0f;
+    accumulatedTorque = 0.0f;
+    isBreakable = 0;
+    isBroken = 0;
+    isNewlyCreated = 0;
+    padding0 = 0;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+/**
+ * @brief Alias for backward compatibility
+ *
+ * AvbdFixedJointConstraint is now unified with AvbdWeldJointConstraint.
+ * Both eJOINT_FIXED and eJOINT_WELD use the same underlying structure.
+ *
+ * For new code, prefer using AvbdWeldJointConstraint directly.
+ */
+typedef AvbdWeldJointConstraint AvbdFixedJointConstraint;
+
+/**
+ * @brief Spherical (Ball) joint constraint for AVBD solver
+ *
+ * Constrains two anchor points to be coincident:
+ *   C(x) = pA + R_A * anchorA - pB - R_B * anchorB = 0
+ *
+ * Optionally supports cone angle limit to restrict relative rotation.
+ */
+struct PX_ALIGN_PREFIX(16) AvbdSphericalJointConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Joint anchors
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 anchorA;        //!< Anchor point on body A (local space)
+  physx::PxReal coneAngleLimit; //!< Cone angle limit in radians (0 = no limit)
+
+  physx::PxVec3 anchorB;    //!< Anchor point on body B (local space)
+  physx::PxReal coneLambda; //!< Lambda for cone constraint
+
+  physx::PxVec3 lambda; //!< Lagrangian multipliers (3 DOF position)
+  physx::PxReal padding0;
+
+  //-------------------------------------------------------------------------
+  // Cone limit axis (local frame on body A)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 coneAxisA;   //!< Cone axis on body A (local space)
+  physx::PxU16 hasConeLimit; //!< Whether cone limit is active
+  physx::PxU16 padding1;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Compute position constraint violation (3 components)
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computeViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                   const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
+    physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
+    return worldAnchorA - worldAnchorB;
+  }
+
+  /**
+   * @brief Compute cone angle violation
+   * @return Angle violation in radians (positive = exceeded limit)
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeConeViolation(const physx::PxQuat &rotA,
+                       const physx::PxQuat &rotB) const {
+    if (!hasConeLimit || coneAngleLimit <= 0.0f)
+      return 0.0f;
+
+    // Get world space cone axes
+    physx::PxVec3 worldAxisA = rotA.rotate(coneAxisA);
+    physx::PxVec3 worldAxisB =
+        rotB.rotate(coneAxisA); // Use same reference axis
+
+    // Compute angle between axes
+    physx::PxReal dotProduct = worldAxisA.dot(worldAxisB);
+    dotProduct = physx::PxClamp(dotProduct, -1.0f, 1.0f);
+    physx::PxReal angle = physx::PxAcos(dotProduct);
+
+    return angle - coneAngleLimit; // Positive if exceeded
+  }
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_SPHERICAL;
+    header.compliance = 0.0f; // Hard constraint by default
+    header.rho = 1e4f;
+    anchorA = physx::PxVec3(0.0f);
+    anchorB = physx::PxVec3(0.0f);
+    lambda = physx::PxVec3(0.0f);
+    coneAngleLimit = 0.0f;
+    coneLambda = 0.0f;
+    coneAxisA = physx::PxVec3(0.0f, 1.0f, 0.0f);
+    hasConeLimit = 0;
+    padding0 = 0.0f;
+    padding1 = 0;
+  }
+
+  /**
+   * @brief Compute augmented Lagrangian energy
+   * E = 0.5 * rho * ||C||^2 + lambda^T * C
+   */
+  PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy(
+      const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+      const physx::PxVec3 &posB, const physx::PxQuat &rotB) const {
+
+    physx::PxVec3 violation = computeViolation(posA, rotA, posB, rotB);
+    physx::PxReal rho = header.rho;
+
+    physx::PxReal energy = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+      energy +=
+          0.5f * rho * violation[i] * violation[i] + lambda[i] * violation[i];
+    }
+
+    return energy;
+  }
+
+  /**
+   * @brief Compute energy gradient w.r.t. body positions and rotations
+   */
+  PX_FORCE_INLINE void
+  computeEnergyGradient(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                        const physx::PxVec3 &posB, const physx::PxQuat &rotB,
+                        physx::PxVec3 &gradPosA, physx::PxVec3 &gradRotA,
+                        physx::PxVec3 &gradPosB,
+                        physx::PxVec3 &gradRotB) const {
+
+    physx::PxVec3 violation = computeViolation(posA, rotA, posB, rotB);
+    physx::PxReal rho = header.rho;
+
+    // Gradient = (rho * C + lambda) * Jacobian
+    // For spherical joint, Jacobian is identity for position
+    physx::PxVec3 force(0.0f);
+    for (int i = 0; i < 3; ++i) {
+      force[i] = rho * violation[i] + lambda[i];
+    }
+
+    gradPosA = force;
+    gradPosB = -force;
+
+    // Rotation gradient: d(R*r)/dq
+    physx::PxVec3 rA = rotA.rotate(anchorA);
+    physx::PxVec3 rB = rotB.rotate(anchorB);
+
+    gradRotA = rA.cross(force);
+    gradRotB = -rB.cross(force);
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+/**
+ * @brief Revolute (Hinge) joint constraint for AVBD solver
+ *
+ * Constrains two bodies to rotate around a single shared axis:
+ *   - Position constraint (3 DOF): anchor points must coincide
+ *   - Axis alignment (2 DOF): rotation axes must align
+ *   - Free axis: 1 rotation DOF around the shared axis
+ *
+ * Total: 5 constraints (3 position + 2 axis alignment)
+ */
+struct PX_ALIGN_PREFIX(16) AvbdRevoluteJointConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Joint geometry
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 anchorA;         //!< Anchor point on body A (local space)
+  physx::PxReal angleLimitLower; //!< Lower angle limit (radians)
+
+  physx::PxVec3 anchorB;         //!< Anchor point on body B (local space)
+  physx::PxReal angleLimitUpper; //!< Upper angle limit (radians)
+
+  physx::PxVec3 axisA; //!< Rotation axis on body A (local space, normalized)
+  physx::PxReal motorTargetVelocity; //!< Motor target angular velocity
+
+  physx::PxVec3 axisB; //!< Rotation axis on body B (local space, normalized)
+  physx::PxReal motorMaxForce; //!< Motor maximum force
+
+  //-------------------------------------------------------------------------
+  // Reference frames for angle measurement
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 refAxisA; //!< Reference axis on body A (perpendicular to axisA)
+  physx::PxReal padding0;
+
+  physx::PxVec3 refAxisB; //!< Reference axis on body B (perpendicular to axisB)
+  physx::PxReal padding1;
+
+  //-------------------------------------------------------------------------
+  // Lagrangian multipliers
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 lambdaPosition;   //!< Position constraint multipliers (3 DOF)
+  physx::PxReal lambdaAngleLimit; //!< Angle limit multiplier
+
+  physx::PxVec3 lambdaAxisAlign; //!< Axis alignment multipliers (2 DOF stored
+                                 //!< as Vec3, z unused)
+  physx::PxReal padding2;
+
+  //-------------------------------------------------------------------------
+  // Flags
+  //-------------------------------------------------------------------------
+
+  physx::PxU16 hasAngleLimit; //!< Whether angle limits are active
+  physx::PxU16 motorEnabled;  //!< Whether motor is enabled
+  physx::PxU16 padding3;
+  physx::PxU16 padding4;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Compute position constraint violation (3 components)
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computePositionViolation(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                           const physx::PxVec3 &posB,
+                           const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
+    physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
+    return worldAnchorA - worldAnchorB;
+  }
+
+  /**
+   * @brief Compute axis alignment violation (2 components)
+   *
+   * The two axes should be parallel. We measure the cross product
+   * and project onto two perpendicular directions.
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computeAxisViolation(const physx::PxQuat &rotA,
+                       const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldAxisA = rotA.rotate(axisA);
+    physx::PxVec3 worldAxisB = rotB.rotate(axisB);
+
+    // Cross product gives axis alignment error
+    // When aligned, cross product is zero
+    return worldAxisA.cross(worldAxisB);
+  }
+
+  /**
+   * @brief Compute current joint angle
+   */
+  PX_FORCE_INLINE physx::PxReal computeAngle(const physx::PxQuat &rotA,
+                                             const physx::PxQuat &rotB) const {
+    // Transform reference axes to world space
+    physx::PxVec3 worldRefA = rotA.rotate(refAxisA);
+    physx::PxVec3 worldRefB = rotB.rotate(refAxisB);
+    physx::PxVec3 worldAxisA = rotA.rotate(axisA);
+
+    // Project refB onto plane perpendicular to axis
+    physx::PxVec3 projB = worldRefB - worldAxisA * worldRefB.dot(worldAxisA);
+    projB.normalize();
+
+    // Compute angle using atan2
+    physx::PxReal cosAngle = worldRefA.dot(projB);
+    physx::PxReal sinAngle = worldAxisA.dot(worldRefA.cross(projB));
+
+    return physx::PxAtan2(sinAngle, cosAngle);
+  }
+
+  /**
+   * @brief Compute angle limit violation
+   * @return Positive if exceeded lower limit, negative if exceeded upper limit
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeAngleLimitViolation(const physx::PxQuat &rotA,
+                             const physx::PxQuat &rotB) const {
+    if (!hasAngleLimit)
+      return 0.0f;
+
+    physx::PxReal angle = computeAngle(rotA, rotB);
+
+    if (angle < angleLimitLower)
+      return angle - angleLimitLower; // Negative
+    if (angle > angleLimitUpper)
+      return angle - angleLimitUpper; // Positive
+
+    return 0.0f;
+  }
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_REVOLUTE;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    anchorA = physx::PxVec3(0.0f);
+    anchorB = physx::PxVec3(0.0f);
+    axisA = physx::PxVec3(0.0f, 0.0f, 1.0f); // Default Z axis
+    axisB = physx::PxVec3(0.0f, 0.0f, 1.0f);
+    refAxisA = physx::PxVec3(1.0f, 0.0f, 0.0f); // Default X axis
+    refAxisB = physx::PxVec3(1.0f, 0.0f, 0.0f);
+    angleLimitLower = -physx::PxPi;
+    angleLimitUpper = physx::PxPi;
+    motorTargetVelocity = 0.0f;
+    motorMaxForce = 0.0f;
+    lambdaPosition = physx::PxVec3(0.0f);
+    lambdaAxisAlign = physx::PxVec3(0.0f);
+    lambdaAngleLimit = 0.0f;
+    hasAngleLimit = 0;
+    motorEnabled = 0;
+    padding0 = 0.0f;
+    padding1 = 0.0f;
+    padding2 = 0;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+/**
+ * @brief Prismatic (Slider) joint constraint for AVBD solver
+ *
+ * Constrains two bodies to move along a single shared axis:
+ *   - Position constraint (3 world-axis rows): slide-axis projection removed
+ *   - Rotation constraint (3 DOF): orientations locked
+ *   - Free axis: 1 translation DOF along the slide axis
+ *
+ * The constraint energy is:
+ *   E = 0.5/alpha * ||C||^2 + lambda^T * C
+ *
+ * Where C includes:
+ *   - Position error in 3 world-axis rows with slide-axis component projected
+ *     out
+ *   - Relative rotation error (quaternion difference)
+ *   - Optional limit constraint (when slide is out of range)
+ */
+struct PX_ALIGN_PREFIX(16) AvbdPrismaticJointConstraint {
+  AvbdConstraintHeader header;
+
+  // Anchor points in local coordinates
+  physx::PxVec3 anchorA;
+  physx::PxVec3 anchorB;
+
+  // Slide axis in local coordinates (body A frame)
+  physx::PxVec3 axisA;
+
+  // Local frame orientations for full rotation lock
+  physx::PxQuat localFrameA;
+  physx::PxQuat localFrameB;
+
+  // Slide limits
+  physx::PxReal limitLower;
+  physx::PxReal limitUpper;
+
+  // Motor
+  physx::PxReal motorTargetVelocity;
+  physx::PxReal motorMaxForce;
+
+  // Lagrange multipliers
+  physx::PxVec3 lambdaPosition; // Projected position multipliers (3 world-axis rows)
+  physx::PxVec3 lambdaRotation; // Rotation alignment (3D)
+  physx::PxReal lambdaLimit;    // Slide limit
+
+  // Flags
+  physx::PxU8 hasLimit;
+  physx::PxU8 motorEnabled;
+  physx::PxU16 padding0;
+  physx::PxReal padding1;
+
+  /**
+   * @brief Compute world space slide axis
+   */
+  PX_FORCE_INLINE physx::PxVec3 getWorldAxis(const physx::PxQuat &rotA) const {
+    return rotA.rotate(axisA);
+  }
+
+  /**
+   * @brief Compute current slide position along axis
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeSlidePosition(const physx::PxVec3 &posA, const physx::PxQuat &rotA,
+                       const physx::PxVec3 &posB,
+                       const physx::PxQuat &rotB) const {
+    physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
+    physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
+    physx::PxVec3 worldAxis = getWorldAxis(rotA);
+    physx::PxVec3 diff = worldAnchorB - worldAnchorA;
+    return diff.dot(worldAxis);
+  }
+
+  /**
+   * @brief Compute limit violation
+   * @return Positive = exceeded upper, Negative = below lower, 0 = within
+   * limits
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeLimitViolation(physx::PxReal slidePos) const {
+    if (!hasLimit)
+      return 0.0f;
+    if (slidePos < limitLower)
+      return slidePos - limitLower;
+    if (slidePos > limitUpper)
+      return slidePos - limitUpper;
+    return 0.0f;
+  }
+
+  /**
+   * @brief Compute rotation constraint violation (3 components as angular
+   * error)
+   */
+  PX_FORCE_INLINE physx::PxVec3
+  computeRotationViolation(const physx::PxQuat &rotA,
+                           const physx::PxQuat &rotB) const {
+    physx::PxQuat worldFrameA = rotA * localFrameA;
+    physx::PxQuat worldFrameB = rotB * localFrameB;
+
+    // Compute relative rotation error in world space
+    // errorQ * worldFrameB = worldFrameA
+    physx::PxQuat errorQ = worldFrameA * worldFrameB.getConjugate();
+    if (errorQ.w < 0.0f)
+      errorQ = -errorQ;
+
+    // Return axis-angle representation (small angle approximation)
+    return physx::PxVec3(errorQ.x, errorQ.y, errorQ.z) * 2.0f;
+  }
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_PRISMATIC;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    anchorA = physx::PxVec3(0.0f);
+    anchorB = physx::PxVec3(0.0f);
+    axisA = physx::PxVec3(1.0f, 0.0f, 0.0f); // Default X axis
+    localFrameA = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
+    localFrameB = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
+    limitLower = -PX_MAX_F32;
+    limitUpper = PX_MAX_F32;
+    motorTargetVelocity = 0.0f;
+    motorMaxForce = 0.0f;
+    lambdaPosition = physx::PxVec3(0.0f);
+    lambdaRotation = physx::PxVec3(0.0f);
+    lambdaLimit = 0.0f;
+    hasLimit = 0;
+    motorEnabled = 0;
+    padding0 = 0;
+    padding1 = 0.0f;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+/**
+ * Semantic joint objective selected once by the pre-solve island compile.
+ *
+ * SourceFlag continues to describe authored/prep row types. These values
+ * replace only transient ACTIVE ownership bits that used to be written into
+ * SourceFlag and decoded again by multiple solve stages. Kind::None is the
+ * explicit backlog for joint objective families not migrated yet.
+ */
+enum class AvbdJointObjectiveKind : physx::PxU8 {
+  None,
+  CoupledLinearVelocityDrive,
+  LinearPositionDrive,
+  CoupledLinearPositionDrive,
+  AngularAxisVelocityDrive,
+  AngularAxisPositionDrive,
+  SlerpVelocityDrive,
+  SlerpPositionDrive,
+  CoupledAngularPositionDrive,
+  CoupledSpatialTendon,
+  CoupledFixedD6,
+  CoupledSphericalCone,
+  NativePassiveReaction,
+  GenericHard1D,
+  GenericAccelerationDamping1D,
+  GenericForceSpring1D,
+  GenericRestitution1D,
+  ArticulationHardMimic,
+  ArticulationCompliantMimic,
+  ArticulationFixedTendon,
+  ArticulationSpatialTendon,
+  NativeRevoluteMotor,
+  OrdinaryD6LinearDrive,
+  OrdinaryD6AngularAxisDrive,
+  OrdinaryD6SlerpDrive,
+  OrdinaryD6Position,
+  Invalid
+};
+
+enum AvbdJointObjectiveSourceRow : physx::PxU32 {
+  eJOINT_SOURCE_LINEAR_DRIVE_X = 1u << 0,
+  eJOINT_SOURCE_LINEAR_DRIVE_Y = 1u << 1,
+  eJOINT_SOURCE_LINEAR_DRIVE_Z = 1u << 2,
+  eJOINT_SOURCE_ANGULAR_DRIVE_X = 1u << 3,
+  eJOINT_SOURCE_ANGULAR_DRIVE_Y = 1u << 4,
+  eJOINT_SOURCE_ANGULAR_DRIVE_Z = 1u << 5,
+  eJOINT_SOURCE_GENERIC_ROW = 1u << 6,
+  eJOINT_SOURCE_LINEAR_MOTION_X = 1u << 7,
+  eJOINT_SOURCE_LINEAR_MOTION_Y = 1u << 8,
+  eJOINT_SOURCE_LINEAR_MOTION_Z = 1u << 9,
+  eJOINT_SOURCE_ANGULAR_MOTION_X = 1u << 10,
+  eJOINT_SOURCE_ANGULAR_MOTION_Y = 1u << 11,
+  eJOINT_SOURCE_ANGULAR_MOTION_Z = 1u << 12,
+  eJOINT_SOURCE_ANGULAR_CONE = 1u << 13,
+  eJOINT_SOURCE_NATIVE_MOTOR = 1u << 14
+};
+
+struct AvbdCompiledJointObjective {
+  AvbdVelocityObjectiveOwner owner;
+  AvbdJointObjectiveKind kind;
+  physx::PxU16 objectiveRowCount;
+  physx::PxU32 sourceRowMask;
+  physx::PxU64 objectiveKey;
+
+  PX_FORCE_INLINE AvbdCompiledJointObjective()
+      : owner(AvbdVelocityObjectiveOwner::Unsupported),
+        kind(AvbdJointObjectiveKind::None),
+        objectiveRowCount(0),
+        sourceRowMask(0),
+        objectiveKey(0) {}
+};
+
+/**
+ * Prep-compiled objective program for one source D6 record.
+ *
+ * The source mask has fifteen distinct slots: six native motion rows, one
+ * cone composite, six drive rows, one generic solverPrep row, and one native
+ * motor row. Most objectives span several slots, but sizing for the
+ * one-objective-per-slot worst case keeps compile failure independent of
+ * authored row combinations and avoids heap state in the constraint stream.
+ */
+struct AvbdCompiledJointObjectiveProgram {
+  enum { eMAX_OBJECTIVES = 15 };
+
+  AvbdCompiledJointObjective entries[eMAX_OBJECTIVES];
+  physx::PxU32 legacySourceRowMask;
+  physx::PxU8 entryCount;
+  physx::PxU8 invalid;
+  physx::PxU16 padding;
+
+  PX_FORCE_INLINE AvbdCompiledJointObjectiveProgram()
+      : legacySourceRowMask(0), entryCount(0), invalid(0), padding(0) {}
+};
+
+PX_FORCE_INLINE void resetAvbdJointObjectiveProgram(
+    AvbdCompiledJointObjectiveProgram &program) {
+  for (physx::PxU32 i = 0;
+       i < AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES; ++i)
+    program.entries[i] = AvbdCompiledJointObjective();
+  program.entryCount = 0;
+  program.invalid = 0;
+  program.padding = 0;
+  program.legacySourceRowMask = 0;
+}
+
+PX_FORCE_INLINE bool isSameAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  return compiled.owner == owner && compiled.kind == kind &&
+         compiled.objectiveRowCount == objectiveRowCount &&
+         compiled.sourceRowMask == sourceRowMask &&
+         compiled.objectiveKey == objectiveKey;
+}
+
+PX_FORCE_INLINE bool canAssignAvbdJointObjective(
+    const AvbdCompiledJointObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  if (program.invalid || kind == AvbdJointObjectiveKind::None ||
+      kind == AvbdJointObjectiveKind::Invalid ||
+      objectiveRowCount == 0 || sourceRowMask == 0 ||
+      (program.legacySourceRowMask & sourceRowMask) != 0)
+    return false;
+
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (isSameAvbdJointObjective(
+            compiled, owner, kind, objectiveRowCount, sourceRowMask,
+            objectiveKey))
+      return true;
+    if ((compiled.sourceRowMask & sourceRowMask) != 0)
+      return false;
+  }
+  return program.entryCount <
+         AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES;
+}
+
+PX_FORCE_INLINE void invalidateAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program) {
+  resetAvbdJointObjectiveProgram(program);
+  program.invalid = 1;
+}
+
+PX_FORCE_INLINE bool assignAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program,
+    AvbdVelocityObjectiveOwner owner,
+    AvbdJointObjectiveKind kind,
+    physx::PxU16 objectiveRowCount,
+    physx::PxU32 sourceRowMask,
+    physx::PxU64 objectiveKey) {
+  if (!canAssignAvbdJointObjective(
+          program, owner, kind, objectiveRowCount, sourceRowMask,
+          objectiveKey)) {
+    invalidateAvbdJointObjective(program);
+    return false;
+  }
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    if (isSameAvbdJointObjective(
+            program.entries[i], owner, kind, objectiveRowCount,
+            sourceRowMask, objectiveKey))
+      return true;
+  }
+  AvbdCompiledJointObjective &compiled =
+      program.entries[program.entryCount++];
+  compiled.owner = owner;
+  compiled.kind = kind;
+  compiled.objectiveRowCount = objectiveRowCount;
+  compiled.sourceRowMask = sourceRowMask;
+  compiled.objectiveKey = objectiveKey;
+  return true;
+}
+
+PX_FORCE_INLINE bool fallbackAvbdJointObjective(
+    AvbdCompiledJointObjectiveProgram &program,
+    AvbdJointObjectiveKind kind) {
+  bool found = false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (compiled.kind != kind)
+      continue;
+    compiled.owner = AvbdVelocityObjectiveOwner::Unsupported;
+    found = true;
+  }
+  return found;
+}
+
+PX_FORCE_INLINE bool isValidAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled) {
+  if (compiled.kind == AvbdJointObjectiveKind::None) {
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported &&
+           compiled.objectiveRowCount == 0 &&
+           compiled.objectiveKey == 0;
+  }
+  if (compiled.kind == AvbdJointObjectiveKind::Invalid ||
+      compiled.objectiveRowCount == 0 ||
+      compiled.sourceRowMask == 0)
+    return false;
+
+  switch (compiled.kind) {
+  case AvbdJointObjectiveKind::CoupledLinearVelocityDrive:
+  case AvbdJointObjectiveKind::AngularAxisVelocityDrive:
+  case AvbdJointObjectiveKind::SlerpVelocityDrive:
+  case AvbdJointObjectiveKind::GenericRestitution1D:
+  case AvbdJointObjectiveKind::NativeRevoluteMotor:
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::JointFinalize ||
+           compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported;
+  case AvbdJointObjectiveKind::LinearPositionDrive:
+  case AvbdJointObjectiveKind::CoupledLinearPositionDrive:
+  case AvbdJointObjectiveKind::AngularAxisPositionDrive:
+  case AvbdJointObjectiveKind::SlerpPositionDrive:
+  case AvbdJointObjectiveKind::CoupledAngularPositionDrive:
+  case AvbdJointObjectiveKind::CoupledSpatialTendon:
+  case AvbdJointObjectiveKind::CoupledFixedD6:
+  case AvbdJointObjectiveKind::CoupledSphericalCone:
+  case AvbdJointObjectiveKind::NativePassiveReaction:
+  case AvbdJointObjectiveKind::GenericHard1D:
+  case AvbdJointObjectiveKind::GenericAccelerationDamping1D:
+  case AvbdJointObjectiveKind::GenericForceSpring1D:
+  case AvbdJointObjectiveKind::ArticulationHardMimic:
+  case AvbdJointObjectiveKind::ArticulationCompliantMimic:
+  case AvbdJointObjectiveKind::ArticulationFixedTendon:
+  case AvbdJointObjectiveKind::ArticulationSpatialTendon:
+  case AvbdJointObjectiveKind::OrdinaryD6LinearDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6AngularAxisDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6SlerpDrive:
+  case AvbdJointObjectiveKind::OrdinaryD6Position:
+    return compiled.owner ==
+               AvbdVelocityObjectiveOwner::PositionAL ||
+           compiled.owner ==
+               AvbdVelocityObjectiveOwner::Unsupported;
+  case AvbdJointObjectiveKind::None:
+  case AvbdJointObjectiveKind::Invalid:
+    break;
+  }
+  return false;
+}
+
+PX_FORCE_INLINE bool isValidAvbdJointObjectiveProgram(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  if (program.invalid ||
+      program.entryCount >
+          AvbdCompiledJointObjectiveProgram::eMAX_OBJECTIVES)
+    return false;
+  physx::PxU32 sourceRows = 0;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (!isValidAvbdJointObjective(compiled) ||
+        (sourceRows & compiled.sourceRowMask) != 0)
+      return false;
+    sourceRows |= compiled.sourceRowMask;
+  }
+  if ((sourceRows & program.legacySourceRowMask) != 0)
+    return false;
+  return true;
+}
+
+PX_FORCE_INLINE bool hasAvbdJointObjective(
+    const AvbdCompiledJointObjectiveProgram &program,
+    AvbdJointObjectiveKind kind) {
+  if (!isValidAvbdJointObjectiveProgram(program))
+    return false;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if (compiled.kind == kind &&
+        compiled.owner !=
+            AvbdVelocityObjectiveOwner::Unsupported)
+      return true;
+  }
+  return false;
+}
+
+PX_FORCE_INLINE const AvbdCompiledJointObjective *
+findAvbdJointObjectiveForSourceRow(
+    const AvbdCompiledJointObjectiveProgram &program,
+    physx::PxU32 sourceRow) {
+  if (!isValidAvbdJointObjectiveProgram(program) ||
+      sourceRow == 0 || (sourceRow & (sourceRow - 1u)) != 0 ||
+      (program.legacySourceRowMask & sourceRow) != 0)
+    return NULL;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i) {
+    const AvbdCompiledJointObjective &compiled = program.entries[i];
+    if ((compiled.sourceRowMask & sourceRow) != 0)
+      return &compiled;
+  }
+  return NULL;
+}
+
+PX_FORCE_INLINE physx::PxU32 getAvbdJointObjectiveSourceRows(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  if (!isValidAvbdJointObjectiveProgram(program))
+    return 0;
+  physx::PxU32 sourceRows = program.legacySourceRowMask;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    sourceRows |= program.entries[i].sourceRowMask;
+  return sourceRows;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdJointObjective(
+    const AvbdCompiledJointObjective &compiled) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ compiled.objectiveRowCount) * prime;
+  hash = (hash ^ compiled.sourceRowMask) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.owner)) * prime;
+  hash = (hash ^ static_cast<physx::PxU8>(compiled.kind)) * prime;
+  return hash;
+}
+
+PX_FORCE_INLINE physx::PxU64 fingerprintAvbdJointObjectiveProgram(
+    const AvbdCompiledJointObjectiveProgram &program) {
+  const physx::PxU64 prime = 1099511628211ull;
+  physx::PxU64 hash = 1469598103934665603ull;
+  hash = (hash ^ program.entryCount) * prime;
+  hash = (hash ^ program.invalid) * prime;
+  hash = (hash ^ program.legacySourceRowMask) * prime;
+  for (physx::PxU32 i = 0; i < program.entryCount; ++i)
+    hash += fingerprintAvbdJointObjective(program.entries[i]);
+  return hash;
+}
+
+/**
+ * @brief D6 (Configurable) joint constraint for AVBD solver
+ *
+ * The D6 joint is the most flexible joint type, allowing independent control
+ * of all 6 degrees of freedom. Each DOF can be configured as:
+ *   - LOCKED: Constrained to zero
+ *   - FREE: No constraint
+ *   - LIMITED: Constrained within a range
+ *
+ * Linear DOFs (3): Translation along X, Y, Z axes
+ * Angular DOFs (3): Rotation around X, Y, Z axes
+ *
+ * The constraint energy is:
+ *   E = 0.5/alpha * ||C||^2 + lambda^T * C
+ *
+ * Where C includes:
+ *   - Locked linear DOFs (position error)
+ *   - Locked angular DOFs (rotation error)
+ *   - Limited linear DOFs (limit violation)
+ *   - Limited angular DOFs (limit violation)
+ *   - Spring forces (optional)
+ */
+struct PX_ALIGN_PREFIX(16) AvbdD6JointConstraint {
+  enum SourceFlag {
+    eD6_SLERP_DRIVE = 1u << 0,
+    eD6_DRIVE_LIMITS_ARE_FORCES = 1u << 2,
+    // Prep-owned tag for a hard Px1DConstraint row emitted by an otherwise
+    // unknown/custom PxConstraintSolverPrep. The stored body-B Jacobians have
+    // already consumed Px1DConstraint's public minus convention.
+    eGENERIC_HARD_1D_ROW = 1u << 10,
+    // A hard articulation-internal mimic row admitted by the strict
+    // fixed-parent/single-DOF prep predicate. The shared hard-row solver uses
+    // this tag to close its exact position and velocity manifold after AL.
+    eARTICULATION_MIMIC_ROW = 1u << 11,
+    // A compliant articulation fixed-tendon row admitted by the strict
+    // fixed-root/two-active-joint serial-angular or sibling-branch prep
+    // predicate. Unlike a generic hard row, this stores physical rest/limit
+    // spring and damping coefficients and must not participate in AL dual
+    // accumulation or exact projection.
+    eARTICULATION_FIXED_TENDON_ROW = 1u << 12,
+    // A compliant articulation spatial-tendon path admitted by the strict
+    // fixed-middle/two-sibling-endpoint prep predicate.  It shares compliant
+    // spring/damper consumption with fixed tendons, not hard-row AL state.
+    eARTICULATION_SPATIAL_TENDON_ROW = 1u << 13,
+    // A pure velocity-damping Px1DConstraint row with
+    // eSPRING|eACCELERATION_SPRING, zero stiffness and zero geometric error.
+    // Its physical damping is converted to a mass-independent implicit
+    // position penalty at solve time and does not accumulate an AL lambda.
+    eGENERIC_ACCELERATION_DAMPING_1D_ROW = 1u << 15,
+    // Public force-spring Px1DConstraint row.  The stored stiffness/damping
+    // are consumed by the same backward-Euler compliant-row formulation used
+    // by articulation tendons.
+    eGENERIC_FORCE_SPRING_1D_ROW = 1u << 16,
+    // Public restitution row.  It is excluded from the position objective and
+    // consumes the pre-solve relative velocity in the post-finalization
+    // velocity projection.
+    eGENERIC_RESTITUTION_1D_ROW = 1u << 17,
+    // Multiple rows emitted by one solverPrep share one public
+    // ConstraintWriteback.  The leader clears that entry and all rows
+    // accumulate their actor-0 impulses into it.
+    eGENERIC_MULTI_ROW = 1u << 18,
+    eGENERIC_MULTI_ROW_LEADER = 1u << 19,
+    // A compliant articulation mimic row.  Natural frequency and damping
+    // ratio are converted to mass-scaled spring coefficients at solve time,
+    // matching the public mimic compliance definition.  Unlike hard mimic
+    // rows it has no AL multiplier or exact manifold projection.
+    eARTICULATION_COMPLIANT_MIMIC_ROW = 1u << 20,
+    // Both D6 swing axes use the public legacy PxJointLimitCone.  Their
+    // admissible region is one elliptical cone, not two independent angular
+    // intervals.  The solver consumes one geometric inequality and excludes
+    // the two per-axis LIMITED rows.
+    eD6_LEGACY_CONE_LIMIT_ACTIVE = 1u << 21,
+    // Native PxSphericalJoint uses the same PxJointLimitCone ellipse as the
+    // Extensions solver prep.  Keep the two authored half-angles instead of
+    // reducing the public limit to a circle with min(yAngle, zAngle).
+    eSPHERICAL_ELLIPTICAL_CONE_LIMIT_ACTIVE = 1u << 22,
+    // Public native-revolute free-spin semantics use a one-sided motor
+    // impulse bound. The strict isolated world-dynamic owner consumes this
+    // tag; mixed limit, gear, contact, and dynamic-pair cases remain rejected.
+    eNATIVE_REVOLUTE_MOTOR_FREESPIN = 1u << 24
+  };
+
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Joint geometry
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 anchorA; //!< Anchor point on body A (local space)
+  physx::PxReal padding0;
+
+  physx::PxVec3 anchorB; //!< Anchor point on body B (local space)
+  physx::PxReal padding1;
+
+  physx::PxQuat localFrameA; //!< Local frame on body A
+  physx::PxQuat localFrameB; //!< Local frame on body B
+
+  // Infinite-mass endpoints are not necessarily stationary.  Prep converts
+  // a kinematic actor's target-derived angular velocity into its authored
+  // world-space step so drive damping can measure relative motion against
+  // that endpoint.  World and rigid-static endpoints retain zero.
+  physx::PxVec3 externalAngularStepA;
+  physx::PxReal externalAngularStepPaddingA;
+  physx::PxVec3 externalAngularStepB;
+  physx::PxReal externalAngularStepPaddingB;
+
+  //-------------------------------------------------------------------------
+  // Linear DOF configuration (3 axes)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 linearLimitLower; //!< Lower limits for X, Y, Z translation
+  physx::PxVec3 linearLimitUpper; //!< Upper limits for X, Y, Z translation
+
+  physx::PxVec3 linearStiffness; //!< Spring stiffness for X, Y, Z
+  physx::PxVec3 linearDamping;   //!< Spring damping for X, Y, Z
+
+  //-------------------------------------------------------------------------
+  // Angular DOF configuration (3 axes)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3
+      angularLimitLower; //!< Lower limits for X, Y, Z rotation (radians)
+  physx::PxVec3
+      angularLimitUpper; //!< Upper limits for X, Y, Z rotation (radians)
+
+  physx::PxVec3 angularStiffness; //!< Spring stiffness for X, Y, Z rotation
+  physx::PxVec3 angularDamping;   //!< Spring damping for X, Y, Z rotation
+
+  //-------------------------------------------------------------------------
+  // Drive (motor) configuration
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 driveLinearVelocity; //!< Target linear velocity (X, Y, Z)
+  physx::PxVec3 driveLinearForce;    //!< Max linear drive force (X, Y, Z)
+  physx::PxVec3 driveLinearPosition; //!< Target translation in joint frame A
+  physx::PxReal drivePositionPadding;
+
+  physx::PxVec3 driveAngularVelocity; //!< Target angular velocity (X, Y, Z)
+  physx::PxVec3 driveAngularForce;    //!< Max angular drive force (X, Y, Z)
+  physx::PxQuat driveAngularPosition; //!< Target rotation in joint frame A
+
+  //-------------------------------------------------------------------------
+  // Lagrangian multipliers (6 DOF)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 lambdaLinear;  //!< Linear constraint multipliers (X, Y, Z)
+  physx::PxVec3 lambdaAngular; //!< Angular constraint multipliers (X, Y, Z)
+
+  //-------------------------------------------------------------------------
+  // Generic 1D solverPrep row
+  //-------------------------------------------------------------------------
+  //
+  // PhysX publishes J={linear0, angular0, -linear1, -angular1}. Store the
+  // effective world-space Jacobian for each endpoint so the primal and dual
+  // paths cannot accidentally apply the public body-B sign twice. The row is
+  // linearized about the exact body poses passed to solverPrep this frame.
+  physx::PxVec3 genericLinearA;
+  physx::PxReal genericGeometricError;
+  physx::PxVec3 genericAngularA;
+  physx::PxReal genericVelocityTarget;
+  physx::PxVec3 genericLinearB;
+  physx::PxReal genericMinImpulse;
+  physx::PxVec3 genericAngularB;
+  physx::PxReal genericMaxImpulse;
+  union {
+    physx::PxReal genericRestitution;
+    // Articulation-tendon low limit expressed in rest-error coordinates.
+    physx::PxReal genericTendonLowLimit;
+  };
+  union {
+    physx::PxReal genericBounceThreshold;
+    // Articulation-tendon high limit expressed in rest-error coordinates.
+    physx::PxReal genericTendonHighLimit;
+  };
+  physx::PxReal genericNaturalFrequency;
+  physx::PxReal genericDampingRatio;
+
+  physx::PxVec3 genericReferencePositionA;
+  physx::PxU32 genericRowFlags;
+  physx::PxQuat genericReferenceRotationA;
+  physx::PxVec3 genericReferencePositionB;
+  physx::PxU32 genericSolveHint;
+  physx::PxQuat genericReferenceRotationB;
+
+  // Actor-0 angular Jacobian used by PxConstraint::getForce().  This is
+  // deliberately separate from genericAngularA, which is the solver
+  // Jacobian about body 0's center of mass.  Standard PGS/TGS writeback
+  // reports the wrench about body0WorldOffset and therefore applies the
+  // solverPrep cA2w/body0WorldOffset reference-point shifts.
+  physx::PxVec3 genericAngularAWriteback;
+  union {
+    physx::PxU32 genericWritebackPadding;
+    // Physical limit stiffness for an articulation-tendon row.
+    physx::PxReal genericTendonLimitStiffness;
+  };
+
+  // Public-force writeback witness.  AVBD's leaky AL multipliers above are
+  // solver state, not the converged physical reaction by themselves.  The
+  // joint solve records a force*dt or torque*dt impulse separately for row
+  // sets whose reaction semantics are currently complete. Unsupported row
+  // sets retain the legacy multiplier fallback.
+  physx::PxVec3 writebackLinearImpulse;
+  physx::PxU32 writebackLinearImpulseValid;
+  physx::PxVec3 writebackAngularImpulse;
+  physx::PxU32 writebackAngularImpulseValid;
+
+  // AL multipliers for velocity-level drive constraints
+  physx::PxVec3 lambdaDriveLinear;  //!< Linear velocity drive multipliers
+  physx::PxVec3 lambdaDriveAngular; //!< Angular velocity drive multipliers
+
+  //-------------------------------------------------------------------------
+  // DOF motion flags (bitmask)
+  //-------------------------------------------------------------------------
+
+  physx::PxU32 linearMotion;  //!< Linear motion flags (3 bits: 0=LOCKED,
+                              //!< 1=LIMITED, 2=FREE)
+  physx::PxU32 angularMotion; //!< Angular motion flags (3 bits: 0=LOCKED,
+                              //!< 1=LIMITED, 2=FREE)
+
+  physx::PxU32 driveFlags; //!< Drive enable flags (6 bits: bit 0-2 linear, bit
+                           //!< 3-5 angular)
+  physx::PxU32 driveAccelerationFlags; //!< Acceleration-drive flags matching drive bits
+  physx::PxU32 driveOutputForceFlags; //!< eOUTPUT_FORCE flags matching drive bits
+  physx::PxU32 sourceFlags; //!< Prep-side SourceFlag tags
+  AvbdCompiledJointObjectiveProgram objectiveProgram;
+  physx::PxU32 cacheIndex; //!< Index into the D6 warm-start cache (PX_MAX_U32 = none)
+  physx::PxU64 cacheKey;   //!< Stable D6 warm-start identity (0 = not cached)
+  physx::PxU32 writeBackIndex; //!< Index into ConstraintWriteBackPool (PX_MAX_U32 = none)
+
+  //-------------------------------------------------------------------------
+  // Breakable joint support
+  //-------------------------------------------------------------------------
+
+  physx::PxReal linBreakImpulse; //!< Linear break force threshold (N)
+  physx::PxReal angBreakImpulse; //!< Angular break torque threshold (N*m)
+
+  //-------------------------------------------------------------------------
+  // Cone limit (for spherical joints mapped to D6)
+  //-------------------------------------------------------------------------
+
+  physx::PxReal coneAngleLimit; //!< Cone Y half-angle (radians, 0 = disabled)
+  physx::PxReal coneAngleLimitZ; //!< Cone Z half-angle; zero selects circular legacy path
+  physx::PxReal coneLambda;     //!< Cone AL multiplier (<= 0, unilateral)
+  physx::PxReal conePadding;
+
+  //-------------------------------------------------------------------------
+  // Revolute motor (strict post-finalize velocity owner, never a pose row)
+  //-------------------------------------------------------------------------
+
+  physx::PxU32 motorEnabled;         //!< 1 = revolute velocity owner active
+  physx::PxReal motorTargetVelocity; //!< Target angular velocity (rad/s) around twist axis
+  physx::PxReal motorMaxForce;       //!< Max motor torque (N*m)
+  physx::PxReal motorGearRatio;      //!< Public drive gear ratio (strict owner currently requires 1)
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Get linear motion type for an axis
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Motion type: 0=LOCKED, 1=LIMITED, 2=FREE
+   */
+  PX_FORCE_INLINE physx::PxU32 getLinearMotion(physx::PxU32 axis) const {
+    return (linearMotion >> (axis * 2)) & 0x3;
+  }
+
+  /**
+   * @brief Get angular motion type for an axis
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Motion type: 0=LOCKED, 1=LIMITED, 2=FREE
+   */
+  PX_FORCE_INLINE physx::PxU32 getAngularMotion(physx::PxU32 axis) const {
+    return (angularMotion >> (axis * 2)) & 0x3;
+  }
+
+  /**
+   * @brief Check if linear drive is enabled for an axis
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return True if drive is enabled
+   */
+  PX_FORCE_INLINE bool isLinearDriveEnabled(physx::PxU32 axis) const {
+    return (driveFlags & (1 << axis)) != 0;
+  }
+
+  PX_FORCE_INLINE bool isLinearAccelerationDrive(physx::PxU32 axis) const {
+    return (driveAccelerationFlags & (1 << axis)) != 0;
+  }
+
+  /**
+   * @brief Check if angular drive is enabled for an axis
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return True if drive is enabled
+   */
+  PX_FORCE_INLINE bool isAngularDriveEnabled(physx::PxU32 axis) const {
+    return (driveFlags & (1 << (axis + 3))) != 0;
+  }
+
+  PX_FORCE_INLINE bool isAngularAccelerationDrive(physx::PxU32 axis) const {
+    return (driveAccelerationFlags & (1 << (axis + 3))) != 0;
+  }
+
+  /**
+   * @brief Compute linear position error for an axis
+   * @param posA World position of body A
+   * @param rotA World rotation of body A
+   * @param posB World position of body B
+   * @param rotB World rotation of body B
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Position error along the axis
+   */
+  PX_FORCE_INLINE physx::PxReal computeLinearError(const physx::PxVec3 &posA,
+                                                   const physx::PxQuat &rotA,
+                                                   const physx::PxVec3 &posB,
+                                                   const physx::PxQuat &rotB,
+                                                   physx::PxU32 axis) const {
+    physx::PxVec3 worldAnchorA = posA + rotA.rotate(anchorA);
+    physx::PxVec3 worldAnchorB = posB + rotB.rotate(anchorB);
+    physx::PxVec3 diff = worldAnchorB - worldAnchorA;
+
+    // Transform to local frame A
+    physx::PxVec3 localDiff = rotA.rotateInv(diff);
+
+    return localDiff[axis];
+  }
+
+  /**
+   * @brief Compute angular error for an axis
+   * @param rotA World rotation of body A
+   * @param rotB World rotation of body B
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Angular error around the axis (radians)
+   */
+  PX_FORCE_INLINE physx::PxReal computeAngularError(const physx::PxQuat &rotA,
+                                                    const physx::PxQuat &rotB,
+                                                    physx::PxU32 axis) const {
+    physx::PxQuat worldFrameA = rotA * localFrameA;
+    physx::PxQuat worldFrameB = rotB * localFrameB;
+
+    // Compute relative rotation in world space (relRot * B = A)
+    physx::PxQuat relRot = worldFrameA * worldFrameB.getConjugate();
+    if (relRot.w < 0.0f)
+      relRot = -relRot;
+
+    // Project onto the requested axis in local frame A
+    physx::PxVec3 localAxis(0.0f);
+    localAxis[axis] = 1.0f;
+    physx::PxVec3 worldAxis = worldFrameA.rotate(localAxis);
+
+    // Recover the rotation vector from atan2(|q.xyz|, q.w).  acos(q.w)
+    // loses all sub-milliradian information when q.w rounds to one, which
+    // quantizes stiff angular rows into zero or ~9.77e-4 rad impulses.
+    const physx::PxVec3 imaginary(relRot.x, relRot.y, relRot.z);
+    const physx::PxReal sinHalfSquared = imaginary.magnitudeSquared();
+    if (sinHalfSquared <= 1e-20f)
+      return 2.0f * imaginary.dot(worldAxis);
+    const physx::PxReal sinHalf = physx::PxSqrt(sinHalfSquared);
+    const physx::PxReal angle =
+        2.0f * physx::PxAtan2(sinHalf, physx::PxClamp(relRot.w, 0.0f, 1.0f));
+    return (angle / sinHalf) * imaginary.dot(worldAxis);
+  }
+
+  /**
+   * @brief Compute linear limit violation for an axis
+   * @param error Current linear error
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Limit violation (0 if within limits)
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeLinearLimitViolation(physx::PxReal error, physx::PxU32 axis) const {
+    if (error < linearLimitLower[axis])
+      return error - linearLimitLower[axis];
+    if (error > linearLimitUpper[axis])
+      return error - linearLimitUpper[axis];
+    return 0.0f;
+  }
+
+  /**
+   * @brief Compute angular limit violation for an axis
+   * @param error Current angular error
+   * @param axis Axis index (0=X, 1=Y, 2=Z)
+   * @return Limit violation (0 if within limits)
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeAngularLimitViolation(physx::PxReal error, physx::PxU32 axis) const {
+    if (error < angularLimitLower[axis])
+      return error - angularLimitLower[axis];
+    if (error > angularLimitUpper[axis])
+      return error - angularLimitUpper[axis];
+    return 0.0f;
+  }
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_D6;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    anchorA = physx::PxVec3(0.0f);
+    anchorB = physx::PxVec3(0.0f);
+    localFrameA = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
+    localFrameB = physx::PxQuat(0.0f, 0.0f, 0.0f, 1.0f);
+    externalAngularStepA = physx::PxVec3(0.0f);
+    externalAngularStepPaddingA = 0.0f;
+    externalAngularStepB = physx::PxVec3(0.0f);
+    externalAngularStepPaddingB = 0.0f;
+    linearLimitLower = physx::PxVec3(0.0f);
+    linearLimitUpper = physx::PxVec3(0.0f);
+    linearStiffness = physx::PxVec3(0.0f);
+    linearDamping = physx::PxVec3(0.0f);
+    angularLimitLower = physx::PxVec3(-physx::PxPi);
+    angularLimitUpper = physx::PxVec3(physx::PxPi);
+    angularStiffness = physx::PxVec3(0.0f);
+    angularDamping = physx::PxVec3(0.0f);
+    driveLinearVelocity = physx::PxVec3(0.0f);
+    driveLinearForce = physx::PxVec3(0.0f);
+    driveLinearPosition = physx::PxVec3(0.0f);
+    drivePositionPadding = 0.0f;
+    driveAngularVelocity = physx::PxVec3(0.0f);
+    driveAngularForce = physx::PxVec3(0.0f);
+    driveAngularPosition = physx::PxQuat(physx::PxIdentity);
+    lambdaLinear = physx::PxVec3(0.0f);
+    lambdaAngular = physx::PxVec3(0.0f);
+    genericLinearA = physx::PxVec3(0.0f);
+    genericGeometricError = 0.0f;
+    genericAngularA = physx::PxVec3(0.0f);
+    genericVelocityTarget = 0.0f;
+    genericLinearB = physx::PxVec3(0.0f);
+    genericMinImpulse = -PX_MAX_REAL;
+    genericAngularB = physx::PxVec3(0.0f);
+    genericMaxImpulse = PX_MAX_REAL;
+    genericRestitution = 0.0f;
+    genericBounceThreshold = 0.0f;
+    genericNaturalFrequency = 0.0f;
+    genericDampingRatio = 0.0f;
+    genericReferencePositionA = physx::PxVec3(0.0f);
+    genericRowFlags = 0;
+    genericReferenceRotationA = physx::PxQuat(physx::PxIdentity);
+    genericReferencePositionB = physx::PxVec3(0.0f);
+    genericSolveHint = 0;
+    genericReferenceRotationB = physx::PxQuat(physx::PxIdentity);
+    genericAngularAWriteback = physx::PxVec3(0.0f);
+    genericWritebackPadding = 0;
+    writebackLinearImpulse = physx::PxVec3(0.0f);
+    writebackLinearImpulseValid = 0;
+    writebackAngularImpulse = physx::PxVec3(0.0f);
+    writebackAngularImpulseValid = 0;
+    lambdaDriveLinear = physx::PxVec3(0.0f);
+    lambdaDriveAngular = physx::PxVec3(0.0f);
+    linearMotion = 0;  // All locked by default
+    angularMotion = 0; // All locked by default
+    driveFlags = 0;
+    driveAccelerationFlags = 0;
+    driveOutputForceFlags = 0;
+    sourceFlags = 0;
+    resetAvbdJointObjectiveProgram(objectiveProgram);
+    cacheIndex = 0xFFFFFFFFu; // PX_MAX_U32 = not cached
+    cacheKey = 0;
+    padding0 = 0.0f;
+    padding1 = 0.0f;
+    writeBackIndex = 0xFFFFFFFFu; // PX_MAX_U32 = no writeback
+    linBreakImpulse = PX_MAX_REAL;
+    angBreakImpulse = PX_MAX_REAL;
+    coneAngleLimit = 0.0f;
+    coneAngleLimitZ = 0.0f;
+    coneLambda = 0.0f;
+    conePadding = 0.0f;
+    motorEnabled = 0;
+    motorTargetVelocity = 0.0f;
+    motorMaxForce = 0.0f;
+    motorGearRatio = 1.0f;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+/**
+ * @brief Constraint batch for SIMD processing
+ *
+ * Groups constraints of the same type for vectorized processing.
+ */
+struct AvbdConstraintBatch {
+  AvbdConstraintType::Enum type; //!< Type of constraints in this batch
+  physx::PxU32 startIndex;       //!< Start index in the constraint pool
+  physx::PxU32 count;            //!< Number of constraints
+  physx::PxU32 padding;
+};
+
+/**
+ * @brief Gear joint constraint for AVBD solver
+ *
+ * Constrains the relative angular velocities of two revolute joints
+ * such that: omega1 * gearRatio = omega0
+ *
+ * This is used for gear mechanisms where two rotating bodies must
+ * maintain a fixed angular velocity ratio.
+ *
+ * The constraint function is:
+ *   C(x) = theta0 * gearRatio - theta1 - error = 0
+ *
+ * Where:
+ *   - theta0 is the angle of the first hinge joint
+ *   - theta1 is the angle of the second hinge joint
+ *   - gearRatio is the ratio of angular velocities
+ *   - error is the accumulated geometric error
+ */
+struct PX_ALIGN_PREFIX(16) AvbdGearJointConstraint {
+  AvbdConstraintHeader header;
+
+  //-------------------------------------------------------------------------
+  // Gear axes (world space, computed from hinge joint frames)
+  //-------------------------------------------------------------------------
+
+  physx::PxVec3 gearAxis0; //!< Rotation axis of first gear (world space)
+  physx::PxReal gearRatio; //!< Gear ratio: omega1 = omega0 * gearRatio
+
+  physx::PxVec3 gearAxis1;      //!< Rotation axis of second gear (world space)
+  physx::PxReal geometricError; //!< Accumulated geometric error
+
+  //-------------------------------------------------------------------------
+  // Lagrangian multiplier
+  //-------------------------------------------------------------------------
+
+  physx::PxReal lambdaGear; //!< Angular constraint multiplier
+  physx::PxReal padding0;
+  physx::PxReal padding1;
+  physx::PxReal padding2;
+
+  //-------------------------------------------------------------------------
+  // Methods
+  //-------------------------------------------------------------------------
+
+  /**
+   * @brief Initialize default values
+   */
+  PX_FORCE_INLINE void initDefaults() {
+    header.type = AvbdConstraintType::eJOINT_GEAR;
+    header.compliance = 0.0f;
+    header.rho = 1e4f;
+    gearAxis0 = physx::PxVec3(0.0f, 0.0f, 1.0f);
+    gearAxis1 = physx::PxVec3(0.0f, 0.0f, 1.0f);
+    gearRatio = 1.0f;
+    geometricError = 0.0f;
+    lambdaGear = 0.0f;
+    padding0 = 0.0f;
+    padding1 = 0.0f;
+    padding2 = 0.0f;
+  }
+
+  /**
+   * @brief Compute angular constraint violation
+   *
+   * The constraint is: angVel0 * gearRatio * axis0 + angVel1 * axis1 = 0
+   * Which means: omega0 * gearRatio = -omega1 (opposite rotation directions)
+   *
+   * @param angVelA Angular velocity of body A (gear 0)
+   * @param angVelB Angular velocity of body B (gear 1)
+   * @return Velocity constraint violation
+   */
+  PX_FORCE_INLINE physx::PxReal
+  computeVelocityViolation(const physx::PxVec3 &angVelA,
+                           const physx::PxVec3 &angVelB) const {
+    physx::PxReal omega0 = angVelA.dot(gearAxis0);
+    physx::PxReal omega1 = angVelB.dot(gearAxis1);
+    return omega0 * gearRatio +
+           omega1; // Should be zero when constraint is satisfied
+  }
+
+  /**
+   * @brief Compute position-level constraint violation
+   *
+   * This uses the accumulated geometric error from the gear joint.
+   *
+   * @return Position constraint violation
+   */
+  PX_FORCE_INLINE physx::PxReal computePositionViolation() const {
+    return geometricError;
+  }
+
+  /**
+   * @brief Compute augmented Lagrangian energy
+   * E = 0.5 * rho * C^2 + lambda * C
+   */
+  PX_FORCE_INLINE physx::PxReal computeAugmentedLagrangianEnergy() const {
+    physx::PxReal violation = geometricError;
+    physx::PxReal rho = header.rho;
+    return 0.5f * rho * violation * violation + lambdaGear * violation;
+  }
+
+} PX_ALIGN_SUFFIX(16);
+
+} // namespace Dy
+
+} // namespace physx
+
+#pragma warning(pop)
+
+#endif // DY_AVBD_CONSTRAINT_H

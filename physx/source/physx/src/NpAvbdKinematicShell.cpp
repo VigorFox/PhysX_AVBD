@@ -23,7 +23,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "PxAvbdKinematicShell.h"
-#include "../../lowleveldynamics/src/DyAvbdKinematicShell.h"
+#include "../../lowleveldynamics/src/avbd/solver/rigid/DyAvbdKinematicShell.h"
 
 namespace physx {
 

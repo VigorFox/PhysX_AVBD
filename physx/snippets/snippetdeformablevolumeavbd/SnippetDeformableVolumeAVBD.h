@@ -28,7 +28,7 @@
 #define PHYSX_SNIPPET_DEFORMABLE_VOLUME_AVBD_H
 
 #include "PxPhysicsAPI.h"
-#include "DyAvbdSoftBodyComponent.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyComponent.h"
 
 struct SoftBodyRenderData
 {

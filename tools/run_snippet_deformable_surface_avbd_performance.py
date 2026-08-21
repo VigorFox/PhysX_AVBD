@@ -78,21 +78,12 @@ INT_KEYS = (
     "physicalCores",
     "actualSoftWorkers",
     "taskCount",
-    "chunkCount",
     "barrierCount",
-    "staticColorCount",
-    "dynamicColorCount",
-    "hostWritebackMeasured",
-    "cpuSkinningMeasured",
     "topologySoftBodies",
     "topologySoftParticles",
     "topologyTriElements",
-    "topologyTetElements",
-    "topologyBendElements",
     "topologySurfaceTriangles",
     "topologySurfaceVertices",
-    "topologySurfaceEdges",
-    "topologyRigidBoxes",
     "warmupFrames",
     "profileFrames",
     "workspaceGrowthEvents",
@@ -131,22 +122,14 @@ INT_KEYS = (
     "collisionGeneratedSelfContacts",
     "componentFallbackSteps",
     "nativeIslandSteps",
-    "sceneStepMeasured",
-    "solverMeasured",
 )
 FLOAT_KEYS = (
     "isaProbeValue",
-    "taskWorkMs",
-    "longestTaskMs",
-    "cpuSkinningMs",
     "avgStepMs",
     "p50StepMs",
     "p95StepMs",
     "maxStepMs",
-    "initialContactMs",
-    "solverMs",
     "sceneMs",
-    "metricsMs",
 )
 
 
@@ -228,8 +211,6 @@ def validate(
         "dispatcherThreads": dispatcher_threads,
         "warmupFrames": warmup_frames,
         "profileFrames": profile_frames,
-        "sceneStepMeasured": 1,
-        "solverMeasured": 0,
     }
     for key, value in expected_ints.items():
         try:
@@ -340,11 +321,6 @@ def run_once(args: argparse.Namespace, repeat: int) -> tuple[bool, dict[str, str
         env["PHYSX_AVBD_SURFACE_EDGE_BVH"] = "0"
     else:
         env.pop("PHYSX_AVBD_SURFACE_EDGE_BVH", None)
-    if args.contact_set_trace is not None:
-        args.contact_set_trace.parent.mkdir(parents=True, exist_ok=True)
-        if args.contact_set_trace.exists():
-            args.contact_set_trace.unlink()
-        env["PHYSX_AVBD_CONTACT_SET_TRACE"] = str(args.contact_set_trace)
     result = run_headless_process(
         argv, cwd=args.bin_dir, env=env, timeout_seconds=args.timeout
     )
@@ -358,18 +334,6 @@ def run_once(args: argparse.Namespace, repeat: int) -> tuple[bool, dict[str, str
         errors.append("visible window detected")
     if result.returncode != 0:
         errors.append(f"exit code {result.returncode}, expected 0")
-    if args.contact_set_trace is not None:
-        if not args.contact_set_trace.is_file():
-            errors.append("contact-set trace was not written")
-        elif args.contact_set_reference is not None:
-            try:
-                if (
-                    args.contact_set_trace.read_bytes()
-                    != args.contact_set_reference.read_bytes()
-                ):
-                    errors.append("contact-set trace differs from reference")
-            except OSError as exc:
-                errors.append(f"could not read contact-set reference: {exc}")
     lines = [
         line.strip() for line in output.splitlines()
         if line.startswith("[AVBD_PERF] ")
@@ -399,12 +363,6 @@ def run_once(args: argparse.Namespace, repeat: int) -> tuple[bool, dict[str, str
         f"sceneMs={fields['sceneMs']} "
         f"profileFrames={fields['profileFrames']}"
     )
-    if args.contact_set_trace is not None:
-        print(
-            "[AVBD_CONTACT_SET_TRACE] "
-            f"path={args.contact_set_trace.resolve()} "
-            f"sha256={hashlib.sha256(args.contact_set_trace.read_bytes()).hexdigest()}"
-        )
     return True, fields
 
 
@@ -431,11 +389,6 @@ def write_json(
             "collisionTelemetry": args.collision_telemetry,
             "surfaceTriangleBvh": args.surface_triangle_bvh,
             "surfaceEdgeBvh": args.surface_edge_bvh,
-            "contactSetTrace": (
-                str(args.contact_set_trace.resolve())
-                if args.contact_set_trace is not None
-                else None
-            ),
             "execution": args.execution,
             "dispatcherThreads": args.dispatcher_threads,
             "binDir": str(args.bin_dir.resolve()),
@@ -489,16 +442,6 @@ def main() -> int:
             "edge sweep for same-binary diagnostic comparison."
         ),
     )
-    parser.add_argument(
-        "--contact-set-trace",
-        type=Path,
-        help="Write sorted canonical OGC contact identities for one diagnostic run.",
-    )
-    parser.add_argument(
-        "--contact-set-reference",
-        type=Path,
-        help="Fail if --contact-set-trace differs byte-for-byte from this reference.",
-    )
     parser.add_argument("--execution", choices=("parallel", "sequential"), default="sequential")
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--performance-json", type=Path)
@@ -513,21 +456,11 @@ def main() -> int:
         )
     if args.repeats <= 0:
         parser.error("--repeats must be positive")
-    if args.contact_set_reference is not None and args.contact_set_trace is None:
-        parser.error("--contact-set-reference requires --contact-set-trace")
-    if args.contact_set_trace is not None and args.repeats != 1:
-        parser.error("contact-set tracing requires --repeats=1")
     if not 1 <= args.dispatcher_threads <= 256:
         parser.error("--dispatcher-threads must be in [1, 256]")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     args.bin_dir = args.bin_dir.resolve()
-    if args.contact_set_trace is not None:
-        args.contact_set_trace = args.contact_set_trace.resolve()
-    if args.contact_set_reference is not None:
-        args.contact_set_reference = args.contact_set_reference.resolve()
-        if not args.contact_set_reference.is_file():
-            parser.error("--contact-set-reference must name an existing file")
     if not (args.bin_dir / EXECUTABLE).is_file():
         print(f"[FAIL] executable not found: {args.bin_dir / EXECUTABLE}")
         return 2

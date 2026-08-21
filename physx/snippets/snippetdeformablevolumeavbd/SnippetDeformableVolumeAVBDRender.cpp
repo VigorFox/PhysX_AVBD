@@ -28,7 +28,7 @@
 
 #include "PxPhysicsAPI.h"
 #include "extensions/PxTetrahedronMeshExt.h"
-#include "DyAvbdSoftBodyComponent.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyComponent.h"
 
 #include "../snippetrender/SnippetRender.h"
 #include "../snippetrender/SnippetCamera.h"

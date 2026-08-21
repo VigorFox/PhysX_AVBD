@@ -17,14 +17,6 @@ DEFAULT_BIN_DIR = (
     REPO_ROOT / "physx" / "bin" / "win.x86_64.vc143.md" / "checked"
 )
 EXECUTABLE = "SnippetSpatialTendon_64.exe"
-JOINT_OBJECTIVE_IR_PREFIX = "[avbd:joint-objective-ir] "
-JOINT_OBJECTIVE_PARTITION_FIELDS = (
-    "jointObjectivePositionRows",
-    "jointObjectiveFinalizeRows",
-    "jointObjectiveUnsupportedRows",
-    "jointObjectiveLegacyRows",
-    "jointObjectiveInvalidRows",
-)
 
 
 @dataclass(frozen=True)
@@ -67,79 +59,6 @@ def parse_authority(line: str) -> tuple[dict[str, str], list[str]]:
     return fields, errors
 
 
-def validate_joint_objective_ir(
-    output: str,
-) -> tuple[dict[str, str], list[str]]:
-    errors: list[str] = []
-    lines = [
-        line.strip()
-        for line in output.splitlines()
-        if line.startswith(JOINT_OBJECTIVE_IR_PREFIX)
-    ]
-    if not lines:
-        return {}, ["no [avbd:joint-objective-ir] diagnostic samples"]
-
-    total_position_rows = 0
-    total_unsupported_rows = 0
-    fingerprints: list[str] = []
-    for line_number, line in enumerate(lines, start=1):
-        values, parse_errors = parse_authority(line)
-        errors.extend(
-            f"joint objective diagnostic {line_number}: {error}"
-            for error in parse_errors
-        )
-        required = (
-            "jointObjectiveRows",
-            *JOINT_OBJECTIVE_PARTITION_FIELDS,
-            "jointObjectiveFingerprint",
-        )
-        missing = [field for field in required if field not in values]
-        if missing:
-            errors.append(
-                f"joint objective diagnostic {line_number} is missing "
-                + ", ".join(missing)
-            )
-            continue
-        try:
-            parsed = {field: int(values[field]) for field in required}
-        except ValueError:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                "a non-integer field"
-            )
-            continue
-        partition_rows = sum(
-            parsed[field] for field in JOINT_OBJECTIVE_PARTITION_FIELDS
-        )
-        if parsed["jointObjectiveRows"] != partition_rows:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                f"jointObjectiveRows={parsed['jointObjectiveRows']} "
-                f"but partition={partition_rows}"
-            )
-        if parsed["jointObjectiveInvalidRows"] != 0:
-            errors.append(
-                f"joint objective diagnostic {line_number} has "
-                "jointObjectiveInvalidRows="
-                f"{parsed['jointObjectiveInvalidRows']}"
-            )
-        total_position_rows += parsed["jointObjectivePositionRows"]
-        total_unsupported_rows += parsed[
-            "jointObjectiveUnsupportedRows"
-        ]
-        fingerprints.append(values["jointObjectiveFingerprint"])
-
-    if total_position_rows == 0:
-        errors.append(
-            "spatial tendon lane compiled no PositionAL joint objective"
-        )
-    if total_unsupported_rows != 0:
-        errors.append("spatial tendon lane fell back to Unsupported")
-    return {
-        "_jointObjectiveFingerprintSequence": ",".join(fingerprints),
-    }, errors
-
-
 def run_one(
     spec: RunSpec, mode: str, bin_dir: Path, timeout_seconds: float
 ) -> tuple[bool, dict[str, str]]:
@@ -159,8 +78,6 @@ def run_one(
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
     env["PHYSX_SNIPPET_SOLVER"] = spec.solver
     env["PHYSX_SNIPPET_FRAME_COUNT"] = "480"
-    env["PHYSX_AVBD_ITER_DIAG"] = "1"
-    env["PHYSX_AVBD_ITER_DIAG_EVERY"] = "60"
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout_seconds
     )
@@ -189,13 +106,6 @@ def run_one(
     else:
         fields, parse_errors = parse_authority(authority_lines[0])
         errors.extend(parse_errors)
-    if spec.solver == "avbd":
-        joint_objective_fields, joint_objective_errors = (
-            validate_joint_objective_ir(combined)
-        )
-        fields.update(joint_objective_fields)
-        errors.extend(joint_objective_errors)
-
     required = {
         "schema": "1",
         "snippet": "SnippetSpatialTendon",

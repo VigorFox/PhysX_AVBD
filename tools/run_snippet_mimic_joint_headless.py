@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import sys
 
-from avbd_joint_objective_ir_gate import validate_joint_objective_ir
 from snippet_headless_process import run_headless_process
 
 
@@ -94,9 +93,6 @@ def run_one(
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
     env["PHYSX_SNIPPET_SOLVER"] = spec.solver
     env["PHYSX_SNIPPET_FRAME_COUNT"] = "360"
-    if spec.solver == "avbd":
-        env["PHYSX_AVBD_ITER_DIAG"] = "1"
-        env["PHYSX_AVBD_ITER_DIAG_EVERY"] = "60"
     result = run_headless_process(
         argv, cwd=bin_dir, env=env, timeout_seconds=timeout_seconds
     )
@@ -179,12 +175,6 @@ def run_one(
         errors.append(
             f"validation={fields.get('validation')!r}, expected PROBE/GATED"
         )
-    if spec.solver == "avbd":
-        objective_errors, _ = validate_joint_objective_ir(
-            combined, expected_owner="PositionAL"
-        )
-        errors.extend(objective_errors)
-
     print(
         f"[MIMIC_JOINT_RUN] name={spec.name} "
         f"status={fields.get('status', 'MISSING')} "

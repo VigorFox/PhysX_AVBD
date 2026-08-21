@@ -28,7 +28,7 @@
 #define PHYSX_SNIPPET_SOFT_BODY_AVBD_H
 
 #include "PxPhysicsAPI.h"
-#include "DyAvbdSoftBodyComponent.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyComponent.h"
 
 // Render data exported from sim to renderer
 struct SoftBodyRenderData
