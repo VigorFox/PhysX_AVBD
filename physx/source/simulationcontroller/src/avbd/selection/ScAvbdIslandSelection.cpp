@@ -916,21 +916,34 @@ bool AvbdCpuSoftScene::buildIslandSelectionStorage(
 					hasRigidTargetContact = true;
 					break;
 				}
-			// Predictive topology has already assigned every selected dynamic
-			// primitive to this rigid island.  Keep that selection as the frame's
-			// sole soft owner even when the discrete/swept narrow phase produces no
-			// row: otherwise an independent zero-contact component forces the
-			// component fallback to overlap a valid native selection elsewhere and
-			// the ownership safety gate must discard both.  An empty-contact native
-			// selection is an intentional no-op for the rigid target, while still
-			// advancing its soft component exactly once.
+			// Some speculative finite-shape rows are materialized only after the
+			// mixed solver owns both endpoints.  The component fallback has no
+			// selected-entry mask, so every predictive dynamic storage must remain
+			// under the same frame owner while any awake speculative-CCD source is
+			// active.  Without that explicit public policy, current-pose OGC sources
+			// still require an actual rigid-target row.
 			const bool hasSelectedDynamicTarget =
 				!storage.selectedDynamicBoxes.empty() ||
 				!storage.selectedDynamicSpheres.empty() ||
 				!storage.selectedDynamicCapsules.empty() ||
 				!storage.selectedDynamicConvexes.empty();
+			bool requiresSpeculativeCcdOwnershipCover = false;
+			for(PxU32 entryIndex = 0;
+				hasSelectedDynamicTarget && entryIndex < mEntries.size();
+				++entryIndex)
+			{
+				const Entry& entry = mEntries[entryIndex];
+				if(!entry.sleeping &&
+					entry.getBodyCore().bodyFlags.isSet(
+					PxDeformableBodyFlag::eENABLE_SPECULATIVE_CCD))
+				{
+					requiresSpeculativeCcdOwnershipCover = true;
+					break;
+				}
+			}
 			const bool isNativeEligible = hasRigidTargetContact ||
-				hasSelectedDynamicTarget ||
+				(hasSelectedDynamicTarget &&
+				 requiresSpeculativeCcdOwnershipCover) ||
 				hasRigidAttachment ||
 				hasArticulationAttachment ||
 				hasSoftPairAttachment;

@@ -40,6 +40,7 @@
 #include "avbd/ogc/DyAvbdOgcTerminalState.h"
 #include "avbd/ogc/DyAvbdOgcTrustRegion.h"
 #include "avbd/solver/soft/DyAvbdSoftIslandPlan.h"
+#include "avbd/solver/soft/DyAvbdSoftBodyPolicy.h"
 
 #include "SnippetSoftBodyAVBDDiagnostics.h"
 #include "SnippetSoftBodyAVBDTests.h"
@@ -4985,6 +4986,18 @@ static void testDeformableMaterialSemantics()
 {
 	printf(
 		"\n--- Test 36: Deformable Material Semantics ---\n");
+	const auto isExactOne = [](const char* value)
+	{
+		return value && value[0] == '1' && value[1] == '\0';
+	};
+	const bool neoHookeanPacketExpected =
+		isExactOne(std::getenv(
+			"PHYSX_AVBD_ENABLE_NEO_HOOKEAN_TET_PACKET_KERNEL")) &&
+		!isExactOne(std::getenv(
+			"PHYSX_AVBD_DISABLE_NEO_HOOKEAN_TET_PACKET_KERNEL"));
+	TEST_CHECK(
+		avbdUseNeoHookeanTetPacketKernel() == neoHookeanPacketExpected,
+		"Neo-Hookean packet execution follows the explicit opt-in policy");
 	PxArray<AvbdSoftParticle> particles(4);
 	const PxVec3 rest[4] =
 	{

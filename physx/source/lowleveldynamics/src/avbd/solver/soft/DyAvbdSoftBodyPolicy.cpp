@@ -156,16 +156,22 @@ avbdGetCorotationalTetPacketKernel()
 }
 
 // Neo-Hookean shares only the material-neutral packet ABI and topology IR
-// with co-rotational elasticity.  Its constitutive evaluator and rollback
-// switch remain independent so either backend can fall back to scalar
-// authority without changing particle ownership or reduction order.
+// with co-rotational elasticity. Integrated contact regressions have shown
+// that the packet evaluator is not yet trajectory-equivalent to the scalar
+// authority, so keep it opt-in until that numerical contract is proven. The
+// explicit disable switch remains authoritative for differential runners.
 bool avbdUseNeoHookeanTetPacketKernel()
 {
 	static const bool enabled = []()
 	{
-		const char* value = std::getenv(
+		const char* enableValue = std::getenv(
+			"PHYSX_AVBD_ENABLE_NEO_HOOKEAN_TET_PACKET_KERNEL");
+		if(!enableValue || enableValue[0] != '1' || enableValue[1] != '\0')
+			return false;
+		const char* disableValue = std::getenv(
 			"PHYSX_AVBD_DISABLE_NEO_HOOKEAN_TET_PACKET_KERNEL");
-		return !(value && value[0] == '1' && value[1] == '\0');
+		return !(disableValue && disableValue[0] == '1' &&
+			disableValue[1] == '\0');
 	}();
 	return enabled;
 }
