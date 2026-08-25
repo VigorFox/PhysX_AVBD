@@ -215,6 +215,7 @@ void AvbdSolver::solveWithJoints(
   buildAvbdJointContactPhaseState(
       contactPhase, bodies, numBodies, contacts, numContacts, numD6,
       numGear, softParticles, numSoftParticles, softContacts, numSoftContacts,
+      gravity, dt,
       passiveCenteredGearVelocityProjectionIsland);
   const physx::PxArray<bool> &touchesKinematicShell =
       contactPhase.touchesKinematicShell;
@@ -258,8 +259,7 @@ void AvbdSolver::solveWithJoints(
   // history, deterministic order, and no-contact body state before execution
   // data materialization and the same-dt iteration phase.
   prepareAvbdJointConstraintPhase(
-      mConfig, invDt2, bodies, numBodies, contacts, numContacts, d6Joints,
-      numD6, gearJoints, numGear, contactMap);
+      mConfig, invDt2, bodies, numBodies, contacts, numContacts, contactMap);
 
   // Materialize the provider-owned execution plan, or build the equivalent
   // source-ordered local fallback for direct/native callers.  All storage is

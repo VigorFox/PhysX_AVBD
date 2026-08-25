@@ -88,6 +88,17 @@ static const PxReal AVBD_MAX_PENALTY_RHO = 1e8f;
 // Minimum penalty parameter
 static const PxReal AVBD_MIN_PENALTY_RHO = 1e2f;
 
+// Shared augmented-Lagrangian profile. Alpha and gamma track the current
+// avbd-demo3d defaults. The linear beta and penalty bounds retain PhysX's
+// established unit scale until impact and joint regressions justify changing
+// them. Contact preparation, rigid/soft solves and persistent joint state must
+// consume this one cross-frame stabilization contract.
+static const PxReal AVBD_AL_ALPHA = 0.99f;
+static const PxReal AVBD_AL_BETA_LINEAR = 1000.0f;
+static const PxReal AVBD_AL_GAMMA = 0.999f;
+static const PxReal AVBD_AL_PENALTY_MIN = 1000.0f;
+static const PxReal AVBD_AL_PENALTY_MAX = 1e9f;
+
 // Penalty parameter increase factor
 static const PxReal AVBD_RHO_INCREASE_FACTOR = 2.0f;
 
@@ -110,9 +121,8 @@ static const PxReal AVBD_CONDITION_NUMBER_THRESHOLD = 1e8f;
 // Regularization coefficient for ill-conditioned matrices
 static const PxReal AVBD_REGULARIZATION_COEFFICIENT = 1e-6f;
 
-// Shared body-vs-static constants (kept aligned with avbd_standalone).
+// Deformable shell fallback and local primal safety-net constants.
 static const PxReal AVBD_PEN_SCALE_BODY_VS_STATIC = 2.0f;
-static const PxReal AVBD_PEN_SCALE_DYN_DYN = 0.05f;
 static const PxReal AVBD_CONTACT_BOOST_FRACTION = 0.005f;
 // Surface-motion alias reject + friction ride caps (solve-loop contract Phase 4)
 static const PxReal AVBD_SURFACE_STEP_ALIAS_M = 0.5f;
@@ -340,8 +350,11 @@ struct AvbdSolverConfig {
         enableStageOwnershipDiagnostics(false),
         enableBoundedComponentProductionProbe(false),
         largeIslandThreshold(128),
-        avbdAlpha(0.95f), avbdBeta(1000.0f), avbdGamma(0.99f),
-        avbdPenaltyMin(1000.0f), avbdPenaltyMax(1e9f),
+        avbdAlpha(AvbdConstants::AVBD_AL_ALPHA),
+        avbdBeta(AvbdConstants::AVBD_AL_BETA_LINEAR),
+        avbdGamma(AvbdConstants::AVBD_AL_GAMMA),
+        avbdPenaltyMin(AvbdConstants::AVBD_AL_PENALTY_MIN),
+        avbdPenaltyMax(AvbdConstants::AVBD_AL_PENALTY_MAX),
         determinismFlags(0) {}
 
   /**

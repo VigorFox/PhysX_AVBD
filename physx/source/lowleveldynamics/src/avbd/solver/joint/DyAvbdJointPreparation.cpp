@@ -40,30 +40,17 @@ void prepareAvbdJointConstraintPhase(
     const AvbdSolverConfig &config, physx::PxReal invDt2,
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
     const AvbdBodyConstraintMap *contactMap) {
   applyAvbdPenaltyFloor(
-      contacts, numContacts, bodies, numBodies, d6Joints, numD6,
-      gearJoints, numGear, invDt2);
+      contacts, numContacts, bodies, numBodies, invDt2,
+      config.avbdPenaltyMin);
 
   initializeAvbdContactC0(
       contacts, numContacts, bodies, numBodies, config);
 
-  if (config.isDeterministic() &&
-      (config.determinismFlags & AvbdDeterminismFlags::eSORT_CONSTRAINTS) &&
-      numContacts > 1) {
-    PX_PROFILE_ZONE("AVBD.sortConstraints", 0);
-    std::sort(
-        contacts, contacts + numContacts,
-        [](const AvbdContactConstraint &a, const AvbdContactConstraint &b) {
-          if (a.header.bodyIndexA != b.header.bodyIndexA)
-            return a.header.bodyIndexA < b.header.bodyIndexA;
-          if (a.header.bodyIndexB != b.header.bodyIndexB)
-            return a.header.bodyIndexB < b.header.bodyIndexB;
-          return a.header.type < b.header.type;
-        });
-  }
+  // The body-contact CSR and deferred output sidecars address physical rows
+  // by index before this phase begins.  Keep those ids immutable; ordered
+  // backends must sort a row-reference view, never the contact storage.
 
   initializeAvbdNoContactBodies(
       bodies, numBodies, contacts, numContacts, contactMap);

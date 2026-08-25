@@ -196,7 +196,6 @@ public:
 			//Loop through the contacts in the contact stream and update contact count!
 	
 			PxU32 numContacts = 0;
-			PxcNpWorkUnit& unit = cm.getWorkUnit();
 			PxsContactManagerOutput& output = mCmOutputs[index];
 	
 			PxU32 numPatches = output.nbPatches;
@@ -273,7 +272,7 @@ public:
 			if(!numContacts)
 			{
 				//KS - we still need to retain the patch count from the previous frame to detect found/lost events...
-				unit.clearCachedState();
+				cm.resetCachedState();
 				continue;
 			}
 	
@@ -1047,4 +1046,3 @@ PxvNphaseImplementationFallback* physx::createNphaseImplementationContext(PxsCon
 
 	return npImplContext;
 }
-

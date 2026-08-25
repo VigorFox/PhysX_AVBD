@@ -33,7 +33,9 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 #include "PxPhysicsAPI.h"
@@ -56,6 +58,7 @@ static PxDefaultCpuDispatcher *gDispatcher = NULL;
 static PxScene *gScene = NULL;
 static PxMaterial *gMaterial = NULL;
 static PxPvd *gPvd = NULL;
+static PxRigidStatic *gGroundPlane = NULL;
 static bool gExtensionsInitialized = false;
 static bool gInitializationFailed = false;
 
@@ -64,9 +67,11 @@ static PxSolverType::Enum gSolverType = PxSolverType::eAVBD;
 static Snippets::HeadlessOptions gHeadlessOptions;
 static bool gHeadlessMode = false;
 static bool gHeadlessBallShot = false;
+static bool gHeadlessTripleBallSlide = false;
 static bool gHeadlessSleepProbe = false;
 static bool gHeadlessLockProbe = false;
 static bool gHeadlessRigidStress = false;
+static bool gHeadlessSubBounceStack = false;
 static bool gRigidStressWorkAttribution = false;
 static bool gRigidStressAvbdIterationsExplicit = false;
 static bool gRigidStressAvbdJointIterationOverrideExplicit = false;
@@ -90,6 +95,10 @@ static PxU32 gBallShotFrame = 30;
 static PxU32 gRigidStressWarmupFrames = 10;
 static PxU32 gSimFrame = 0;
 static PxRigidDynamic *gShotBall = NULL;
+static const PxU32 gTripleBallShotCount = 3u;
+static const PxU32 gTripleBallShotSpacing = 30u;
+static PxRigidDynamic *gTripleBallShots[gTripleBallShotCount] = {
+    NULL, NULL, NULL};
 enum HelloWorldSleepWitness {
   eHELLO_SLEEP_FREE = 0,
   eHELLO_SLEEP_STATIC_TOUCH = 1,
@@ -111,7 +120,16 @@ static PxRigidDynamic *gLockedBodies[eHELLO_LOCK_WITNESS_COUNT] = {
 static PxRigidDynamic *gLockControlBodies[eHELLO_LOCK_WITNESS_COUNT] = {
     NULL, NULL, NULL, NULL, NULL, NULL};
 static PxTransform gLockInitialPoses[eHELLO_LOCK_WITNESS_COUNT * 2];
+static const PxU32 gSubBounceBoxCount = 3u;
+static const PxU32 gSubBounceInterfaceCount = 3u;
+static const PxU32 gSubBounceTailFrames = 60u;
+static const PxReal gSubBounceBoxHalfExtent = 0.5f;
+static PxRigidStatic *gSubBounceGround = NULL;
+static PxRigidDynamic *gSubBounceBodies[gSubBounceBoxCount] = {NULL, NULL,
+                                                               NULL};
 static std::vector<PxRigidDynamic *> gBoxes;
+static bool gCaptureAutoStart = false;
+static std::string gCaptureRequestedPath;
 static std::vector<PxVec3> gPreviousBoxVelocities;
 static std::vector<PxVec3> gPreviousBoxPositions;
 static std::vector<PxVec3> gBoxContactBaselines;
@@ -280,6 +298,9 @@ static const PxU32 gBallResponseWindowFrames = 3;
 static const PxU32 gBoxResponseWindowFrames = 12;
 static const PxU32 gExpectedBoxCount = 275;
 static const PxU32 gExpectedTargetBoxCount = 55;
+static const PxU32 gHelloWorldStackCount = 5u;
+static const PxU32 gHelloWorldBoxesPerStack =
+    gExpectedBoxCount / gHelloWorldStackCount;
 static const PxReal gMinBallResponseFraction = 0.05f;
 static const PxReal gMinTargetResponseMomentumRatio = 0.01f;
 static const PxReal gMinTargetResponseDisplacement = 0.5f;
@@ -340,11 +361,34 @@ struct HelloWorldMetrics {
   PxU32 fetchErrorState = 0;
   PxReal tailAvgBoxSpeed = 0.0f;
   PxU32 tailSpeedSamples = 0;
+  PxU32 finalAwakeByStack[gHelloWorldStackCount] = {};
+  PxReal tailPeakLinearSpeedByStack[gHelloWorldStackCount] = {};
+  PxReal tailPeakAngularSpeedByStack[gHelloWorldStackCount] = {};
   bool nanDetected = false;
   bool mechanicalReferenceSet = false;
 };
 
 static HelloWorldMetrics gMetrics;
+
+struct HelloWorldGroundSlideWitness {
+  PxU32 currentFrames = 0u;
+  PxU32 maxFrames = 0u;
+  PxU32 totalFrames = 0u;
+  PxU32 episodeCount = 0u;
+  PxU32 firstFrame = PX_MAX_U32;
+  PxU32 lastFrame = PX_MAX_U32;
+  PxVec3 initialPosition = PxVec3(0.0f);
+  PxVec3 finalPosition = PxVec3(0.0f);
+  PxReal peakHorizontalSpeed = 0.0f;
+  PxReal peakAngularSpeed = 0.0f;
+  PxReal peakMinimumContactSlip = 0.0f;
+  PxReal finalHorizontalSpeed = 0.0f;
+  PxReal finalAngularSpeed = 0.0f;
+  PxReal finalMinimumContactSlip = 0.0f;
+  PxReal finalLowestCornerY = PX_MAX_F32;
+};
+
+static std::vector<HelloWorldGroundSlideWitness> gGroundSlideWitnesses;
 
 struct HelloWorldSleepWitnessMetrics {
   PxVec3 initialPosition = PxVec3(0.0f);
@@ -414,11 +458,46 @@ struct HelloWorldLockProbeMetrics {
 
 static HelloWorldLockProbeMetrics gLockMetrics;
 
+struct HelloWorldSubBounceMetrics {
+  PxU32 actorCount = 0;
+  PxU32 contactFrames[gSubBounceInterfaceCount] = {};
+  PxU32 contactPoints[gSubBounceInterfaceCount] = {};
+  PxU32 firstContactFrame[gSubBounceInterfaceCount] = {PX_MAX_U32,
+                                                        PX_MAX_U32,
+                                                        PX_MAX_U32};
+  PxU32 lastContactFrame[gSubBounceInterfaceCount] = {PX_MAX_U32,
+                                                       PX_MAX_U32,
+                                                       PX_MAX_U32};
+  PxReal maxGap[gSubBounceInterfaceCount] = {};
+  PxReal maxPenetration[gSubBounceInterfaceCount] = {};
+  PxReal minReportedSeparation[gSubBounceInterfaceCount] = {
+      PX_MAX_F32, PX_MAX_F32, PX_MAX_F32};
+  PxReal maxReportedSeparation[gSubBounceInterfaceCount] = {
+      -PX_MAX_F32, -PX_MAX_F32, -PX_MAX_F32};
+  PxReal maxTiltRadians = 0.0f;
+  PxReal tailLinearSpeedSum = 0.0f;
+  PxReal tailAngularSpeedSum = 0.0f;
+  PxReal tailPeakLinearSpeed = 0.0f;
+  PxReal tailPeakAngularSpeed = 0.0f;
+  PxReal maxAbsPosition = 0.0f;
+  PxU32 tailSamples = 0;
+  PxU32 firstAllSleepFrame = PX_MAX_U32;
+  PxU32 finalSleepingCount = 0;
+  bool contactFinite[gSubBounceInterfaceCount] = {true, true, true};
+  bool finite = true;
+};
+
+static HelloWorldSubBounceMetrics gSubBounceMetrics;
+
 enum HelloWorldFilterKind {
   eHELLO_FILTER_UNTAGGED = 0,
   eHELLO_FILTER_BOX = 1,
   eHELLO_FILTER_TARGET_BOX = 2,
-  eHELLO_FILTER_BALL = 3
+  eHELLO_FILTER_BALL = 3,
+  eHELLO_FILTER_SUB_BOUNCE_GROUND = 4,
+  eHELLO_FILTER_SUB_BOUNCE_BOX_0 = 5,
+  eHELLO_FILTER_SUB_BOUNCE_BOX_1 = 6,
+  eHELLO_FILTER_SUB_BOUNCE_BOX_2 = 7
 };
 
 static PxReal saturateMetric(double value) {
@@ -446,12 +525,528 @@ static PxI32 findBoxIndex(const PxActor *actor) {
   return -1;
 }
 
+// The interactive capture is intentionally independent of PVD. It records a
+// compact, text-based physics trace that can be inspected without launching a
+// PVD application or replaying a rendering stream. Sleeping bodies are only
+// emitted when their sleep state changes; awake bodies are emitted every frame.
+struct HelloWorldCaptureActor {
+  PxRigidDynamic *body;
+  PxI32 id;
+  PxI32 boxIndex;
+  bool previousSleeping;
+  bool previousSleepingValid;
+
+  HelloWorldCaptureActor(PxRigidDynamic *actor, PxI32 actorId,
+                         PxI32 sourceBoxIndex)
+      : body(actor), id(actorId), boxIndex(sourceBoxIndex),
+        previousSleeping(false), previousSleepingValid(false) {}
+};
+
+struct HelloWorldCaptureContact {
+  PxI32 actor0;
+  PxI32 actor1;
+  PxVec3 position;
+  PxVec3 normal;
+  PxVec3 impulse;
+  PxReal separation;
+};
+
+struct HelloWorldCapture {
+  FILE *file;
+  bool active;
+  bool writeFailed;
+  PxU32 recordedFrames;
+  PxU64 recordedStates;
+  PxU64 recordedContactPoints;
+  PxI32 nextActorId;
+  std::string path;
+  std::vector<HelloWorldCaptureActor> actors;
+  std::vector<HelloWorldCaptureContact> contacts;
+  std::vector<PxContactPairPoint> contactPointScratch;
+
+  HelloWorldCapture()
+      : file(NULL), active(false), writeFailed(false), recordedFrames(0),
+        recordedStates(0), recordedContactPoints(0), nextActorId(0) {}
+};
+
+static HelloWorldCapture gCapture;
+static PxU32 gCaptureSequence = 0;
+
+static PxI32 findCaptureActorId(const PxActor *actor) {
+  if (!actor)
+    return -3;
+  if (actor == gGroundPlane)
+    return -1;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gCapture.actors.size()); ++i) {
+    if (gCapture.actors[i].body == actor)
+      return gCapture.actors[i].id;
+  }
+  return actor->getType() == PxActorType::eRIGID_STATIC ? -2 : -3;
+}
+
+static void getCaptureGeometryDescription(const PxRigidDynamic &body,
+                                          PxGeometryType::Enum &type,
+                                          PxVec3 &dimensions) {
+  type = PxGeometryType::eINVALID;
+  dimensions = PxVec3(0.0f);
+  PxShape *shape = NULL;
+  if (body.getShapes(&shape, 1) != 1 || !shape)
+    return;
+
+  const PxGeometry &geometry = shape->getGeometry();
+  type = geometry.getType();
+  switch (type) {
+  case PxGeometryType::eBOX:
+    dimensions = static_cast<const PxBoxGeometry &>(geometry).halfExtents;
+    break;
+  case PxGeometryType::eSPHERE:
+    dimensions.x = static_cast<const PxSphereGeometry &>(geometry).radius;
+    break;
+  case PxGeometryType::eCAPSULE: {
+    const PxCapsuleGeometry &capsule =
+        static_cast<const PxCapsuleGeometry &>(geometry);
+    dimensions.x = capsule.radius;
+    dimensions.y = capsule.halfHeight;
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+static void writeCaptureActorMetadata(const HelloWorldCaptureActor &actor) {
+  if (!gCapture.file || !actor.body)
+    return;
+  PxGeometryType::Enum geometryType;
+  PxVec3 dimensions;
+  getCaptureGeometryDescription(*actor.body, geometryType, dimensions);
+  PxU32 positionIterations = 0;
+  PxU32 velocityIterations = 0;
+  actor.body->getSolverIterationCounts(positionIterations, velocityIterations);
+  const PxVec3 inertia = actor.body->getMassSpaceInertiaTensor();
+  if (std::fprintf(
+          gCapture.file,
+          "A,%d,%d,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+          "%.9g,%.9g,%u,%u\n",
+          actor.id, actor.boxIndex, static_cast<PxU32>(geometryType),
+          double(dimensions.x), double(dimensions.y), double(dimensions.z),
+          double(actor.body->getMass()), double(inertia.x), double(inertia.y),
+          double(inertia.z), double(actor.body->getLinearDamping()),
+          double(actor.body->getAngularDamping()),
+          double(actor.body->getSleepThreshold()),
+          double(actor.body->getStabilizationThreshold()), positionIterations,
+          velocityIterations) < 0)
+    gCapture.writeFailed = true;
+}
+
+static void getCaptureKineticEnergy(const PxRigidDynamic &body,
+                                    const PxTransform &pose,
+                                    const PxVec3 &linearVelocity,
+                                    const PxVec3 &angularVelocity,
+                                    PxReal &linearEnergy,
+                                    PxReal &angularEnergy) {
+  const PxReal mass = body.getMass();
+  const PxVec3 inertia = body.getMassSpaceInertiaTensor();
+  const PxVec3 localAngularVelocity = pose.q.rotateInv(angularVelocity);
+  linearEnergy =
+      0.5f * mass * PxMax(0.0f, linearVelocity.magnitudeSquared());
+  angularEnergy = 0.5f *
+                  PxMax(0.0f,
+                        inertia.x * localAngularVelocity.x *
+                                localAngularVelocity.x +
+                            inertia.y * localAngularVelocity.y *
+                                localAngularVelocity.y +
+                            inertia.z * localAngularVelocity.z *
+                                localAngularVelocity.z);
+}
+
+static bool writeCaptureBodyState(HelloWorldCaptureActor &actor, PxU32 frame,
+                                  bool force, PxReal &linearEnergy,
+                                  PxReal &angularEnergy) {
+  linearEnergy = 0.0f;
+  angularEnergy = 0.0f;
+  if (!gCapture.file || !actor.body)
+    return false;
+
+  const bool sleeping = actor.body->isSleeping();
+  const PxTransform pose = actor.body->getGlobalPose();
+  const PxVec3 linearVelocity = actor.body->getLinearVelocity();
+  const PxVec3 angularVelocity = actor.body->getAngularVelocity();
+  getCaptureKineticEnergy(*actor.body, pose, linearVelocity, angularVelocity,
+                          linearEnergy, angularEnergy);
+  const bool sleepTransition = !actor.previousSleepingValid ||
+                               sleeping != actor.previousSleeping;
+  actor.previousSleeping = sleeping;
+  actor.previousSleepingValid = true;
+  if (!force && sleeping && !sleepTransition)
+    return false;
+
+  if (std::fprintf(
+          gCapture.file,
+          "B,%u,%d,%u,"
+          "%.9g,%.9g,%.9g,"
+          "%.9g,%.9g,%.9g,%.9g,"
+          "%.9g,%.9g,%.9g,"
+          "%.9g,%.9g,%.9g,"
+          "%.9g,%.9g,%.9g\n",
+          frame, actor.id, sleeping ? 1u : 0u, double(pose.p.x),
+          double(pose.p.y), double(pose.p.z), double(pose.q.x),
+          double(pose.q.y), double(pose.q.z), double(pose.q.w),
+          double(linearVelocity.x), double(linearVelocity.y),
+          double(linearVelocity.z), double(angularVelocity.x),
+          double(angularVelocity.y), double(angularVelocity.z),
+          double(actor.body->getWakeCounter()), double(linearEnergy),
+          double(angularEnergy)) < 0)
+    gCapture.writeFailed = true;
+  ++gCapture.recordedStates;
+  return true;
+}
+
+static PxI32 registerCaptureActor(PxRigidDynamic *body,
+                                  PxI32 boxIndex = -1) {
+  if (!gCapture.active || !body)
+    return -3;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gCapture.actors.size()); ++i) {
+    HelloWorldCaptureActor &actor = gCapture.actors[i];
+    if (actor.body == body) {
+      if (actor.boxIndex < 0 && boxIndex >= 0)
+        actor.boxIndex = boxIndex;
+      return actor.id;
+    }
+  }
+
+  gCapture.actors.push_back(
+      HelloWorldCaptureActor(body, gCapture.nextActorId++, boxIndex));
+  HelloWorldCaptureActor &actor = gCapture.actors.back();
+  writeCaptureActorMetadata(actor);
+  PxReal linearEnergy = 0.0f;
+  PxReal angularEnergy = 0.0f;
+  writeCaptureBodyState(actor, gSimFrame, true, linearEnergy, angularEnergy);
+  return actor.id;
+}
+
+static void registerCaptureSceneActors() {
+  if (!gCapture.active || !gScene)
+    return;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gBoxes.size()); ++i)
+    registerCaptureActor(gBoxes[i], static_cast<PxI32>(i));
+
+  const PxActorTypeFlags actorTypes = PxActorTypeFlag::eRIGID_DYNAMIC;
+  const PxU32 actorCount = gScene->getNbActors(actorTypes);
+  if (!actorCount)
+    return;
+  std::vector<PxActor *> actors(actorCount);
+  const PxU32 returned =
+      gScene->getActors(actorTypes, actors.data(), actorCount);
+  for (PxU32 i = 0; i < returned; ++i) {
+    PxRigidDynamic *body = actors[i]->is<PxRigidDynamic>();
+    if (body)
+      registerCaptureActor(body, findBoxIndex(body));
+  }
+}
+
+static std::string getDefaultCapturePath() {
+  char path[256];
+  const long long timestamp = static_cast<long long>(std::time(NULL));
+  std::snprintf(path, sizeof(path), "SnippetHelloWorld_%s_%lld_%03u.pxtrace",
+                Snippets::getSolverTypeName(gSolverType), timestamp,
+                gCaptureSequence++);
+  return path;
+}
+
+static std::string getDisplayCapturePath(const std::string &path) {
+#if defined(_WIN32)
+  char absolutePath[4096];
+  if (_fullpath(absolutePath, path.c_str(), sizeof(absolutePath)))
+    return absolutePath;
+#endif
+  return path;
+}
+
+static bool startCapture(const char *requestedPath = NULL) {
+  if (gCapture.active)
+    return true;
+  if (!gScene) {
+    std::printf("[HelloWorldCapture] start failed: scene is unavailable\n");
+    return false;
+  }
+
+  gCapture.path = requestedPath && requestedPath[0]
+                      ? requestedPath
+                      : getDefaultCapturePath();
+  gCapture.file = std::fopen(gCapture.path.c_str(), "wb");
+  if (!gCapture.file) {
+    std::printf("[HelloWorldCapture] start failed: cannot open file=\"%s\"\n",
+                gCapture.path.c_str());
+    gCapture.path.clear();
+    return false;
+  }
+  std::setvbuf(gCapture.file, NULL, _IOFBF, 1024u * 1024u);
+  gCapture.active = true;
+  gCapture.writeFailed = false;
+  gCapture.recordedFrames = 0;
+  gCapture.recordedStates = 0;
+  gCapture.recordedContactPoints = 0;
+  gCapture.nextActorId = 0;
+  gCapture.actors.clear();
+  gCapture.contacts.clear();
+  gCapture.contactPointScratch.clear();
+  gCapture.actors.reserve(gBoxes.size() + 16u);
+  gCapture.contacts.reserve(4096u);
+  gCapture.contactPointScratch.reserve(64u);
+
+  const PxVec3 gravity = gScene->getGravity();
+  const PxReal staticFriction = gMaterial ? gMaterial->getStaticFriction()
+                                          : 0.0f;
+  const PxReal dynamicFriction = gMaterial ? gMaterial->getDynamicFriction()
+                                           : 0.0f;
+  const PxReal restitution = gMaterial ? gMaterial->getRestitution() : 0.0f;
+  std::fprintf(gCapture.file, "PXHWTRACE,1\n");
+  std::fprintf(gCapture.file, "M,snippet,SnippetHelloWorld\n");
+  std::fprintf(gCapture.file, "M,solver,%s\n",
+               Snippets::getSolverTypeName(gSolverType));
+  std::fprintf(gCapture.file, "M,dt,%.9g\n", 1.0 / 60.0);
+  std::fprintf(gCapture.file, "M,startFrame,%u\n", gSimFrame);
+  std::fprintf(gCapture.file, "M,gravity,%.9g,%.9g,%.9g\n",
+               double(gravity.x), double(gravity.y), double(gravity.z));
+  std::fprintf(gCapture.file, "M,material,%.9g,%.9g,%.9g\n",
+               double(staticFriction), double(dynamicFriction),
+               double(restitution));
+  std::fprintf(
+      gCapture.file,
+      "# A,id,boxIndex,geometryType,dim0,dim1,dim2,mass,inertiaX,inertiaY,"
+      "inertiaZ,linearDamping,angularDamping,sleepThreshold,"
+      "stabilizationThreshold,positionIterations,velocityIterations\n");
+  std::fprintf(
+      gCapture.file,
+      "# B,frame,id,sleeping,px,py,pz,qx,qy,qz,qw,lvx,lvy,lvz,avx,avy,"
+      "avz,wakeCounter,linearKineticEnergy,angularKineticEnergy\n");
+  std::fprintf(gCapture.file,
+               "# C,frame,id0,id1,px,py,pz,nx,ny,nz,separation,ix,iy,iz\n");
+  std::fprintf(gCapture.file,
+               "# F,frame,simTime,activeDynamicBodies,contactPairs,"
+               "contactPoints,totalLinearKineticEnergy,"
+               "totalAngularKineticEnergy,stateRows\n");
+  std::fprintf(gCapture.file, "A,-1,-1,%u,0,0,0,0,0,0,0,0,0,0,0,0,0\n",
+               static_cast<PxU32>(PxGeometryType::ePLANE));
+
+  registerCaptureSceneActors();
+  std::fflush(gCapture.file);
+  std::printf(
+      "[HelloWorldCapture] recording file=\"%s\" startFrame=%u actors=%u "
+      "controls=R:stop,M:mark\n",
+      getDisplayCapturePath(gCapture.path).c_str(), gSimFrame,
+      static_cast<PxU32>(gCapture.actors.size()));
+  return true;
+}
+
+static void stopCapture() {
+  if (!gCapture.active)
+    return;
+  gCapture.active = false;
+  if (gCapture.file) {
+    std::fprintf(gCapture.file, "END,%u,%u,%llu,%llu,%u\n", gSimFrame,
+                 gCapture.recordedFrames,
+                 static_cast<unsigned long long>(gCapture.recordedStates),
+                 static_cast<unsigned long long>(
+                     gCapture.recordedContactPoints),
+                 gCapture.writeFailed ? 1u : 0u);
+    if (std::fflush(gCapture.file) != 0 || std::ferror(gCapture.file))
+      gCapture.writeFailed = true;
+    std::fclose(gCapture.file);
+    gCapture.file = NULL;
+  }
+  std::printf(
+      "[HelloWorldCapture] stopped file=\"%s\" endFrame=%u frames=%u "
+      "states=%llu contactPoints=%llu writeFailed=%u\n",
+      getDisplayCapturePath(gCapture.path).c_str(), gSimFrame,
+      gCapture.recordedFrames,
+      static_cast<unsigned long long>(gCapture.recordedStates),
+      static_cast<unsigned long long>(gCapture.recordedContactPoints),
+      gCapture.writeFailed ? 1u : 0u);
+  gCapture.actors.clear();
+  gCapture.contacts.clear();
+  gCapture.contactPointScratch.clear();
+}
+
+static void beginCaptureFrame() {
+  if (!gCapture.active)
+    return;
+  gCapture.contacts.clear();
+}
+
+static void recordCaptureContacts(const PxContactPairHeader &pairHeader,
+                                  const PxContactPair *pairs,
+                                  PxU32 pairCount) {
+  if (!gCapture.active)
+    return;
+  const PxI32 actor0 = findCaptureActorId(pairHeader.actors[0]);
+  const PxI32 actor1 = findCaptureActorId(pairHeader.actors[1]);
+  for (PxU32 pairIndex = 0; pairIndex < pairCount; ++pairIndex) {
+    const PxContactPair &pair = pairs[pairIndex];
+    if (pair.flags & (PxContactPairFlag::eREMOVED_SHAPE_0 |
+                      PxContactPairFlag::eREMOVED_SHAPE_1))
+      continue;
+    if (!pair.contactCount)
+      continue;
+    gCapture.contactPointScratch.resize(pair.contactCount);
+    const PxU32 extracted = pair.extractContacts(
+        gCapture.contactPointScratch.data(), pair.contactCount);
+    for (PxU32 pointIndex = 0; pointIndex < extracted; ++pointIndex) {
+      const PxContactPairPoint &point =
+          gCapture.contactPointScratch[pointIndex];
+      HelloWorldCaptureContact contact;
+      contact.actor0 = actor0;
+      contact.actor1 = actor1;
+      contact.position = point.position;
+      contact.normal = point.normal;
+      contact.impulse = point.impulse;
+      contact.separation = point.separation;
+      gCapture.contacts.push_back(contact);
+    }
+  }
+}
+
+static void recordCaptureFrame(PxU32 frame) {
+  if (!gCapture.active || !gCapture.file)
+    return;
+  PxReal totalLinearEnergy = 0.0f;
+  PxReal totalAngularEnergy = 0.0f;
+  PxU32 stateRows = 0;
+  PxU32 activeBodies = 0;
+  for (PxU32 i = 0; i < static_cast<PxU32>(gCapture.actors.size()); ++i) {
+    HelloWorldCaptureActor &actor = gCapture.actors[i];
+    if (!actor.body)
+      continue;
+    if (!actor.body->isSleeping())
+      ++activeBodies;
+    PxReal linearEnergy = 0.0f;
+    PxReal angularEnergy = 0.0f;
+    stateRows += writeCaptureBodyState(actor, frame, false, linearEnergy,
+                                       angularEnergy)
+                     ? 1u
+                     : 0u;
+    totalLinearEnergy += linearEnergy;
+    totalAngularEnergy += angularEnergy;
+  }
+
+  for (PxU32 i = 0; i < static_cast<PxU32>(gCapture.contacts.size()); ++i) {
+    const HelloWorldCaptureContact &contact = gCapture.contacts[i];
+    if (std::fprintf(
+            gCapture.file,
+            "C,%u,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g\n",
+            frame, contact.actor0, contact.actor1,
+            double(contact.position.x), double(contact.position.y),
+            double(contact.position.z), double(contact.normal.x),
+            double(contact.normal.y), double(contact.normal.z),
+            double(contact.separation), double(contact.impulse.x),
+            double(contact.impulse.y), double(contact.impulse.z)) < 0)
+      gCapture.writeFailed = true;
+  }
+
+  PxSimulationStatistics statistics;
+  gScene->getSimulationStatistics(statistics);
+  if (std::fprintf(
+          gCapture.file, "F,%u,%.9g,%u,%u,%u,%.9g,%.9g,%u\n", frame,
+          double(frame) / 60.0, activeBodies,
+          statistics.nbDiscreteContactPairsWithContacts,
+          static_cast<PxU32>(gCapture.contacts.size()),
+          double(totalLinearEnergy), double(totalAngularEnergy), stateRows) < 0)
+    gCapture.writeFailed = true;
+  ++gCapture.recordedFrames;
+  gCapture.recordedContactPoints += gCapture.contacts.size();
+  if ((gCapture.recordedFrames % 60u) == 0u &&
+      std::fflush(gCapture.file) != 0)
+    gCapture.writeFailed = true;
+  if (std::ferror(gCapture.file))
+    gCapture.writeFailed = true;
+}
+
+static void markCapture() {
+  if (!gCapture.active || !gCapture.file) {
+    std::printf("[HelloWorldCapture] mark ignored: recording is not active\n");
+    return;
+  }
+  std::fprintf(gCapture.file, "M,userMark,%u\n", gSimFrame);
+  std::fflush(gCapture.file);
+  std::printf("[HelloWorldCapture] marked frame=%u file=\"%s\"\n", gSimFrame,
+              getDisplayCapturePath(gCapture.path).c_str());
+}
+
 static PxI32 findSleepWitnessIndex(const PxActor *actor) {
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i) {
     if (gSleepBodies[i] == actor)
       return static_cast<PxI32>(i);
   }
   return -1;
+}
+
+static PxI32 findSubBounceInterface(const PxActor *actor0,
+                                    const PxActor *actor1) {
+  const PxActor *lowerActors[gSubBounceInterfaceCount] = {
+      gSubBounceGround, gSubBounceBodies[0], gSubBounceBodies[1]};
+  const PxActor *upperActors[gSubBounceInterfaceCount] = {
+      gSubBounceBodies[0], gSubBounceBodies[1], gSubBounceBodies[2]};
+  for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i) {
+    if ((actor0 == lowerActors[i] && actor1 == upperActors[i]) ||
+        (actor1 == lowerActors[i] && actor0 == upperActors[i]))
+      return static_cast<PxI32>(i);
+  }
+  return -1;
+}
+
+static PxU32 getSubBounceInterfaceMask() {
+  PxU32 mask = 0;
+  for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i)
+    mask |= gSubBounceMetrics.contactPoints[i] ? 1u << i : 0u;
+  return mask;
+}
+
+static void recordSubBounceContact(const PxContactPairHeader &pairHeader,
+                                   const PxContactPair *pairs,
+                                   PxU32 pairCount) {
+  const PxI32 interfaceIndex =
+      findSubBounceInterface(pairHeader.actors[0], pairHeader.actors[1]);
+  if (interfaceIndex < 0)
+    return;
+
+  const PxU32 index = static_cast<PxU32>(interfaceIndex);
+  PxU32 extractedForInterface = 0;
+  for (PxU32 pairIndex = 0; pairIndex < pairCount; ++pairIndex) {
+    if (pairs[pairIndex].flags &
+        (PxContactPairFlag::eREMOVED_SHAPE_0 |
+         PxContactPairFlag::eREMOVED_SHAPE_1))
+      continue;
+    PxContactPairPoint points[16];
+    const PxU32 capacity =
+        PxMin(PxU32(pairs[pairIndex].contactCount), 16u);
+    const PxU32 extracted = pairs[pairIndex].extractContacts(
+        points, capacity);
+    extractedForInterface += extracted;
+    for (PxU32 pointIndex = 0; pointIndex < extracted; ++pointIndex) {
+      const PxReal separation = points[pointIndex].separation;
+      if (!PxIsFinite(separation)) {
+        gSubBounceMetrics.contactFinite[index] = false;
+        continue;
+      }
+      gSubBounceMetrics.minReportedSeparation[index] = PxMin(
+          gSubBounceMetrics.minReportedSeparation[index], separation);
+      gSubBounceMetrics.maxReportedSeparation[index] = PxMax(
+          gSubBounceMetrics.maxReportedSeparation[index], separation);
+    }
+  }
+  if (!extractedForInterface)
+    return;
+
+  const PxU32 completedFrame = gSimFrame + 1u;
+  gSubBounceMetrics.contactPoints[index] += extractedForInterface;
+  if (gSubBounceMetrics.firstContactFrame[index] == PX_MAX_U32)
+    gSubBounceMetrics.firstContactFrame[index] = completedFrame;
+  if (gSubBounceMetrics.lastContactFrame[index] != completedFrame) {
+    gSubBounceMetrics.lastContactFrame[index] = completedFrame;
+    gSubBounceMetrics.contactFrames[index]++;
+  }
 }
 
 class HelloWorldSimulationCallback : public PxSimulationEventCallback {
@@ -498,6 +1093,11 @@ public:
         (PxContactPairHeaderFlag::eREMOVED_ACTOR_0 |
          PxContactPairHeaderFlag::eREMOVED_ACTOR_1))
       return;
+    recordCaptureContacts(pairHeader, pairs, pairCount);
+    if (gHeadlessSubBounceStack) {
+      recordSubBounceContact(pairHeader, pairs, pairCount);
+      return;
+    }
     const PxActor *boxActor = NULL;
     if (pairHeader.actors[0] == gShotBall)
       boxActor = pairHeader.actors[1];
@@ -559,6 +1159,11 @@ static PxFilterFlags helloWorldFilterShader(
     return PxFilterFlag::eDEFAULT;
   }
   pairFlags = PxPairFlag::eCONTACT_DEFAULT;
+  if (!gHeadlessMode || gCaptureAutoStart || gCapture.active)
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
+                 PxPairFlag::eNOTIFY_TOUCH_LOST |
+                 PxPairFlag::eNOTIFY_CONTACT_POINTS;
   const bool ballAndBox =
       (filterData0.word0 == eHELLO_FILTER_BALL &&
        filterData1.word0 == eHELLO_FILTER_TARGET_BOX) ||
@@ -567,13 +1172,27 @@ static PxFilterFlags helloWorldFilterShader(
   if (ballAndBox)
     pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
                  PxPairFlag::eNOTIFY_CONTACT_POINTS;
+  const PxU32 tag0 = filterData0.word0;
+  const PxU32 tag1 = filterData1.word0;
+  const bool subBounceInterface =
+      tag0 >= eHELLO_FILTER_SUB_BOUNCE_GROUND &&
+      tag0 <= eHELLO_FILTER_SUB_BOUNCE_BOX_2 &&
+      tag1 >= eHELLO_FILTER_SUB_BOUNCE_GROUND &&
+      tag1 <= eHELLO_FILTER_SUB_BOUNCE_BOX_2 &&
+      (tag0 + 1u == tag1 || tag1 + 1u == tag0);
+  if (subBounceInterface)
+    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
+                 PxPairFlag::eNOTIFY_CONTACT_POINTS;
   return PxFilterFlag::eDEFAULT;
 }
 
 enum HelloWorldHeadlessCase {
   eHELLO_CASE_STACK_SETTLE,
   eHELLO_CASE_BALL_SHOT,
+  eHELLO_CASE_TRIPLE_BALL_SLIDE,
   eHELLO_CASE_RIGID_STRESS,
+  eHELLO_CASE_SUB_BOUNCE_STACK,
   eHELLO_CASE_SLEEP_IDLE,
   eHELLO_CASE_SLEEP_WAKE,
   eHELLO_CASE_SLEEP_DISABLED,
@@ -593,9 +1212,17 @@ static bool tryParseHeadlessCase(const char *value,
     headlessCase = eHELLO_CASE_BALL_SHOT;
     return true;
   }
+  if (Snippets::equalsIgnoreCase(value, "triple-ball-slide")) {
+    headlessCase = eHELLO_CASE_TRIPLE_BALL_SLIDE;
+    return true;
+  }
   if (Snippets::equalsIgnoreCase(value, "rigid-stress") ||
       Snippets::equalsIgnoreCase(value, "hellogrb-cpu")) {
     headlessCase = eHELLO_CASE_RIGID_STRESS;
+    return true;
+  }
+  if (Snippets::equalsIgnoreCase(value, "sub-bounce-stack")) {
+    headlessCase = eHELLO_CASE_SUB_BOUNCE_STACK;
     return true;
   }
   if (Snippets::equalsIgnoreCase(value, "sleep-idle")) {
@@ -621,8 +1248,12 @@ static const char *getHeadlessCaseName(HelloWorldHeadlessCase headlessCase) {
   switch (headlessCase) {
   case eHELLO_CASE_BALL_SHOT:
     return "ball-shot";
+  case eHELLO_CASE_TRIPLE_BALL_SLIDE:
+    return "triple-ball-slide";
   case eHELLO_CASE_RIGID_STRESS:
     return "rigid-stress";
+  case eHELLO_CASE_SUB_BOUNCE_STACK:
+    return "sub-bounce-stack";
   case eHELLO_CASE_SLEEP_IDLE:
     return "sleep-idle";
   case eHELLO_CASE_SLEEP_WAKE:
@@ -655,7 +1286,10 @@ static const char *getRigidStressLayoutName() {
 static void resetRuntimeState() {
   stackZ = 10.0f;
   gSimFrame = 0;
+  gGroundPlane = NULL;
   gShotBall = NULL;
+  for (PxU32 i = 0u; i < gTripleBallShotCount; ++i)
+    gTripleBallShots[i] = NULL;
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i)
     gSleepBodies[i] = NULL;
   for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
@@ -665,9 +1299,13 @@ static void resetRuntimeState() {
     gLockInitialPoses[i + eHELLO_LOCK_WITNESS_COUNT] =
         PxTransform(PxIdentity);
   }
+  gSubBounceGround = NULL;
+  for (PxU32 i = 0; i < gSubBounceBoxCount; ++i)
+    gSubBounceBodies[i] = NULL;
   gMetrics = HelloWorldMetrics();
   gSleepMetrics = HelloWorldSleepProbeMetrics();
   gLockMetrics = HelloWorldLockProbeMetrics();
+  gSubBounceMetrics = HelloWorldSubBounceMetrics();
   gRigidStressMetrics = RigidStressMetrics();
   gRigidStressWorkMetrics = RigidStressWorkMetrics();
   gRigidStressProfilerBaseline = RigidStressProfilerCounts();
@@ -685,6 +1323,7 @@ static void resetRuntimeState() {
   gBoxResponseObserved.clear();
   gBoxIsTarget.clear();
   gBoxContactFrames.clear();
+  gGroundSlideWitnesses.clear();
   gMechanicalEnergyHistory.clear();
 }
 
@@ -709,7 +1348,27 @@ static PxRigidDynamic *createDynamic(const PxTransform &t,
     shape->setSimulationFilterData(filterData);
   }
   gScene->addActor(*dynamic);
+  registerCaptureActor(dynamic);
   return dynamic;
+}
+
+static void createSubBounceStackFixture() {
+  const PxBoxGeometry geometry(gSubBounceBoxHalfExtent,
+                               gSubBounceBoxHalfExtent,
+                               gSubBounceBoxHalfExtent);
+  for (PxU32 i = 0; i < gSubBounceBoxCount; ++i) {
+    gSubBounceBodies[i] = createDynamic(
+        PxTransform(PxVec3(0.0f,
+                          gSubBounceBoxHalfExtent + PxReal(i), 0.0f)),
+        geometry, PxVec3(0.0f),
+        static_cast<HelloWorldFilterKind>(
+            eHELLO_FILTER_SUB_BOUNCE_BOX_0 + i));
+    if (!gSubBounceBodies[i]) {
+      gInitializationFailed = true;
+      continue;
+    }
+    gSubBounceMetrics.actorCount++;
+  }
 }
 
 static void createSleepProbeFixture() {
@@ -894,6 +1553,8 @@ static void createStack(const PxTransform &t, PxU32 size, PxReal halfExtent,
       }
       gScene->addActor(*body);
       gBoxes.push_back(body);
+      registerCaptureActor(body,
+                           static_cast<PxI32>(gBoxes.size() - 1u));
       gPreviousBoxVelocities.push_back(PxVec3(0.0f));
       gPreviousBoxPositions.push_back(body->getGlobalPose().p);
       gBoxContactBaselines.push_back(PxVec3(0.0f));
@@ -902,6 +1563,9 @@ static void createStack(const PxTransform &t, PxU32 size, PxReal halfExtent,
       gBoxResponseObserved.push_back(0);
       gBoxIsTarget.push_back(targetStack ? 1 : 0);
       gBoxContactFrames.push_back(PX_MAX_U32);
+      gGroundSlideWitnesses.push_back(HelloWorldGroundSlideWitness());
+      gGroundSlideWitnesses.back().initialPosition =
+          body->getGlobalPose().p;
     }
   }
   shape->release();
@@ -925,6 +1589,30 @@ static void spawnBallShot() {
          gBallShotVel.y, gBallShotVel.z, gBallShotRadius);
 }
 
+static void spawnTripleBallShot(PxU32 shotIndex) {
+  if (shotIndex >= gTripleBallShotCount ||
+      gTripleBallShots[shotIndex])
+    return;
+  PxRigidDynamic *ball = createDynamic(
+      PxTransform(gBallShotPos), PxSphereGeometry(gBallShotRadius),
+      gBallShotVel, eHELLO_FILTER_BALL);
+  if (!ball) {
+    gMetrics.launchFailures++;
+    return;
+  }
+  gTripleBallShots[shotIndex] = ball;
+  if (shotIndex == 0u) {
+    gShotBall = ball;
+    gMetrics.ballLaunchMomentum = saturateMetric(
+        double(ball->getMass()) * PxAbs(gBallShotVel.z));
+  }
+  printf("[HelloWorldTripleBallShot] shot=%u frame=%u "
+         "pos=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f,%.1f) radius=%.2f\n",
+         shotIndex, gSimFrame, gBallShotPos.x, gBallShotPos.y,
+         gBallShotPos.z, gBallShotVel.x, gBallShotVel.y,
+         gBallShotVel.z, gBallShotRadius);
+}
+
 static void createRigidStressProjectile() {
   gShotBall = createDynamic(PxTransform(gRigidStressBallPosition),
                             PxSphereGeometry(gRigidStressBallRadius),
@@ -940,6 +1628,101 @@ static void createRigidStressProjectile() {
 
 static PxReal addMetric(PxReal lhs, PxReal rhs) {
   return saturateMetric(double(lhs) + double(rhs));
+}
+
+static PxReal getBoxVerticalSupport(const PxQuat &orientation,
+                                    PxReal halfExtent) {
+  const PxMat33 rotation(orientation);
+  return halfExtent *
+         (PxAbs(rotation.column0.y) + PxAbs(rotation.column1.y) +
+          PxAbs(rotation.column2.y));
+}
+
+static void sampleSubBounceStackAfterFetch(PxU32 frameIndex) {
+  PxTransform poses[gSubBounceBoxCount] = {
+      PxTransform(PxIdentity), PxTransform(PxIdentity),
+      PxTransform(PxIdentity)};
+  PxReal supports[gSubBounceBoxCount] = {};
+  PxReal frameMaxLinearSpeed = 0.0f;
+  PxReal frameMaxAngularSpeed = 0.0f;
+  PxU32 sleepingCount = 0;
+  bool frameFinite = true;
+
+  for (PxU32 i = 0; i < gSubBounceBoxCount; ++i) {
+    PxRigidDynamic *body = gSubBounceBodies[i];
+    if (!body) {
+      frameFinite = false;
+      continue;
+    }
+    poses[i] = body->getGlobalPose();
+    const PxVec3 linearVelocity = body->getLinearVelocity();
+    const PxVec3 angularVelocity = body->getAngularVelocity();
+    if (!poses[i].isValid() || !linearVelocity.isFinite() ||
+        !angularVelocity.isFinite()) {
+      frameFinite = false;
+      continue;
+    }
+
+    const PxReal linearSpeed = getSafeMagnitude(linearVelocity);
+    const PxReal angularSpeed = getSafeMagnitude(angularVelocity);
+    if (linearSpeed >= PX_MAX_F32 || angularSpeed >= PX_MAX_F32) {
+      frameFinite = false;
+      continue;
+    }
+    frameMaxLinearSpeed = PxMax(frameMaxLinearSpeed, linearSpeed);
+    frameMaxAngularSpeed = PxMax(frameMaxAngularSpeed, angularSpeed);
+    gSubBounceMetrics.maxAbsPosition =
+        PxMax(gSubBounceMetrics.maxAbsPosition,
+              PxMax(PxAbs(poses[i].p.x),
+                    PxMax(PxAbs(poses[i].p.y), PxAbs(poses[i].p.z))));
+    supports[i] =
+        getBoxVerticalSupport(poses[i].q, gSubBounceBoxHalfExtent);
+    const PxVec3 worldUp = poses[i].q.rotate(PxVec3(0.0f, 1.0f, 0.0f));
+    const PxReal upDot = PxClamp(worldUp.y, -1.0f, 1.0f);
+    gSubBounceMetrics.maxTiltRadians = PxMax(
+        gSubBounceMetrics.maxTiltRadians, PxReal(std::acos(double(upDot))));
+    sleepingCount += body->isSleeping() ? 1u : 0u;
+  }
+
+  if (frameFinite) {
+    PxReal gaps[gSubBounceInterfaceCount];
+    gaps[0] = poses[0].p.y - supports[0];
+    gaps[1] = (poses[1].p.y - supports[1]) -
+              (poses[0].p.y + supports[0]);
+    gaps[2] = (poses[2].p.y - supports[2]) -
+              (poses[1].p.y + supports[1]);
+    for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i) {
+      if (!PxIsFinite(gaps[i])) {
+        frameFinite = false;
+        break;
+      }
+      gSubBounceMetrics.maxGap[i] =
+          PxMax(gSubBounceMetrics.maxGap[i], PxMax(0.0f, gaps[i]));
+      gSubBounceMetrics.maxPenetration[i] = PxMax(
+          gSubBounceMetrics.maxPenetration[i], PxMax(0.0f, -gaps[i]));
+    }
+  }
+
+  if (frameIndex + gSubBounceTailFrames >= gHeadlessOptions.frames) {
+    gSubBounceMetrics.tailLinearSpeedSum = addMetric(
+        gSubBounceMetrics.tailLinearSpeedSum, frameMaxLinearSpeed);
+    gSubBounceMetrics.tailAngularSpeedSum = addMetric(
+        gSubBounceMetrics.tailAngularSpeedSum, frameMaxAngularSpeed);
+    gSubBounceMetrics.tailPeakLinearSpeed = PxMax(
+        gSubBounceMetrics.tailPeakLinearSpeed, frameMaxLinearSpeed);
+    gSubBounceMetrics.tailPeakAngularSpeed = PxMax(
+        gSubBounceMetrics.tailPeakAngularSpeed, frameMaxAngularSpeed);
+    gSubBounceMetrics.tailSamples++;
+  }
+
+  if (sleepingCount == gSubBounceBoxCount &&
+      gSubBounceMetrics.firstAllSleepFrame == PX_MAX_U32)
+    gSubBounceMetrics.firstAllSleepFrame = frameIndex + 1u;
+  gSubBounceMetrics.finalSleepingCount = sleepingCount;
+  gSubBounceMetrics.finite &= frameFinite;
+  if (!frameFinite)
+    gMetrics.nanDetected = true;
+  gMetrics.completedFrames = frameIndex + 1u;
 }
 
 static bool sampleBodyState(PxRigidDynamic *body, PxVec3 &position,
@@ -1005,6 +1788,107 @@ static bool sampleBodyState(PxRigidDynamic *body, PxVec3 &position,
     return false;
   mechanicalEnergy = PxReal(totalEnergy);
   return true;
+}
+
+static PxReal getMinimumBottomCornerTangentialSpeed(
+    const PxQuat &orientation, const PxVec3 &linearVelocity,
+    const PxVec3 &angularVelocity, PxReal halfExtent,
+    PxReal &lowestRelativeY) {
+  PxVec3 cornerArms[8];
+  lowestRelativeY = PX_MAX_F32;
+  PxU32 cornerIndex = 0u;
+  for (PxU32 x = 0u; x < 2u; ++x) {
+    for (PxU32 y = 0u; y < 2u; ++y) {
+      for (PxU32 z = 0u; z < 2u; ++z) {
+        const PxVec3 localCorner(x ? halfExtent : -halfExtent,
+                                 y ? halfExtent : -halfExtent,
+                                 z ? halfExtent : -halfExtent);
+        const PxVec3 arm = orientation.rotate(localCorner);
+        cornerArms[cornerIndex++] = arm;
+        lowestRelativeY = PxMin(lowestRelativeY, arm.y);
+      }
+    }
+  }
+
+  const PxReal bottomBand = 0.15f;
+  PxReal minimumTangentialSpeed = PX_MAX_F32;
+  for (PxU32 i = 0u; i < 8u; ++i) {
+    if (cornerArms[i].y > lowestRelativeY + bottomBand)
+      continue;
+    const PxVec3 pointVelocity =
+        linearVelocity + angularVelocity.cross(cornerArms[i]);
+    const PxReal tangentialSpeed =
+        PxSqrt(pointVelocity.x * pointVelocity.x +
+               pointVelocity.z * pointVelocity.z);
+    minimumTangentialSpeed =
+        PxMin(minimumTangentialSpeed, tangentialSpeed);
+  }
+  return minimumTangentialSpeed == PX_MAX_F32 ? 0.0f
+                                               : minimumTangentialSpeed;
+}
+
+static void sampleGroundSlideWitness(
+    PxU32 frameIndex, PxU32 boxIndex, PxRigidDynamic *body,
+    const PxVec3 &position, const PxQuat &orientation,
+    const PxVec3 &linearVelocity, const PxVec3 &angularVelocity) {
+  if (!gHeadlessTripleBallSlide ||
+      boxIndex >= gGroundSlideWitnesses.size())
+    return;
+
+  HelloWorldGroundSlideWitness &witness =
+      gGroundSlideWitnesses[boxIndex];
+  PxReal lowestRelativeY = 0.0f;
+  const PxReal minimumContactSlip =
+      getMinimumBottomCornerTangentialSpeed(
+          orientation, linearVelocity, angularVelocity, gBoxHalfExtent,
+          lowestRelativeY);
+  const PxReal lowestCornerY = position.y + lowestRelativeY;
+  const PxReal horizontalSpeed =
+      PxSqrt(linearVelocity.x * linearVelocity.x +
+             linearVelocity.z * linearVelocity.z);
+  const PxReal angularSpeed = getSafeMagnitude(angularVelocity);
+  witness.finalHorizontalSpeed = horizontalSpeed;
+  witness.finalAngularSpeed = angularSpeed;
+  witness.finalMinimumContactSlip = minimumContactSlip;
+  witness.finalLowestCornerY = lowestCornerY;
+  witness.finalPosition = position;
+
+  const PxU32 finalShotFrame =
+      gBallShotFrame +
+      (gTripleBallShotCount - 1u) * gTripleBallShotSpacing;
+  const bool sustainedGroundSlide =
+      frameIndex >= finalShotFrame && !body->isSleeping() &&
+      lowestCornerY >= -0.5f && lowestCornerY <= 0.20f &&
+      PxAbs(linearVelocity.y) <= 2.0f && horizontalSpeed >= 0.25f &&
+      minimumContactSlip >= 0.25f;
+  if (!sustainedGroundSlide) {
+    witness.currentFrames = 0u;
+    return;
+  }
+
+  if (witness.currentFrames == 0u) {
+    ++witness.episodeCount;
+    if (witness.firstFrame == PX_MAX_U32)
+      witness.firstFrame = frameIndex;
+  }
+  ++witness.currentFrames;
+  ++witness.totalFrames;
+  witness.maxFrames = PxMax(witness.maxFrames, witness.currentFrames);
+  witness.lastFrame = frameIndex;
+  witness.peakHorizontalSpeed =
+      PxMax(witness.peakHorizontalSpeed, horizontalSpeed);
+  witness.peakAngularSpeed =
+      PxMax(witness.peakAngularSpeed, angularSpeed);
+  witness.peakMinimumContactSlip =
+      PxMax(witness.peakMinimumContactSlip, minimumContactSlip);
+  if ((witness.currentFrames % 60u) == 0u) {
+    printf("[HelloWorldGroundSlide] frame=%u box=%u streak=%u "
+           "horizontal=%.9g angular=%.9g minimumContactSlip=%.9g "
+           "lowestCornerY=%.9g\n",
+           frameIndex, boxIndex, witness.currentFrames,
+           double(horizontalSpeed), double(angularSpeed),
+           double(minimumContactSlip), double(lowestCornerY));
+  }
 }
 
 static void applySleepWakeImpulse() {
@@ -1155,6 +2039,9 @@ static void sampleLockProbeAfterFetch(PxU32 frameIndex) {
 
 static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
   PxReal maxBoxSpeed = 0.0f;
+  PxReal stackMaxLinearSpeed[gHelloWorldStackCount] = {};
+  PxReal stackMaxAngularSpeed[gHelloWorldStackCount] = {};
+  PxU32 awakeByStack[gHelloWorldStackCount] = {};
   PxReal sumBoxSpeed = 0.0f;
   PxU32 countAbove5 = 0;
   PxU32 countAbove15 = 0;
@@ -1162,7 +2049,14 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
   PxU32 sunkBoxes = 0;
   double totalMechanicalEnergy = 0.0;
   PxReal maxSpeedBoxY = 0.0f;
+  PxU32 maxSpeedBoxIndex = PX_MAX_U32;
+  PxVec3 maxSpeedBoxPosition(0.0f);
+  PxVec3 maxSpeedBoxVelocity(0.0f);
+  PxVec3 maxSpeedBoxAngularVelocity(0.0f);
+  PxReal maxSpeedBoxSupportY = 0.0f;
   const PxU32 currentFrame = frameIndex + 1;
+  const bool inSettleWindow =
+      frameIndex + settleTailFrames >= gHeadlessFrameCount;
 
   for (PxU32 boxIndex = 0; boxIndex < gBoxes.size(); ++boxIndex) {
     PxRigidDynamic *body = gBoxes[boxIndex];
@@ -1174,6 +2068,7 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
       gMetrics.nanDetected = true;
       continue;
     }
+    const PxVec3 angularVelocity = body->getAngularVelocity();
     totalMechanicalEnergy += double(bodyEnergy);
     gMetrics.maxSpeedAll = PxMax(gMetrics.maxSpeedAll, speed);
     gMetrics.maxBoxCenterY = PxMax(gMetrics.maxBoxCenterY, position.y);
@@ -1181,6 +2076,25 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
     if (speed > maxBoxSpeed) {
       maxBoxSpeed = speed;
       maxSpeedBoxY = position.y;
+      maxSpeedBoxIndex = boxIndex;
+      maxSpeedBoxPosition = position;
+      maxSpeedBoxVelocity = velocity;
+      maxSpeedBoxAngularVelocity = angularVelocity;
+      const PxMat33 maxSpeedRotation(orientation);
+      maxSpeedBoxSupportY =
+          gBoxHalfExtent *
+          (PxAbs(maxSpeedRotation.column0.y) +
+           PxAbs(maxSpeedRotation.column1.y) +
+           PxAbs(maxSpeedRotation.column2.y));
+    }
+    const PxU32 stackIndex = boxIndex / gHelloWorldBoxesPerStack;
+    if (stackIndex < gHelloWorldStackCount) {
+      const PxReal angularSpeed = getSafeMagnitude(angularVelocity);
+      stackMaxLinearSpeed[stackIndex] =
+          PxMax(stackMaxLinearSpeed[stackIndex], speed);
+      stackMaxAngularSpeed[stackIndex] =
+          PxMax(stackMaxAngularSpeed[stackIndex], angularSpeed);
+      awakeByStack[stackIndex] += body->isSleeping() ? 0u : 1u;
     }
     sumBoxSpeed += speed;
     if (speed > 5.0f)
@@ -1196,6 +2110,9 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
          PxAbs(rotation.column2.y));
     if (position.y + supportY < -0.05f)
       sunkBoxes++;
+
+    sampleGroundSlideWitness(frameIndex, boxIndex, body, position,
+                             orientation, velocity, angularVelocity);
 
     if (gBoxContacted[boxIndex] &&
         currentFrame >= gBoxContactFrames[boxIndex] &&
@@ -1233,6 +2150,15 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
     gPreviousBoxPositions[boxIndex] = position;
   }
   gMetrics.finalAwakeBoxes = awakeBoxes;
+  for (PxU32 i = 0; i < gHelloWorldStackCount; ++i) {
+    gMetrics.finalAwakeByStack[i] = awakeByStack[i];
+    if (inSettleWindow) {
+      gMetrics.tailPeakLinearSpeedByStack[i] = PxMax(
+          gMetrics.tailPeakLinearSpeedByStack[i], stackMaxLinearSpeed[i]);
+      gMetrics.tailPeakAngularSpeedByStack[i] = PxMax(
+          gMetrics.tailPeakAngularSpeedByStack[i], stackMaxAngularSpeed[i]);
+    }
+  }
   gMetrics.maxSunkBoxes = PxMax(gMetrics.maxSunkBoxes, sunkBoxes);
 
   if (gShotBall) {
@@ -1267,6 +2193,28 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
     }
   }
 
+  if (gHeadlessTripleBallSlide) {
+    for (PxU32 shotIndex = 1u; shotIndex < gTripleBallShotCount;
+         ++shotIndex) {
+      PxVec3 position(0.0f), velocity(0.0f);
+      PxQuat orientation(PxIdentity);
+      PxReal speed = 0.0f, ballEnergy = 0.0f;
+      if (!gTripleBallShots[shotIndex])
+        continue;
+      if (!sampleBodyState(gTripleBallShots[shotIndex], position,
+                           orientation, velocity, speed, ballEnergy)) {
+        gMetrics.nanDetected = true;
+        continue;
+      }
+      totalMechanicalEnergy += double(ballEnergy);
+      gMetrics.maxSpeedAll = PxMax(gMetrics.maxSpeedAll, speed);
+      gMetrics.maxBallSpeed = PxMax(gMetrics.maxBallSpeed, speed);
+      gMetrics.minBallCenterY =
+          PxMin(gMetrics.minBallCenterY, position.y);
+      gMetrics.maxBallUpVy = PxMax(gMetrics.maxBallUpVy, velocity.y);
+    }
+  }
+
   PxReal currentMechanicalEnergy = 0.0f;
   if (!std::isfinite(totalMechanicalEnergy) ||
       std::abs(totalMechanicalEnergy) >= double(PX_MAX_F32)) {
@@ -1276,10 +2224,22 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
     currentMechanicalEnergy = PxReal(totalMechanicalEnergy);
   }
 
+  const PxU32 energyReferenceFrame =
+      gHeadlessTripleBallSlide
+          ? gBallShotFrame +
+                (gTripleBallShotCount - 1u) * gTripleBallShotSpacing
+          : gBallShotFrame;
+  bool allProjectilesAvailable = gShotBall != NULL;
+  if (gHeadlessTripleBallSlide) {
+    for (PxU32 shotIndex = 0u; shotIndex < gTripleBallShotCount;
+         ++shotIndex)
+      allProjectilesAvailable &= gTripleBallShots[shotIndex] != NULL;
+  }
   const bool establishEnergyReference =
       !gMetrics.mechanicalReferenceSet &&
       ((!gHeadlessBallShot && frameIndex == 0) ||
-       (gHeadlessBallShot && gShotBall && frameIndex >= gBallShotFrame));
+       (gHeadlessBallShot && allProjectilesAvailable &&
+        frameIndex >= energyReferenceFrame));
   if (establishEnergyReference) {
     gMetrics.mechanicalReferenceSet = true;
     gMetrics.mechanicalEnergyReference = currentMechanicalEnergy;
@@ -1294,8 +2254,6 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
   gMechanicalEnergyHistory.push_back(currentMechanicalEnergy);
 
   const PxU32 boxCount = static_cast<PxU32>(gBoxes.size());
-  const bool inSettleWindow =
-      frameIndex + settleTailFrames >= gHeadlessFrameCount;
   if (inSettleWindow && boxCount > 0) {
     gMetrics.maxBoxSpeedSettle =
         PxMax(gMetrics.maxBoxSpeedSettle, maxBoxSpeed);
@@ -1315,9 +2273,16 @@ static void sampleDynamics(PxU32 frameIndex, PxU32 settleTailFrames) {
     const PxReal avgSpeed =
         boxCount ? sumBoxSpeed / PxReal(boxCount) : 0.0f;
     printf("[HelloWorldTrace] frame=%u maxBoxSpeed=%.3f avgBoxSpeed=%.3f "
-           "above5=%u above15=%u awakeBoxes=%u maxSpeedBoxY=%.2f\n",
+           "above5=%u above15=%u awakeBoxes=%u maxBox=%u "
+           "position=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) "
+           "angular=(%.3f,%.3f,%.3f) bottom=%.3f\n",
            frameIndex, maxBoxSpeed, avgSpeed, countAbove5, countAbove15,
-           awakeBoxes, maxSpeedBoxY);
+           awakeBoxes, maxSpeedBoxIndex, maxSpeedBoxPosition.x,
+           maxSpeedBoxPosition.y, maxSpeedBoxPosition.z,
+           maxSpeedBoxVelocity.x, maxSpeedBoxVelocity.y,
+           maxSpeedBoxVelocity.z, maxSpeedBoxAngularVelocity.x,
+           maxSpeedBoxAngularVelocity.y, maxSpeedBoxAngularVelocity.z,
+           maxSpeedBoxY - maxSpeedBoxSupportY);
   }
   gMetrics.completedFrames = currentFrame;
 }
@@ -1446,6 +2411,13 @@ static void sampleRigidStressFinalState() {
   gRigidStressMetrics.maxAbsPosition = 0.0f;
   RigidStressStateHasher stateHasher;
   PxU32 stateActorCount = 0;
+  PxU32 verticalMovedBoxes = 0;
+  PxU32 horizontalMovedBoxes = 0;
+  PxReal maxVerticalDisplacement = 0.0f;
+  PxReal maxHorizontalDisplacement = 0.0f;
+  PxF64 layerVerticalDisplacement[gRigidStressStackSize] = {};
+  PxF64 layerHorizontalDisplacement[gRigidStressStackSize] = {};
+  PxU32 layerSamples[gRigidStressStackSize] = {};
   for (PxU32 i = 0; i < static_cast<PxU32>(gBoxes.size()); ++i) {
     const PxRigidDynamic *body = gBoxes[i];
     appendRigidStressActorState(stateHasher, 1u, i, body, stateActorCount);
@@ -1465,9 +2437,50 @@ static void sampleRigidStressFinalState() {
         PxMax(gRigidStressMetrics.maxAbsPosition,
               PxMax(PxAbs(pose.p.x),
                     PxMax(PxAbs(pose.p.y), PxAbs(pose.p.z))));
-    if (i < static_cast<PxU32>(gPreviousBoxPositions.size()) &&
-        (pose.p - gPreviousBoxPositions[i]).magnitudeSquared() > 0.0025f)
-      gRigidStressMetrics.movedBoxes++;
+    if (i < static_cast<PxU32>(gPreviousBoxPositions.size())) {
+      const PxVec3 displacement = pose.p - gPreviousBoxPositions[i];
+      if (displacement.magnitudeSquared() > 0.0025f)
+        gRigidStressMetrics.movedBoxes++;
+      const PxReal vertical = PxAbs(displacement.y);
+      const PxReal horizontal =
+          PxSqrt(displacement.x * displacement.x +
+                 displacement.z * displacement.z);
+      verticalMovedBoxes += vertical > 0.05f ? 1u : 0u;
+      horizontalMovedBoxes += horizontal > 0.05f ? 1u : 0u;
+      maxVerticalDisplacement = PxMax(maxVerticalDisplacement, vertical);
+      maxHorizontalDisplacement = PxMax(maxHorizontalDisplacement, horizontal);
+      PxU32 withinStack = i %
+          (gRigidStressStackSize * (gRigidStressStackSize + 1u) / 2u);
+      PxU32 layer = 0;
+      PxU32 layerWidth = gRigidStressStackSize;
+      while (layer + 1u < gRigidStressStackSize &&
+             withinStack >= layerWidth) {
+        withinStack -= layerWidth;
+        ++layer;
+        --layerWidth;
+      }
+      layerVerticalDisplacement[layer] += vertical;
+      layerHorizontalDisplacement[layer] += horizontal;
+      ++layerSamples[layer];
+    }
+  }
+  if (const char *trace = std::getenv("AVBD_RIGID_STRESS_TRACE")) {
+    if (trace[0] && trace[0] != '0') {
+      printf("[RigidStressTrace] verticalMoved=%u horizontalMoved=%u "
+             "maxVertical=%.9g maxHorizontal=%.9g\n",
+             verticalMovedBoxes, horizontalMovedBoxes,
+             double(maxVerticalDisplacement),
+             double(maxHorizontalDisplacement));
+      for (PxU32 layer = 0; layer < gRigidStressStackSize; ++layer) {
+        const PxF64 divisor = layerSamples[layer] ?
+            PxF64(layerSamples[layer]) : 1.0;
+        printf("[RigidStressLayer] layer=%u avgVertical=%.9g "
+               "avgHorizontal=%.9g samples=%u\n", layer,
+               layerVerticalDisplacement[layer] / divisor,
+               layerHorizontalDisplacement[layer] / divisor,
+               layerSamples[layer]);
+      }
+    }
   }
   appendRigidStressActorState(stateHasher, 2u, 0u, gShotBall,
                               stateActorCount);
@@ -1533,6 +2546,24 @@ static void setGateFailure(HelloWorldGateEvaluation &evaluation,
   evaluation.exitCode = Snippets::eHEADLESS_GATE_FAILED;
   evaluation.status = "FAIL";
   evaluation.reason = reason;
+}
+
+static HelloWorldGateEvaluation evaluateSubBounceStackGate() {
+  HelloWorldGateEvaluation evaluation;
+  evaluation.boxCount = gSubBounceMetrics.actorCount;
+  if (gMetrics.completedFrames != gHeadlessOptions.frames ||
+      gMetrics.fetchFailures)
+    setGateError(evaluation, "incomplete_simulation");
+  if (gSubBounceMetrics.actorCount != gSubBounceBoxCount)
+    setGateError(evaluation, "actor_registry");
+  if (gErrorCallback.getFatalCount() || gMetrics.fetchErrorState)
+    setGateFailure(evaluation, "physx_error");
+  bool contactsFinite = true;
+  for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i)
+    contactsFinite &= gSubBounceMetrics.contactFinite[i];
+  if (!gSubBounceMetrics.finite || !contactsFinite || gMetrics.nanDetected)
+    setGateFailure(evaluation, "non_finite");
+  return evaluation;
 }
 
 static HelloWorldGateEvaluation evaluateRigidStressGate() {
@@ -1773,6 +2804,8 @@ static PxReal getTailWindowMean(const std::vector<PxReal> &values,
 }
 
 static HelloWorldGateEvaluation evaluateGate() {
+  if (gHeadlessSubBounceStack)
+    return evaluateSubBounceStackGate();
   if (gHeadlessSleepProbe)
     return evaluateSleepProbeGate();
   if (gHeadlessLockProbe)
@@ -1848,7 +2881,13 @@ static HelloWorldGateEvaluation evaluateGate() {
     if (gMetrics.maxBoxSpeedSettle > gSettleSpeedCap)
       setGateFailure(evaluation, "settle_speed");
   } else {
-    if (!gShotBall || !gMetrics.ballLaunchMomentum)
+    bool projectilesAvailable = gShotBall != NULL;
+    if (gHeadlessTripleBallSlide) {
+      for (PxU32 shotIndex = 0u; shotIndex < gTripleBallShotCount;
+           ++shotIndex)
+        projectilesAvailable &= gTripleBallShots[shotIndex] != NULL;
+    }
+    if (!projectilesAvailable || !gMetrics.ballLaunchMomentum)
       setGateError(evaluation, "projectile_missing");
     if (!gMetrics.ballBoxContactEvents || !gMetrics.ballBoxContactPoints ||
         !gMetrics.contactedBoxes)
@@ -1931,6 +2970,8 @@ void initPhysics(bool interactive) {
   sceneDesc.gravity = (gHeadlessSleepProbe || gHeadlessLockProbe)
                           ? PxVec3(0.0f)
                           : PxVec3(0.0f, -9.81f, 0.0f);
+  if (gHeadlessSubBounceStack)
+    sceneDesc.bounceThresholdVelocity = 2.0f;
   if (gHeadlessCase == eHELLO_CASE_SLEEP_DISABLED)
     sceneDesc.flags |= PxSceneFlag::eDISABLE_SLEEPING;
   gDispatcher = PxDefaultCpuDispatcherCreate(
@@ -1940,12 +2981,13 @@ void initPhysics(bool interactive) {
     return;
   }
   sceneDesc.cpuDispatcher = gDispatcher;
-  sceneDesc.filterShader =
-      (interactive || gHeadlessRigidStress)
-          ? PxDefaultSimulationFilterShader
-          : helloWorldFilterShader;
+  const bool useHelloWorldFilter =
+      interactive || gCaptureAutoStart || !gHeadlessRigidStress;
+  sceneDesc.filterShader = useHelloWorldFilter
+                               ? helloWorldFilterShader
+                               : PxDefaultSimulationFilterShader;
   sceneDesc.simulationEventCallback =
-      (interactive || gHeadlessRigidStress) ? NULL : &gSimulationCallback;
+      useHelloWorldFilter ? &gSimulationCallback : NULL;
   sceneDesc.solverType = gSolverType;
   gScene = gPhysics->createScene(sceneDesc);
   if (!gScene) {
@@ -1980,9 +3022,29 @@ void initPhysics(bool interactive) {
     gInitializationFailed = true;
     return;
   }
+  if (gHeadlessSubBounceStack) {
+    gSubBounceGround = groundPlane;
+    PxShape *groundShape = NULL;
+    if (groundPlane->getShapes(&groundShape, 1) == 1 && groundShape) {
+      PxFilterData filterData;
+      filterData.word0 = eHELLO_FILTER_SUB_BOUNCE_GROUND;
+      groundShape->setSimulationFilterData(filterData);
+    } else {
+      gInitializationFailed = true;
+    }
+  }
+  gGroundPlane = groundPlane;
   gScene->addActor(*groundPlane);
 
-  if (gHeadlessSleepProbe) {
+  if (gHeadlessSubBounceStack) {
+    createSubBounceStackFixture();
+    printf("[HelloWorld] init solver=%s subBounceStack=1 boxes=%u "
+           "boxSize=1 restitution=0.6 bounceThresholdVelocity=2 "
+           "gravity=-9.81 ground=plane headless=%s\n",
+           Snippets::getSolverTypeName(gSolverType),
+           gSubBounceMetrics.actorCount,
+           gHeadlessMode ? "yes" : "no");
+  } else if (gHeadlessSleepProbe) {
     createSleepProbeFixture();
     printf("[HelloWorld] init solver=%s sleepProbe=%s actors=%u "
            "gravity=zero ground=plane sleepingDisabled=%u headless=%s\n",
@@ -2037,6 +3099,14 @@ void initPhysics(bool interactive) {
            static_cast<PxU32>(gBoxes.size()), gExpectedTargetBoxCount,
            gHeadlessMode ? "yes" : "no");
   }
+
+  if (gCaptureAutoStart && !gInitializationFailed)
+    startCapture(gCaptureRequestedPath.empty()
+                     ? NULL
+                     : gCaptureRequestedPath.c_str());
+  if (interactive && !gCaptureAutoStart)
+    std::printf("[HelloWorldCapture] controls R:start/stop M:mark; output is "
+                "a local .pxtrace physics recording\n");
 }
 
 static void beginRigidStressAttributionFrame() {
@@ -2096,14 +3166,24 @@ static void sampleRigidStressWorkAfterFetch() {
 void stepPhysics(bool interactive) {
   if (!gScene)
     return;
-  if (!interactive && gHeadlessBallShot && gSimFrame == gBallShotFrame)
+  if (!interactive && gHeadlessTripleBallSlide) {
+    for (PxU32 shotIndex = 0u; shotIndex < gTripleBallShotCount;
+         ++shotIndex) {
+      if (gSimFrame ==
+          gBallShotFrame + shotIndex * gTripleBallShotSpacing)
+        spawnTripleBallShot(shotIndex);
+    }
+  } else if (!interactive && gHeadlessBallShot &&
+             gSimFrame == gBallShotFrame) {
     spawnBallShot();
+  }
   if (!interactive && gHeadlessCase == eHELLO_CASE_SLEEP_WAKE &&
       gSimFrame == gSleepWakeFrame)
     applySleepWakeImpulse();
   if (!interactive && gHeadlessLockProbe &&
       gSimFrame == gLockImpulseFrame)
     applyLockProbeRuntimeExcitation();
+  beginCaptureFrame();
   PxU32 errorState = 0;
   bool fetched = false;
   if (!interactive && gHeadlessRigidStress) {
@@ -2132,7 +3212,9 @@ void stepPhysics(bool interactive) {
   if (!interactive && errorState)
     gMetrics.fetchErrorState |= errorState;
   if (!interactive) {
-    if (gHeadlessSleepProbe)
+    if (gHeadlessSubBounceStack)
+      sampleSubBounceStackAfterFetch(gSimFrame);
+    else if (gHeadlessSleepProbe)
       sampleSleepProbeAfterFetch(gSimFrame);
     else if (gHeadlessLockProbe)
       sampleLockProbeAfterFetch(gSimFrame);
@@ -2141,10 +3223,12 @@ void stepPhysics(bool interactive) {
     else
       sampleDynamics(gSimFrame, 120);
   }
+  recordCaptureFrame(gSimFrame + 1u);
   ++gSimFrame;
 }
 
 void cleanupPhysics(bool interactive) {
+  stopCapture();
   PX_RELEASE(gScene);
   PX_RELEASE(gMaterial);
   PX_RELEASE(gDispatcher);
@@ -2163,7 +3247,13 @@ void cleanupPhysics(bool interactive) {
     PxSetProfilerCallback(NULL);
 #endif
   PX_RELEASE(gFoundation);
+  gGroundPlane = NULL;
   gShotBall = NULL;
+  for (PxU32 i = 0u; i < gTripleBallShotCount; ++i)
+    gTripleBallShots[i] = NULL;
+  gSubBounceGround = NULL;
+  for (PxU32 i = 0; i < gSubBounceBoxCount; ++i)
+    gSubBounceBodies[i] = NULL;
   for (PxU32 i = 0; i < eHELLO_SLEEP_WITNESS_COUNT; ++i)
     gSleepBodies[i] = NULL;
   for (PxU32 i = 0; i < eHELLO_LOCK_WITNESS_COUNT; ++i) {
@@ -2188,6 +3278,15 @@ void keyPress(unsigned char key, const PxTransform &camera) {
   switch (toupper(key)) {
   case 'B':
     createStack(PxTransform(PxVec3(0, 0, stackZ -= 10.0f)), 10, 2.0f);
+    break;
+  case 'M':
+    markCapture();
+    break;
+  case 'R':
+    if (gCapture.active)
+      stopCapture();
+    else
+      startCapture();
     break;
   case ' ':
     createDynamic(camera, PxSphereGeometry(3.0f),
@@ -2662,7 +3761,162 @@ static void printRigidStressWorkResult() {
       gRigidStressWorkMetrics.peakSolverPartitions);
 }
 
+static void printGroundSlideDetails() {
+  if (!gHeadlessTripleBallSlide)
+    return;
+
+  std::vector<PxU32> orderedBoxes;
+  orderedBoxes.reserve(gGroundSlideWitnesses.size());
+  PxU32 sustainedBoxCount = 0u;
+  for (PxU32 i = 0u; i < gGroundSlideWitnesses.size(); ++i) {
+    orderedBoxes.push_back(i);
+    sustainedBoxCount +=
+        gGroundSlideWitnesses[i].maxFrames >= 60u ? 1u : 0u;
+  }
+  std::sort(orderedBoxes.begin(), orderedBoxes.end(),
+            [](PxU32 lhs, PxU32 rhs) {
+              const HelloWorldGroundSlideWitness &a =
+                  gGroundSlideWitnesses[lhs];
+              const HelloWorldGroundSlideWitness &b =
+                  gGroundSlideWitnesses[rhs];
+              if (a.maxFrames != b.maxFrames)
+                return a.maxFrames > b.maxFrames;
+              return lhs < rhs;
+            });
+
+  const PxU32 reportedCount =
+      PxMin(PxU32(8), static_cast<PxU32>(orderedBoxes.size()));
+  const PxU32 worstBox = reportedCount ? orderedBoxes[0] : PX_MAX_U32;
+  const PxU32 worstFrames =
+      reportedCount ? gGroundSlideWitnesses[worstBox].maxFrames : 0u;
+  printf("[SnippetHelloWorldGroundSlideSummary] shots=%u spacingFrames=%u "
+         "witnessBoxes=%u sustainedBoxes=%u worstBox=%u "
+         "worstConsecutiveFrames=%u linearThreshold=0.25 "
+         "contactSlipThreshold=0.25 groundBand=[-0.5,0.2]\n",
+         gTripleBallShotCount, gTripleBallShotSpacing,
+         static_cast<PxU32>(gGroundSlideWitnesses.size()),
+         sustainedBoxCount, worstBox, worstFrames);
+  for (PxU32 shotIndex = 0u; shotIndex < gTripleBallShotCount;
+       ++shotIndex) {
+    const PxRigidDynamic *ball = gTripleBallShots[shotIndex];
+    if (!ball) {
+      printf("[SnippetHelloWorldProjectile] shot=%u missing=1\n",
+             shotIndex);
+      continue;
+    }
+    const PxTransform pose = ball->getGlobalPose();
+    const PxVec3 linearVelocity = ball->getLinearVelocity();
+    const PxVec3 angularVelocity = ball->getAngularVelocity();
+    printf("[SnippetHelloWorldProjectile] shot=%u missing=0 sleeping=%u "
+           "position=(%.9g,%.9g,%.9g) velocity=(%.9g,%.9g,%.9g) "
+           "angular=(%.9g,%.9g,%.9g)\n",
+           shotIndex, ball->isSleeping() ? 1u : 0u,
+           double(pose.p.x), double(pose.p.y), double(pose.p.z),
+           double(linearVelocity.x), double(linearVelocity.y),
+           double(linearVelocity.z), double(angularVelocity.x),
+           double(angularVelocity.y), double(angularVelocity.z));
+  }
+  for (PxU32 rank = 0u; rank < reportedCount; ++rank) {
+    const PxU32 boxIndex = orderedBoxes[rank];
+    const HelloWorldGroundSlideWitness &witness =
+        gGroundSlideWitnesses[boxIndex];
+    printf("[SnippetHelloWorldGroundSlide] rank=%u box=%u "
+           "maxConsecutiveFrames=%u totalFrames=%u episodes=%u "
+           "firstFrame=%u lastFrame=%u "
+           "peakHorizontal=%.9g peakAngular=%.9g "
+           "peakMinimumContactSlip=%.9g finalHorizontal=%.9g "
+           "finalAngular=%.9g finalMinimumContactSlip=%.9g "
+           "finalLowestCornerY=%.9g initialPosition=(%.9g,%.9g,%.9g) "
+           "finalPosition=(%.9g,%.9g,%.9g)\n",
+           rank + 1u, boxIndex, witness.maxFrames, witness.totalFrames,
+           witness.episodeCount, witness.firstFrame, witness.lastFrame,
+           double(witness.peakHorizontalSpeed),
+           double(witness.peakAngularSpeed),
+           double(witness.peakMinimumContactSlip),
+           double(witness.finalHorizontalSpeed),
+           double(witness.finalAngularSpeed),
+           double(witness.finalMinimumContactSlip),
+           double(witness.finalLowestCornerY),
+           double(witness.initialPosition.x),
+           double(witness.initialPosition.y),
+           double(witness.initialPosition.z),
+           double(witness.finalPosition.x),
+           double(witness.finalPosition.y),
+           double(witness.finalPosition.z));
+  }
+}
+
 static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
+  if (gHeadlessSubBounceStack) {
+    const PxReal tailMeanLinear =
+        gSubBounceMetrics.tailSamples
+            ? gSubBounceMetrics.tailLinearSpeedSum /
+                  PxReal(gSubBounceMetrics.tailSamples)
+            : 0.0f;
+    const PxReal tailMeanAngular =
+        gSubBounceMetrics.tailSamples
+            ? gSubBounceMetrics.tailAngularSpeedSum /
+                  PxReal(gSubBounceMetrics.tailSamples)
+            : 0.0f;
+    PxReal minReportedSeparation = PX_MAX_F32;
+    PxReal maxReportedSeparation = -PX_MAX_F32;
+    for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i) {
+      minReportedSeparation = PxMin(
+          minReportedSeparation,
+          gSubBounceMetrics.minReportedSeparation[i]);
+      maxReportedSeparation = PxMax(
+          maxReportedSeparation,
+          gSubBounceMetrics.maxReportedSeparation[i]);
+    }
+    if (minReportedSeparation == PX_MAX_F32)
+      minReportedSeparation = 0.0f;
+    if (maxReportedSeparation == -PX_MAX_F32)
+      maxReportedSeparation = 0.0f;
+    const PxU32 interfaceMask = getSubBounceInterfaceMask();
+    printf(
+        "[SnippetHelloWorldSubBounce] interfaceMask=0x%x "
+        "allInterfacesObserved=%u contactFrames=[%u,%u,%u] "
+        "contactPoints=[%u,%u,%u] firstContactFrames=[%u,%u,%u] "
+        "lastContactFrames=[%u,%u,%u] maxGap=[%.9g,%.9g,%.9g] "
+        "maxPenetration=[%.9g,%.9g,%.9g] "
+        "reportedSeparation=[%.9g,%.9g] maxTiltDegrees=%.9g "
+        "tailSamples=%u tailMeanMaxLinearSpeed=%.9g "
+        "tailMeanMaxAngularSpeed=%.9g tailPeakLinearSpeed=%.9g "
+        "tailPeakAngularSpeed=%.9g firstAllSleepFrame=%u "
+        "finalSleeping=%u maxAbsPosition=%.9g\n",
+        interfaceMask,
+        interfaceMask == ((1u << gSubBounceInterfaceCount) - 1u)
+            ? 1u
+            : 0u,
+        gSubBounceMetrics.contactFrames[0],
+        gSubBounceMetrics.contactFrames[1],
+        gSubBounceMetrics.contactFrames[2],
+        gSubBounceMetrics.contactPoints[0],
+        gSubBounceMetrics.contactPoints[1],
+        gSubBounceMetrics.contactPoints[2],
+        gSubBounceMetrics.firstContactFrame[0],
+        gSubBounceMetrics.firstContactFrame[1],
+        gSubBounceMetrics.firstContactFrame[2],
+        gSubBounceMetrics.lastContactFrame[0],
+        gSubBounceMetrics.lastContactFrame[1],
+        gSubBounceMetrics.lastContactFrame[2],
+        double(gSubBounceMetrics.maxGap[0]),
+        double(gSubBounceMetrics.maxGap[1]),
+        double(gSubBounceMetrics.maxGap[2]),
+        double(gSubBounceMetrics.maxPenetration[0]),
+        double(gSubBounceMetrics.maxPenetration[1]),
+        double(gSubBounceMetrics.maxPenetration[2]),
+        double(minReportedSeparation), double(maxReportedSeparation),
+        double(gSubBounceMetrics.maxTiltRadians * 180.0f / PxPi),
+        gSubBounceMetrics.tailSamples, double(tailMeanLinear),
+        double(tailMeanAngular),
+        double(gSubBounceMetrics.tailPeakLinearSpeed),
+        double(gSubBounceMetrics.tailPeakAngularSpeed),
+        gSubBounceMetrics.firstAllSleepFrame,
+        gSubBounceMetrics.finalSleepingCount,
+        double(gSubBounceMetrics.maxAbsPosition));
+    return;
+  }
   if (gHeadlessSleepProbe) {
     printSleepProbeDetails();
     return;
@@ -2675,6 +3929,7 @@ static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
     printRigidStressDetails();
     return;
   }
+  printGroundSlideDetails();
   const PxReal tailAverageMaxBoxSpeed =
       gMetrics.tailSpeedSamples
           ? gMetrics.tailAvgBoxSpeed / PxReal(gMetrics.tailSpeedSamples)
@@ -2690,6 +3945,24 @@ static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
       double(evaluation.maxEnergyRatio), double(evaluation.tailEnergyW1),
       double(evaluation.tailEnergyW2), double(evaluation.tailEnergyW3),
       double(evaluation.tailEnergyW4), double(evaluation.tailEnergyGrowth));
+  printf(
+      "[SnippetHelloWorldStacks] stackZ=[0,-10,-20,-30,-40] "
+      "finalAwake=[%u,%u,%u,%u,%u] "
+      "tailPeakLinearSpeed=[%.9g,%.9g,%.9g,%.9g,%.9g] "
+      "tailPeakAngularSpeed=[%.9g,%.9g,%.9g,%.9g,%.9g]\n",
+      gMetrics.finalAwakeByStack[0], gMetrics.finalAwakeByStack[1],
+      gMetrics.finalAwakeByStack[2], gMetrics.finalAwakeByStack[3],
+      gMetrics.finalAwakeByStack[4],
+      double(gMetrics.tailPeakLinearSpeedByStack[0]),
+      double(gMetrics.tailPeakLinearSpeedByStack[1]),
+      double(gMetrics.tailPeakLinearSpeedByStack[2]),
+      double(gMetrics.tailPeakLinearSpeedByStack[3]),
+      double(gMetrics.tailPeakLinearSpeedByStack[4]),
+      double(gMetrics.tailPeakAngularSpeedByStack[0]),
+      double(gMetrics.tailPeakAngularSpeedByStack[1]),
+      double(gMetrics.tailPeakAngularSpeedByStack[2]),
+      double(gMetrics.tailPeakAngularSpeedByStack[3]),
+      double(gMetrics.tailPeakAngularSpeedByStack[4]));
   if (gHeadlessBallShot) {
     printf(
         "[SnippetHelloWorldImpact] events=%u points=%u firstHitFrame=%u "
@@ -2709,6 +3982,36 @@ static void printGateDetails(const HelloWorldGateEvaluation &evaluation) {
 
 static void printGateResult(const HelloWorldGateEvaluation &evaluation,
                             PxU32 physicsErrors, PxU32 physicsWarnings) {
+  if (gHeadlessSubBounceStack) {
+    bool contactsFinite = true;
+    for (PxU32 i = 0; i < gSubBounceInterfaceCount; ++i)
+      contactsFinite &= gSubBounceMetrics.contactFinite[i];
+    printf(
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld "
+        "case=sub-bounce-stack solver=%s execution=%s requestedFrames=%u "
+        "completedFrames=%u dt=%.9g seed=%u dispatcherThreads=%u "
+        "capability=SUPPORTED validation=DIAGNOSTIC status=%s reason=%s "
+        "nonFinite=%u physicsErrors=%u physicsWarnings=%u "
+        "fetchFailures=%u fetchErrorState=%u boxCount=%u "
+        "restitution=0.6 bounceThresholdVelocity=2 "
+        "interfaceMask=0x%x firstAllSleepFrame=%u finalSleeping=%u\n",
+        Snippets::getSolverTypeName(gHeadlessOptions.solverType),
+        Snippets::getExecutionName(gHeadlessOptions.execution),
+        gHeadlessOptions.frames, gMetrics.completedFrames,
+        double(gHeadlessOptions.dt), gHeadlessOptions.seed,
+        gHeadlessOptions.dispatcherThreads, evaluation.status,
+        evaluation.reason,
+        (!gSubBounceMetrics.finite || !contactsFinite ||
+         gMetrics.nanDetected)
+            ? 1u
+            : 0u,
+        physicsErrors, physicsWarnings, gMetrics.fetchFailures,
+        gMetrics.fetchErrorState, evaluation.boxCount,
+        getSubBounceInterfaceMask(),
+        gSubBounceMetrics.firstAllSleepFrame,
+        gSubBounceMetrics.finalSleepingCount);
+    return;
+  }
   if (gHeadlessSleepProbe) {
     printSleepProbeGateResult(evaluation, physicsErrors, physicsWarnings);
     return;
@@ -2825,6 +4128,9 @@ int snippetMain(int argc, const char *const *argv) {
   bool rigidStressLayoutSeen = false;
   bool caseSeen = false;
   bool headlessOnlyOptionSeen = false;
+  bool captureSeen = false;
+  bool captureAutoStart = false;
+  std::string capturePath;
   PxU32 ballShotFrame = 30;
   PxU32 rigidStressWarmupFrames = 10;
   PxU32 rigidStressAvbdIterations = 0;
@@ -2837,6 +4143,21 @@ int snippetMain(int argc, const char *const *argv) {
     const char *arg = argv[i];
     if (!arg)
       continue;
+    if (strcmp(arg, "--capture") == 0 ||
+        Snippets::hasOptionPrefix(arg, "--capture=")) {
+      if (captureSeen)
+        return reportConfigurationError(options, "duplicate_--capture");
+      captureSeen = true;
+      captureAutoStart = true;
+      if (Snippets::hasOptionPrefix(arg, "--capture=")) {
+        const char *value = arg + strlen("--capture=");
+        if (!value[0])
+          return reportConfigurationError(options,
+                                          "invalid_--capture_value");
+        capturePath = value;
+      }
+      continue;
+    }
     if (strcmp(arg, "--work-attribution") == 0) {
       if (workAttributionSeen)
         return reportConfigurationError(options,
@@ -2983,16 +4304,23 @@ int snippetMain(int argc, const char *const *argv) {
   const bool sleepProbeCase = isSleepProbeCase(headlessCase);
   const bool lockProbeCase = isLockProbeCase(headlessCase);
   const bool rigidStressCase = headlessCase == eHELLO_CASE_RIGID_STRESS;
+  const bool tripleBallSlideCase =
+      headlessCase == eHELLO_CASE_TRIPLE_BALL_SLIDE;
+  const bool subBounceStackCase =
+      headlessCase == eHELLO_CASE_SUB_BOUNCE_STACK;
   if (sleepProbeCase && !options.framesExplicit)
     options.frames = headlessCase == eHELLO_CASE_SLEEP_WAKE ? 360u : 180u;
   if (lockProbeCase && !options.framesExplicit)
     options.frames = 120u;
   if (rigidStressCase && !options.framesExplicit)
     options.frames = 120u;
+  if (subBounceStackCase && !options.framesExplicit)
+    options.frames = 360u;
 
-  if (ballShotFrameSeen && headlessCase != eHELLO_CASE_BALL_SHOT)
+  if (ballShotFrameSeen && headlessCase != eHELLO_CASE_BALL_SHOT &&
+      !tripleBallSlideCase)
     return reportConfigurationError(options,
-                                    "--ball-shot-frame_requires_ball-shot");
+                                    "--ball-shot-frame_requires_ball-shot_case");
   if (warmupFramesSeen && !rigidStressCase)
     return reportConfigurationError(options,
                                     "--warmup-frames_requires_rigid-stress");
@@ -3045,6 +4373,12 @@ int snippetMain(int argc, const char *const *argv) {
       options.frames < ballShotFrame + 120u)
     return reportConfigurationError(options,
                                     "ball-shot_response_window_incomplete");
+  if (tripleBallSlideCase &&
+      options.frames <
+          ballShotFrame +
+              (gTripleBallShotCount - 1u) * gTripleBallShotSpacing + 120u)
+    return reportConfigurationError(
+        options, "triple-ball-slide_response_window_incomplete");
   if (options.execution == Snippets::eHEADLESS_SEQUENTIAL &&
       options.solverType != PxSolverType::eAVBD)
     return reportConfigurationError(options, "sequential_requires_avbd");
@@ -3057,10 +4391,13 @@ int snippetMain(int argc, const char *const *argv) {
   gHeadlessCase = headlessCase;
   gSolverType = options.solverType;
   gHeadlessMode = options.headless;
-  gHeadlessBallShot = headlessCase == eHELLO_CASE_BALL_SHOT;
+  gHeadlessBallShot =
+      headlessCase == eHELLO_CASE_BALL_SHOT || tripleBallSlideCase;
+  gHeadlessTripleBallSlide = tripleBallSlideCase;
   gHeadlessSleepProbe = sleepProbeCase;
   gHeadlessLockProbe = lockProbeCase;
   gHeadlessRigidStress = rigidStressCase;
+  gHeadlessSubBounceStack = subBounceStackCase;
   gRigidStressWorkAttribution = workAttributionSeen;
   gRigidStressAvbdIterationsExplicit = avbdIterationsSeen;
   gRigidStressAvbdJointIterationOverrideExplicit =
@@ -3077,6 +4414,8 @@ int snippetMain(int argc, const char *const *argv) {
   gHeadlessFrameCount = options.frames;
   gBallShotFrame = ballShotFrame;
   gRigidStressWarmupFrames = rigidStressWarmupFrames;
+  gCaptureAutoStart = captureAutoStart;
+  gCaptureRequestedPath = capturePath;
 
 #ifdef RENDER_SNIPPET
   if (!options.headless) {
@@ -3099,10 +4438,20 @@ int snippetMain(int argc, const char *const *argv) {
            gRigidStressExpectedBoxCount, double(gRigidStressBallRadius),
            double(gRigidStressBallDensity), gRigidStressWarmupFrames,
            gHeadlessOptions.frames - gRigidStressWarmupFrames);
+  } else if (gHeadlessSubBounceStack) {
+    printf("[SnippetHelloWorldConfig] subBounceStack=1 boxes=3 "
+           "boxSize=1 initialVelocity=zero restitution=0.6 "
+           "bounceThresholdVelocity=2 tailFrames=%u "
+           "validation=DIAGNOSTIC\n",
+           gSubBounceTailFrames);
   } else if (gHeadlessBallShot) {
-    printf("[SnippetHelloWorldConfig] shotFrame=%u targetStackZ=0 "
-           "direction=negative-z responseWindowFrames=%u\n",
-           gBallShotFrame, gBoxResponseWindowFrames);
+    printf("[SnippetHelloWorldConfig] shotFrame=%u shotCount=%u "
+           "shotSpacingFrames=%u targetStackZ=0 direction=negative-z "
+           "responseWindowFrames=%u\n",
+           gBallShotFrame,
+           gHeadlessTripleBallSlide ? gTripleBallShotCount : 1u,
+           gHeadlessTripleBallSlide ? gTripleBallShotSpacing : 0u,
+           gBoxResponseWindowFrames);
   } else if (gHeadlessSleepProbe) {
     printf("[SnippetHelloWorldConfig] sleepProbe=1 witnessCount=%u "
            "gravity=zero wakeFrame=%u wakeDeltaVelocity=%.9g "
@@ -3122,7 +4471,9 @@ int snippetMain(int argc, const char *const *argv) {
   initPhysics(false);
   if (gInitializationFailed) {
     HelloWorldGateEvaluation evaluation;
-    evaluation.boxCount = static_cast<PxU32>(gBoxes.size());
+    evaluation.boxCount = gHeadlessSubBounceStack
+                              ? gSubBounceMetrics.actorCount
+                              : static_cast<PxU32>(gBoxes.size());
     for (PxU32 i = 0; i < gBoxIsTarget.size(); ++i)
       evaluation.targetBoxCount += gBoxIsTarget[i] ? 1u : 0u;
     setGateError(evaluation, "initialization");

@@ -51,23 +51,30 @@ void reconstructPostAlBodyVelocities(
     const physx::PxArray<physx::PxQuat> &postBlockRot,
     const physx::PxArray<physx::PxVec3> &postDepenPos,
     const physx::PxArray<physx::PxQuat> &postDepenRot,
-    const AvbdPostAlVelocityState &velocityState,
+    AvbdPostAlVelocityState &velocityState,
     bool terminalCurrentPoseEpochApplied,
     const physx::PxArray<physx::PxVec3> &terminalVelocityBasePos,
     const physx::PxArray<physx::PxQuat> &terminalVelocityBaseRot,
     const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
     const physx::PxArray<physx::PxVec3> *angularVelAtSolveStart,
     physx::PxReal velocityDamping, physx::PxReal angularDamping) {
+  (void)gravity;
   const physx::PxArray<physx::PxU32> &physicalContactTangentOwnerIndex =
       velocityState.physicalContactTangentOwnerIndex;
   const physx::PxArray<bool> &fastNormalImpactByBody =
       velocityState.fastNormalImpactByBody;
+  physx::PxArray<physx::PxReal> &linearPoseVelocityGain =
+      velocityState.linearPoseVelocityGain;
+  physx::PxArray<physx::PxReal> &angularPoseVelocityGain =
+      velocityState.angularPoseVelocityGain;
   static const physx::PxReal kShellFastImpactSpeed =
       AvbdConstants::AVBD_SHELL_FAST_IMPACT_SPEED;
 
     PX_PROFILE_ZONE("AVBD.updateVelocities", 0);
     for (physx::PxU32 i = 0; i < numBodies; ++i) {
       if (bodies[i].invMass > 0.0f) {
+        linearPoseVelocityGain[i] = 1.0f;
+        angularPoseVelocityGain[i] = 1.0f;
         bodies[i].prevLinearVelocity = bodies[i].linearVelocity;
         const physx::PxU32 physicalContactTangentMaterialOwnerIndex =
             physicalContactTangentOwnerIndex[i];
@@ -94,6 +101,7 @@ void reconstructPostAlBodyVelocities(
         if (fastNormalImpact) {
           bodies[i].linearVelocity =
               (*linearVelAtSolveStart)[i] * 0.85f + vFromPose * 0.15f;
+          linearPoseVelocityGain[i] = 0.15f;
         } else if (i < touchesKinematicShell.size() && touchesKinematicShell[i] &&
                    shellLinearVelAtSolveStart &&
                    shellLinearVelAtSolveStart->size() == numBodies) {
@@ -116,13 +124,16 @@ void reconstructPostAlBodyVelocities(
                 (*shellLinearVelAtSolveStart)[i] * 0.85f + vFromPose * 0.15f;
           else
             bodies[i].linearVelocity = vFromPose;
+          linearPoseVelocityGain[i] = shellFast ? 0.15f : 1.0f;
         } else {
           bodies[i].linearVelocity = vFromPose;
         }
 
         if (applyVelocityDamping &&
-            !physicalContactTangentMaterialOwner)
+            !physicalContactTangentMaterialOwner) {
           bodies[i].linearVelocity *= velocityDamping;
+          linearPoseVelocityGain[i] *= velocityDamping;
+        }
 
         const bool unconstrainedAngularMotion =
             numContacts == 0 && !hasKinematicShellContacts &&
@@ -177,13 +188,21 @@ void reconstructPostAlBodyVelocities(
           // again turns a constant-speed target into a frame-rate-dependent
           // lag and changes a passive manifold's inertial baseline.
           if (!physicalSlerpPositionDrive &&
-              !physicalContactTangentMaterialOwner)
+              !physicalContactTangentMaterialOwner) {
             bodies[i].angularVelocity *= angularDamping;
+            angularPoseVelocityGain[i] *= angularDamping;
+          }
         }
 
-        if (physicalContactTangentMaterialOwnerIndex != PX_MAX_U32 &&
-            hasVelocityFrictionManifoldOwner(
-                contacts[physicalContactTangentMaterialOwnerIndex]) &&
+        const AvbdCompiledVelocityObjective* completeManifoldObjective =
+            physicalContactTangentMaterialOwnerIndex != PX_MAX_U32
+                ? findAvbdCompleteManifoldObjective(
+                      contacts[physicalContactTangentMaterialOwnerIndex]
+                          .objectiveProgram)
+                : NULL;
+        if (completeManifoldObjective &&
+            completeManifoldObjective->reconstruction ==
+                AvbdVelocityObjectiveReconstruction::SolveStartInertial &&
             linearVelAtSolveStart && angularVelAtSolveStart &&
             linearVelAtSolveStart->size() == numBodies &&
             angularVelAtSolveStart->size() == numBodies) {
@@ -193,13 +212,15 @@ void reconstructPostAlBodyVelocities(
           // post-reconstruction owner rebuilds both the nonnegative normal
           // response and the tangent target from that single baseline.
           physx::PxVec3 baselineLinear =
-              (*linearVelAtSolveStart)[i] + gravity * dt;
+              (*linearVelAtSolveStart)[i];
           physx::PxVec3 baselineAngular =
               (*angularVelAtSolveStart)[i];
           bodies[i].projectLockedLinearVector(baselineLinear);
           bodies[i].projectLockedAngularVector(baselineAngular);
           bodies[i].linearVelocity = baselineLinear;
           bodies[i].angularVelocity = baselineAngular;
+          linearPoseVelocityGain[i] = 0.0f;
+          angularPoseVelocityGain[i] = 0.0f;
           bodies[i].projectLockedVelocities();
         } else if (
             physicalContactTangentMaterialOwnerIndex != PX_MAX_U32 &&
@@ -238,7 +259,7 @@ void reconstructPostAlBodyVelocities(
               angularJacobian.dot(normalAngularResponse);
           if (normalResponse > 1.0e-12f) {
             physx::PxVec3 baselineLinear =
-                (*linearVelAtSolveStart)[i] + gravity * dt;
+                (*linearVelAtSolveStart)[i];
             physx::PxVec3 baselineAngular =
                 (*angularVelAtSolveStart)[i];
             bodies[i].projectLockedLinearVector(baselineLinear);
@@ -256,6 +277,8 @@ void reconstructPostAlBodyVelocities(
                 baselineLinear + normalLinearResponse * normalImpulse;
             bodies[i].angularVelocity =
                 baselineAngular + normalAngularResponse * normalImpulse;
+            linearPoseVelocityGain[i] = 0.0f;
+            angularPoseVelocityGain[i] = 0.0f;
             bodies[i].projectLockedVelocities();
           }
         }
@@ -264,26 +287,32 @@ void reconstructPostAlBodyVelocities(
           physx::PxReal linDecay =
               1.0f / (1.0f + bodies[i].linearDamping * dt);
           bodies[i].linearVelocity *= linDecay;
+          linearPoseVelocityGain[i] *= linDecay;
         }
         if (bodies[i].angularDampingBody > 0.0f) {
           physx::PxReal angDecay =
               1.0f / (1.0f + bodies[i].angularDampingBody * dt);
           bodies[i].angularVelocity *= angDecay;
+          angularPoseVelocityGain[i] *= angDecay;
         }
 
         physx::PxReal linVelSq =
             bodies[i].linearVelocity.magnitudeSquared();
         if (linVelSq > bodies[i].maxLinearVelocitySq &&
             bodies[i].maxLinearVelocitySq > 0.0f) {
-          bodies[i].linearVelocity *=
+          const physx::PxReal capScale =
               physx::PxSqrt(bodies[i].maxLinearVelocitySq / linVelSq);
+          bodies[i].linearVelocity *= capScale;
+          linearPoseVelocityGain[i] *= capScale;
         }
         physx::PxReal angVelSq =
             bodies[i].angularVelocity.magnitudeSquared();
         if (angVelSq > bodies[i].maxAngularVelocitySq &&
             bodies[i].maxAngularVelocitySq > 0.0f) {
-          bodies[i].angularVelocity *=
+          const physx::PxReal capScale =
               physx::PxSqrt(bodies[i].maxAngularVelocitySq / angVelSq);
+          bodies[i].angularVelocity *= capScale;
+          angularPoseVelocityGain[i] *= capScale;
         }
       }
     }

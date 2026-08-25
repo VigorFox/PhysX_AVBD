@@ -115,83 +115,148 @@ void warmstartAvbdRigidBodies(
   }
 }
 
+namespace {
+
+// A hard rigid-contact row is conditioned against its complete spatial
+// response w = J M^-1 J^T.  The ratio is dimensionless and therefore does not
+// depend on mass, timestep, endpoint type or contact lever arm.
+static const physx::PxReal kRigidContactConditioning = 2.0f;
+
+static physx::PxReal computeContactRowSpatialResponse(
+    const AvbdContactConstraint &contact, const physx::PxVec3 &axis,
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies) {
+  physx::PxReal response = 0.0f;
+  const auto addEndpoint = [&](physx::PxU32 bodyIndex,
+                               const physx::PxVec3 &localPoint,
+                               physx::PxReal linearScale,
+                               physx::PxReal angularScale) {
+    if (bodyIndex >= numBodies || linearScale < 0.0f ||
+        angularScale < 0.0f)
+      return;
+
+    const AvbdSolverBody &body = bodies[bodyIndex];
+    if (body.invMass <= 0.0f)
+      return;
+
+    physx::PxVec3 linearJacobian = axis;
+    body.projectLockedLinearVector(linearJacobian);
+    response += linearScale * body.invMass *
+                linearJacobian.magnitudeSquared();
+
+    physx::PxVec3 angularJacobian =
+        body.rotation.rotate(localPoint).cross(axis);
+    body.projectLockedAngularVector(angularJacobian);
+    const physx::PxReal angularResponse = angularJacobian.dot(
+        body.invInertiaWorld * angularJacobian);
+    if (angularResponse > 0.0f)
+      response += angularScale * angularResponse;
+  };
+
+  addEndpoint(contact.header.bodyIndexA, contact.contactPointA,
+              contact.invMassScaleA, contact.invInertiaScaleA);
+  addEndpoint(contact.header.bodyIndexB, contact.contactPointB,
+              contact.invMassScaleB, contact.invInertiaScaleB);
+  return physx::PxIsFinite(response) && response > 1.0e-12f
+             ? response
+             : 0.0f;
+}
+
+static physx::PxReal computeContactRowPenaltyFloor(
+    const AvbdContactConstraint &contact, const physx::PxVec3 &axis,
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    physx::PxReal invDt2) {
+  const physx::PxReal response = computeContactRowSpatialResponse(
+      contact, axis, bodies, numBodies);
+  return response > 0.0f
+             ? kRigidContactConditioning * invDt2 / response
+             : 0.0f;
+}
+
+static void applyPenaltyFloor(physx::PxReal &penalty,
+                              physx::PxReal penaltyFloor,
+                              physx::PxReal penaltyMin) {
+  if (!(penaltyFloor > 0.0f) || !physx::PxIsFinite(penaltyFloor))
+    return;
+  if (penalty <= penaltyMin || penalty < penaltyFloor)
+    penalty = penaltyFloor;
+}
+
+static bool isColdDeformableContactLoaded(
+    const AvbdContactConstraint &contact, const AvbdSolverBody *bodies,
+    physx::PxU32 numBodies) {
+  if (!hasDeformableStaticAnchor(contact))
+    return false;
+
+  const physx::PxU32 bodyA = contact.header.bodyIndexA;
+  const physx::PxU32 bodyB = contact.header.bodyIndexB;
+  const physx::PxVec3 worldA =
+      bodyA < numBodies
+          ? bodies[bodyA].position +
+                bodies[bodyA].rotation.rotate(contact.contactPointA)
+          : contact.contactPointA;
+  const physx::PxVec3 worldB =
+      bodyB < numBodies
+          ? bodies[bodyB].position +
+                bodies[bodyB].rotation.rotate(contact.contactPointB)
+          : contact.contactPointB;
+  const physx::PxReal violation = finalizeBodyVsStaticViolation(
+      (worldA - worldB).dot(contact.contactNormal) +
+          contact.penetrationDepth,
+      contact.penetrationDepth);
+  return violation < 0.0f;
+}
+
+} // namespace
+
+void applyAvbdLoadedTangentPenaltyFloor(
+    AvbdContactConstraint &contact, const AvbdSolverBody *bodies,
+    physx::PxU32 numBodies, physx::PxReal invDt2,
+    physx::PxReal penaltyMin) {
+  if (!hasPositionTangentParticipation(contact) ||
+      (contact.friction <= 0.0f && contact.staticFriction <= 0.0f))
+    return;
+
+  applyPenaltyFloor(
+      contact.tangentPenalty0,
+      computeContactRowPenaltyFloor(contact, contact.tangent0,
+                                    bodies, numBodies, invDt2),
+      penaltyMin);
+  applyPenaltyFloor(
+      contact.tangentPenalty1,
+      computeContactRowPenaltyFloor(contact, contact.tangent1,
+                                    bodies, numBodies, invDt2),
+      penaltyMin);
+}
+
 void applyAvbdPenaltyFloor(
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
-    const AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    const AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-    physx::PxReal invDt2) {
-  if (!contacts || numContacts == 0u)
+    physx::PxReal invDt2, physx::PxReal penaltyMin) {
+  if (!contacts || !bodies || numContacts == 0u || numBodies == 0u ||
+      !(invDt2 > 0.0f))
     return;
 
   PX_PROFILE_ZONE("AVBD.penaltyFloor", 0);
-
-  const int propagationDepth = 4;
-  const physx::PxReal propagationDecay = 0.5f;
-
-  physx::PxArray<physx::PxArray<physx::PxU32>> adj;
-  adj.resize(numBodies);
-  auto addEdge = [&](physx::PxU32 a, physx::PxU32 b) {
-    if (a < numBodies && b < numBodies) {
-      adj[a].pushBack(b);
-      adj[b].pushBack(a);
-    }
-  };
-  for (physx::PxU32 j = 0; j < numD6; ++j)
-    addEdge(d6Joints[j].header.bodyIndexA, d6Joints[j].header.bodyIndexB);
-  for (physx::PxU32 j = 0; j < numGear; ++j)
-    addEdge(gearJoints[j].header.bodyIndexA,
-            gearJoints[j].header.bodyIndexB);
-
-  physx::PxArray<physx::PxReal> effectiveMassByBody;
-  effectiveMassByBody.resize(numBodies);
-  for (physx::PxU32 i = 0; i < numBodies; ++i)
-    effectiveMassByBody[i] =
-        (bodies[i].invMass > 0.0f) ? (1.0f / bodies[i].invMass) : 0.0f;
-
-  for (int depth = 0; depth < propagationDepth; ++depth) {
-    physx::PxArray<physx::PxReal> nextEffectiveMass;
-    nextEffectiveMass.resize(numBodies);
-    for (physx::PxU32 i = 0; i < numBodies; ++i) {
-      const physx::PxReal baseMass =
-          (bodies[i].invMass > 0.0f) ? (1.0f / bodies[i].invMass) : 0.0f;
-      physx::PxReal neighborSum = 0.0f;
-      for (physx::PxU32 k = 0; k < adj[i].size(); ++k)
-        neighborSum += effectiveMassByBody[adj[i][k]];
-      nextEffectiveMass[i] =
-          baseMass + propagationDecay * neighborSum;
-    }
-    effectiveMassByBody = nextEffectiveMass;
-  }
-
-  for (physx::PxU32 c = 0; c < numContacts; ++c) {
-    const physx::PxU32 bodyA = contacts[c].header.bodyIndexA;
-    const physx::PxU32 bodyB = contacts[c].header.bodyIndexB;
-    physx::PxReal massA = 0.0f;
-    physx::PxReal massB = 0.0f;
-    if (bodyA < numBodies && bodies[bodyA].invMass > 0.0f)
-      massA = 1.0f / bodies[bodyA].invMass;
-    if (bodyB < numBodies && bodies[bodyB].invMass > 0.0f)
-      massB = 1.0f / bodies[bodyB].invMass;
-
-    const physx::PxReal augmentedA =
-        (bodyA < numBodies) ? effectiveMassByBody[bodyA] : 0.0f;
-    const physx::PxReal augmentedB =
-        (bodyB < numBodies) ? effectiveMassByBody[bodyB] : 0.0f;
-    const physx::PxReal effectiveMass =
-        physx::PxMax(augmentedA, augmentedB);
-    const physx::PxReal penaltyScale =
-        (massA > 0.0f && massB > 0.0f)
-            ? AvbdConstants::AVBD_PEN_SCALE_DYN_DYN
-            : AvbdConstants::AVBD_PEN_SCALE_BODY_VS_STATIC;
-    const physx::PxReal penaltyFloor =
-        penaltyScale * effectiveMass * invDt2;
-    if (contacts[c].header.penalty < penaltyFloor)
-      contacts[c].header.penalty = penaltyFloor;
-    if (contacts[c].tangentPenalty0 < penaltyFloor)
-      contacts[c].tangentPenalty0 = penaltyFloor;
-    if (contacts[c].tangentPenalty1 < penaltyFloor)
-      contacts[c].tangentPenalty1 = penaltyFloor;
+  for (physx::PxU32 contactIndex = 0; contactIndex < numContacts;
+       ++contactIndex) {
+    AvbdContactConstraint &contact = contacts[contactIndex];
+    applyPenaltyFloor(
+        contact.header.penalty,
+        computeContactRowPenaltyFloor(contact, contact.contactNormal,
+                                      bodies, numBodies, invDt2),
+        penaltyMin);
+    // Deformable mesh points deliberately cold-start their multiplier because
+    // the moving triangle anchor is not persistent.  Classify those rows from
+    // the same predicted normal violation used by PositionAL; otherwise a
+    // genuine mesh contact can never acquire the tangent conditioning needed
+    // by the four-iteration solve.  Positive-separation speculative rows keep
+    // their adaptive penalty and cannot create a load-free glue network.
+    const bool loadedCoulombRow =
+        contact.header.lambda < 0.0f ||
+        isColdDeformableContactLoaded(contact, bodies, numBodies);
+    if (loadedCoulombRow)
+      applyAvbdLoadedTangentPenaltyFloor(
+          contact, bodies, numBodies, invDt2, penaltyMin);
   }
 }
 

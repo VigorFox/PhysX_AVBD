@@ -24,6 +24,9 @@
 *.lastbuildstate
 *.log
 
+# Local SnippetHelloWorld physics recordings.
+*.pxtrace
+
 # Rebuildable AVBD probes and temporary CMake/MSBuild trees. Keep source,
 # JSON/CSV measurements, and handoff reports visible to Git.
 /tools/**/*.exe

@@ -30,7 +30,7 @@
 
 using namespace physx;
 
-PxsContactManager::PxsContactManager(PxU32 index) : mFlags(0), mCmIndex(index)
+PxsContactManager::PxsContactManager(PxU32 index) : mFlags(0), mCmIndex(index), mCacheEpoch(0)
 {
 	// PT: TODO: any reason why we don't initialize all members here, e.g. shapeCore pointers?
 	// PT: it might be because of the way we preallocate contact managers in the pipeline, and release the ones
@@ -61,4 +61,3 @@ void PxsContactManager::setCCD(bool enable)
 
 	mFlags = flags;
 }
-

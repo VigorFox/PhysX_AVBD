@@ -27,6 +27,12 @@ void applyBodyStaticNormalDepenetrationSweeps(
       const physx::PxU32 bB = contacts[c].header.bodyIndexB;
       if (!isBodyVsStaticContact(bA, bB, numBodies))
         continue;
+      // Ordinary rigid-static normals are owned completely by the AVBD
+      // primal/dual manifold. A geometric edit here would invalidate the
+      // just-updated multiplier. Only the deformable-anchor recovery path is
+      // retained until it is absorbed by the unified OGC contact solve.
+      if (!hasDeformableStaticAnchor(contacts[c]))
+        continue;
 
       const bool dynIsA = (bA < numBodies);
       const bool dynIsB = (bB < numBodies);
@@ -89,7 +95,7 @@ void applyBodyStaticNormalDepenetrationSweeps(
       // The retained normal AL row owns uninterrupted shallow support for
       // both rigid and deformable static anchors. Split-pose recovery is an
       // onset/deep-overlap emergency, never a second steady-support owner.
-      if (contacts[c].contactManagerEstablished &&
+      if (contacts[c].persistentPointMatched &&
           !deepInitialViolation)
         continue;
 
@@ -190,10 +196,10 @@ void applyBodyStaticFrictionSweeps(AvbdSolverBody *bodies,
     if (!isBodyVsStaticContact(cc.header.bodyIndexA, cc.header.bodyIndexB,
                                numBodies))
       continue;
-    if (hasVelocityTangentMaterialOwner(cc) &&
-        !hasVelocityBodyStaticFrictionSweepOwner(cc))
-      continue;
-    if (hasDeformablePositionTangentOwner(cc))
+    // This fallback may consume only rows explicitly compiled for it. A
+    // missing/invalid owner is fail-closed, never implicit permission to run a
+    // second pose solver after PositionAL has finalized its multiplier.
+    if (!hasVelocityBodyStaticFrictionSweepOwner(cc))
       continue;
     const physx::PxU32 bi = dynA ? cc.header.bodyIndexA : cc.header.bodyIndexB;
     if (hasDeformableStaticAnchor(cc) && skipForBodies &&

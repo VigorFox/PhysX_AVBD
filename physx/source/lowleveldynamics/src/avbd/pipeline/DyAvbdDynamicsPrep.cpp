@@ -77,64 +77,233 @@ static PxVec3 computeKinematicContactStep(
 
 static constexpr physx::PxU16 AVBD_PRISMATIC_LIMIT_ENABLED_FLAG = 0x0002;
 
-// Match the standalone contact cache's 1 mm local-anchor quantization.  The
-// cache slot itself is still scoped by the persistent contact-manager index;
-// this key validates row identity when NP patch/contact ordering changes.
-static PX_FORCE_INLINE PxI32 quantizeAvbdContactAnchor(PxReal value,
-                                                       PxReal lengthScale) {
-  const PxReal safeLengthScale = PxMax(lengthScale, 1e-6f);
-  const PxReal scaled = PxClamp(value * (1000.0f / safeLengthScale),
-                                -2147483000.0f,
-                                2147483000.0f);
-  return static_cast<PxI32>(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+static PxU64 makeAvbdContactManagerIdentity(
+    const PxsContactManager *manager) {
+  return (PxU64(manager->getCacheEpoch()) << 32) |
+         (PxU64(manager->getIndex()) + 1u);
 }
 
-static PX_FORCE_INLINE void mixAvbdContactKey(PxU64 &hash, PxU32 value) {
-  hash ^= static_cast<PxU64>(value);
-  hash *= 1099511628211ull;
+static PX_FORCE_INLINE PxU64 makeAvbdManifoldPointIdentity(
+    PxU32 contactManagerIndex, PxU32 pointSlot) {
+  return ((static_cast<PxU64>(contactManagerIndex) + 1u) << 8) |
+         (static_cast<PxU64>(pointSlot) + 1u);
 }
 
-static PxU64 makeAvbdContactCacheKey(PxU32 globalBody0Idx,
-                                     PxU32 globalBody1Idx,
-                                     const PxVec3 &localPointA,
-                                     const PxVec3 &localPointB,
-                                     PxReal lengthScale) {
-  PxU64 hash = 14695981039346656037ull;
-  mixAvbdContactKey(hash, globalBody0Idx);
-  mixAvbdContactKey(hash, globalBody1Idx);
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointA.x, lengthScale)));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointA.y, lengthScale)));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointA.z, lengthScale)));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointB.x, lengthScale)));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointB.y, lengthScale)));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(
-                quantizeAvbdContactAnchor(localPointB.z, lengthScale)));
-  return hash != 0 ? hash : 1;
+static PX_FORCE_INLINE PxU64 makeAvbdTransientContactIdentity(
+    PxU32 contactManagerIndex, PxU32 streamPointIndex) {
+  return ((static_cast<PxU64>(contactManagerIndex) + 1u) << 32) |
+         (static_cast<PxU64>(streamPointIndex) + 1u);
 }
 
-static PxU64 makeAvbdContactManagerKey(const PxsContactManager *manager,
-                                       PxU32 globalBody0Idx,
-                                       PxU32 globalBody1Idx) {
-  const std::uintptr_t address =
-      reinterpret_cast<std::uintptr_t>(manager);
-  PxU64 hash = 14695981039346656037ull;
-  mixAvbdContactKey(hash, static_cast<PxU32>(address));
-  mixAvbdContactKey(
-      hash, static_cast<PxU32>(static_cast<PxU64>(address) >> 32));
-  mixAvbdContactKey(hash, globalBody0Idx);
-  mixAvbdContactKey(hash, globalBody1Idx);
-  return hash != 0 ? hash : 1;
+static PX_FORCE_INLINE PxU32 makeAvbdManifoldMaterialKey(
+    const PxContactPatch &patch) {
+  return static_cast<PxU32>(patch.materialIndex0) |
+         (static_cast<PxU32>(patch.materialIndex1) << 16);
+}
+
+static PX_FORCE_INLINE PxVec3 getAvbdAnchorWorldAtCapture(
+    const PxVec3 &anchor, const AvbdSolverBody *body) {
+  return body ? body->position + body->rotation.rotate(anchor)
+              : anchor;
+}
+
+static void makeAvbdCanonicalContactBasis(const PxVec3 &normal,
+                                          PxVec3 &tangent0,
+                                          PxVec3 &tangent1) {
+  if (PxAbs(normal.y) > 0.9f)
+    tangent0 = normal.cross(PxVec3(1.0f, 0.0f, 0.0f));
+  else
+    tangent0 = normal.cross(PxVec3(0.0f, 1.0f, 0.0f));
+  if (tangent0.normalize() <= 1.0e-6f)
+    tangent0 = PxVec3(1.0f, 0.0f, 0.0f);
+  tangent1 = normal.cross(tangent0);
+  tangent1.normalize();
+}
+
+static bool makeAvbdTransportedContactBasis(
+    const PxVec3 &normal,
+    const AvbdDynamicsContext::CachedContactManifoldPoint *previous,
+    PxVec3 &tangent0, PxVec3 &tangent1) {
+  if (!previous || !previous->normal.isFinite() ||
+      !previous->tangent0.isFinite()) {
+    makeAvbdCanonicalContactBasis(normal, tangent0, tangent1);
+    return false;
+  }
+
+  PxVec3 oldNormal = previous->normal;
+  PxVec3 newNormal = normal;
+  PxVec3 oldTangent = previous->tangent0;
+  if (oldNormal.normalize() <= 1.0e-6f ||
+      newNormal.normalize() <= 1.0e-6f ||
+      oldTangent.normalize() <= 1.0e-6f) {
+    makeAvbdCanonicalContactBasis(normal, tangent0, tangent1);
+    return false;
+  }
+
+  const PxReal cosine = PxClamp(oldNormal.dot(newNormal), -1.0f, 1.0f);
+  const PxReal denominator = 1.0f + cosine;
+  if (denominator <= 1.0e-4f) {
+    makeAvbdCanonicalContactBasis(normal, tangent0, tangent1);
+    return false;
+  }
+  const PxVec3 axis = oldNormal.cross(newNormal);
+  tangent0 = oldTangent + axis.cross(oldTangent) +
+             axis.cross(axis.cross(oldTangent)) / denominator;
+  tangent0 -= newNormal * tangent0.dot(newNormal);
+  if (!tangent0.isFinite() || tangent0.normalize() <= 1.0e-6f) {
+    makeAvbdCanonicalContactBasis(normal, tangent0, tangent1);
+    return false;
+  }
+  tangent1 = newNormal.cross(tangent0);
+  tangent1.normalize();
+  return true;
+}
+
+struct AvbdFreshManifoldCandidate {
+  PxVec3 worldPoint;
+  PxVec3 normal;
+  PxU32 materialKey;
+};
+
+/**
+ * Find a maximum-cardinality, minimum-distance one-to-one correspondence
+ * between at most eight fresh points and the preceding compact manifold.
+ *
+ * The bounded dynamic program is deterministic and has no hash lookup. In
+ * the common four-point case it visits at most 4*16*4 states; the eight-point
+ * worst case remains fixed at 8*256*8.
+ */
+static void matchAvbdPersistentManifold(
+    const AvbdFreshManifoldCandidate *fresh, PxU32 freshCount,
+    const AvbdDynamicsContext::CachedContactManifoldPoint *previous,
+    const AvbdSolverBody *bodyA, const AvbdSolverBody *bodyB,
+    PxU16 frameStamp, PxReal lengthScale, PxU8 *assignment) {
+  const PxU32 capacity =
+      AvbdDynamicsContext::CONTACT_MANIFOLD_POINT_CAPACITY;
+  PX_ASSERT(freshCount <= capacity && capacity == 8u);
+
+  for (PxU32 i = 0; i < capacity; ++i)
+    assignment[i] = 0xffu;
+  if (!previous || freshCount == 0)
+    return;
+
+  bool viable[8][8] = {};
+  PxReal score[8][8] = {};
+  const PxReal scaledLength = PxMax(lengthScale, 1.0e-6f);
+  // PhysX's default friction-correlation distance. The context value will be
+  // threaded through this ABI when custom scene distances are enabled.
+  const PxReal matchDistance = 0.025f * scaledLength;
+  const PxReal maxScore = matchDistance * matchDistance;
+  const PxReal normalGate = 0.9659258f; // cos(15 degrees)
+
+  for (PxU32 newPoint = 0; newPoint < freshCount; ++newPoint) {
+    for (PxU32 oldPoint = 0; oldPoint < capacity; ++oldPoint) {
+      const AvbdDynamicsContext::CachedContactManifoldPoint &candidate =
+          previous[oldPoint];
+      if (candidate.frameStamp == 0 ||
+          static_cast<PxU16>(frameStamp - candidate.frameStamp) != 1u ||
+          candidate.materialKey != fresh[newPoint].materialKey ||
+          !candidate.detectionPointA.isFinite() ||
+          !candidate.detectionPointB.isFinite() ||
+          !candidate.normal.isFinite() ||
+          !candidate.tangent0.isFinite() ||
+          candidate.normal.magnitudeSquared() < 0.5f ||
+          candidate.tangent0.magnitudeSquared() < 0.5f ||
+          candidate.normal.dot(fresh[newPoint].normal) < normalGate)
+        continue;
+
+      const PxVec3 oldWorldA = getAvbdAnchorWorldAtCapture(
+          candidate.detectionPointA, bodyA);
+      const PxVec3 oldWorldB = getAvbdAnchorWorldAtCapture(
+          candidate.detectionPointB, bodyB);
+      const PxReal candidateScore =
+          0.5f * ((oldWorldA - fresh[newPoint].worldPoint)
+                       .magnitudeSquared() +
+                  (oldWorldB - fresh[newPoint].worldPoint)
+                       .magnitudeSquared());
+      if (!PxIsFinite(candidateScore) || candidateScore > maxScore)
+        continue;
+      viable[newPoint][oldPoint] = true;
+      score[newPoint][oldPoint] = candidateScore;
+    }
+  }
+
+  struct MatchCell {
+    PxReal cost;
+    PxI8 count;
+    PxU16 parentMask;
+    PxI8 assignedPoint;
+  };
+  MatchCell cells[9][256];
+  for (PxU32 row = 0; row <= freshCount; ++row) {
+    for (PxU32 mask = 0; mask < 256u; ++mask) {
+      cells[row][mask].cost = PX_MAX_REAL;
+      cells[row][mask].count = -1;
+      cells[row][mask].parentMask = 0;
+      cells[row][mask].assignedPoint = -1;
+    }
+  }
+  cells[0][0].cost = 0.0f;
+  cells[0][0].count = 0;
+
+  for (PxU32 newPoint = 0; newPoint < freshCount; ++newPoint) {
+    for (PxU32 mask = 0; mask < 256u; ++mask) {
+      const MatchCell &source = cells[newPoint][mask];
+      if (source.count < 0)
+        continue;
+
+      MatchCell &unmatched = cells[newPoint + 1u][mask];
+      if (source.count > unmatched.count ||
+          (source.count == unmatched.count &&
+           source.cost < unmatched.cost)) {
+        unmatched.cost = source.cost;
+        unmatched.count = source.count;
+        unmatched.parentMask = static_cast<PxU16>(mask);
+        unmatched.assignedPoint = -1;
+      }
+
+      for (PxU32 oldPoint = 0; oldPoint < capacity; ++oldPoint) {
+        const PxU32 oldBit = 1u << oldPoint;
+        if ((mask & oldBit) != 0 || !viable[newPoint][oldPoint])
+          continue;
+        const PxU32 nextMask = mask | oldBit;
+        const PxI8 nextCount = static_cast<PxI8>(source.count + 1);
+        const PxReal nextCost = source.cost + score[newPoint][oldPoint];
+        MatchCell &matched = cells[newPoint + 1u][nextMask];
+        if (nextCount > matched.count ||
+            (nextCount == matched.count &&
+             (nextCost < matched.cost ||
+              (nextCost == matched.cost &&
+               static_cast<PxI8>(oldPoint) < matched.assignedPoint)))) {
+          matched.cost = nextCost;
+          matched.count = nextCount;
+          matched.parentMask = static_cast<PxU16>(mask);
+          matched.assignedPoint = static_cast<PxI8>(oldPoint);
+        }
+      }
+    }
+  }
+
+  PxU32 bestMask = 0;
+  MatchCell best = cells[freshCount][0];
+  for (PxU32 mask = 1; mask < 256u; ++mask) {
+    const MatchCell &candidate = cells[freshCount][mask];
+    if (candidate.count > best.count ||
+        (candidate.count == best.count &&
+         (candidate.cost < best.cost ||
+          (candidate.cost == best.cost && mask < bestMask)))) {
+      best = candidate;
+      bestMask = mask;
+    }
+  }
+
+  PxU32 mask = bestMask;
+  for (PxU32 row = freshCount; row > 0; --row) {
+    const MatchCell &cell = cells[row][mask];
+    if (cell.assignedPoint >= 0)
+      assignment[row - 1u] = static_cast<PxU8>(cell.assignedPoint);
+    mask = cell.parentMask;
+  }
 }
 
 // Helper struct for joint data protocol (must match SnippetAvbdDx11)
@@ -301,7 +470,8 @@ struct AvbdContactPrepSource {
   const PxArray<PxsIndexedContactManager> *contactList;
   PxsContactManagerOutputIterator *outputIterator;
   PxArray<AvbdDynamicsContext::CachedContactManagerState> *managerStateCache;
-  const PxArray<AvbdDynamicsContext::CachedLambda> *lambdaCache;
+  const PxArray<AvbdDynamicsContext::CachedContactManifoldPoint>
+      *contactManifoldPoints;
   bool enableLambdaWarmStart;
   PxReal lengthScale;
   PxU16 frameStamp;
@@ -411,14 +581,15 @@ static PxU32 prepareAvbdContactsImpl(
                                 : nullptr;
     const PxU32 cmIdx = snapshot ? snapshot->contactManagerIndex : cm->getIndex();
     PxU8 contactManagerAge = snapshot ? snapshot->contactManagerAge : 255;
-    const PxU64 contactManagerKey =
-        snapshot ? snapshot->contactManagerKey
-                 : makeAvbdContactManagerKey(cm, globalBody0Idx, globalBody1Idx);
+    const PxU64 contactManagerIdentity =
+        snapshot ? snapshot->contactManagerIdentity
+                 : makeAvbdContactManagerIdentity(cm);
     AvbdDynamicsContext::CachedContactManagerState *contactManagerState = nullptr;
     if (source.managerStateCache &&
         cmIdx < source.managerStateCache->size()) {
       contactManagerState = &(*source.managerStateCache)[cmIdx];
-      if (!snapshot && contactManagerState->key == contactManagerKey &&
+      if (!snapshot &&
+          contactManagerState->identity == contactManagerIdentity &&
           contactManagerState->frameStamp != 0) {
         const PxU16 age = static_cast<PxU16>(
             frameStamp - contactManagerState->frameStamp);
@@ -427,6 +598,28 @@ static PxU32 prepareAvbdContactsImpl(
     }
     const PxU32 managerConstraintStart = constraintIndex;
 
+    const PxU64 manifoldBase64 =
+        static_cast<PxU64>(cmIdx) *
+        AvbdDynamicsContext::CONTACT_MANIFOLD_POINT_CAPACITY;
+    const PxU32 manifoldBase =
+        manifoldBase64 <= PX_MAX_U32 ? static_cast<PxU32>(manifoldBase64)
+                                    : PX_MAX_U32;
+    const AvbdDynamicsContext::CachedContactManifoldPoint *manifoldPoints =
+        nullptr;
+    if (source.enableLambdaWarmStart && manifoldBase != PX_MAX_U32) {
+      if (snapshot && snapshot->contactManifoldPoints) {
+        manifoldPoints = reinterpret_cast<const
+            AvbdDynamicsContext::CachedContactManifoldPoint *>(
+            snapshot->contactManifoldPoints);
+      } else if (!snapshot && source.contactManifoldPoints &&
+                 manifoldBase64 +
+                         AvbdDynamicsContext::
+                             CONTACT_MANIFOLD_POINT_CAPACITY <=
+                     source.contactManifoldPoints->size()) {
+        manifoldPoints =
+            &(*source.contactManifoldPoints)[manifoldBase];
+      }
+    }
     const PxU8 *contactData = snapshot ? snapshot->contactPoints : output->contactPoints;
     const PxU8 *patchData = snapshot ? snapshot->contactPatches : output->contactPatches;
 
@@ -446,6 +639,93 @@ static PxU32 prepareAvbdContactsImpl(
     const PxU32 contactPointSize = stream.contactPointSize;
     const bool hasExtendedContact =
         stream.mStreamFormat != PxContactStreamIterator::eSIMPLE_STREAM;
+
+    const bool bodyVsStatic = (bodyA != nullptr) != (bodyB != nullptr);
+    const PxReal restDist = snapshot ? snapshot->restDistance
+                                     : cm->getRestDistance();
+    const bool deformableStaticAnchor =
+        isDeformableStaticAnchorContact(bodyVsStatic, restDist);
+    const bool persistentEndpointTypes =
+        (indexType0 == PxsIndexedInteraction::eBODY ||
+         indexType0 == PxsIndexedInteraction::eWORLD) &&
+        (indexType1 == PxsIndexedInteraction::eBODY ||
+         indexType1 == PxsIndexedInteraction::eWORLD);
+    const bool persistentManifoldEligible =
+        source.enableLambdaWarmStart && manifoldPoints &&
+        !deformableStaticAnchor && persistentEndpointTypes &&
+        !hasExtendedContact;
+
+    AvbdFreshManifoldCandidate manifoldCandidates[8];
+    PxU8 manifoldAssignment[8];
+    bool manifoldMatched[8] = {};
+    PxU32 manifoldCandidateCount = 0;
+    for (PxU32 point = 0; point < 8u; ++point)
+      manifoldAssignment[point] = 0xffu;
+
+    if (persistentManifoldEligible) {
+      // Gather the compact candidate set before emitting rows so matching is
+      // one-to-one and independent of which fresh row happens to claim an old
+      // point first. Rows beyond the bounded manifold remain fully solved but
+      // intentionally cold-start instead of aliasing another point.
+      for (PxU8 patchIdx = 0;
+           patchIdx < nbPatches && manifoldCandidateCount < 8u;
+           ++patchIdx) {
+        const PxContactPatch *candidatePatch =
+            reinterpret_cast<const PxContactPatch *>(
+                patchData + patchIdx * sizeof(PxContactPatch));
+        const PxU32 candidateMaterialKey =
+            makeAvbdManifoldMaterialKey(*candidatePatch);
+        for (PxU16 candidateIndex = 0;
+             candidateIndex < candidatePatch->nbContacts &&
+             manifoldCandidateCount < 8u;
+             ++candidateIndex) {
+          const PxU32 streamIndex =
+              candidatePatch->startContactIndex + candidateIndex;
+          const PxContact *candidateContact =
+              reinterpret_cast<const PxContact *>(
+                  contactData + streamIndex * contactPointSize);
+          if (hasExtendedContact &&
+              static_cast<const PxExtendedContact *>(candidateContact)
+                      ->maxImpulse <= 0.0f)
+            continue;
+          AvbdFreshManifoldCandidate &candidate =
+              manifoldCandidates[manifoldCandidateCount++];
+          candidate.worldPoint = candidateContact->contact;
+          candidate.normal = candidatePatch->normal;
+          candidate.materialKey = candidateMaterialKey;
+        }
+      }
+
+      if (contactManagerAge == 1u) {
+        matchAvbdPersistentManifold(
+            manifoldCandidates, manifoldCandidateCount, manifoldPoints,
+            bodyA, bodyB, frameStamp, source.lengthScale,
+            manifoldAssignment);
+      }
+
+      PxU16 occupiedSlots = 0;
+      for (PxU32 point = 0; point < manifoldCandidateCount; ++point) {
+        if (manifoldAssignment[point] != 0xffu) {
+          manifoldMatched[point] = true;
+          occupiedSlots = static_cast<PxU16>(
+              occupiedSlots | (1u << manifoldAssignment[point]));
+        }
+      }
+      for (PxU32 point = 0; point < manifoldCandidateCount; ++point) {
+        if (manifoldAssignment[point] != 0xffu)
+          continue;
+        for (PxU8 slot = 0; slot < 8u; ++slot) {
+          const PxU16 slotBit = static_cast<PxU16>(1u << slot);
+          if ((occupiedSlots & slotBit) != 0)
+            continue;
+          manifoldAssignment[point] = slot;
+          occupiedSlots = static_cast<PxU16>(occupiedSlots | slotBit);
+          break;
+        }
+      }
+    }
+
+    PxU32 manifoldCandidateOrdinal = 0;
 
     for (PxU8 patchIdx = 0; patchIdx < nbPatches; ++patchIdx) {
       const PxContactPatch *patch = reinterpret_cast<const PxContactPatch *>(
@@ -467,6 +747,36 @@ static PxU32 prepareAvbdContactsImpl(
                     patchIdx
               : nullptr;
       PxU32 reportAnchorCount = 0;
+      PxU16 secondAnchorContact = 0;
+      PxVec3 anchorPositions[2] = {PxVec3(0.0f), PxVec3(0.0f)};
+      if (numContactsInPatch > 0 &&
+          (patch->dynamicFriction > 0.0f ||
+           patch->staticFriction > 0.0f)) {
+        const PxContact *firstContact =
+            reinterpret_cast<const PxContact *>(
+                contactData + startContact * contactPointSize);
+        anchorPositions[0] = firstContact->contact;
+        reportAnchorCount = 1;
+
+        PxReal farthestDistanceSq = 0.0f;
+        for (PxU16 anchorCandidate = 1;
+             anchorCandidate < numContactsInPatch; ++anchorCandidate) {
+          const PxContact *candidate =
+              reinterpret_cast<const PxContact *>(
+                  contactData +
+                  (startContact + anchorCandidate) * contactPointSize);
+          const PxReal distanceSq =
+              (candidate->contact - firstContact->contact)
+                  .magnitudeSquared();
+          if (distanceSq > farthestDistanceSq) {
+            farthestDistanceSq = distanceSq;
+            secondAnchorContact = anchorCandidate;
+            anchorPositions[1] = candidate->contact;
+          }
+        }
+        if (farthestDistanceSq > 1.0e-12f)
+          reportAnchorCount = 2;
+      }
       if (reportFrictionPatch) {
         reportFrictionPatch->anchorCount = 0;
         reportFrictionPatch->anchorPositions[0] = PxVec3(0.0f);
@@ -474,37 +784,10 @@ static PxU32 prepareAvbdContactsImpl(
         reportFrictionPatch->anchorImpulses[0] = PxVec3(0.0f);
         reportFrictionPatch->anchorImpulses[1] = PxVec3(0.0f);
 
-        if (numContactsInPatch > 0 &&
-            (patch->dynamicFriction > 0.0f ||
-             patch->staticFriction > 0.0f)) {
-          const PxContact *firstContact =
-              reinterpret_cast<const PxContact *>(
-                  contactData + startContact * contactPointSize);
-          reportFrictionPatch->anchorPositions[0] = firstContact->contact;
-          reportAnchorCount = 1;
-
-          PxReal farthestDistanceSq = 0.0f;
-          PxVec3 farthestPosition = firstContact->contact;
-          for (PxU16 anchorCandidate = 1;
-               anchorCandidate < numContactsInPatch; ++anchorCandidate) {
-            const PxContact *candidate =
-                reinterpret_cast<const PxContact *>(
-                    contactData +
-                    (startContact + anchorCandidate) * contactPointSize);
-            const PxReal distanceSq =
-                (candidate->contact - firstContact->contact)
-                    .magnitudeSquared();
-            if (distanceSq > farthestDistanceSq) {
-              farthestDistanceSq = distanceSq;
-              farthestPosition = candidate->contact;
-            }
-          }
-          if (farthestDistanceSq > 1.0e-12f) {
-            reportFrictionPatch->anchorPositions[1] = farthestPosition;
-            reportAnchorCount = 2;
-          }
-          reportFrictionPatch->anchorCount = reportAnchorCount;
-        }
+        for (PxU32 anchor = 0; anchor < reportAnchorCount; ++anchor)
+          reportFrictionPatch->anchorPositions[anchor] =
+              anchorPositions[anchor];
+        reportFrictionPatch->anchorCount = reportAnchorCount;
       }
 
       for (PxU16 c = 0;
@@ -538,43 +821,71 @@ static PxU32 prepareAvbdContactsImpl(
             AvbdConstants::AVBD_MIN_PENALTY_RHO; // PENALTY_MIN = 1000
 
         const PxVec3 worldContact = contact->contact;
-        if (bodyA) {
-          constraint.contactPointA =
-              bodyA->rotation.rotateInv(contact->contact - bodyA->position);
-        } else {
-          constraint.contactPointA =
-              worldContact +
-              computeKinematicContactStep(
-                  kinematicBodyA, worldContact, dt);
+        const PxVec3 freshPointA =
+            bodyA ? bodyA->rotation.rotateInv(worldContact - bodyA->position)
+                  : worldContact + computeKinematicContactStep(
+                                       kinematicBodyA, worldContact, dt);
+        const PxVec3 freshPointB =
+            bodyB ? bodyB->rotation.rotateInv(worldContact - bodyB->position)
+                  : worldContact + computeKinematicContactStep(
+                                       kinematicBodyB, worldContact, dt);
+        // PxContact separation is measured between the actual shape
+        // surfaces.  The solver constraint, however, is defined relative to
+        // the pair's requested rest distance for every contact kind.  Keeping
+        // ordinary rigid contacts in raw-separation space made their active
+        // set and restitution gate disagree with the SDK contact model (and
+        // with TGS), especially for stacks using a non-zero rest offset.
+        const PxReal processedSeparation = contact->separation - restDist;
+        const PxU32 materialKey = makeAvbdManifoldMaterialKey(*patch);
+        const PxU32 candidateOrdinal = manifoldCandidateOrdinal++;
+        const bool ownsManifoldPoint =
+            persistentManifoldEligible &&
+            candidateOrdinal < manifoldCandidateCount &&
+            manifoldAssignment[candidateOrdinal] != 0xffu;
+        const bool matchedManifoldPoint =
+            ownsManifoldPoint && manifoldMatched[candidateOrdinal];
+        const PxU8 manifoldSlot =
+            ownsManifoldPoint ? manifoldAssignment[candidateOrdinal] : 0xffu;
+        const AvbdDynamicsContext::CachedContactManifoldPoint *cachedPoint =
+            matchedManifoldPoint ? &manifoldPoints[manifoldSlot] : nullptr;
+
+        constraint.contactPointA = freshPointA;
+        constraint.contactPointB = freshPointB;
+        constraint.detectionPointA = freshPointA;
+        constraint.detectionPointB = freshPointB;
+        constraint.detectionSeparation = processedSeparation;
+        constraint.penetrationDepth = processedSeparation;
+        constraint.contactNormal = normal;
+        constraint.contactManagerIndex = cmIdx;
+        constraint.manifoldMaterialKey = materialKey;
+        constraint.contactPatchIndex = patchIdx;
+        constraint.frictionAnchorCount =
+            static_cast<PxU8>(reportAnchorCount);
+        constraint.frictionAnchorMask =
+            static_cast<PxU8>((c == 0 ? 1u : 0u) |
+                              (reportAnchorCount > 1 &&
+                                       c == secondAnchorContact
+                                   ? 2u
+                                   : 0u));
+        constraint.cacheIndex =
+            ownsManifoldPoint ? manifoldBase + manifoldSlot : PX_MAX_U32;
+        constraint.cacheKey =
+            ownsManifoldPoint
+                ? makeAvbdManifoldPointIdentity(cmIdx, manifoldSlot)
+                : makeAvbdTransientContactIdentity(cmIdx, startContact + c);
+        constraint.persistentPointMatched =
+            matchedManifoldPoint ? 1u : 0u;
+        if (ownsManifoldPoint) {
+          constraint.header.flags = static_cast<PxU16>(
+              constraint.header.flags |
+              AvbdContactConstraintFlags::ePERSISTENT_MANIFOLD_POINT);
+        }
+        if (deformableStaticAnchor) {
+          constraint.header.flags = static_cast<PxU16>(
+              constraint.header.flags |
+              AvbdContactConstraintFlags::eDEFORMABLE_STATIC_ANCHOR);
         }
 
-        if (bodyB) {
-          constraint.contactPointB =
-              bodyB->rotation.rotateInv(contact->contact - bodyB->position);
-        } else {
-          constraint.contactPointB =
-              worldContact +
-              computeKinematicContactStep(
-                  kinematicBodyB, worldContact, dt);
-        }
-
-        // Lambda & penalty warm-starting (ref: AVBD3D solver.cpp L64-72)
-        //   lambda *= alpha * gamma
-        //   penalty = clamp(penalty * gamma, PENALTY_MIN, PENALTY_MAX)
-        const PxU64 cacheKey = makeAvbdContactCacheKey(
-            globalBody0Idx, globalBody1Idx, constraint.contactPointA,
-            constraint.contactPointB, source.lengthScale);
-        const PxU64 cacheIdx64 =
-            static_cast<PxU64>(cmIdx) *
-                AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM +
-            (cacheKey & (AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM - 1u));
-        const PxU32 cacheIdx = cacheIdx64 < PX_MAX_U32
-                                   ? static_cast<PxU32>(cacheIdx64)
-                                   : PX_MAX_U32;
-        constraint.cacheIndex = cacheIdx;
-        constraint.cacheKey = cacheKey;
-        constraint.contactManagerEstablished =
-            contactManagerAge == 1 ? 1 : 0;
         constraint.contactImpulseWriteback =
             !snapshot && output && output->contactForces
                 ? output->contactForces + startContact + c
@@ -608,101 +919,6 @@ static PxU32 prepareAvbdContactsImpl(
               &reportFrictionPatch->anchorImpulses[anchorIndex];
         }
 
-        // AVBD warmstart decay constants
-        // alpha=0.95, gamma=0.99 => alpha*gamma=0.9405
-        const PxReal wsAlpha = 0.95f;
-        const PxReal wsGamma = 0.99f;
-        const PxReal wsPenaltyMin = 1000.0f;
-        const PxReal wsPenaltyMax = 1e9f;
-
-        const bool bodyVsStatic =
-            (bodyA != nullptr) != (bodyB != nullptr);
-        const PxReal restDist = snapshot ? snapshot->restDistance
-                                         : cm->getRestDistance();
-        const bool deformableStaticAnchor =
-            isDeformableStaticAnchorContact(bodyVsStatic, restDist);
-
-        const AvbdDynamicsContext::CachedLambda *cachedLambda = nullptr;
-        if (snapshot) {
-          const PxU64 cacheBase = static_cast<PxU64>(cmIdx) *
-                                  AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM;
-          if (snapshot->lambdaCacheDirect && cacheIdx64 >= cacheBase) {
-            const PxU64 slotOffset = cacheIdx64 - cacheBase;
-            if (slotOffset < AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM)
-              cachedLambda = reinterpret_cast<
-                  const AvbdDynamicsContext::CachedLambda *>(
-                  snapshot->lambdaCacheDirect) + slotOffset;
-          } else if (snapshot->lambdaCacheBytes && cacheIdx64 >= cacheBase) {
-            const PxU64 slotOffset = cacheIdx64 - cacheBase;
-            if (slotOffset < AvbdDynamicsContext::CONTACT_CACHE_SLOTS_PER_CM &&
-                snapshot->lambdaCacheSlots) {
-              const PxU8 slot = static_cast<PxU8>(slotOffset);
-              for (PxU32 compactSlot = 0;
-                   compactSlot < snapshot->lambdaCacheSlotCount;
-                   ++compactSlot) {
-                if (snapshot->lambdaCacheSlots[compactSlot] == slot) {
-                  cachedLambda = reinterpret_cast<const AvbdDynamicsContext::CachedLambda *>(
-                                     snapshot->lambdaCacheBytes) +
-                                 compactSlot;
-                  break;
-                }
-              }
-            }
-          }
-        } else if (source.lambdaCache && cacheIdx < source.lambdaCache->size()) {
-          cachedLambda = &(*source.lambdaCache)[cacheIdx];
-        }
-
-        if (deformableStaticAnchor) {
-          // Entry 108: no lambda/penalty warmstart on deformable mesh anchors.
-          // Stale multipliers from the moving surface cause impact blow-up without CCD.
-          constraint.header.lambda = 0.0f;
-          constraint.tangentLambda0 = 0.0f;
-          constraint.tangentLambda1 = 0.0f;
-          constraint.header.penalty = wsPenaltyMin;
-          constraint.tangentPenalty0 = wsPenaltyMin;
-          constraint.tangentPenalty1 = wsPenaltyMin;
-          setFrictionStick(constraint, false);
-        } else if (source.enableLambdaWarmStart && cachedLambda) {
-          const AvbdDynamicsContext::CachedLambda &cached = *cachedLambda;
-          const PxU16 frameAge =
-              static_cast<PxU16>(frameStamp - cached.frameStamp);
-          if (cached.key == cacheKey && cached.frameStamp != 0 &&
-              frameAge <= AvbdDynamicsContext::LAMBDA_MAX_AGE) {
-            // Apply warmstart decay (ref Eq. 19)
-            constraint.header.lambda = cached.lambda * wsAlpha * wsGamma;
-            constraint.tangentLambda0 =
-                cached.tangentLambda0 * wsAlpha * wsGamma;
-            constraint.tangentLambda1 =
-                cached.tangentLambda1 * wsAlpha * wsGamma;
-            // Restore and decay penalty (normal + tangent)
-            constraint.header.penalty =
-                PxClamp(cached.penalty * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty0 = PxClamp(
-                cached.tangentPenalty0 * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            constraint.tangentPenalty1 = PxClamp(
-                cached.tangentPenalty1 * wsGamma, wsPenaltyMin, wsPenaltyMax);
-            setFrictionStick(constraint, cached.stick != 0);
-          } else {
-            constraint.header.lambda = 0.0f;
-            constraint.tangentLambda0 = 0.0f;
-            constraint.tangentLambda1 = 0.0f;
-            constraint.header.penalty = wsPenaltyMin;
-            constraint.tangentPenalty0 = wsPenaltyMin;
-            constraint.tangentPenalty1 = wsPenaltyMin;
-            setFrictionStick(constraint, false);
-          }
-        } else {
-          constraint.header.lambda = 0.0f;
-          constraint.tangentLambda0 = 0.0f;
-          constraint.tangentLambda1 = 0.0f;
-          constraint.header.penalty = wsPenaltyMin;
-          constraint.tangentPenalty0 = wsPenaltyMin;
-          constraint.tangentPenalty1 = wsPenaltyMin;
-          setFrictionStick(constraint, false);
-        }
-
-        constraint.contactNormal = normal;
         constraint.targetVelocity =
             extendedContact ? extendedContact->targetVelocity : PxVec3(0.0f);
         constraint.maxImpulse = maxImpulse;
@@ -714,36 +930,136 @@ static PxU32 prepareAvbdContactsImpl(
             PxMax(0.0f, patch->mMassModification.angular0);
         constraint.invInertiaScaleB =
             PxMax(0.0f, patch->mMassModification.angular1);
-        constraint.header.flags = deformableStaticAnchor
-                                      ? AvbdContactConstraintFlags::
-                                            eDEFORMABLE_STATIC_ANCHOR
-                                      : 0;
-        // Deformable mesh only: TGS-style separation - restDistance. Plane/stack
-        // keep baseline separation.
-        constraint.penetrationDepth =
-            deformableStaticAnchor ? (contact->separation - restDist)
-                                   : contact->separation;
-        // Material slice from NP-combined patch (PxCombineMode already applied).
-        // Restitution -> post-AL material normal response; mu -> dual + friction.
         constraint.restitution = patch->restitution;
         constraint.friction = patch->dynamicFriction;
         constraint.staticFriction = patch->staticFriction;
 
         PxVec3 t0, t1;
-        if (PxAbs(normal.y) > 0.9f) {
-          t0 = normal.cross(PxVec3(1, 0, 0)).getNormalized();
-        } else {
-          t0 = normal.cross(PxVec3(0, 1, 0)).getNormalized();
-        }
-        t1 = normal.cross(t0);
-
+        const bool transportedBasis = makeAvbdTransportedContactBasis(
+            normal, cachedPoint, t0, t1);
         constraint.tangent0 = t0;
         constraint.tangent1 = t1;
-        // NOTE: tangentLambda0/1 are already set by the warmstart block above
-        // (either warmstarted values or 0). Do NOT overwrite them here.
+
+        // AVBD warmstart decay (demo3d Eq. 19). A point must have an exact
+        // preceding-frame geometric match; older rows never restore material
+        // anchors or dual state.
+        const PxReal wsAlpha = AvbdConstants::AVBD_AL_ALPHA;
+        const PxReal wsGamma = AvbdConstants::AVBD_AL_GAMMA;
+        const PxReal wsPenaltyMin = AvbdConstants::AVBD_AL_PENALTY_MIN;
+        const PxReal wsPenaltyMax = AvbdConstants::AVBD_AL_PENALTY_MAX;
+        constraint.header.lambda = 0.0f;
+        constraint.tangentLambda0 = 0.0f;
+        constraint.tangentLambda1 = 0.0f;
+        constraint.header.penalty = wsPenaltyMin;
+        constraint.tangentPenalty0 = wsPenaltyMin;
+        constraint.tangentPenalty1 = wsPenaltyMin;
+        bool retainMaterialAnchor = false;
+
+        const bool finiteCachedDual =
+            cachedPoint && PxIsFinite(cachedPoint->lambda) &&
+            PxIsFinite(cachedPoint->tangentLambda0) &&
+            PxIsFinite(cachedPoint->tangentLambda1) &&
+            PxIsFinite(cachedPoint->penalty) &&
+            PxIsFinite(cachedPoint->tangentPenalty0) &&
+            PxIsFinite(cachedPoint->tangentPenalty1) &&
+            PxIsFinite(cachedPoint->normalOffset) &&
+            cachedPoint->constraintPointA.isFinite() &&
+            cachedPoint->constraintPointB.isFinite();
+
+        // Normal AL state persists for an exact preceding-frame manifold
+        // match and releases through the unilateral projection. The material
+        // anchor, its normal offset and the tangential dual are a separate
+        // sticking tuple: correlate that tuple before rebasing the contact
+        // geometry onto the cached anchor.
+        if (finiteCachedDual && cachedPoint->stick != 0 &&
+            (patch->staticFriction > 0.0f ||
+             patch->dynamicFriction > 0.0f)) {
+          PxVec3 oldNormal = cachedPoint->normal;
+          PxVec3 newNormal = normal;
+          oldNormal.normalize();
+          newNormal.normalize();
+          const PxVec3 oldWorldA = getAvbdAnchorWorldAtCapture(
+              cachedPoint->constraintPointA, bodyA);
+          const PxVec3 oldWorldB = getAvbdAnchorWorldAtCapture(
+              cachedPoint->constraintPointB, bodyB);
+          const PxVec3 oldDelta = oldWorldA - oldWorldB;
+          const PxVec3 tangentialDrift =
+              oldDelta - newNormal * oldDelta.dot(newNormal);
+          const PxReal correlationDistance =
+              0.025f * PxMax(source.lengthScale, 1.0e-6f);
+          retainMaterialAnchor =
+              oldNormal.dot(newNormal) >= 0.999f &&
+              tangentialDrift.magnitudeSquared() <=
+                  correlationDistance * correlationDistance;
+        }
+
+        if (retainMaterialAnchor) {
+          constraint.contactPointA = cachedPoint->constraintPointA;
+          constraint.contactPointB = cachedPoint->constraintPointB;
+          constraint.penetrationDepth = cachedPoint->normalOffset;
+        }
+
+        if (finiteCachedDual) {
+          // An exact preceding-frame manifold match is the persistence gate.
+          // Do not fade a matched normal force across an arbitrary separation
+          // band: the unilateral AL projection releases it naturally when
+          // K*C + lambda changes sign.  Prematurely clearing lambda makes a
+          // lightly rocking stack repeatedly lose and rebuild its support.
+          const PxReal warmstartScale = wsAlpha * wsGamma;
+          constraint.header.lambda =
+              PxMin(0.0f, cachedPoint->lambda * warmstartScale);
+          constraint.tangentLambda0 =
+              cachedPoint->tangentLambda0 * warmstartScale;
+          constraint.tangentLambda1 =
+              cachedPoint->tangentLambda1 * warmstartScale;
+          constraint.header.penalty = PxClamp(
+              cachedPoint->penalty * wsGamma,
+              wsPenaltyMin, wsPenaltyMax);
+          constraint.tangentPenalty0 = PxClamp(
+              cachedPoint->tangentPenalty0 * wsGamma,
+              wsPenaltyMin, wsPenaltyMax);
+          constraint.tangentPenalty1 = PxClamp(
+              cachedPoint->tangentPenalty1 * wsGamma,
+              wsPenaltyMin, wsPenaltyMax);
+
+          if (!transportedBasis) {
+            const PxVec3 oldTangent1 =
+                cachedPoint->normal.cross(cachedPoint->tangent0);
+            const PxVec3 worldTangentForce =
+                cachedPoint->tangent0 *
+                    (cachedPoint->tangentLambda0 * warmstartScale) +
+                oldTangent1 *
+                    (cachedPoint->tangentLambda1 * warmstartScale);
+            constraint.tangentLambda0 = worldTangentForce.dot(t0);
+            constraint.tangentLambda1 = worldTangentForce.dot(t1);
+            const PxReal isotropicPenalty = PxMin(
+                constraint.tangentPenalty0, constraint.tangentPenalty1);
+            constraint.tangentPenalty0 = isotropicPenalty;
+            constraint.tangentPenalty1 = isotropicPenalty;
+          }
+
+          if (cachedPoint->stick != 0 && !retainMaterialAnchor) {
+            // A stale strong-friction anchor must not leave a tangential
+            // preload behind after correlation is lost.
+            constraint.tangentLambda0 = 0.0f;
+            constraint.tangentLambda1 = 0.0f;
+            constraint.tangentPenalty0 = wsPenaltyMin;
+            constraint.tangentPenalty1 = wsPenaltyMin;
+          }
+        }
+        setFrictionStick(constraint, retainMaterialAnchor);
+
+        const PxReal frictionCap =
+            PxMax(0.0f, -constraint.header.lambda) *
+            contactCoulombMu(constraint);
+        avbdProjectImpulseCone(
+            frictionCap, constraint.tangentLambda0,
+            constraint.tangentLambda1);
 
         // Initialize C0 to 0 (will be computed by solver before iterations)
         constraint.C0 = 0.0f;
+        constraint.tangentC0 = 0.0f;
+        constraint.tangentC1 = 0.0f;
         constraint.supportClass = AvbdSupportClass::eUnset;
 
         if (deformableStaticAnchor) {
@@ -769,7 +1085,11 @@ static PxU32 prepareAvbdContactsImpl(
           // contact captured by narrow phase, not the world origin.  Using
           // zero here turns the actor's absolute X/Z coordinates into a
           // fictitious tangential step and injects unbounded friction energy.
-          constraint.staticPrevWorldPoint = worldContact;
+          constraint.staticPrevWorldPoint =
+              ownsManifoldPoint
+                  ? (bodyA ? constraint.contactPointB
+                           : constraint.contactPointA)
+                  : worldContact;
         } else {
           constraint.staticPrevWorldPoint = PxVec3(0.0f);
         }
@@ -788,7 +1108,7 @@ static PxU32 prepareAvbdContactsImpl(
       if (snapshot)
         snapshot->managerStateCommit = 1;
       else if (contactManagerState) {
-        contactManagerState->key = contactManagerKey;
+        contactManagerState->identity = contactManagerIdentity;
         contactManagerState->frameStamp = frameStamp;
       }
     }
@@ -815,7 +1135,7 @@ PxU32 AvbdDynamicsContext::prepareAvbdContacts(
       &mContactList,
       &mOutputIterator,
       &mContactManagerStateCache,
-      &mLambdaCache,
+      &mContactManifoldPoints,
       mEnableLambdaWarmStart,
       getLengthScale(),
       getAvbdFrameStamp()};
@@ -1388,8 +1708,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
             c.linBreakImpulse = constraint->linBreakForce;
             c.angBreakImpulse = constraint->angBreakForce;
             c.writeBackIndex = constraint->index;
-            restoreJointLambdaFromCache(*this, c,
-                                        reinterpret_cast<PxU64>(constraint));
+            const PxU64 sourceIdentity =
+                reinterpret_cast<PxU64>(constraint);
+            restoreJointLambdaFromCache(
+                *this, c, constraint->index, sourceIdentity,
+                sourceIdentity);
           }
           } // end validated standard joint data
         } // end standard joint route
@@ -1601,9 +1924,13 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.linBreakImpulse = constraint->linBreakForce;
               c.angBreakImpulse = constraint->angBreakForce;
               c.writeBackIndex = constraint->index;
+              const PxU64 sourceIdentity =
+                  reinterpret_cast<PxU64>(constraint);
+              c.cacheKey = sourceIdentity;
               if (!multiRow) {
                 restoreJointLambdaFromCache(
-                    *this, c, reinterpret_cast<PxU64>(constraint));
+                    *this, c, constraint->index, sourceIdentity,
+                    sourceIdentity);
               }
             }
           }
@@ -1642,8 +1969,11 @@ void AvbdDynamicsContext::prepareAvbdConstraints(
               c.linearMotion = 0b010101;
             }
 
-            restoreJointLambdaFromCache(*this, c,
-                                        reinterpret_cast<PxU64>(constraint));
+            const PxU64 sourceIdentity =
+                reinterpret_cast<PxU64>(constraint);
+            restoreJointLambdaFromCache(
+                *this, c, constraint->index, sourceIdentity,
+                sourceIdentity);
           }
         }
     } // end if (constraint && constraint->constantBlock && ...)

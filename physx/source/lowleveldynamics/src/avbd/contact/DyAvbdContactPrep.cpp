@@ -44,11 +44,8 @@ void initializeAvbdContactC0(
     const physx::PxU32 bodyB = contacts[c].header.bodyIndexB;
     if (hasDeformableStaticAnchor(contacts[c])) {
       contacts[c].C0 = 0.0f;
-      continue;
-    }
-    if (isBodyVsStaticContact(bodyA, bodyB, numBodies) &&
-        contacts[c].contactManagerEstablished) {
-      contacts[c].C0 = 0.0f;
+      contacts[c].tangentC0 = 0.0f;
+      contacts[c].tangentC1 = 0.0f;
       continue;
     }
 
@@ -64,19 +61,23 @@ void initializeAvbdContactC0(
                   bodies[bodyB].prevRotation.rotate(
                       contacts[c].contactPointB)
             : contacts[c].contactPointB;
+    const physx::PxVec3 initialDelta = worldA - worldB;
     physx::PxReal rawC0 =
-        (worldA - worldB).dot(contacts[c].contactNormal) +
+        initialDelta.dot(contacts[c].contactNormal) +
         contacts[c].penetrationDepth;
 
     const physx::PxReal c0Threshold = 0.05f * config.lengthScale;
     const physx::PxReal c0MaxDepth = 0.20f * config.lengthScale;
-    if (rawC0 < -c0Threshold) {
+    if (contacts[c].persistentPointMatched == 0 &&
+        rawC0 < -c0Threshold) {
       const physx::PxReal t = physx::PxClamp(
           (c0MaxDepth + rawC0) / (c0MaxDepth - c0Threshold),
           0.0f, 1.0f);
       rawC0 *= t;
     }
     contacts[c].C0 = rawC0;
+    contacts[c].tangentC0 = initialDelta.dot(contacts[c].tangent0);
+    contacts[c].tangentC1 = initialDelta.dot(contacts[c].tangent1);
   }
 }
 
@@ -171,7 +172,10 @@ void AvbdContactPrep::convertContact(
   outContact.header.lambda = 0.0f;
   outContact.header.rho = config.initialRho;
   outContact.cacheIndex = PX_MAX_U32;
+  outContact.contactManagerIndex = PX_MAX_U32;
   outContact.cacheKey = 0;
+  outContact.manifoldMaterialKey = 0;
+  outContact.persistentPointMatched = 0;
 
   // Transform contact point to body local space
   physx::PxVec3 worldContactA = contactPoint;
@@ -184,6 +188,9 @@ void AvbdContactPrep::convertContact(
   // For body B: r_B = contact - posB
   physx::PxQuat invRotB = bodyB.rotation.getConjugate();
   outContact.contactPointB = invRotB.rotate(worldContactB - bodyB.position);
+  outContact.detectionPointA = outContact.contactPointA;
+  outContact.detectionPointB = outContact.contactPointB;
+  outContact.detectionSeparation = penetration;
 
   // Store normal and penetration
   outContact.contactNormal = contactNormal;
@@ -192,6 +199,10 @@ void AvbdContactPrep::convertContact(
   // Material properties
   outContact.restitution = restitution;
   outContact.friction = friction;
+  outContact.staticFriction = friction;
+  outContact.C0 = 0.0f;
+  outContact.tangentC0 = 0.0f;
+  outContact.tangentC1 = 0.0f;
 
   // Initialize friction constraint if requested
   if (outFriction != nullptr && friction > 0.0f) {

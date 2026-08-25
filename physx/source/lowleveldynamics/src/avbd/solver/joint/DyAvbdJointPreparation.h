@@ -36,8 +36,6 @@ void prepareAvbdJointConstraintPhase(
     const AvbdSolverConfig &config, physx::PxReal invDt2,
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-    AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
     const AvbdBodyConstraintMap *contactMap);
 
 } // namespace Dy

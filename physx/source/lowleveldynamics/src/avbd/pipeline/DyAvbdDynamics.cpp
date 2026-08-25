@@ -47,7 +47,6 @@
 #include "foundation/PxMath.h"
 
 #include <cstdlib>
-#include <cstdint>
 #include <cstring>
 
 using namespace physx;
@@ -57,39 +56,19 @@ using namespace physx::Dy;
 // This is incremented at the start of each update() call
 static physx::PxU64 gAvbdMotorFrameCounter = 0;
 
-static PX_FORCE_INLINE PxU32 getJointLambdaCacheIndex(PxU64 key,
-                                                      PxU32 cacheSize) {
-  const PxU64 mixed = key ^ (key >> 33) ^ (key >> 17);
-  return cacheSize ? static_cast<PxU32>(mixed % cacheSize) : 0;
-}
-
-static PX_FORCE_INLINE PxU32 getBodyVelocityHistoryCacheIndex(PxU64 key,
-                                                              PxU32 cacheSize) {
-  const PxU64 mixed = key ^ (key >> 33) ^ (key >> 17);
-  return cacheSize ? static_cast<PxU32>(mixed % cacheSize) : 0;
-}
-
 static bool isEnvFlagEnabled(const char *name) {
   const char *value = std::getenv(name);
   return value && value[0] && value[0] != '0';
 }
 
-static PX_FORCE_INLINE void mixAvbdContactManagerKey(PxU64 &hash, PxU32 value) {
-  hash ^= value;
-  hash *= 1099511628211ull;
-}
-
-static PxU64 makeAvbdContactManagerKey(const PxsContactManager *manager,
-                                       PxU32 globalBody0Idx,
-                                       PxU32 globalBody1Idx) {
-  const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(manager);
-  PxU64 hash = 14695981039346656037ull;
-  mixAvbdContactManagerKey(hash, static_cast<PxU32>(address));
-  mixAvbdContactManagerKey(
-      hash, static_cast<PxU32>(static_cast<PxU64>(address) >> 32));
-  mixAvbdContactManagerKey(hash, globalBody0Idx);
-  mixAvbdContactManagerKey(hash, globalBody1Idx);
-  return hash != 0 ? hash : 1;
+static PxU64 makeAvbdContactManagerIdentity(
+    const PxsContactManager *manager) {
+  // The cache is already addressed directly by ContactManager index. Pack its
+  // exact low-level cache generation into the validation token so pool reuse
+  // and transform-triggered cache resets cannot inherit an old AVBD manifold.
+  // This is integer packing, not hashing or an associative lookup.
+  return (PxU64(manager->getCacheEpoch()) << 32) |
+         (PxU64(manager->getIndex()) + 1u);
 }
 
 // Accessor for the solver to get current frame
@@ -99,8 +78,7 @@ physx::PxU64 getAvbdMotorFrameCounter() { return gAvbdMotorFrameCounter; }
 // Articulation Internal Joints Helper (forward declaration)
 //=============================================================================
 static void prepareArticulationInternalJoints(
-  AvbdDynamicsContext &context, FeatherstoneArticulation *articulation,
-  PxU32 firstBodyIndex,
+    FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxReal dt = 1.0f / 60.0f);
@@ -221,113 +199,115 @@ AvbdDynamicsContext::AvbdDynamicsContext(
   // provide.
   mTaskFactory = new AvbdTaskFactory(mTaskManager, mAllocatorAdapter);
 
-  // Initialize lambda warm-starting cache
+  // Initialize compact persistent contact manifolds.
   mEnableLambdaWarmStart = true;
-  // Small-scene seed; update() grows this to cover every active contact
-  // manager before any island task can access the backing storage.
-  mLambdaCache.resize(4096);
-  memset(mLambdaCache.begin(), 0, sizeof(CachedLambda) * mLambdaCache.size());
-  mJointLambdaCache.resize(JOINT_LAMBDA_CACHE_SIZE);
-  memset(mJointLambdaCache.begin(), 0,
-         sizeof(CachedJointLambda) * mJointLambdaCache.size());
-  mBodyVelocityHistoryCache.resize(BODY_VELOCITY_HISTORY_CACHE_SIZE);
-  memset(mBodyVelocityHistoryCache.begin(), 0,
-         sizeof(CachedBodyVelocityHistory) *
-             mBodyVelocityHistoryCache.size());
+  // The seed covers 512 managers at eight points each. update() grows the
+  // storage once, before any island task borrows a manager range.
+  mContactManifoldPoints.resize(4096);
+  memset(mContactManifoldPoints.begin(), 0,
+         sizeof(CachedContactManifoldPoint) *
+             mContactManifoldPoints.size());
   mBodyVelocityHistoryFrame = 0;
+  mBodyVelocityHistoryWriteBuffer = 0;
+}
+
+void AvbdDynamicsContext::beginBodyVelocityHistoryFrame(
+    PxU32 nodeCapacity, PxU32 sampleCapacity) {
+  mBodyVelocityHistoryWriteBuffer ^= 1u;
+  PxArray<BodyVelocityHistoryHeader> &writeHeaders =
+      mBodyVelocityHistoryHeaders[mBodyVelocityHistoryWriteBuffer];
+  if (nodeCapacity > writeHeaders.size()) {
+    const PxU32 oldSize = writeHeaders.size();
+    writeHeaders.resize(nodeCapacity);
+    memset(writeHeaders.begin() + oldSize, 0,
+           sizeof(BodyVelocityHistoryHeader) * (nodeCapacity - oldSize));
+  }
+
+  PxArray<PxVec3> &writeSamples =
+      mBodyVelocityHistorySamples[mBodyVelocityHistoryWriteBuffer];
+  writeSamples.clear();
+  if (sampleCapacity > writeSamples.capacity())
+    writeSamples.reserve(sampleCapacity);
 }
 
 void AvbdDynamicsContext::restoreAndUpdateBodyVelocityHistory(
-    const PxsBodyCore &bodyCore, AvbdSolverBody &solverBody) {
-  const PxU64 bodyCoreKey = reinterpret_cast<PxU64>(&bodyCore);
-  const PxU32 cacheSize = mBodyVelocityHistoryCache.size();
-  if (cacheSize == 0)
+    const PxsBodyCore &bodyCore, AvbdSolverBody &solverBody,
+    PxNodeIndex nodeIndex, PxU32 sampleIndex, PxU32 sampleCount) {
+  if (!nodeIndex.isValid() || sampleCount == 0 ||
+      sampleIndex >= sampleCount)
     return;
 
-  const PxU32 firstIndex =
-      getBodyVelocityHistoryCacheIndex(bodyCoreKey, cacheSize);
-  CachedBodyVelocityHistory *cached = NULL;
-  CachedBodyVelocityHistory *firstReusable = NULL;
-
-  // Gather is serial.  Resolve pointer-hash collisions instead of allowing
-  // one body to evict another active body's previous-frame velocity.  A slot
-  // absent for at least one complete update is reusable, but remains a
-  // tombstone while the exact key may still exist later in the probe chain.
-  for (PxU32 probe = 0; probe < cacheSize; ++probe) {
-    CachedBodyVelocityHistory &candidate =
-        mBodyVelocityHistoryCache[(firstIndex + probe) % cacheSize];
-    if (candidate.bodyCoreKey == bodyCoreKey) {
-      cached = &candidate;
-      break;
-    }
-    if (candidate.bodyCoreKey == 0) {
-      cached = firstReusable ? firstReusable : &candidate;
-      break;
-    }
-    if (!firstReusable &&
-        candidate.lastSeenFrame + 1 < mBodyVelocityHistoryFrame) {
-      firstReusable = &candidate;
-    }
-  }
-  if (!cached)
-    cached = firstReusable;
-  if (!cached)
+  const PxU32 node = nodeIndex.index();
+  const PxU64 generation = mIslandManager.getNodeGeneration(nodeIndex);
+  if (generation == 0)
     return;
 
   // initialize()/copyToAvbdSolverBody() deliberately remain the source of all
-  // current-frame state.  Only replace the history sample, and only when the
-  // exact body was gathered in the immediately preceding update.  A sleeping
-  // or otherwise absent frame therefore falls back to full initialization.
-  if (cached->bodyCoreKey == bodyCoreKey &&
-      cached->lastSeenFrame + 1 == mBodyVelocityHistoryFrame) {
-    solverBody.prevLinearVelocity = cached->linearVelocity;
-    solverBody.projectLockedLinearVector(solverBody.prevLinearVelocity);
-  }
-
-  // Gather is serial, so it is safe to prepare next frame's history here.
-  cached->bodyCoreKey = bodyCoreKey;
-  cached->lastSeenFrame = mBodyVelocityHistoryFrame;
-  cached->linearVelocity = bodyCore.linearVelocity;
-}
-
-void AvbdDynamicsContext::ensureBodyVelocityHistoryCapacity(
-    PxU32 bodyCount) {
-  const PxU64 required64 = PxU64(bodyCount) * 2u;
-  if (required64 <= mBodyVelocityHistoryCache.size() ||
-      required64 > PX_MAX_U32)
-    return;
-
-  PxU32 newCapacity = mBodyVelocityHistoryCache.size();
-  while (newCapacity < required64 && newCapacity <= PX_MAX_U32 / 2u)
-    newCapacity *= 2u;
-  if (newCapacity < required64)
-    return;
-
-  PxArray<CachedBodyVelocityHistory> previous(
-      mBodyVelocityHistoryCache);
-  mBodyVelocityHistoryCache.resize(newCapacity);
-  memset(mBodyVelocityHistoryCache.begin(), 0,
-         sizeof(CachedBodyVelocityHistory) *
-             mBodyVelocityHistoryCache.size());
-
-  // Preserve exact previous-frame samples while rebuilding the probe table.
-  // Growth keeps load at or below 0.5, so every retained key has an empty
-  // destination.
-  for (PxU32 i = 0; i < previous.size(); ++i) {
-    const CachedBodyVelocityHistory &source = previous[i];
-    if (source.bodyCoreKey == 0)
-      continue;
-    const PxU32 firstIndex = getBodyVelocityHistoryCacheIndex(
-        source.bodyCoreKey, newCapacity);
-    for (PxU32 probe = 0; probe < newCapacity; ++probe) {
-      CachedBodyVelocityHistory &destination =
-          mBodyVelocityHistoryCache[(firstIndex + probe) % newCapacity];
-      if (destination.bodyCoreKey == 0) {
-        destination = source;
-        break;
-      }
+  // current-frame state. Only an immediately preceding sample from the exact
+  // node lifetime and the same rigid/articulation layout may replace history.
+  const PxU32 readBuffer = mBodyVelocityHistoryWriteBuffer ^ 1u;
+  const PxArray<BodyVelocityHistoryHeader> &readHeaders =
+      mBodyVelocityHistoryHeaders[readBuffer];
+  const PxArray<PxVec3> &readSamples =
+      mBodyVelocityHistorySamples[readBuffer];
+  if (node < readHeaders.size()) {
+    const BodyVelocityHistoryHeader &readHeader = readHeaders[node];
+    const bool rangeValid = readHeader.offset <= readSamples.size() &&
+                            readHeader.count <=
+                                readSamples.size() - readHeader.offset;
+    if (readHeader.frame + 1u == mBodyVelocityHistoryFrame &&
+        readHeader.generation == generation &&
+        readHeader.count == sampleCount && rangeValid) {
+      solverBody.prevLinearVelocity =
+          readSamples[readHeader.offset + sampleIndex];
+      solverBody.projectLockedLinearVector(solverBody.prevLinearVelocity);
     }
   }
+
+  // Gather is serial. A node receives one compact range in the write buffer;
+  // after gather completes neither headers nor samples are mutated by tasks.
+  PxArray<BodyVelocityHistoryHeader> &writeHeaders =
+      mBodyVelocityHistoryHeaders[mBodyVelocityHistoryWriteBuffer];
+  PxArray<PxVec3> &writeSamples =
+      mBodyVelocityHistorySamples[mBodyVelocityHistoryWriteBuffer];
+  if (node >= writeHeaders.size())
+    return;
+
+  BodyVelocityHistoryHeader &writeHeader = writeHeaders[node];
+  if (writeHeader.frame != mBodyVelocityHistoryFrame ||
+      writeHeader.generation != generation) {
+    const PxU32 offset = writeSamples.size();
+    if (sampleCount > PX_MAX_U32 - offset)
+      return;
+    writeSamples.resize(offset + sampleCount);
+    memset(writeSamples.begin() + offset, 0,
+           sizeof(PxVec3) * sampleCount);
+    writeHeader.frame = mBodyVelocityHistoryFrame;
+    writeHeader.generation = generation;
+    writeHeader.offset = offset;
+    writeHeader.count = sampleCount;
+  } else if (writeHeader.count != sampleCount) {
+    PX_ASSERT(writeHeader.count == sampleCount);
+    return;
+  }
+  writeSamples[writeHeader.offset + sampleIndex] = bodyCore.linearVelocity;
+}
+
+void AvbdDynamicsContext::ensureJointLambdaCacheCapacity(
+    PxU32 requiredCapacity) {
+  if (requiredCapacity <= mJointLambdaCache.size())
+    return;
+
+  const PxU32 oldSize = mJointLambdaCache.size();
+  mJointLambdaCache.resize(requiredCapacity);
+  memset(mJointLambdaCache.begin() + oldSize, 0,
+         sizeof(CachedJointLambda) * (requiredCapacity - oldSize));
+}
+
+void AvbdDynamicsContext::invalidateJointLambdaCacheSlot(PxU32 index) {
+  if (index >= mJointLambdaCache.size())
+    return;
+  memset(&mJointLambdaCache[index], 0, sizeof(CachedJointLambda));
 }
 
 AvbdDynamicsContext::~AvbdDynamicsContext() {
@@ -354,7 +334,7 @@ void AvbdDynamicsContext::destroyTask(AvbdTask *task) {
 }
 
 //=============================================================================
-// Lambda Warm-Starting Cache Write-Back
+// Persistent Contact Manifold Write-Back
 //=============================================================================
 
 namespace physx {
@@ -367,7 +347,8 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
     return;
   }
 
-  PxArray<AvbdDynamicsContext::CachedLambda> &cache = ctx.mLambdaCache;
+  PxArray<AvbdDynamicsContext::CachedContactManifoldPoint> &cache =
+      ctx.mContactManifoldPoints;
   const PxU16 cacheFrameStamp = ctx.getAvbdFrameStamp();
 
   for (PxU32 i = 0; i < numConstraints; ++i) {
@@ -379,36 +360,25 @@ void writeLambdaToCache(AvbdDynamicsContext &ctx,
       continue;
     }
 
-    AvbdDynamicsContext::CachedLambda &cached = cache[cacheIdx];
-
-    // Dual warmstart policy:
-    //   deformable mesh NP anchor -> no cross-frame lambda / staticPrev
-    //   rigid plane / dyn-dyn -> write dual state
-    // Entry 108/153: CM-index staticPrev aliasing caused long-run heave energy.
-    if (hasDeformableStaticAnchor(constraint)) {
-      cached.key = 0;
-      cached.lambda = 0.0f;
-      cached.tangentLambda0 = 0.0f;
-      cached.tangentLambda1 = 0.0f;
-      cached.penalty = 1000.0f;
-      cached.tangentPenalty0 = 1000.0f;
-      cached.tangentPenalty1 = 1000.0f;
-      cached.stick = 0;
-      cached.prevStaticWorldPoint = PxVec3(0.0f);
-      // Invalidate the stamp so a non-deformable pair reusing this CM index
-      // does not inherit mesh dual garbage if the pair type changes.
-      cached.frameStamp = 0;
+    if (!hasPersistentContactManifoldPoint(constraint))
       continue;
-    }
 
-    // Rigid / dyn-dyn contacts: standard dual warmstart write-back.
-    cached.key = constraint.cacheKey;
+    AvbdDynamicsContext::CachedContactManifoldPoint &cached =
+        cache[cacheIdx];
+    cached.detectionPointA = constraint.detectionPointA;
+    cached.detectionPointB = constraint.detectionPointB;
+    cached.constraintPointA = constraint.contactPointA;
+    cached.constraintPointB = constraint.contactPointB;
+    cached.normal = constraint.contactNormal;
+    cached.tangent0 = constraint.tangent0;
+    cached.normalOffset = constraint.penetrationDepth;
     cached.lambda = constraint.header.lambda;
     cached.tangentLambda0 = constraint.tangentLambda0;
     cached.tangentLambda1 = constraint.tangentLambda1;
     cached.penalty = constraint.header.penalty;
     cached.tangentPenalty0 = constraint.tangentPenalty0;
     cached.tangentPenalty1 = constraint.tangentPenalty1;
+    cached.materialKey = constraint.manifoldMaterialKey;
     cached.stick = hasFrictionStick(constraint) ? 1u : 0u;
     cached.frameStamp = cacheFrameStamp;
   }
@@ -438,11 +408,14 @@ void writeContactImpulseToOutput(const AvbdContactConstraint *constraints,
       const bool dynamicDynamic =
           constraint.header.bodyIndexA < numBodies &&
           constraint.header.bodyIndexB < numBodies;
-      if (dynamicDynamic) {
+      if (dynamicDynamic &&
+          !hasVelocityTotalMaterialConeReportOwner(constraint)) {
         // Dynamic-dynamic tangents are part of the AVBD primal/dual solve.
         // Their multipliers are forces, matching the normal multiplier, so
-        // convert the final force on body A to a per-step impulse.
-        frictionImpulse +=
+        // convert the final force on body A to a per-step impulse. A strict
+        // total-cone owner reports its complete tangent impulse directly and
+        // sets velocityNormalImpulse, so the raw AL source must not be added.
+        frictionImpulse -=
             (constraint.tangent0 * constraint.tangentLambda0 +
              constraint.tangent1 * constraint.tangentLambda1) *
             dt;
@@ -484,8 +457,9 @@ void writeContactImpulseToOutputTokens(
       const bool dynamicDynamic =
           constraint.header.bodyIndexA < numBodies &&
           constraint.header.bodyIndexB < numBodies;
-      if (dynamicDynamic) {
-        frictionImpulse +=
+      if (dynamicDynamic &&
+          !hasVelocityTotalMaterialConeReportOwner(constraint)) {
+        frictionImpulse -=
             (constraint.tangent0 * constraint.tangentLambda0 +
              constraint.tangent1 * constraint.tangentLambda1) *
             dt;
@@ -515,30 +489,35 @@ void commitContactOutputTokens(const AvbdContactOutputTarget *targets,
 
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
-                                 PxU64 cacheKey) {
+                                 PxU32 cacheIndex, PxU64 cacheIdentity,
+                                 PxU64 objectiveKey) {
   constraint.cacheIndex = PX_MAX_U32;
+  constraint.cacheIdentity = 0;
+  constraint.cacheKey = objectiveKey;
 
-  if (!ctx.mEnableLambdaWarmStart || cacheKey == 0 ||
-      ctx.mJointLambdaCache.empty()) {
+  if (!ctx.mEnableLambdaWarmStart || cacheIdentity == 0 ||
+      cacheIndex >= ctx.mJointLambdaCache.size()) {
     return;
   }
 
-  const PxU32 cacheIdx =
-      getJointLambdaCacheIndex(cacheKey, ctx.mJointLambdaCache.size());
-  constraint.cacheIndex = cacheIdx;
-    constraint.cacheKey = cacheKey;
+  // External low-level constraints already own a stable dense index. Keep
+  // that direct address independent from cacheKey, which is only an objective
+  // identity used by solver-program ownership and ordering.
+  constraint.cacheIndex = cacheIndex;
+  constraint.cacheIdentity = cacheIdentity;
 
-  AvbdDynamicsContext::CachedJointLambda &cached =
-      ctx.mJointLambdaCache[cacheIdx];
+  const AvbdDynamicsContext::CachedJointLambda &cached =
+      ctx.mJointLambdaCache[cacheIndex];
   const PxU16 currentStamp = ctx.getAvbdFrameStamp();
   const PxU16 frameAge =
       static_cast<PxU16>(currentStamp - cached.frameStamp);
-  if (cached.key != cacheKey || cached.frameStamp == 0 ||
+  if (cached.identity != cacheIdentity || cached.frameStamp == 0 ||
       frameAge > AvbdDynamicsContext::LAMBDA_MAX_AGE) {
     return;
   }
 
-  const PxReal warmScale = 0.95f * 0.99f;
+  const PxReal warmScale = AvbdConstants::AVBD_AL_ALPHA *
+                           AvbdConstants::AVBD_AL_GAMMA;
   constraint.lambdaLinear = cached.lambdaLinear * warmScale;
   constraint.lambdaAngular = cached.lambdaAngular * warmScale;
   constraint.lambdaDriveLinear = cached.lambdaDriveLinear * warmScale;
@@ -598,30 +577,45 @@ void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
   }
 }
 
-void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
-                             AvbdD6JointConstraint *constraints,
-                             PxU32 numConstraints) {
-  if (!ctx.mEnableLambdaWarmStart || !constraints || numConstraints == 0 ||
+void commitJointLambdaCacheRanges(
+    AvbdDynamicsContext &ctx,
+    const AvbdJointCacheCommitRange *ranges, PxU32 rangeCount) {
+  if (!ctx.mEnableLambdaWarmStart || !ranges || rangeCount == 0 ||
       ctx.mJointLambdaCache.empty()) {
     return;
   }
 
-  for (PxU32 i = 0; i < numConstraints; ++i) {
-    const AvbdD6JointConstraint &constraint = constraints[i];
-    const PxU32 cacheIdx = constraint.cacheIndex;
-    if (cacheIdx >= ctx.mJointLambdaCache.size()) {
+  const PxU16 frameStamp = ctx.getAvbdFrameStamp();
+  for (PxU32 rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex) {
+    const AvbdJointCacheCommitRange &range = ranges[rangeIndex];
+    if (!range.constraints)
       continue;
-    }
+    for (PxU32 i = 0; i < range.numConstraints; ++i) {
+      const AvbdD6JointConstraint &constraint = range.constraints[i];
+      const PxU32 cacheIndex = constraint.cacheIndex;
+      if (cacheIndex >= ctx.mJointLambdaCache.size() ||
+          constraint.cacheIdentity == 0)
+        continue;
 
-    AvbdDynamicsContext::CachedJointLambda &cached =
-        ctx.mJointLambdaCache[cacheIdx];
-    cached.key = constraint.cacheKey;
-    cached.lambdaLinear = constraint.lambdaLinear;
-    cached.lambdaAngular = constraint.lambdaAngular;
-    cached.lambdaDriveLinear = constraint.lambdaDriveLinear;
-    cached.lambdaDriveAngular = constraint.lambdaDriveAngular;
-    cached.coneLambda = constraint.coneLambda;
-    cached.frameStamp = ctx.getAvbdFrameStamp();
+      AvbdDynamicsContext::CachedJointLambda &cached =
+          ctx.mJointLambdaCache[cacheIndex];
+      if (cached.frameStamp == frameStamp) {
+        // One external Constraint::index may own at most one persistent D6
+        // row. Poison an accidental duplicate for this frame instead of
+        // making persistence depend on island completion order.
+        memset(&cached, 0, sizeof(cached));
+        cached.frameStamp = frameStamp;
+        continue;
+      }
+
+      cached.identity = constraint.cacheIdentity;
+      cached.lambdaLinear = constraint.lambdaLinear;
+      cached.lambdaAngular = constraint.lambdaAngular;
+      cached.lambdaDriveLinear = constraint.lambdaDriveLinear;
+      cached.lambdaDriveAngular = constraint.lambdaDriveAngular;
+      cached.coneLambda = constraint.coneLambda;
+      cached.frameStamp = frameStamp;
+    }
   }
 }
 
@@ -751,9 +745,14 @@ void AvbdDynamicsContext::update(
   // history when it next appears.
   ++mBodyVelocityHistoryFrame;
   if (mBodyVelocityHistoryFrame == 0) {
-    memset(mBodyVelocityHistoryCache.begin(), 0,
-           sizeof(CachedBodyVelocityHistory) *
-               mBodyVelocityHistoryCache.size());
+    for (PxU32 buffer = 0; buffer < 2; ++buffer) {
+      PxArray<BodyVelocityHistoryHeader> &headers =
+          mBodyVelocityHistoryHeaders[buffer];
+      if (!headers.empty())
+        memset(headers.begin(), 0,
+               sizeof(BodyVelocityHistoryHeader) * headers.size());
+      mBodyVelocityHistorySamples[buffer].clear();
+    }
     ++mBodyVelocityHistoryFrame;
   }
 
@@ -764,8 +763,8 @@ void AvbdDynamicsContext::update(
       ((mBodyVelocityHistoryFrame - 1u) % 65535u) == 0u) {
     // Clear stamps at the 16-bit epoch boundary so an entry older than 65535
     // updates cannot alias a fresh stamp after wraparound.
-    for (PxU32 i = 0; i < mLambdaCache.size(); ++i)
-      mLambdaCache[i].frameStamp = 0;
+    for (PxU32 i = 0; i < mContactManifoldPoints.size(); ++i)
+      mContactManifoldPoints[i].frameStamp = 0;
     for (PxU32 i = 0; i < mJointLambdaCache.size(); ++i)
       mJointLambdaCache[i].frameStamp = 0;
     for (PxU32 i = 0; i < mContactManagerStateCache.size(); ++i)
@@ -791,22 +790,27 @@ void AvbdDynamicsContext::update(
   const PxU32 numArticulations =
       islandSim.getNbActiveNodes(IG::Node::eARTICULATION_TYPE);
 
+  // Rotate the exact node-indexed history even on an empty update. A sleeping
+  // or otherwise absent frame must break velocity-history continuity.
+  const PxU32 totalBodyCount =
+      numDynamicBodies + numArticulations * maxArticulationLinks;
+  beginBodyVelocityHistoryFrame(mIslandManager.getNbNodeHandles(),
+                                totalBodyCount);
+
   if (islandCount == 0) {
     return;
   }
 
-  // Calculate total body count including articulation links
-  PxU32 totalBodyCount = numDynamicBodies + numArticulations * maxArticulationLinks;
   // A complete soft selection is a first-class main-solver island even when
   // it has no rigid endpoint. Keep one non-addressable allocation slot so the
   // gather/provider/task plumbing stays valid while every physical loop still
   // observes totalBodyCount == 0.
   const PxU32 bodyAllocationCount = PxMax<PxU32>(totalBodyCount, 1u);
-  ensureBodyVelocityHistoryCapacity(totalBodyCount);
 
   // Allocate global arrays - use scratch with main allocator fallback
   AvbdSolverBody *avbdBodies = nullptr;
   PxsRigidBody **rigidBodies = nullptr;
+  PxNodeIndex *bodyNodeIndices = nullptr;
   PxU32 *staticTouchCounts = nullptr;
   {
     PX_PROFILE_ZONE("AVBD.allocateMemory", mContextID);
@@ -818,13 +822,18 @@ void AvbdDynamicsContext::update(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxsRigidBody *) * bodyAllocationCount, "RigidBodies"));
 
+    bodyNodeIndices = reinterpret_cast<PxNodeIndex *>(allocWithFallback(
+        mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
+        sizeof(PxNodeIndex) * bodyAllocationCount, "BodyNodeIndices"));
+
     staticTouchCounts = reinterpret_cast<PxU32 *>(allocWithFallback(
         mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
         sizeof(PxU32) * bodyAllocationCount, "StaticTouchCounts"));
   }
 
   // Check if allocation failed completely
-  if (!avbdBodies || !rigidBodies || !staticTouchCounts) {
+  if (!avbdBodies || !rigidBodies || !bodyNodeIndices ||
+      !staticTouchCounts) {
     return;
   }
 
@@ -951,6 +960,7 @@ void AvbdDynamicsContext::update(
 
       if (node.getNodeType() == IG::Node::eRIGID_BODY_TYPE) {
         rigidBodies[bodyIndex] = getRigidBodyFromIG(islandSim, currentIndex);
+        bodyNodeIndices[bodyIndex] = currentIndex;
         staticTouchCounts[bodyIndex] =
             islandSim.getIslandStaticTouchCount(currentIndex);
         const PxU32 activeNodeIdx = islandSim.getActiveNodeIndex(currentIndex);
@@ -977,11 +987,13 @@ void AvbdDynamicsContext::update(
 
           ArticulationData &artData = articulation->getArticulationData();
           const PxU32 linkCount = artData.getLinkCount();
+          const PxU32 storedLinkCount =
+              PxMin(linkCount, totalBodyCount - bodyIndex);
 
-          for (PxU32 linkIdx = 0;
-               linkIdx < linkCount && bodyIndex < totalBodyCount; ++linkIdx) {
+          for (PxU32 linkIdx = 0; linkIdx < storedLinkCount; ++linkIdx) {
             const ArticulationLink &link = artData.getLink(linkIdx);
             AvbdSolverBody &solverBody = avbdBodies[bodyIndex];
+            bodyNodeIndices[bodyIndex] = currentIndex;
 
             const PxsBodyCore *bodyCore = link.bodyCore;
             if (bodyCore) {
@@ -1005,7 +1017,9 @@ void AvbdDynamicsContext::update(
                     invInertiaWorld, bodyIndex);
               }
 
-              restoreAndUpdateBodyVelocityHistory(*bodyCore, solverBody);
+              restoreAndUpdateBodyVelocityHistory(
+                  *bodyCore, solverBody, currentIndex, linkIdx,
+                  storedLinkCount);
 
               // Copy per-body damping and velocity caps from body core
               solverBody.linearDamping = bodyCore->linearDamping;
@@ -1246,7 +1260,8 @@ void AvbdDynamicsContext::update(
 
   // 3. Setup bodies (for rigid bodies only, articulation links already set up)
   if (avbdBodies && rigidBodies) {
-    setupBodies(avbdBodies, rigidBodies, bodyIndex, dt, gravity);
+    setupBodies(avbdBodies, rigidBodies, bodyNodeIndices, bodyIndex, dt,
+                gravity);
   }
 
   // The Scene may bind one complete soft/VBD tuple to each already gathered
@@ -1309,11 +1324,11 @@ void AvbdDynamicsContext::update(
         isEnvFlagEnabled("PHYSX_AVBD_BOUNDED_COMPONENT_PROBE");
     config.contactCompliance = 1e-2f;
     // AVBD reference parameters
-    config.avbdAlpha = 0.95f;
-    config.avbdBeta = 1000.0f;
-    config.avbdGamma = 0.99f;
-    config.avbdPenaltyMin = 1000.0f;
-    config.avbdPenaltyMax = 1e9f;
+    config.avbdAlpha = AvbdConstants::AVBD_AL_ALPHA;
+    config.avbdBeta = AvbdConstants::AVBD_AL_BETA_LINEAR;
+    config.avbdGamma = AvbdConstants::AVBD_AL_GAMMA;
+    config.avbdPenaltyMin = AvbdConstants::AVBD_AL_PENALTY_MIN;
+    config.avbdPenaltyMax = AvbdConstants::AVBD_AL_PENALTY_MAX;
     mSolver.initialize(config, mAllocatorAdapter);
     mSolverInitialized = true;
   }
@@ -1410,7 +1425,7 @@ void AvbdDynamicsContext::update(
     }
   }
 
-  // Reserve the complete contact-cache range before any island task is
+  // Reserve the complete compact-manifold range before any island task is
   // submitted.  Islands are prepared and launched in one loop below; growing
   // PxArray from a later island while an earlier task writes its lambdas would
   // invalidate the earlier task's cache storage and race the reallocation.
@@ -1422,19 +1437,19 @@ void AvbdDynamicsContext::update(
         continue;
       const PxU64 managerEnd =
           (static_cast<PxU64>(cm->getIndex()) + 1u) *
-          CONTACT_CACHE_SLOTS_PER_CM;
+          CONTACT_MANIFOLD_POINT_CAPACITY;
       requiredCacheSize = PxMax(requiredCacheSize, managerEnd);
     }
     if (requiredCacheSize <= PX_MAX_U32 &&
-        requiredCacheSize > mLambdaCache.size()) {
-      const PxU32 oldSize = mLambdaCache.size();
+        requiredCacheSize > mContactManifoldPoints.size()) {
+      const PxU32 oldSize = mContactManifoldPoints.size();
       const PxU32 requested = static_cast<PxU32>(requiredCacheSize);
       const PxU32 newSize = requested > PX_MAX_U32 - 1023u
                                 ? requested
                                 : (requested + 1023u) & ~1023u;
-      mLambdaCache.resize(newSize);
-      memset(mLambdaCache.begin() + oldSize, 0,
-             sizeof(CachedLambda) * (newSize - oldSize));
+      mContactManifoldPoints.resize(newSize);
+      memset(mContactManifoldPoints.begin() + oldSize, 0,
+             sizeof(CachedContactManifoldPoint) * (newSize - oldSize));
     }
   }
   if (!mContactList.empty()) {
@@ -1528,8 +1543,8 @@ void AvbdDynamicsContext::update(
             snapshot.indexType1 == PxsIndexedInteraction::eBODY
                 ? static_cast<PxU32>(snapshot.solverBody1)
                 : PX_MAX_U32;
-        snapshot.contactManagerKey = makeAvbdContactManagerKey(
-            cm, globalBody0Idx, globalBody1Idx);
+        snapshot.contactManagerIdentity =
+            makeAvbdContactManagerIdentity(cm);
         snapshot.restDistance = cm->getRestDistance();
         if (isDeformableStaticAnchorContact(
                 (globalBody0Idx != PX_MAX_U32) !=
@@ -1540,7 +1555,7 @@ void AvbdDynamicsContext::update(
         if (snapshot.contactManagerIndex < mContactManagerStateCache.size()) {
           const CachedContactManagerState &state =
               mContactManagerStateCache[snapshot.contactManagerIndex];
-          if (state.key == snapshot.contactManagerKey &&
+          if (state.identity == snapshot.contactManagerIdentity &&
               state.frameStamp != 0) {
             const PxU16 age = static_cast<PxU16>(frameStamp - state.frameStamp);
             snapshot.contactManagerAge =
@@ -1671,16 +1686,17 @@ void AvbdDynamicsContext::update(
           }
         }
 
-        // The cache belongs to this contact manager's disjoint slot range.
-        // Borrow it read-only until the solve task writes the same range back;
-        // this avoids rebuilding per-contact compact cache payloads during
-        // the parent preparation prefix.
+        // Borrow this manager's compact persistent points read-only until the
+        // owning island writes the same disjoint range back after its solve.
         if (mEnableLambdaWarmStart) {
           const PxU64 cacheBase = static_cast<PxU64>(
-              snapshot.contactManagerIndex) * CONTACT_CACHE_SLOTS_PER_CM;
-          const PxU64 cacheEnd = cacheBase + CONTACT_CACHE_SLOTS_PER_CM;
-          if (cacheEnd <= mLambdaCache.size())
-            snapshot.lambdaCacheDirect = &mLambdaCache[static_cast<PxU32>(cacheBase)];
+              snapshot.contactManagerIndex) *
+              CONTACT_MANIFOLD_POINT_CAPACITY;
+          const PxU64 cacheEnd =
+              cacheBase + CONTACT_MANIFOLD_POINT_CAPACITY;
+          if (cacheEnd <= mContactManifoldPoints.size())
+            snapshot.contactManifoldPoints =
+                &mContactManifoldPoints[static_cast<PxU32>(cacheBase)];
         }
         // The narrow-phase output remains immutable until the post-solver
         // continuation consumes it. Borrow the already frozen byte ranges
@@ -1767,6 +1783,21 @@ void AvbdDynamicsContext::update(
       reinterpret_cast<AvbdGearJointConstraint *>(allocWithFallback(
           mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
           sizeof(AvbdGearJointConstraint) * totalGearCapacity, "GearJoints"));
+
+  // Each island publishes one immutable range descriptor during parent-side
+  // preparation. The post-join writeback task consumes the complete table in
+  // a single linear pass; allocation failure merely disables persistence for
+  // this frame and never reintroduces worker-side cache mutation.
+  AvbdJointCacheCommitRange *jointCacheCommitRanges =
+      reinterpret_cast<AvbdJointCacheCommitRange *>(allocWithFallback(
+          mScratchAllocator, mAllocatorAdapter, mHeapFallbackAllocations,
+          sizeof(AvbdJointCacheCommitRange) * islandCount,
+          "AvbdJointCacheCommitRanges"));
+  if (jointCacheCommitRanges) {
+    for (PxU32 i = 0; i < islandCount; ++i)
+      PX_PLACEMENT_NEW(&jointCacheCommitRanges[i],
+                       AvbdJointCacheCommitRange)();
+  }
 
   // Reserve one disjoint map slot per island before any solve task can be
   // submitted.  A failed reservation is deliberately non-fatal: that island
@@ -2002,9 +2033,8 @@ void AvbdDynamicsContext::update(
         snapshot.solverBody1 = icm.solverBody1;
         snapshot.indexType0 = icm.indexType0;
         snapshot.indexType1 = icm.indexType1;
-        snapshot.contactManagerKey = makeAvbdContactManagerKey(
-            cm, body0 ? static_cast<PxU32>(globalBody0) : PX_MAX_U32,
-            body1 ? static_cast<PxU32>(globalBody1) : PX_MAX_U32);
+        snapshot.contactManagerIdentity =
+            makeAvbdContactManagerIdentity(cm);
         snapshot.restDistance = cm->getRestDistance();
         if (isDeformableStaticAnchorContact(body0 != body1,
                                             snapshot.restDistance)) {
@@ -2016,7 +2046,7 @@ void AvbdDynamicsContext::update(
             mContactManagerStateCache.size()) {
           const CachedContactManagerState &state =
               mContactManagerStateCache[snapshot.contactManagerIndex];
-          if (state.key == snapshot.contactManagerKey &&
+          if (state.identity == snapshot.contactManagerIdentity &&
               state.frameStamp != 0) {
             const PxU16 age =
                 static_cast<PxU16>(frameStamp - state.frameStamp);
@@ -2027,11 +2057,12 @@ void AvbdDynamicsContext::update(
         if (mEnableLambdaWarmStart) {
           const PxU64 cacheBase =
               static_cast<PxU64>(snapshot.contactManagerIndex) *
-              CONTACT_CACHE_SLOTS_PER_CM;
-          const PxU64 cacheEnd = cacheBase + CONTACT_CACHE_SLOTS_PER_CM;
-          if (cacheEnd <= mLambdaCache.size())
-            snapshot.lambdaCacheDirect =
-                &mLambdaCache[static_cast<PxU32>(cacheBase)];
+              CONTACT_MANIFOLD_POINT_CAPACITY;
+          const PxU64 cacheEnd =
+              cacheBase + CONTACT_MANIFOLD_POINT_CAPACITY;
+          if (cacheEnd <= mContactManifoldPoints.size())
+            snapshot.contactManifoldPoints =
+                &mContactManifoldPoints[static_cast<PxU32>(cacheBase)];
         }
         snapshot.contactPatches = output.contactPatches;
         snapshot.contactPoints = output.contactPoints;
@@ -2106,7 +2137,8 @@ void AvbdDynamicsContext::update(
       *this, avbdBodies, rigidBodies, staticTouchCounts, bodyIndex, dt,
       mEnableStabilization, isSleepingDisabled(), articulationForBody,
       linkIndexForBody, contactOutputTargets, contactOutputResults,
-      maxConstraints);
+      maxConstraints, jointCacheCommitRanges,
+      jointCacheCommitRanges ? islandCount : 0u);
   wbTask->setContinuation(continuation);
 
   AvbdCoordinatorTask *coordTask =
@@ -2243,7 +2275,7 @@ void AvbdDynamicsContext::update(
               // Prepare articulation internal joints as unified D6
               PxU32 artD6 = 0, artGear = 0;
                prepareArticulationInternalJoints(
-                   *this, articulation, localFirstBodyIdx,
+                   articulation, localFirstBodyIdx,
                    d6Joints + d6StorageOffset + numD6, artD6,
                    info.d6OutputCapacity - PxMin(
                        info.d6OutputCapacity, numD6),
@@ -2319,6 +2351,10 @@ void AvbdDynamicsContext::update(
     batch.numD6 = numD6;
     batch.gearJoints = &gearJoints[gearStorageOffset];
     batch.numGear = numGear;
+    if (jointCacheCommitRanges) {
+      jointCacheCommitRanges[i].constraints = batch.d6Joints;
+      jointCacheCommitRanges[i].numConstraints = batch.numD6;
+    }
 
     batch.softParticles =
         ownsSoftSelection ? softSelection->particles : nullptr;
@@ -2419,7 +2455,6 @@ void AvbdDynamicsContext::update(
         writeContactImpulseToOutput(batch.constraints, batch.numConstraints,
                                     batch.numBodies, dt);
       }
-      writeJointLambdaToCache(*this, batch.d6Joints, batch.numD6);
       writeJointConstraintWriteback(*this, batch.d6Joints, batch.numD6, dt);
       // Release constraint maps
       PxAllocatorCallback &alloc = getAllocator();
@@ -2463,7 +2498,7 @@ void AvbdDynamicsContext::commitContactPrepSnapshots(
       continue;
     CachedContactManagerState &state =
         mContactManagerStateCache[snapshot.contactManagerIndex];
-    state.key = snapshot.contactManagerKey;
+    state.identity = snapshot.contactManagerIdentity;
     state.frameStamp = frameStamp;
   }
 }
@@ -2474,6 +2509,7 @@ void AvbdDynamicsContext::commitContactPrepSnapshots(
 
 void AvbdDynamicsContext::setupBodies(AvbdSolverBody *avbdBodies,
                                       PxsRigidBody **rigidBodies,
+                                      const PxNodeIndex *bodyNodeIndices,
                                       PxU32 numBodies, PxReal dt,
                                       const PxVec3 &gravity) {
   PX_UNUSED(gravity);
@@ -2483,7 +2519,8 @@ void AvbdDynamicsContext::setupBodies(AvbdSolverBody *avbdBodies,
     if (rigidBody) {
       const PxsBodyCore &core = rigidBody->getCore();
       copyToAvbdSolverBody(core, avbdBodies[i], i, dt);
-      restoreAndUpdateBodyVelocityHistory(core, avbdBodies[i]);
+      restoreAndUpdateBodyVelocityHistory(core, avbdBodies[i],
+                                          bodyNodeIndices[i], 0, 1);
     }
   }
 }
@@ -2561,8 +2598,7 @@ static bool prepareHardMimicAxis(
 }
 
 static void prepareArticulationInternalJoints(
-  AvbdDynamicsContext &context, FeatherstoneArticulation *articulation,
-  PxU32 firstBodyIndex,
+    FeatherstoneArticulation *articulation, PxU32 firstBodyIndex,
     AvbdD6JointConstraint *d6Constraints, PxU32 &numD6, PxU32 maxD6,
     AvbdGearJointConstraint *gearConstraints, PxU32 &numGear, PxU32 maxGear,
     PxReal dt) {
@@ -2877,9 +2913,10 @@ static void prepareArticulationInternalJoints(
         }
       }
 
-      restoreJointLambdaFromCache(
-          context, c,
-          reinterpret_cast<PxU64>(jointCore));
+      // Articulation joints have no external Constraint::index/generation.
+      // Keep their source identity for objective ownership, but fail closed
+      // to a cold start until an articulation-owned direct sidecar exists.
+      c.cacheKey = reinterpret_cast<PxU64>(jointCore);
 
       numD6++;
     }

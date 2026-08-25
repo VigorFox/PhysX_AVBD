@@ -69,6 +69,7 @@ void buildAvbdJointContactPhaseState(
     physx::PxU32 numContacts, physx::PxU32 numD6, physx::PxU32 numGear,
     AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
     AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    const physx::PxVec3 &gravity, physx::PxReal dt,
     bool captureAngularVelocityForPassiveGear) {
   state.hasKinematicShellContacts = false;
   state.hasBodyStaticContact = false;
@@ -125,13 +126,21 @@ void buildAvbdJointContactPhaseState(
 
   if (numContacts > 0) {
     state.linearVelAtSolveStart.resize(numBodies);
-    for (physx::PxU32 i = 0; i < numBodies; ++i)
-      state.linearVelAtSolveStart[i] = bodies[i].linearVelocity;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      physx::PxVec3 linear =
+          bodies[i].linearVelocity +
+          gravity * (bodies[i].gravityScale * dt);
+      bodies[i].projectLockedLinearVector(linear);
+      state.linearVelAtSolveStart[i] = linear;
+    }
   }
   if (numContacts > 0 || captureAngularVelocityForPassiveGear) {
     state.angularVelAtSolveStart.resize(numBodies);
-    for (physx::PxU32 i = 0; i < numBodies; ++i)
-      state.angularVelAtSolveStart[i] = bodies[i].angularVelocity;
+    for (physx::PxU32 i = 0; i < numBodies; ++i) {
+      physx::PxVec3 angular = bodies[i].angularVelocity;
+      bodies[i].projectLockedAngularVector(angular);
+      state.angularVelAtSolveStart[i] = angular;
+    }
   }
 }
 

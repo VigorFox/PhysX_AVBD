@@ -77,6 +77,7 @@ void PostThirdPassTask::runInternal()
 ///////////////////////////////////////////////////////////////////////////////
 
 SimpleIslandManager::SimpleIslandManager(bool useEnhancedDeterminism, bool gpu, PxU64 contextID) : 
+	mNodeGenerations			("mNodeGenerations"),
 	mDestroyedNodes				("mDestroyedNodes"), 
 	mDestroyedEdges				("mDestroyedEdges"), 
 	mAccurateIslandManager		(mCpuData, gpu ? &mGpuData : NULL, contextID),
@@ -99,6 +100,17 @@ SimpleIslandManager::~SimpleIslandManager()
 PxNodeIndex SimpleIslandManager::addNode(bool isActive, bool isKinematic, Node::NodeType type, void* object)
 {
 	const PxU32 handle = mNodeHandles.getHandle();
+	if(handle >= mNodeGenerations.size())
+	{
+		const PxU32 oldSize = mNodeGenerations.size();
+		mNodeGenerations.resize(handle + 1);
+		for(PxU32 i = oldSize; i <= handle; ++i)
+			mNodeGenerations[i] = 0;
+	}
+	PxU64 generation = mNodeGenerations[handle] + 1;
+	if(generation == 0)
+		generation = 1;
+	mNodeGenerations[handle] = generation;
 	const PxNodeIndex nodeIndex(handle);
 	mAccurateIslandManager		.addNode(isActive, isKinematic, type, nodeIndex, object);
 	mSpeculativeIslandManager	.addNode(isActive, isKinematic, type, nodeIndex, object);

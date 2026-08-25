@@ -267,7 +267,7 @@ PxsContactManager* PxsContext::createContactManager(PxsContactManager* contactMa
 	PxsContactManager* cm = contactManager? contactManager : mContactManagerPool.get();
 	if(cm)
 	{
-		cm->getWorkUnit().clearCachedState();
+		cm->resetCachedState();
 
 		if(!contactManager)
 			setActiveContactManager(cm, useCCD);
@@ -598,4 +598,3 @@ void PxsContext::beginUpdate()
 	PX_CATCH_UNDEFINED_ENABLE_SIM_STATS
 #endif
 }
-

@@ -53,7 +53,7 @@ class PxsRigidBody;
 // unsupported endpoint kinds fail closed to the legacy preparation path until
 // their commit ABI is explicit.
 struct AvbdContactPrepSnapshot {
-  PxU64 contactManagerKey;
+  PxU64 contactManagerIdentity;
   PxReal restDistance;
   PxU32 contactManagerIndex;
   PxU32 npIndex;
@@ -70,15 +70,9 @@ struct AvbdContactPrepSnapshot {
   // keeps the source buffers alive through the post-solver continuation.
   const PxU8 *contactPatches;
   const PxU8 *contactPoints;
-  // Optional compact copy of this manager's direct-mapped warm-start slots
-  // retained for ABI fallback. The live path prefers lambdaCacheDirect below;
-  // the parallel arrays keep the fallback payload opaque.
-  const PxU8 *lambdaCacheBytes;
-  const PxU8 *lambdaCacheSlots;
-  // Parent-owned direct-mapped cache range borrowed read-only for this update.
-  // The opaque pointer keeps CachedLambda out of the snapshot ABI.
-  const void *lambdaCacheDirect;
-  PxU32 lambdaCacheSlotCount;
+  // Parent-owned compact manifold points for this manager, borrowed read-only
+  // until the island solve writes the same disjoint range back.
+  const void *contactManifoldPoints;
   PxU32 outputTargetBase;
   PxU16 outputTargetCount;
   // Row-cardinality contract: captured from the immutable NP stream and
@@ -96,13 +90,12 @@ struct AvbdContactPrepSnapshot {
   PxU8 padding[2];
 
   AvbdContactPrepSnapshot()
-      : contactManagerKey(0), restDistance(0.0f),
+      : contactManagerIdentity(0), restDistance(0.0f),
         contactManagerIndex(PX_MAX_U32), npIndex(PX_MAX_U32), solverBody0(0),
         solverBody1(0), indexType0(0), indexType1(0), nbPatches(0),
         contactManagerAge(255), nbContacts(0), contactPointSize(0),
         contactPatches(nullptr), contactPoints(nullptr),
-        lambdaCacheBytes(nullptr), lambdaCacheSlots(nullptr),
-        lambdaCacheDirect(nullptr), lambdaCacheSlotCount(0),
+        contactManifoldPoints(nullptr),
         outputTargetBase(0), outputTargetCount(0), expectedResponseRows(0),
         emittedResponseRows(0), outputTargetFlags(0),
         managerStateCommit(0), eligible(0), padding{0, 0} {}
@@ -162,14 +155,13 @@ public:
 class AvbdDynamicsContext : public DynamicsContextBase {
   PX_NOCOPY(AvbdDynamicsContext)
 
-  // Friend function for lambda cache write-back from task (needs access to
-  // private mLambdaCache)
+  // Friend function for persistent-manifold write-back from an island task.
   friend void writeLambdaToCache(AvbdDynamicsContext &ctx,
                                  AvbdContactConstraint *constraints,
                                  PxU32 numConstraints, PxU32 numBodies);
-  friend void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
-                                      AvbdD6JointConstraint *constraints,
-                                      PxU32 numConstraints);
+  friend void commitJointLambdaCacheRanges(
+      AvbdDynamicsContext &ctx,
+      const AvbdJointCacheCommitRange *ranges, PxU32 rangeCount);
 public:
   AvbdDynamicsContext(PxcNpMemBlockPool *memBlockPool,
                       PxcScratchAllocator &scratchAllocator,
@@ -241,6 +233,7 @@ public:
   }
 
   virtual void setConstraintConcreteType(PxU32 id, PxU16 type) override {
+    ensureJointLambdaCacheCapacity(id + 1u);
     if (id >= mConstraintConcreteTypes.size()) {
       const PxU32 oldSize = mConstraintConcreteTypes.size();
       mConstraintConcreteTypes.resize(id + 1);
@@ -253,6 +246,7 @@ public:
   virtual void clearConstraintConcreteType(PxU32 id) override {
     if (id < mConstraintConcreteTypes.size())
       mConstraintConcreteTypes[id] = 0;
+    invalidateJointLambdaCacheSlot(id);
   }
 
   PX_FORCE_INLINE void setSoftIslandProvider(
@@ -283,36 +277,43 @@ public:
   }
 
   //-------------------------------------------------------------------------
-  // Lambda Warm-Starting Cache (Public for external access)
+  // Persistent contact manifold state (Public for preparation/writeback)
   //-------------------------------------------------------------------------
 
   /**
-   * @brief Cached lambda values for warm-starting across frames
+   * @brief One compact persistent point owned by a ContactManager
    *
-   * Each contact manager owns a fixed, disjoint group of direct-mapped slots.
-   * Rows are selected by a stable contact-identity hash and the stored key is
-   * validated before restore.  This prevents patch reordering and recycled
-   * contact-manager indices from applying another row's dual state.
+   * Detection anchors are refreshed every frame and used for deterministic
+   * one-to-one geometric matching. Constraint anchors and their normal offset
+   * are a single tuple: sticking points retain that tuple, while sliding
+   * points adopt the fresh narrow-phase tuple. No hashed point lookup is used.
    */
-  struct CachedLambda {
-    PxU64 key;             //!< Stable contact identity for slot validation
+  struct CachedContactManifoldPoint {
+    PxVec3 detectionPointA;
+    PxVec3 detectionPointB;
+    PxVec3 constraintPointA;
+    PxVec3 constraintPointB;
+    PxVec3 normal;
+    PxVec3 tangent0;
+    PxReal normalOffset;   //!< Offset paired with the constraint anchors
     PxReal lambda;         //!< Normal constraint lambda
     PxReal tangentLambda0; //!< Friction lambda 1
     PxReal tangentLambda1; //!< Friction lambda 2
     PxReal penalty; //!< Adaptive penalty for normal (persists across frames)
-    PxReal tangentPenalty0; //!< Adaptive penalty for tangent 0
-    PxReal tangentPenalty1; //!< Adaptive penalty for tangent 1
-    PxVec3 prevStaticWorldPoint; //!< Deformable/static anchor for friction
+    PxReal tangentPenalty0; //!< Adaptive penalty along transported tangent 0
+    PxReal tangentPenalty1; //!< Adaptive penalty along transported tangent 1
+    PxU32 materialKey;
     PxU16 frameStamp;
     PxU8 stick;             //!< Coulomb stick flag (static μ next frame)
     PxU8 padding[1];
   };
 
-  PxArray<CachedLambda> mLambdaCache; //!< Per-contact lambda storage
+  PxArray<CachedContactManifoldPoint>
+      mContactManifoldPoints; //!< Fixed compact ranges indexed by CM
   bool mEnableLambdaWarmStart; //!< Enable lambda warm-starting (default: true)
 
   struct CachedContactManagerState {
-    PxU64 key;      //!< Exact manager/body identity for slot validation
+    PxU64 identity; //!< Exact manager identity for slot validation
     PxU16 frameStamp;
     PxU8 padding[6];
   };
@@ -321,7 +322,7 @@ public:
       mContactManagerStateCache; //!< One persistent state per CM index
 
   struct CachedJointLambda {
-    PxU64 key; //!< Stable joint identity used to validate hashed cache slots
+    PxU64 identity; //!< Exact source identity validating the direct slot
     PxVec3 lambdaLinear;
     PxVec3 lambdaAngular;
     PxVec3 lambdaDriveLinear;
@@ -331,12 +332,11 @@ public:
     PxU8 padding[2];
   };
 
-  PxArray<CachedJointLambda> mJointLambdaCache; //!< Per-D6 warm-start storage
+  PxArray<CachedJointLambda>
+      mJointLambdaCache; //!< Direct sidecar indexed by Constraint::index
 
-  static const PxU32 CONTACT_CACHE_SLOTS_PER_CM =
-      64; //!< Direct-mapped cache slots owned by each ContactManager
-  static const PxU32 JOINT_LAMBDA_CACHE_SIZE =
-      8192; //!< Fixed-size hashed cache for D6 joints
+  static const PxU32 CONTACT_MANIFOLD_POINT_CAPACITY =
+      8; //!< Matches the reference AVBD manifold bound
   static const PxU8 LAMBDA_MAX_AGE = 3; //!< Max frames to keep cached lambda
   static constexpr PxReal LAMBDA_WARMSTART_SCALE =
       0.9f; //!< Damping for warm-started lambda
@@ -347,28 +347,34 @@ private:
                                                 : PxU16(0);
   }
 
-  struct CachedBodyVelocityHistory {
-    PxU64 bodyCoreKey;
-    PxU64 lastSeenFrame;
-    PxVec3 linearVelocity;
+  struct BodyVelocityHistoryHeader {
+    PxU64 frame;
+    PxU64 generation;
+    PxU32 offset;
+    PxU32 count;
   };
 
-  // Open-addressed storage starts at a bounded minimum and grows before
-  // gather to keep load at or below 0.5.  The exact bodyCore pointer is
-  // validated before any history is used, and serial gather resolves
-  // collisions without evicting another active body's previous-frame state.
-  static const PxU32 BODY_VELOCITY_HISTORY_CACHE_SIZE = 16384;
-  PxArray<CachedBodyVelocityHistory> mBodyVelocityHistoryCache;
+  // Direct node-indexed headers validate the node lifetime generation and
+  // address a compact, contiguous sample range. The two buffers alternate:
+  // serial gather only reads the previous buffer and appends to the current
+  // one, which is frozen before island tasks are submitted.
+  PxArray<BodyVelocityHistoryHeader> mBodyVelocityHistoryHeaders[2];
+  PxArray<PxVec3> mBodyVelocityHistorySamples[2];
   PxU64 mBodyVelocityHistoryFrame;
+  PxU32 mBodyVelocityHistoryWriteBuffer;
   PxArray<PxU16> mConstraintConcreteTypes;
 
   //-------------------------------------------------------------------------
   // Internal Methods
   //-------------------------------------------------------------------------
 
-  void restoreAndUpdateBodyVelocityHistory(const PxsBodyCore &bodyCore,
-                                           AvbdSolverBody &solverBody);
-  void ensureBodyVelocityHistoryCapacity(PxU32 bodyCount);
+  void beginBodyVelocityHistoryFrame(PxU32 nodeCapacity,
+                                     PxU32 sampleCapacity);
+  void restoreAndUpdateBodyVelocityHistory(
+      const PxsBodyCore &bodyCore, AvbdSolverBody &solverBody,
+      PxNodeIndex nodeIndex, PxU32 sampleIndex, PxU32 sampleCount);
+  void ensureJointLambdaCacheCapacity(PxU32 requiredCapacity);
+  void invalidateJointLambdaCacheSlot(PxU32 index);
 
   /**
    * @brief Solve constraints for a single island using AVBD algorithm
@@ -385,7 +391,8 @@ private:
    * @brief Convert PhysX bodies to AVBD solver bodies
    */
   void setupBodies(AvbdSolverBody *avbdBodies, PxsRigidBody **rigidBodies,
-                   PxU32 numBodies, PxReal dt, const PxVec3 &gravity);
+                   const PxNodeIndex *bodyNodeIndices, PxU32 numBodies,
+                   PxReal dt, const PxVec3 &gravity);
 
   /**
    * @brief Write AVBD solver results back to PhysX bodies
@@ -513,11 +520,12 @@ void commitContactOutputTokens(const AvbdContactOutputTarget *targets,
 
 void restoreJointLambdaFromCache(AvbdDynamicsContext &ctx,
                                  AvbdD6JointConstraint &constraint,
-                                 PxU64 cacheKey);
+                                 PxU32 cacheIndex, PxU64 cacheIdentity,
+                                 PxU64 objectiveKey);
 
-void writeJointLambdaToCache(AvbdDynamicsContext &ctx,
-                             AvbdD6JointConstraint *constraints,
-                             PxU32 numConstraints);
+void commitJointLambdaCacheRanges(
+    AvbdDynamicsContext &ctx,
+    const AvbdJointCacheCommitRange *ranges, PxU32 rangeCount);
 
 void writeJointConstraintWriteback(AvbdDynamicsContext &ctx,
                                    const AvbdD6JointConstraint *constraints,

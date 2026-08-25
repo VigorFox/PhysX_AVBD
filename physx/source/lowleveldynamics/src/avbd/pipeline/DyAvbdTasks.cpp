@@ -555,12 +555,14 @@ void AvbdSolveIslandTask::run() {
         continue;
       }
 
-      // Dual rows read the final primal poses, so lock projection remains
-      // behind the last color/wave fan-in and ahead of contact fan-out.
-      for (PxU32 i = 0; i < mBatch.numBodies; ++i) {
-        if (mBatch.bodies[i].invMass > 0.0f)
-          mBatch.bodies[i].projectLockedPose(mBatch.bodies[i].prevPosition,
-                                             mBatch.bodies[i].prevRotation);
+      // Accept relaxation and locked-axis projection only after the final
+      // primal fan-in. Parallel dual rows must read that accepted pose, not
+      // the pre-Chebyshev iterate.
+      if (!mSolver.finalizeRigidPrimalIteration(
+              mRigidContext.iteration)) {
+        mSolver.finishRigidSolve(mRigidContext);
+        mRigidAsync = false;
+        return;
       }
       if (mRigidUsesBodyColors && submitRigidDual())
         return;
@@ -609,8 +611,9 @@ void AvbdSolveIslandTask::release() {
     return;
   }
 
-  // Write back lambda values to the cache for warm-starting next frame
-  // This is thread-safe because each island writes to disjoint cache indices
+  // Produce per-island report results. Persistent joint lambdas are committed
+  // by AvbdWriteBackTask after the coordinator join; no island worker mutates
+  // the shared joint sidecar.
   {
     AvbdContactConstraint *constraints = mBatch.constraints;
     PxU32 numConstraints = mBatch.numConstraints;
@@ -625,7 +628,6 @@ void AvbdSolveIslandTask::release() {
       writeContactImpulseToOutput(constraints, numConstraints, mBatch.numBodies,
                                   mDt);
     }
-    writeJointLambdaToCache(mContext, mBatch.d6Joints, mBatch.numD6);
   }
 
   // Shared by the task and forced-sequential paths so constraint force and
@@ -649,6 +651,12 @@ void AvbdSolveIslandTask::release() {
 }
 
 void AvbdWriteBackTask::run() {
+  // This task is downstream of the coordinator fan-in. It is the sole writer
+  // of the direct Constraint::index joint-lambda sidecar, so persistence is
+  // independent of island worker completion order.
+  commitJointLambdaCacheRanges(mContext, mJointCacheRanges,
+                               mJointCacheRangeCount);
+
   // Contact report targets are committed only after every island solve has
   // released its worker-owned result tokens.
   commitContactOutputTokens(mContactOutputTargets, mContactOutputResults,

@@ -76,6 +76,7 @@ struct AvbdRigidSolveIterationState {
   physx::PxU32 iter;
   physx::PxU32 activeIteration;
   bool iterationActive;
+  bool primalFinalized;
   // Set only by the fast CPU task path after every disjoint contact range has
   // completed. The ordered authority always leaves this false and executes
   // the established scalar dual pass inside completeRigidSolveIteration().
@@ -95,7 +96,7 @@ struct AvbdRigidSolveIterationState {
         stats(nullptr), useChebyshev(false), enableEarlyStop(false),
         chebyOmega(1.0f), iters(0), minIterations(0),
         rotationTolerance(0.0f), consecutiveConvergedIterations(0), iter(0),
-        activeIteration(0), iterationActive(false),
+        activeIteration(0), iterationActive(false), primalFinalized(false),
         parallelDualComplete(false) {}
 };
 
@@ -243,6 +244,9 @@ public:
 
   /** Begin one prepared iteration before body-range tasks are submitted. */
   bool beginRigidSolveIteration(AvbdRigidSolveIterationState &state);
+
+  /** Accept relaxation and locked-axis projection before any dual update. */
+  bool finalizeRigidPrimalIteration(AvbdRigidSolveIterationState &state);
 
   /** Complete one prepared iteration after all body ranges have finished. */
   bool completeRigidSolveIteration(AvbdRigidSolveIterationState &state);

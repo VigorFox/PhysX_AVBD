@@ -148,6 +148,7 @@ class AuxCpuData
 class SimpleIslandManager : public PxUserAllocated
 {
 	HandleManager<PxU32> mNodeHandles;		//! Handle manager for nodes
+	PxArray<PxU64> mNodeGenerations;		//! Nonzero lifetime generation indexed by node handle
 	HandleManager<EdgeIndex> mEdgeHandles;	//! Handle manager for edges
 
 	//An array of destroyed nodes
@@ -232,6 +233,13 @@ public:
 	PX_FORCE_INLINE PxU32				getNbEdgeHandles()			const	{ return mEdgeHandles.getTotalHandles(); }
 
 	PX_FORCE_INLINE PxU32				getNbNodeHandles()			const	{ return mNodeHandles.getTotalHandles(); }
+
+	PX_FORCE_INLINE PxU64 getNodeGeneration(PxNodeIndex nodeIndex) const
+	{
+		const PxU32 index = nodeIndex.index();
+		PX_ASSERT(nodeIndex.isValid() && index < mNodeGenerations.size());
+		return index < mNodeGenerations.size() ? mNodeGenerations[index] : 0;
+	}
 
 	void deactivateEdge(const EdgeIndex edge);
 

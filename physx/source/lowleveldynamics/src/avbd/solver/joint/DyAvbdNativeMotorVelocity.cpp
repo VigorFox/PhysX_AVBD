@@ -381,7 +381,7 @@ bool isContactCoupledNativeRevoluteMotorVelocityProjectionSupported(
         contact.restitution < 0.0f ||
         contact.targetVelocity.magnitudeSquared() > 1e-12f)
       return false;
-    if (contact.contactManagerEstablished == 0u)
+    if (contact.persistentPointMatched == 0u)
       haveUnsupportedTransientContact = true;
 
     const bool dynamicIsA = contact.header.bodyIndexA < numBodies;

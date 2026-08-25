@@ -351,6 +351,8 @@ void AvbdSolver::postAlStages(
       clampBodyStaticInelasticNormalVelocities(
           bodies, numBodies, contacts, numContacts, contactMap,
           linearVelAtSolveStart, angularVelAtSolveStart,
+          &velocityState.linearPoseVelocityGain,
+          &velocityState.angularPoseVelocityGain,
           &splitRigidFiniteMaterialPose, dt,
           mConfig.bounceApproachSpeedThreshold(), mConfig.lengthScale,
           hasJointConstraints,
@@ -358,7 +360,14 @@ void AvbdSolver::postAlStages(
           deformableNormalStageMaskPtr, &stats);
       PX_PROFILE_ZONE("AVBD.contactTargetVelocity", 0);
       applyAvbdContactTargetVelocity(bodies, numBodies, contacts,
-                                     numContacts, dt, postAlContactWork);
+                                     numContacts, contactMap,
+                                     linearVelAtSolveStart,
+                                     angularVelAtSolveStart,
+                                     &velocityState.linearPoseVelocityGain,
+                                     &velocityState.angularPoseVelocityGain,
+                                     dt,
+                                     mConfig.bounceApproachSpeedThreshold(),
+                                     postAlContactWork);
     }
     if (hasKinematicShellContacts) {
       PX_PROFILE_ZONE("AVBD.kinematicShellInelasticVel", 0);

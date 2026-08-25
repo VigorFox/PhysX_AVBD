@@ -602,8 +602,11 @@ PX_FORCE_INLINE bool accumulateOwnerMajorContact(
 			contactBoostFloor);
 		const PxF32 tPen1 = PxMax(contact.tangentPenalty1,
 			contactBoostFloor);
-		const PxF32 tC0 = relDisp.dot(contact.tangent0);
-		const PxF32 tC1 = relDisp.dot(contact.tangent1);
+		const PxF32 c0Scale = 1.0f - avbdAlpha;
+		const PxF32 tC0 = c0Scale * contact.tangentC0 +
+			relDisp.dot(contact.tangent0);
+		const PxF32 tC1 = c0Scale * contact.tangentC1 +
+			relDisp.dot(contact.tangent1);
 		const PxF32 mu = contactCoulombMu(contact);
 		PxF32 Fn = 0.0f, Ft0 = 0.0f, Ft1 = 0.0f;
 		(void)avbdEvaluateContactForcesCone(
@@ -820,10 +823,16 @@ static PxU8 prepareOwnerMajorContactBlock(
 			const PxF32 pen0 = PxMax(contact.tangentPenalty0, floor);
 			const PxF32 pen1 = PxMax(contact.tangentPenalty1, floor);
 			PxF32 normalForce = 0.0f, tangent0 = 0.0f, tangent1 = 0.0f;
+			const PxF32 tangentViolation0 =
+				(1.0f - input.avbdAlpha) * contact.tangentC0 +
+				rel.dot(contact.tangent0);
+			const PxF32 tangentViolation1 =
+				(1.0f - input.avbdAlpha) * contact.tangentC1 +
+				rel.dot(contact.tangent1);
 			if(contact.friction > 0.0f || contact.staticFriction > 0.0f)
 				(void)avbdEvaluateContactForcesCone(penalty, violation,
-					contact.header.lambda, pen0, rel.dot(contact.tangent0),
-					contact.tangentLambda0, pen1, rel.dot(contact.tangent1),
+					contact.header.lambda, pen0, tangentViolation0,
+					contact.tangentLambda0, pen1, tangentViolation1,
 					contact.tangentLambda1, contactCoulombMu(contact), normalForce,
 					tangent0, tangent1);
 			const PxVec3 tangents[2] = {contact.tangent0, contact.tangent1};

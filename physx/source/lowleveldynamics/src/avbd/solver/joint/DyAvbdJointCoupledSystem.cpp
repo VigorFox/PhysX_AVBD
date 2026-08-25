@@ -185,8 +185,10 @@ bool addStrictFrictionalBodyVsStaticContactPositionRows(
         (body.prevPosition + previousR);
     const physx::PxReal sign = dynamicA ? 1.0f : -1.0f;
     const physx::PxReal tangentViolation0 =
+        (1.0f - config.avbdAlpha) * contact.tangentC0 +
         sign * displacement.dot(contact.tangent0);
     const physx::PxReal tangentViolation1 =
+        (1.0f - config.avbdAlpha) * contact.tangentC1 +
         sign * displacement.dot(contact.tangent1);
 
     const physx::PxReal mass = 1.0f / body.invMass;

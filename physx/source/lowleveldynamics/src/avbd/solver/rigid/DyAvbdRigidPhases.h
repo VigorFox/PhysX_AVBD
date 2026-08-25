@@ -51,9 +51,12 @@ void warmstartAvbdRigidBodies(
 void applyAvbdPenaltyFloor(
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
-    const AvbdD6JointConstraint *d6Joints, physx::PxU32 numD6,
-    const AvbdGearJointConstraint *gearJoints, physx::PxU32 numGear,
-    physx::PxReal invDt2);
+    physx::PxReal invDt2, physx::PxReal penaltyMin);
+
+void applyAvbdLoadedTangentPenaltyFloor(
+    AvbdContactConstraint &contact, const AvbdSolverBody *bodies,
+    physx::PxU32 numBodies, physx::PxReal invDt2,
+    physx::PxReal penaltyMin);
 
 } // namespace Dy
 } // namespace physx

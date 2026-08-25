@@ -123,6 +123,17 @@ struct AvbdContactOutputResult {
         padding{0, 0, 0} {}
 };
 
+// Parent-owned description of one island's final D6 row range. Island tasks
+// only mutate the rows themselves; the post-join writeback task walks these
+// ranges linearly and is the sole owner of persistent joint-cache mutation.
+struct AvbdJointCacheCommitRange {
+  const AvbdD6JointConstraint *constraints;
+  PxU32 numConstraints;
+
+  AvbdJointCacheCommitRange()
+      : constraints(nullptr), numConstraints(0) {}
+};
+
 struct AvbdIslandBatch {
   AvbdSolverBody *bodies;
   PxU32 numBodies;
@@ -314,7 +325,9 @@ public:
                     PxU32 *linkIndexForBody = nullptr,
                     AvbdContactOutputTarget *contactOutputTargets = nullptr,
                     AvbdContactOutputResult *contactOutputResults = nullptr,
-                    PxU32 contactOutputCount = 0)
+                    PxU32 contactOutputCount = 0,
+                    const AvbdJointCacheCommitRange *jointCacheRanges = nullptr,
+                    PxU32 jointCacheRangeCount = 0)
       : AvbdTask(context), mAvbdBodies(avbdBodies), mRigidBodies(rigidBodies),
         mStaticTouchCounts(staticTouchCounts), mNumBodies(numBodies), mDt(dt),
         mEnableStabilization(enableStabilization),
@@ -323,7 +336,9 @@ public:
         mLinkIndexForBody(linkIndexForBody),
         mContactOutputTargets(contactOutputTargets),
         mContactOutputResults(contactOutputResults),
-        mContactOutputCount(contactOutputCount) {}
+        mContactOutputCount(contactOutputCount),
+        mJointCacheRanges(jointCacheRanges),
+        mJointCacheRangeCount(jointCacheRangeCount) {}
 
   virtual void run() override; // Implemented in cpp
 
@@ -342,6 +357,8 @@ private:
   AvbdContactOutputTarget *mContactOutputTargets;
   AvbdContactOutputResult *mContactOutputResults;
   PxU32 mContactOutputCount;
+  const AvbdJointCacheCommitRange *mJointCacheRanges;
+  PxU32 mJointCacheRangeCount;
 };
 
 //=============================================================================
@@ -413,14 +430,16 @@ public:
                       PxU32 *linkIndexForBody = nullptr,
                       AvbdContactOutputTarget *contactOutputTargets = nullptr,
                       AvbdContactOutputResult *contactOutputResults = nullptr,
-                      PxU32 contactOutputCount = 0) {
+                      PxU32 contactOutputCount = 0,
+                      const AvbdJointCacheCommitRange *jointCacheRanges = nullptr,
+                      PxU32 jointCacheRangeCount = 0) {
     void *mem = mAllocator.allocate(sizeof(AvbdWriteBackTask),
                                     "AvbdWriteBackTask", __FILE__, __LINE__);
     return PX_PLACEMENT_NEW(mem, AvbdWriteBackTask)(
         context, avbdBodies, rigidBodies, staticTouchCounts, numBodies, dt,
         enableStabilization, sleepingDisabled, articulationForBody,
         linkIndexForBody, contactOutputTargets, contactOutputResults,
-        contactOutputCount);
+        contactOutputCount, jointCacheRanges, jointCacheRangeCount);
   }
 
   AvbdCoordinatorTask *createCoordinatorTask(AvbdDynamicsContext &context,

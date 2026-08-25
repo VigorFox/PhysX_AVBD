@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "PxPhysicsAPI.h"
+#include "avbd/core/DyAvbdConstraint.h"
 #include "avbd/solver/soft/DyAvbdSoftBody.h"
 #include "avbd/contact/DyAvbdContactDetection.h"
 #include "avbd/ogc/DyAvbdOgcAdmission.h"
@@ -8938,6 +8939,1469 @@ static void testRigidCapsuleParallelFaceManifold()
 		"Parallel capsule manifold spans both capsule-axis support points");
 }
 
+// ============================================================================
+// Test 64: body-static relative displacement is invariant to actor ordering.
+// ============================================================================
+
+static void testBodyStaticRelativeDisplacementEndpointSymmetry()
+{
+	printf("\n--- Test 64: Body-Static Relative-Displacement Symmetry ---\n");
+	const PxU32 numBodies = 1u;
+	const PxVec3 dynamicPrev(-0.7f, 1.2f, 0.4f);
+	const PxVec3 dynamicNow(0.8f, 0.9f, 1.1f);
+	const PxVec3 staticPrev(0.2f, -0.1f, 0.3f);
+	const PxVec3 staticNow(0.4f, 0.2f, -0.2f);
+	const PxVec3 dynamicMinusStatic =
+		(dynamicNow - dynamicPrev) - (staticNow - staticPrev);
+
+	AvbdContactConstraint dynamicA = {};
+	dynamicA.header.bodyIndexA = 0u;
+	dynamicA.header.bodyIndexB = PX_MAX_U32;
+	dynamicA.contactPointB = staticNow;
+	dynamicA.staticPrevWorldPoint = staticPrev;
+	dynamicA.tangent0 = PxVec3(1.0f, 0.0f, 0.0f);
+	dynamicA.tangent1 = PxVec3(0.0f, 0.0f, 1.0f);
+
+	AvbdContactConstraint dynamicB = {};
+	dynamicB.header.bodyIndexA = PX_MAX_U32;
+	dynamicB.header.bodyIndexB = 0u;
+	dynamicB.contactPointA = staticNow;
+	dynamicB.staticPrevWorldPoint = staticPrev;
+	dynamicB.tangent0 = dynamicA.tangent0;
+	dynamicB.tangent1 = dynamicA.tangent1;
+
+	const PxVec3 relDynamicA = computeBodyVsStaticRelDisp(
+		dynamicNow, dynamicPrev, staticNow, staticPrev, dynamicA, numBodies);
+	const PxVec3 relDynamicB = computeBodyVsStaticRelDisp(
+		staticNow, staticPrev, dynamicNow, dynamicPrev, dynamicB, numBodies);
+	TEST_CHECK(
+		(relDynamicA - dynamicMinusStatic).magnitudeSquared() < 1e-12f &&
+		(relDynamicB - dynamicMinusStatic).magnitudeSquared() < 1e-12f,
+		"Body-static displacement remains dynamic-minus-static for either endpoint");
+	TEST_CHECK(
+		PxAbs(relDynamicA.dot(dynamicA.tangent0) -
+			relDynamicB.dot(dynamicB.tangent0)) < 1e-6f &&
+		PxAbs(relDynamicA.dot(dynamicA.tangent1) -
+			relDynamicB.dot(dynamicB.tangent1)) < 1e-6f,
+		"Body-static tangent projections are actor-order invariant");
+}
+
+// ============================================================================
+// Test 65: tiny public-API rigid scenes protect the coupled contact contract.
+//
+// These probes deliberately avoid stacks, randomization, and wall-clock
+// measurements.  Each scene contains at most two moving bodies, so a failure
+// points at contact semantics rather than broadphase or scheduling noise.
+// ============================================================================
+
+struct RigidContactProbe
+{
+	PxVec3 position0;
+	PxVec3 position1;
+	PxVec3 velocity0;
+	PxVec3 velocity1;
+	PxVec3 angularVelocity;
+	PxVec3 angularVelocity1;
+	PxReal initialEnergy;
+	PxReal maxEnergy;
+	PxU32 contactPoints;
+	PxU32 currentContactPoints;
+	PxU32 singleContactFrames;
+	PxU32 multiContactFrames;
+	PxU32 maxContactPointsPerFrame;
+	bool finite;
+
+	RigidContactProbe()
+		: position0(PxZero), position1(PxZero), velocity0(PxZero),
+		  velocity1(PxZero), angularVelocity(PxZero),
+		  angularVelocity1(PxZero), initialEnergy(0.0f), maxEnergy(0.0f),
+		  contactPoints(0), currentContactPoints(0), singleContactFrames(0),
+		  multiContactFrames(0), maxContactPointsPerFrame(0), finite(true)
+	{
+	}
+};
+
+class RigidContactProbeCallback : public PxSimulationEventCallback
+{
+public:
+	explicit RigidContactProbeCallback(RigidContactProbe& probe)
+		: mProbe(probe)
+	{
+	}
+
+	virtual void onConstraintBreak(PxConstraintInfo*, PxU32) PX_OVERRIDE {}
+	virtual void onWake(PxActor**, PxU32) PX_OVERRIDE {}
+	virtual void onSleep(PxActor**, PxU32) PX_OVERRIDE {}
+	virtual void onTrigger(PxTriggerPair*, PxU32) PX_OVERRIDE {}
+	virtual void onAdvance(
+		const PxRigidBody*const*, const PxTransform*, const PxU32) PX_OVERRIDE {}
+
+	virtual void onContact(
+		const PxContactPairHeader& pairHeader,
+		const PxContactPair* pairs, PxU32 pairCount) PX_OVERRIDE
+	{
+		if(pairHeader.flags &
+			(PxContactPairHeaderFlag::eREMOVED_ACTOR_0 |
+			 PxContactPairHeaderFlag::eREMOVED_ACTOR_1))
+			return;
+
+		for(PxU32 pairIndex = 0; pairIndex < pairCount; ++pairIndex)
+		{
+			if(pairs[pairIndex].flags &
+				(PxContactPairFlag::eREMOVED_SHAPE_0 |
+				 PxContactPairFlag::eREMOVED_SHAPE_1))
+				continue;
+			mProbe.contactPoints += pairs[pairIndex].contactCount;
+			mProbe.currentContactPoints += pairs[pairIndex].contactCount;
+		}
+	}
+
+private:
+	RigidContactProbe& mProbe;
+};
+
+static PxFilterFlags rigidContactProbeFilter(
+	PxFilterObjectAttributes, PxFilterData,
+	PxFilterObjectAttributes, PxFilterData,
+	PxPairFlags& pairFlags, const void*, PxU32)
+{
+	pairFlags = PxPairFlag::eCONTACT_DEFAULT |
+		PxPairFlag::eNOTIFY_TOUCH_FOUND |
+		PxPairFlag::eNOTIFY_TOUCH_PERSISTS |
+		PxPairFlag::eNOTIFY_CONTACT_POINTS;
+	return PxFilterFlag::eDEFAULT;
+}
+
+static PxScene* createRigidContactProbeScene(
+	PxPhysics& physics, PxDefaultCpuDispatcher*& dispatcher,
+	PxSimulationEventCallback* callback, const PxVec3& gravity,
+	PxSolverType::Enum solverType = PxSolverType::eAVBD)
+{
+	dispatcher = PxDefaultCpuDispatcherCreate(1);
+	if(!dispatcher)
+		return NULL;
+	PxSceneDesc sceneDesc(physics.getTolerancesScale());
+	sceneDesc.cpuDispatcher = dispatcher;
+	sceneDesc.filterShader = rigidContactProbeFilter;
+	sceneDesc.simulationEventCallback = callback;
+	sceneDesc.gravity = gravity;
+	sceneDesc.solverType = solverType;
+	return physics.createScene(sceneDesc);
+}
+
+static PxRigidDynamic* createRigidProbeSphere(
+	PxPhysics& physics, PxMaterial& material, const PxVec3& position,
+	const PxVec3& velocity, PxShape** shapeResult = NULL)
+{
+	PxRigidDynamic* body = physics.createRigidDynamic(PxTransform(position));
+	PxShape* shape = physics.createShape(
+		PxSphereGeometry(0.5f), material, true);
+	if(!body || !shape)
+	{
+		PX_RELEASE(shape);
+		PX_RELEASE(body);
+		return NULL;
+	}
+	body->attachShape(*shape);
+	body->setMass(1.0f);
+	body->setMassSpaceInertiaTensor(PxVec3(0.1f));
+	body->setLinearVelocity(velocity);
+	body->setLinearDamping(0.0f);
+	body->setAngularDamping(0.0f);
+	body->setSleepThreshold(0.0f);
+	body->setSolverIterationCounts(8, 2);
+	if(shapeResult)
+		*shapeResult = shape;
+	else
+		shape->release();
+	return body;
+}
+
+static PxRigidDynamic* createRigidProbeBox(
+	PxPhysics& physics, PxMaterial& material, const PxVec3& position,
+	const PxVec3& velocity, const PxVec3& halfExtent = PxVec3(0.5f))
+{
+	PxRigidDynamic* body = physics.createRigidDynamic(PxTransform(position));
+	PxShape* shape = physics.createShape(
+		PxBoxGeometry(halfExtent), material, true);
+	if(!body || !shape)
+	{
+		PX_RELEASE(shape);
+		PX_RELEASE(body);
+		return NULL;
+	}
+	body->attachShape(*shape);
+	shape->release();
+	body->setMass(1.0f);
+	body->setMassSpaceInertiaTensor(PxVec3(
+		(halfExtent.y * halfExtent.y + halfExtent.z * halfExtent.z) / 3.0f,
+		(halfExtent.x * halfExtent.x + halfExtent.z * halfExtent.z) / 3.0f,
+		(halfExtent.x * halfExtent.x + halfExtent.y * halfExtent.y) / 3.0f));
+	body->setLinearVelocity(velocity);
+	body->setLinearDamping(0.0f);
+	body->setAngularDamping(0.0f);
+	body->setSleepThreshold(0.0f);
+	body->setSolverIterationCounts(8, 2);
+	return body;
+}
+
+static PxReal rigidProbeKineticEnergy(const PxRigidDynamic& body)
+{
+	const PxVec3 linearVelocity = body.getLinearVelocity();
+	const PxVec3 angularVelocity = body.getAngularVelocity();
+	const PxVec3 localAngularVelocity =
+		body.getGlobalPose().q.rotateInv(angularVelocity);
+	return 0.5f * body.getMass() * linearVelocity.magnitudeSquared() +
+		0.5f * localAngularVelocity.dot(
+			body.getMassSpaceInertiaTensor().multiply(localAngularVelocity));
+}
+
+static bool stepRigidProbeScene(
+	PxScene& scene, PxRigidDynamic*const* bodies, PxU32 bodyCount,
+	PxU32 frames, RigidContactProbe& probe)
+{
+	for(PxU32 frame = 0; frame < frames; ++frame)
+	{
+		scene.simulate(1.0f / 60.0f);
+		PxU32 errorState = 0;
+		if(!scene.fetchResults(true, &errorState) || errorState)
+			return false;
+		probe.maxContactPointsPerFrame = PxMax(
+			probe.maxContactPointsPerFrame, probe.currentContactPoints);
+		if(probe.currentContactPoints == 1)
+			++probe.singleContactFrames;
+		else if(probe.currentContactPoints > 1)
+			++probe.multiContactFrames;
+		probe.currentContactPoints = 0;
+		PxReal energy = 0.0f;
+		for(PxU32 bodyIndex = 0; bodyIndex < bodyCount; ++bodyIndex)
+		{
+			const PxRigidDynamic* body = bodies[bodyIndex];
+			if(!body || !body->getGlobalPose().isValid() ||
+				!body->getLinearVelocity().isFinite() ||
+				!body->getAngularVelocity().isFinite())
+			{
+				probe.finite = false;
+				return false;
+			}
+			energy += rigidProbeKineticEnergy(*body);
+		}
+		probe.maxEnergy = PxMax(probe.maxEnergy, energy);
+	}
+	return true;
+}
+
+static RigidContactProbe runRigidGravityProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, NULL, PxVec3(0.0f, -9.81f, 0.0f), solverType);
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(PxZero), PxVec3(PxZero)) : NULL;
+	probe.finite = scene && box;
+	if(probe.finite)
+	{
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 120, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidDynamicFrictionSlideProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidDynamic* support = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 0.5f, 0.0f), PxVec3(PxZero),
+		PxVec3(20.0f, 0.5f, 5.0f)) : NULL;
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 1.5f, 0.0f),
+		PxVec3(10.0f, 0.0f, 0.0f)) : NULL;
+	probe.finite = scene && support && box;
+	if(probe.finite)
+	{
+		support->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+		support->setMass(1000.0f);
+		support->setMassSpaceInertiaTensor(
+			support->getMassSpaceInertiaTensor() * 1000.0f);
+		scene->addActor(*support);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[2] = {support, box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 2, 60, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.position1 = support->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.velocity1 = support->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+		probe.angularVelocity1 = support->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(support);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidHeavyBoxImpactProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(PxZero), solverType);
+	PxRigidDynamic* striker = scene ? createRigidProbeBox(
+		physics, material, PxVec3(-2.0f, 4.0f, 0.0f),
+		PxVec3(10.0f, 0.0f, 0.0f)) : NULL;
+	PxRigidDynamic* target = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 4.0f, 0.0f), PxVec3(PxZero)) : NULL;
+	probe.finite = scene && striker && target;
+	if(probe.finite)
+	{
+		striker->setMass(800.0f);
+		striker->setMassSpaceInertiaTensor(
+			striker->getMassSpaceInertiaTensor() * 800.0f);
+		scene->addActor(*striker);
+		scene->addActor(*target);
+		PxRigidDynamic* bodies[2] = {striker, target};
+		probe.initialEnergy = rigidProbeKineticEnergy(*striker);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 2, 30, probe) && probe.finite;
+		probe.position0 = striker->getGlobalPose().p;
+		probe.position1 = target->getGlobalPose().p;
+		probe.velocity0 = striker->getLinearVelocity();
+		probe.velocity1 = target->getLinearVelocity();
+		probe.angularVelocity = striker->getAngularVelocity();
+		probe.angularVelocity1 = target->getAngularVelocity();
+	}
+	PX_RELEASE(target);
+	PX_RELEASE(striker);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidFrictionSlideProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 0.5f, 0.0f),
+		PxVec3(10.0f, 0.0f, 0.0f)) : NULL;
+	probe.finite = scene && ground && box;
+	if(probe.finite)
+	{
+		scene->addActor(*ground);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 60, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidSinglePointSphereSlideProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	PxRigidDynamic* sphere = scene ? createRigidProbeSphere(
+		physics, material, PxVec3(0.0f, 0.5f, 0.0f),
+		PxVec3(10.0f, 0.0f, 0.0f)) : NULL;
+	probe.finite = scene && ground && sphere;
+	if(probe.finite)
+	{
+		// Angular damping continually turns rolling back into a small slip. A
+		// correct passive Coulomb owner dissipates that slip; a stale
+		// Position-AL tangent instead performs positive work every frame.
+		sphere->setAngularDamping(0.5f);
+		scene->addActor(*ground);
+		scene->addActor(*sphere);
+		PxRigidDynamic* bodies[1] = {sphere};
+		probe.initialEnergy = rigidProbeKineticEnergy(*sphere);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 1800, probe) && probe.finite;
+		probe.position0 = sphere->getGlobalPose().p;
+		probe.velocity0 = sphere->getLinearVelocity();
+		probe.angularVelocity = sphere->getAngularVelocity();
+	}
+	PX_RELEASE(sphere);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidTumblingLandingProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 4.0f, 0.0f),
+		PxVec3(8.0f, 0.0f, 1.0f)) : NULL;
+	probe.finite = scene && ground && box;
+	if(probe.finite)
+	{
+		box->setGlobalPose(PxTransform(
+			PxVec3(0.0f, 4.0f, 0.0f),
+			PxQuat(0.65f, PxVec3(0.0f, 0.0f, 1.0f))));
+		box->setAngularVelocity(PxVec3(2.0f, 4.0f, 6.0f));
+		scene->addActor(*ground);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 300, probe) && probe.finite;
+		probe.position1 = box->getGlobalPose().p;
+		probe.velocity1 = box->getLinearVelocity();
+		probe.angularVelocity1 = box->getAngularVelocity();
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 900, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidHighSpinLandingProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	const PxVec3 halfExtent(2.0f);
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 7.0f, 0.0f),
+		PxVec3(9.37f, 0.0f, -0.257f), halfExtent) : NULL;
+	probe.finite = scene && ground && box;
+	if(probe.finite)
+	{
+		box->setGlobalPose(PxTransform(
+			PxVec3(0.0f, 7.0f, 0.0f), PxQuat(PxIdentity)));
+		box->setMass(640.0f);
+		box->setMassSpaceInertiaTensor(
+			box->getMassSpaceInertiaTensor() * 640.0f);
+		box->setAngularVelocity(PxVec3(0.0f, 24.0f, 0.0f));
+		box->setSolverIterationCounts(4, 1);
+		scene->addActor(*ground);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 300, probe) && probe.finite;
+		probe.position1 = box->getGlobalPose().p;
+		probe.velocity1 = box->getLinearVelocity();
+		probe.angularVelocity1 = box->getAngularVelocity();
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 900, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidDampedYawSlideProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	const PxVec3 halfExtent(2.0f);
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, 2.0f, 0.0f),
+		PxVec3(-18.0f, 0.0f, 2.0f), halfExtent) : NULL;
+	probe.finite = scene && ground && box;
+	if(probe.finite)
+	{
+		// Reduced from actor 82 at frame 1300 of the captured HelloWorld
+		// failure. The box remains on a four-point plane manifold while mild
+		// angular damping continually changes its yaw slip. A pose-residual
+		// material reconstruction feeds that slip back into translation.
+		box->setGlobalPose(PxTransform(
+			PxVec3(0.0f, 2.0f, 0.0f),
+			PxQuat(1.165f, PxVec3(0.0f, 1.0f, 0.0f))));
+		box->setMass(640.0f);
+		box->setMassSpaceInertiaTensor(
+			box->getMassSpaceInertiaTensor() * 640.0f);
+		box->setAngularVelocity(PxVec3(0.0f, 2.55f, 0.0f));
+		box->setAngularDamping(0.05f);
+		box->setSolverIterationCounts(4, 1);
+		scene->addActor(*ground);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 1800, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidMigratingTwoPointSlideProbe(
+	PxPhysics& physics, PxMaterial& material,
+	PxSolverType::Enum solverType)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f),
+		solverType);
+	PxRigidStatic* ground = scene
+		? PxCreatePlane(physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), material)
+		: NULL;
+	const PxReal tilt = 0.02f;
+	const PxReal support = 2.0f * (PxCos(tilt) + PxSin(tilt));
+	PxRigidDynamic* box = scene ? createRigidProbeBox(
+		physics, material, PxVec3(0.0f, support - 0.05f, 0.0f),
+		PxVec3(9.37f, 0.0f, -0.257f), PxVec3(2.0f)) : NULL;
+	probe.finite = scene && ground && box;
+	if(probe.finite)
+	{
+		box->setGlobalPose(PxTransform(
+			PxVec3(0.0f, support - 0.05f, 0.0f),
+			PxQuat(tilt, PxVec3(0.0f, 0.0f, 1.0f))));
+		box->setMass(640.0f);
+		box->setMassSpaceInertiaTensor(
+			box->getMassSpaceInertiaTensor() * 640.0f);
+		box->setSolverIterationCounts(4, 1);
+		scene->addActor(*ground);
+		scene->addActor(*box);
+		PxRigidDynamic* bodies[1] = {box};
+		probe.initialEnergy = rigidProbeKineticEnergy(*box);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 60, probe) && probe.finite;
+		probe.position1 = box->getGlobalPose().p;
+		probe.velocity1 = box->getLinearVelocity();
+		probe.angularVelocity1 = box->getAngularVelocity();
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 540, probe) && probe.finite;
+		probe.position0 = box->getGlobalPose().p;
+		probe.velocity0 = box->getLinearVelocity();
+		probe.angularVelocity = box->getAngularVelocity();
+	}
+	PX_RELEASE(box);
+	PX_RELEASE(ground);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runHeadOnRigidContactProbe(
+	PxPhysics& physics, PxMaterial& material, bool reverseActorCreation)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(PxZero));
+	PxRigidDynamic* left = NULL;
+	PxRigidDynamic* right = NULL;
+	if(scene)
+	{
+		if(reverseActorCreation)
+		{
+			right = createRigidProbeSphere(
+				physics, material, PxVec3(1.5f, 4.0f, 0.0f),
+				PxVec3(-5.0f, 0.0f, 0.0f));
+			left = createRigidProbeSphere(
+				physics, material, PxVec3(-1.5f, 4.0f, 0.0f),
+				PxVec3(5.0f, 0.0f, 0.0f));
+		}
+		else
+		{
+			left = createRigidProbeSphere(
+				physics, material, PxVec3(-1.5f, 4.0f, 0.0f),
+				PxVec3(5.0f, 0.0f, 0.0f));
+			right = createRigidProbeSphere(
+				physics, material, PxVec3(1.5f, 4.0f, 0.0f),
+				PxVec3(-5.0f, 0.0f, 0.0f));
+		}
+	}
+	probe.finite = scene && left && right;
+	if(probe.finite)
+	{
+		if(reverseActorCreation)
+		{
+			scene->addActor(*right);
+			scene->addActor(*left);
+		}
+		else
+		{
+			scene->addActor(*left);
+			scene->addActor(*right);
+		}
+		PxRigidDynamic* bodies[2] = {left, right};
+		probe.initialEnergy = rigidProbeKineticEnergy(*left) +
+			rigidProbeKineticEnergy(*right);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 2, 36, probe) && probe.finite;
+		probe.velocity0 = left->getLinearVelocity();
+		probe.velocity1 = right->getLinearVelocity();
+	}
+	PX_RELEASE(left);
+	PX_RELEASE(right);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runDampedCoMotionRigidContactProbe(
+	PxPhysics& physics, PxMaterial& material)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(PxZero));
+	PxRigidDynamic* left = NULL;
+	PxRigidDynamic* right = NULL;
+	if(scene)
+	{
+		left = createRigidProbeSphere(
+			physics, material, PxVec3(-0.495f, 4.0f, 0.0f),
+			PxVec3(4.5f, 0.0f, 0.0f));
+		right = createRigidProbeSphere(
+			physics, material, PxVec3(0.495f, 4.0f, 0.0f),
+			PxVec3(1.5f, 0.0f, 0.0f));
+	}
+	probe.finite = scene && left && right;
+	if(probe.finite)
+	{
+		left->setLinearDamping(2.0f);
+		right->setLinearDamping(2.0f);
+		scene->addActor(*left);
+		scene->addActor(*right);
+		PxRigidDynamic* bodies[2] = {left, right};
+		probe.initialEnergy = rigidProbeKineticEnergy(*left) +
+			rigidProbeKineticEnergy(*right);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 2, 1, probe) && probe.finite;
+		probe.position0 = left->getGlobalPose().p;
+		probe.position1 = right->getGlobalPose().p;
+		probe.velocity0 = left->getLinearVelocity();
+		probe.velocity1 = right->getLinearVelocity();
+		probe.angularVelocity = left->getAngularVelocity();
+		probe.angularVelocity1 = right->getAngularVelocity();
+	}
+	PX_RELEASE(left);
+	PX_RELEASE(right);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static PxReal grazingRigidContactPointSlip(
+	const RigidContactProbe& probe)
+{
+	PxVec3 normal = probe.position1 - probe.position0;
+	const PxReal distance = normal.normalize();
+	if(!PxIsFinite(distance) || distance <= 1.0e-6f)
+		return PX_MAX_F32;
+	const PxVec3 commonPoint =
+		0.5f * (probe.position0 + probe.position1);
+	const PxVec3 pointVelocity0 =
+		probe.velocity0 + probe.angularVelocity.cross(
+			commonPoint - probe.position0);
+	const PxVec3 pointVelocity1 =
+		probe.velocity1 + probe.angularVelocity1.cross(
+			commonPoint - probe.position1);
+	const PxVec3 relativeVelocity = pointVelocity1 - pointVelocity0;
+	return (relativeVelocity - normal * relativeVelocity.dot(normal)).magnitude();
+}
+
+static RigidContactProbe runGrazingRigidContactProbe(
+	PxPhysics& physics, PxMaterial& material)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(PxZero));
+	PxRigidDynamic* left = NULL;
+	PxRigidDynamic* right = NULL;
+	if(scene)
+	{
+		// The small overlap supplies the same normal PositionAL impulse in the
+		// frictionless and frictional scenes.  Relative velocity is purely
+		// tangential, so Coulomb friction may dissipate slip but must never feed
+		// back into, or manufacture, a normal separating impulse.
+		left = createRigidProbeSphere(
+			physics, material, PxVec3(-0.495f, 4.0f, 0.0f),
+			PxVec3(0.0f, 5.0f, 0.0f));
+		right = createRigidProbeSphere(
+			physics, material, PxVec3(0.495f, 4.0f, 0.0f),
+			PxVec3(0.0f, -5.0f, 0.0f));
+	}
+	probe.finite = scene && left && right;
+	if(probe.finite)
+	{
+		scene->addActor(*left);
+		scene->addActor(*right);
+		PxRigidDynamic* bodies[2] = {left, right};
+		probe.initialEnergy = rigidProbeKineticEnergy(*left) +
+			rigidProbeKineticEnergy(*right);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 2, 1, probe) && probe.finite;
+		probe.position0 = left->getGlobalPose().p;
+		probe.position1 = right->getGlobalPose().p;
+		probe.velocity0 = left->getLinearVelocity();
+		probe.velocity1 = right->getLinearVelocity();
+		probe.angularVelocity = left->getAngularVelocity();
+		probe.angularVelocity1 = right->getAngularVelocity();
+	}
+	PX_RELEASE(left);
+	PX_RELEASE(right);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static PxRigidStatic* createRigidProbeCorner(
+	PxPhysics& physics, PxMaterial& material, bool reverseShapeOrder)
+{
+	PxRigidStatic* corner =
+		physics.createRigidStatic(PxTransform(PxIdentity));
+	if(!corner)
+		return NULL;
+	PxShape* floorShape = physics.createShape(
+		PxBoxGeometry(3.0f, 0.5f, 2.0f), material, true);
+	PxShape* wallShape = physics.createShape(
+		PxBoxGeometry(0.5f, 3.0f, 2.0f), material, true);
+	if(!floorShape || !wallShape)
+	{
+		PX_RELEASE(floorShape);
+		PX_RELEASE(wallShape);
+		PX_RELEASE(corner);
+		return NULL;
+	}
+	floorShape->setLocalPose(PxTransform(PxVec3(0.0f, -0.5f, 0.0f)));
+	wallShape->setLocalPose(PxTransform(PxVec3(-0.5f, 2.5f, 0.0f)));
+	if(reverseShapeOrder)
+	{
+		corner->attachShape(*wallShape);
+		corner->attachShape(*floorShape);
+	}
+	else
+	{
+		corner->attachShape(*floorShape);
+		corner->attachShape(*wallShape);
+	}
+	floorShape->release();
+	wallShape->release();
+	return corner;
+}
+
+static RigidContactProbe runCornerRigidContactProbe(
+	PxPhysics& physics, PxMaterial& material, bool reverseOrdering)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(PxZero));
+	PxRigidStatic* corner = NULL;
+	PxRigidDynamic* sphere = NULL;
+	if(scene)
+	{
+		if(reverseOrdering)
+		{
+			sphere = createRigidProbeSphere(
+				physics, material, PxVec3(1.5f, 1.5f, 0.0f),
+				PxVec3(-6.0f, -6.0f, 0.0f));
+			corner = createRigidProbeCorner(physics, material, true);
+		}
+		else
+		{
+			corner = createRigidProbeCorner(physics, material, false);
+			sphere = createRigidProbeSphere(
+				physics, material, PxVec3(1.5f, 1.5f, 0.0f),
+				PxVec3(-6.0f, -6.0f, 0.0f));
+		}
+	}
+	probe.finite = scene && corner && sphere;
+	if(probe.finite)
+	{
+		if(reverseOrdering)
+		{
+			scene->addActor(*sphere);
+			scene->addActor(*corner);
+		}
+		else
+		{
+			scene->addActor(*corner);
+			scene->addActor(*sphere);
+		}
+		PxRigidDynamic* bodies[1] = {sphere};
+		probe.initialEnergy = rigidProbeKineticEnergy(*sphere);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 48, probe) && probe.finite;
+		probe.position0 = sphere->getGlobalPose().p;
+		probe.velocity0 = sphere->getLinearVelocity();
+		probe.angularVelocity = sphere->getAngularVelocity();
+	}
+	PX_RELEASE(sphere);
+	PX_RELEASE(corner);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static RigidContactProbe runRigidRestDistanceProbe(
+	PxPhysics& physics, PxMaterial& material)
+{
+	RigidContactProbe probe;
+	RigidContactProbeCallback callback(probe);
+	PxDefaultCpuDispatcher* dispatcher = NULL;
+	PxScene* scene = createRigidContactProbeScene(
+		physics, dispatcher, &callback, PxVec3(0.0f, -9.81f, 0.0f));
+	PxRigidStatic* floorActor = NULL;
+	PxRigidDynamic* sphere = NULL;
+	PxShape* sphereShape = NULL;
+	if(scene)
+	{
+		floorActor = physics.createRigidStatic(
+			PxTransform(PxVec3(0.0f, -0.5f, 0.0f)));
+		PxShape* floorShape = physics.createShape(
+			PxBoxGeometry(4.0f, 0.5f, 4.0f), material, true);
+		if(floorActor && floorShape)
+			floorActor->attachShape(*floorShape);
+		else
+			probe.finite = false;
+		PX_RELEASE(floorShape);
+		sphere = createRigidProbeSphere(
+			physics, material, PxVec3(0.0f, 2.0f, 0.0f),
+			PxVec3(PxZero), &sphereShape);
+		if(sphereShape)
+		{
+			sphereShape->setContactOffset(0.25f);
+			sphereShape->setRestOffset(0.20f);
+			sphereShape->release();
+		}
+	}
+	probe.finite = probe.finite && scene && floorActor && sphere;
+	if(probe.finite)
+	{
+		scene->addActor(*floorActor);
+		scene->addActor(*sphere);
+		PxRigidDynamic* bodies[1] = {sphere};
+		probe.initialEnergy = rigidProbeKineticEnergy(*sphere);
+		probe.maxEnergy = probe.initialEnergy;
+		probe.finite = stepRigidProbeScene(
+			*scene, bodies, 1, 240, probe) && probe.finite;
+		probe.position0 = sphere->getGlobalPose().p;
+		probe.velocity0 = sphere->getLinearVelocity();
+	}
+	PX_RELEASE(sphere);
+	PX_RELEASE(floorActor);
+	PX_RELEASE(scene);
+	PX_RELEASE(dispatcher);
+	return probe;
+}
+
+static void testUnifiedRigidContactContract(PxFoundation& foundation)
+{
+	printf("\n--- Test 65: Unified Rigid Contact Contract ---\n");
+	PxPhysics* physics = PxCreatePhysics(
+		PX_PHYSICS_VERSION, foundation, PxTolerancesScale(), false);
+	TEST_CHECK(physics != NULL, "Rigid contact probe creates PxPhysics");
+	if(!physics)
+		return;
+
+	PxMaterial* inelasticMaterial =
+		physics->createMaterial(0.0f, 0.0f, 0.0f);
+	PxMaterial* frictionMaterial =
+		physics->createMaterial(0.5f, 0.5f, 0.0f);
+	PxMaterial* frictionRestitutionMaterial =
+		physics->createMaterial(0.5f, 0.5f, 0.6f);
+	PxMaterial* restitutionMaterial =
+		physics->createMaterial(0.0f, 0.0f, 0.6f);
+	TEST_CHECK(
+		inelasticMaterial && frictionMaterial &&
+			frictionRestitutionMaterial && restitutionMaterial,
+		"Rigid contact probe creates calibrated materials");
+	if(!inelasticMaterial || !frictionMaterial ||
+		!frictionRestitutionMaterial || !restitutionMaterial)
+	{
+		PX_RELEASE(restitutionMaterial);
+		PX_RELEASE(frictionRestitutionMaterial);
+		PX_RELEASE(frictionMaterial);
+		PX_RELEASE(inelasticMaterial);
+		PX_RELEASE(physics);
+		return;
+	}
+
+	const RigidContactProbe inelasticForward =
+		runHeadOnRigidContactProbe(
+			*physics, *inelasticMaterial, false);
+	const RigidContactProbe inelasticReverse =
+		runHeadOnRigidContactProbe(
+			*physics, *inelasticMaterial, true);
+	printf(
+		"  inelastic forward=(%.9g, %.9g) reverse=(%.9g, %.9g)\n",
+		double(inelasticForward.velocity0.x),
+		double(inelasticForward.velocity1.x),
+		double(inelasticReverse.velocity0.x),
+		double(inelasticReverse.velocity1.x));
+	TEST_CHECK(
+		inelasticForward.finite && inelasticReverse.finite &&
+			inelasticForward.contactPoints && inelasticReverse.contactPoints,
+		"Inelastic dynamic contact produces finite solver contact data");
+	TEST_CHECK(
+		inelasticForward.maxEnergy <=
+			inelasticForward.initialEnergy * 1.05f + 1.0e-4f &&
+		inelasticReverse.maxEnergy <=
+			inelasticReverse.initialEnergy * 1.05f + 1.0e-4f,
+		"Zero-restitution dynamic contact does not create kinetic energy");
+	TEST_CHECK(
+		PxAbs(inelasticForward.velocity1.x -
+			inelasticForward.velocity0.x) < 0.05f &&
+		PxAbs(inelasticReverse.velocity1.x -
+			inelasticReverse.velocity0.x) < 0.05f,
+		"Zero-restitution dynamic contact removes closing velocity");
+	TEST_CHECK(
+		(inelasticForward.velocity0 - inelasticReverse.velocity0).
+			magnitude() < 0.05f &&
+		(inelasticForward.velocity1 - inelasticReverse.velocity1).
+			magnitude() < 0.05f,
+		"Dynamic contact response is invariant to actor creation order");
+
+	const RigidContactProbe dampedCoMotion =
+		runDampedCoMotionRigidContactProbe(*physics, *inelasticMaterial);
+	PxReal expectedDampedSpeed = 3.0f;
+	for(PxU32 frame = 0; frame < 1; ++frame)
+		expectedDampedSpeed /= 1.0f + 2.0f / 60.0f;
+	const PxReal measuredDampedSpeed =
+		0.5f * (dampedCoMotion.velocity0.x + dampedCoMotion.velocity1.x);
+	printf(
+		"  damped co-motion measured=%.9g expected=%.9g relative=%.9g\n",
+		double(measuredDampedSpeed), double(expectedDampedSpeed),
+		double(PxAbs(
+			dampedCoMotion.velocity1.x - dampedCoMotion.velocity0.x)));
+	TEST_CHECK(
+		dampedCoMotion.finite && dampedCoMotion.contactPoints &&
+			PxAbs(measuredDampedSpeed - expectedDampedSpeed) < 0.02f &&
+			PxAbs(dampedCoMotion.velocity1.x -
+				dampedCoMotion.velocity0.x) < 0.05f,
+		"Dynamic contact preserves per-body damping in its momentum nullspace");
+
+	const RigidContactProbe grazingFrictionless =
+		runGrazingRigidContactProbe(*physics, *inelasticMaterial);
+	const RigidContactProbe grazingFrictional =
+		runGrazingRigidContactProbe(*physics, *frictionMaterial);
+	const PxReal frictionlessNormalSeparation =
+		grazingFrictionless.velocity1.x - grazingFrictionless.velocity0.x;
+	const PxReal frictionalNormalSeparation =
+		grazingFrictional.velocity1.x - grazingFrictional.velocity0.x;
+	const PxReal frictionlessTangentSlip =
+		PxAbs(grazingFrictionless.velocity1.y -
+			grazingFrictionless.velocity0.y);
+	const PxReal frictionalTangentSlip =
+		PxAbs(grazingFrictional.velocity1.y -
+			grazingFrictional.velocity0.y);
+	const PxReal frictionlessContactSlip =
+		grazingRigidContactPointSlip(grazingFrictionless);
+	const PxReal frictionalContactSlip =
+		grazingRigidContactPointSlip(grazingFrictional);
+	printf(
+		"  grazing normal=(%.9g, %.9g) comSlip=(%.9g, %.9g) "
+		"contactSlip=(%.9g, %.9g) energy=(%.9g/%.9g, %.9g/%.9g)\n",
+		double(frictionlessNormalSeparation),
+		double(frictionalNormalSeparation),
+		double(frictionlessTangentSlip),
+		double(frictionalTangentSlip),
+		double(frictionlessContactSlip),
+		double(frictionalContactSlip),
+		double(grazingFrictionless.maxEnergy),
+		double(grazingFrictionless.initialEnergy),
+		double(grazingFrictional.maxEnergy),
+		double(grazingFrictional.initialEnergy));
+	TEST_CHECK(
+		grazingFrictionless.finite && grazingFrictional.finite &&
+			grazingFrictionless.contactPoints &&
+			grazingFrictional.contactPoints,
+		"Grazing dynamic contact produces finite solver contact data");
+	TEST_CHECK(
+		PxAbs(frictionalNormalSeparation -
+			frictionlessNormalSeparation) < 0.02f,
+		"Tangential slip cannot manufacture a normal contact impulse");
+	TEST_CHECK(
+		PxIsFinite(frictionlessContactSlip) &&
+		PxIsFinite(frictionalContactSlip) &&
+		frictionalContactSlip < 10.0f &&
+			grazingFrictional.maxEnergy <=
+				grazingFrictional.initialEnergy * 1.0001f + 1.0e-4f,
+		"Grazing Coulomb response is dissipative at the material point");
+
+	const RigidContactProbe restitutionForward =
+		runHeadOnRigidContactProbe(
+			*physics, *restitutionMaterial, false);
+	const RigidContactProbe restitutionReverse =
+		runHeadOnRigidContactProbe(
+			*physics, *restitutionMaterial, true);
+	const PxReal forwardRecovery =
+		(restitutionForward.velocity1.x -
+		 restitutionForward.velocity0.x) / 10.0f;
+	const PxReal reverseRecovery =
+		(restitutionReverse.velocity1.x -
+		 restitutionReverse.velocity0.x) / 10.0f;
+	printf(
+		"  restitution forward=(%.9g, %.9g; e=%.9g) "
+		"reverse=(%.9g, %.9g; e=%.9g)\n",
+		double(restitutionForward.velocity0.x),
+		double(restitutionForward.velocity1.x), double(forwardRecovery),
+		double(restitutionReverse.velocity0.x),
+		double(restitutionReverse.velocity1.x), double(reverseRecovery));
+	TEST_CHECK(
+		restitutionForward.finite && restitutionReverse.finite &&
+			forwardRecovery > 0.35f && forwardRecovery < 0.85f &&
+			reverseRecovery > 0.35f && reverseRecovery < 0.85f,
+		"Nonzero restitution restores a bounded separating velocity");
+	TEST_CHECK(
+		PxAbs(forwardRecovery - reverseRecovery) < 0.02f &&
+		(restitutionForward.velocity0 - restitutionReverse.velocity0).
+			magnitude() < 0.05f &&
+		(restitutionForward.velocity1 - restitutionReverse.velocity1).
+			magnitude() < 0.05f,
+		"Restitution is invariant to dynamic endpoint ordering");
+
+	const RigidContactProbe cornerForward = runCornerRigidContactProbe(
+		*physics, *frictionMaterial, false);
+	const RigidContactProbe cornerReverse = runCornerRigidContactProbe(
+		*physics, *frictionMaterial, true);
+	printf(
+		"  corner forwardPos=(%.9g, %.9g) forwardVel=(%.9g, %.9g) "
+		"reversePos=(%.9g, %.9g) reverseVel=(%.9g, %.9g)\n",
+		double(cornerForward.position0.x), double(cornerForward.position0.y),
+		double(cornerForward.velocity0.x), double(cornerForward.velocity0.y),
+		double(cornerReverse.position0.x), double(cornerReverse.position0.y),
+		double(cornerReverse.velocity0.x), double(cornerReverse.velocity0.y));
+	TEST_CHECK(
+		cornerForward.finite && cornerReverse.finite &&
+			cornerForward.contactPoints && cornerReverse.contactPoints,
+		"Multi-manifold probe produces finite contact states");
+	TEST_CHECK(
+		cornerForward.maxEnergy <=
+			cornerForward.initialEnergy * 1.05f + 1.0e-4f &&
+		cornerReverse.maxEnergy <=
+			cornerReverse.initialEnergy * 1.05f + 1.0e-4f,
+		"Zero-restitution multi-manifold contact does not create energy");
+	TEST_CHECK(
+		(cornerForward.position0 - cornerReverse.position0).
+			magnitude() < 0.03f &&
+		(cornerForward.velocity0 - cornerReverse.velocity0).
+			magnitude() < 0.05f &&
+		(cornerForward.angularVelocity - cornerReverse.angularVelocity).
+			magnitude() < 0.05f,
+		"Contact-manifold and actor creation order preserve final state");
+
+	const RigidContactProbe restDistance = runRigidRestDistanceProbe(
+		*physics, *inelasticMaterial);
+	TEST_CHECK(
+		restDistance.finite && restDistance.contactPoints &&
+			restDistance.position0.y > 0.66f &&
+			restDistance.position0.y < 0.74f &&
+			PxAbs(restDistance.velocity0.y) < 0.1f,
+		"Ordinary rigid contact converges to its nonzero rest distance");
+
+	const RigidContactProbe gravityAvbd = runRigidGravityProbe(
+		*physics, *inelasticMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe gravityTgs = runRigidGravityProbe(
+		*physics, *inelasticMaterial, PxSolverType::eTGS);
+	const PxReal expectedGravityVelocity = -9.81f * 2.0f;
+	const PxReal expectedGravityPosition =
+		-9.81f * (120.0f * 121.0f) /
+			(2.0f * 60.0f * 60.0f);
+	printf(
+		"  gravity AVBD=(y=%.9g, vy=%.9g) TGS=(y=%.9g, vy=%.9g) "
+		"expected=(y=%.9g, vy=%.9g)\n",
+		double(gravityAvbd.position0.y), double(gravityAvbd.velocity0.y),
+		double(gravityTgs.position0.y), double(gravityTgs.velocity0.y),
+		double(expectedGravityPosition), double(expectedGravityVelocity));
+	TEST_CHECK(
+		gravityAvbd.finite && gravityTgs.finite &&
+			PxAbs(gravityAvbd.velocity0.y - gravityTgs.velocity0.y) < 1.0e-3f &&
+			PxAbs(gravityAvbd.position0.y - gravityTgs.position0.y) < 2.0e-3f &&
+			PxAbs(gravityAvbd.velocity0.y - expectedGravityVelocity) < 2.0e-3f,
+		"AVBD free-flight gravity matches TGS and the 60 Hz impulse integral");
+
+	// Keep the one-second Coulomb deceleration close to TGS.  AVBD resolves the
+	// contact at position level, so exact equality is neither expected nor
+	// desirable, but a materially weaker response would recreate long slides.
+	const RigidContactProbe slideAvbd = runRigidFrictionSlideProbe(
+		*physics, *frictionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe slideTgs = runRigidFrictionSlideProbe(
+		*physics, *frictionMaterial, PxSolverType::eTGS);
+	const PxReal avbdSlideDeceleration = 10.0f - slideAvbd.velocity0.x;
+	const PxReal tgsSlideDeceleration = 10.0f - slideTgs.velocity0.x;
+	printf(
+		"  friction-slide AVBD=(x=%.9g, vx=%.9g, y=%.9g, w=%.9g) "
+		"TGS=(x=%.9g, vx=%.9g, y=%.9g, w=%.9g) "
+		"deceleration=(%.9g, %.9g)\n",
+		double(slideAvbd.position0.x), double(slideAvbd.velocity0.x),
+		double(slideAvbd.position0.y),
+		double(slideAvbd.angularVelocity.magnitude()),
+		double(slideTgs.position0.x), double(slideTgs.velocity0.x),
+		double(slideTgs.position0.y),
+		double(slideTgs.angularVelocity.magnitude()),
+		double(avbdSlideDeceleration), double(tgsSlideDeceleration));
+	TEST_CHECK(
+		slideAvbd.finite && slideTgs.finite && slideAvbd.contactPoints &&
+			slideTgs.contactPoints,
+		"Friction calibration boxes retain finite ground contact");
+	TEST_CHECK(
+		slideAvbd.velocity0.x >= 0.0f && slideTgs.velocity0.x >= 0.0f &&
+			PxAbs(avbdSlideDeceleration - tgsSlideDeceleration) < 1.25f,
+		"AVBD rigid-static dynamic friction remains calibrated to TGS");
+
+	const RigidContactProbe sphereSlideAvbd =
+		runRigidSinglePointSphereSlideProbe(
+			*physics, *frictionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe sphereSlideTgs =
+		runRigidSinglePointSphereSlideProbe(
+			*physics, *frictionMaterial, PxSolverType::eTGS);
+	printf(
+		"  single-point-sphere-slide AVBD=(x=%.9g, v=%.9g, w=%.9g, "
+		"energy=%.9g/%.9g; single=%u multi=%u) "
+		"TGS=(x=%.9g, v=%.9g, w=%.9g, energy=%.9g/%.9g; "
+		"single=%u multi=%u)\n",
+		double(sphereSlideAvbd.position0.x),
+		double(sphereSlideAvbd.velocity0.magnitude()),
+		double(sphereSlideAvbd.angularVelocity.magnitude()),
+		double(sphereSlideAvbd.maxEnergy),
+		double(sphereSlideAvbd.initialEnergy),
+		sphereSlideAvbd.singleContactFrames,
+		sphereSlideAvbd.multiContactFrames,
+		double(sphereSlideTgs.position0.x),
+		double(sphereSlideTgs.velocity0.magnitude()),
+		double(sphereSlideTgs.angularVelocity.magnitude()),
+		double(sphereSlideTgs.maxEnergy),
+		double(sphereSlideTgs.initialEnergy),
+		sphereSlideTgs.singleContactFrames,
+		sphereSlideTgs.multiContactFrames);
+	TEST_CHECK(
+		sphereSlideAvbd.finite && sphereSlideTgs.finite &&
+			sphereSlideAvbd.singleContactFrames > 0u &&
+			sphereSlideTgs.singleContactFrames > 0u,
+		"Single-point sphere slides retain finite ground contact");
+	TEST_CHECK(
+		sphereSlideAvbd.maxEnergy <=
+			sphereSlideAvbd.initialEnergy * 1.01f + 1.0e-4f &&
+			sphereSlideAvbd.velocity0.magnitude() <= 10.0f,
+		"AVBD single-point passive friction never injects kinetic energy");
+
+	const RigidContactProbe dynamicSlideAvbd =
+		runRigidDynamicFrictionSlideProbe(
+			*physics, *frictionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe dynamicSlideTgs =
+		runRigidDynamicFrictionSlideProbe(
+			*physics, *frictionMaterial, PxSolverType::eTGS);
+	const PxReal avbdDynamicSlideDeceleration =
+		10.0f - dynamicSlideAvbd.velocity0.x;
+	const PxReal tgsDynamicSlideDeceleration =
+		10.0f - dynamicSlideTgs.velocity0.x;
+	printf(
+		"  dynamic-friction-slide AVBD=(x=%.9g, vx=%.9g, y=%.9g, w=%.9g) "
+		"TGS=(x=%.9g, vx=%.9g, y=%.9g, w=%.9g) "
+		"deceleration=(%.9g, %.9g)\n",
+		double(dynamicSlideAvbd.position0.x),
+		double(dynamicSlideAvbd.velocity0.x),
+		double(dynamicSlideAvbd.position0.y),
+		double(dynamicSlideAvbd.angularVelocity.magnitude()),
+		double(dynamicSlideTgs.position0.x),
+		double(dynamicSlideTgs.velocity0.x),
+		double(dynamicSlideTgs.position0.y),
+		double(dynamicSlideTgs.angularVelocity.magnitude()),
+		double(avbdDynamicSlideDeceleration),
+		double(tgsDynamicSlideDeceleration));
+	TEST_CHECK(
+		dynamicSlideAvbd.finite && dynamicSlideTgs.finite &&
+			dynamicSlideAvbd.contactPoints && dynamicSlideTgs.contactPoints,
+		"Dynamic friction calibration boxes retain finite contact");
+	TEST_CHECK(
+		dynamicSlideAvbd.velocity0.x >= 0.0f &&
+			dynamicSlideTgs.velocity0.x >= 0.0f &&
+			PxAbs(avbdDynamicSlideDeceleration -
+				tgsDynamicSlideDeceleration) < 1.25f,
+		"AVBD rigid-dynamic friction remains calibrated to TGS");
+
+	const RigidContactProbe landingAvbd = runRigidTumblingLandingProbe(
+		*physics, *frictionRestitutionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe landingTgs = runRigidTumblingLandingProbe(
+		*physics, *frictionRestitutionMaterial, PxSolverType::eTGS);
+	printf(
+		"  tumbling-landing AVBD=(x5=%.9g, v5=%.9g, w5=%.9g; "
+		"x20=%.9g, v20=%.9g, w20=%.9g) "
+		"TGS=(x5=%.9g, v5=%.9g, w5=%.9g; "
+		"x20=%.9g, v20=%.9g, w20=%.9g)\n",
+		double(landingAvbd.position1.x),
+		double(landingAvbd.velocity1.magnitude()),
+		double(landingAvbd.angularVelocity1.magnitude()),
+		double(landingAvbd.position0.x),
+		double(landingAvbd.velocity0.magnitude()),
+		double(landingAvbd.angularVelocity.magnitude()),
+		double(landingTgs.position1.x),
+		double(landingTgs.velocity1.magnitude()),
+		double(landingTgs.angularVelocity1.magnitude()),
+		double(landingTgs.position0.x),
+		double(landingTgs.velocity0.magnitude()),
+		double(landingTgs.angularVelocity.magnitude()));
+	TEST_CHECK(
+		landingAvbd.finite && landingTgs.finite &&
+			landingAvbd.contactPoints && landingTgs.contactPoints,
+		"Tumbling landing boxes retain finite ground contact");
+	TEST_CHECK(
+		landingAvbd.velocity0.magnitude() < 0.02f &&
+			landingAvbd.angularVelocity.magnitude() < 0.02f &&
+			PxAbs(landingAvbd.position0.x - landingAvbd.position1.x) < 1.0f,
+		"AVBD tumbling boxes converge instead of retaining tangential drift");
+
+	const RigidContactProbe highSpinAvbd = runRigidHighSpinLandingProbe(
+		*physics, *frictionRestitutionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe highSpinTgs = runRigidHighSpinLandingProbe(
+		*physics, *frictionRestitutionMaterial, PxSolverType::eTGS);
+	printf(
+		"  high-spin-landing AVBD=(x5=%.9g, v5=%.9g, w5=%.9g; "
+		"x20=%.9g, v20=%.9g, w20=%.9g; single=%u multi=%u max=%u) "
+		"TGS=(x5=%.9g, v5=%.9g, w5=%.9g; "
+		"x20=%.9g, v20=%.9g, w20=%.9g; single=%u multi=%u max=%u)\n",
+		double(highSpinAvbd.position1.x),
+		double(highSpinAvbd.velocity1.magnitude()),
+		double(highSpinAvbd.angularVelocity1.magnitude()),
+		double(highSpinAvbd.position0.x),
+		double(highSpinAvbd.velocity0.magnitude()),
+		double(highSpinAvbd.angularVelocity.magnitude()),
+		highSpinAvbd.singleContactFrames,
+		highSpinAvbd.multiContactFrames,
+		highSpinAvbd.maxContactPointsPerFrame,
+		double(highSpinTgs.position1.x),
+		double(highSpinTgs.velocity1.magnitude()),
+		double(highSpinTgs.angularVelocity1.magnitude()),
+		double(highSpinTgs.position0.x),
+		double(highSpinTgs.velocity0.magnitude()),
+		double(highSpinTgs.angularVelocity.magnitude()),
+		highSpinTgs.singleContactFrames,
+		highSpinTgs.multiContactFrames,
+		highSpinTgs.maxContactPointsPerFrame);
+	TEST_CHECK(
+		highSpinAvbd.finite && highSpinTgs.finite &&
+			highSpinAvbd.contactPoints && highSpinTgs.contactPoints,
+		"High-spin landing boxes retain finite ground contact");
+	TEST_CHECK(
+		highSpinAvbd.velocity0.magnitude() < 0.02f &&
+			highSpinAvbd.angularVelocity.magnitude() < 0.02f &&
+			PxAbs(highSpinAvbd.velocity1.magnitude() -
+				highSpinTgs.velocity1.magnitude()) < 1.0f &&
+			PxAbs(highSpinAvbd.angularVelocity1.magnitude() -
+				highSpinTgs.angularVelocity1.magnitude()) < 1.0f &&
+			PxAbs(highSpinAvbd.position0.x - highSpinTgs.position0.x) < 2.0f,
+		"AVBD high-spin boxes retain ground friction through contact migration");
+
+	const RigidContactProbe dampedYawSlideAvbd =
+		runRigidDampedYawSlideProbe(
+			*physics, *frictionRestitutionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe dampedYawSlideTgs =
+		runRigidDampedYawSlideProbe(
+			*physics, *frictionRestitutionMaterial, PxSolverType::eTGS);
+	printf(
+		"  damped-yaw-slide AVBD=(x=%.9g, v=%.9g, w=%.9g, "
+		"energy=%.9g/%.9g; single=%u multi=%u max=%u) "
+		"TGS=(x=%.9g, v=%.9g, w=%.9g, energy=%.9g/%.9g; "
+		"single=%u multi=%u max=%u)\n",
+		double(dampedYawSlideAvbd.position0.x),
+		double(dampedYawSlideAvbd.velocity0.magnitude()),
+		double(dampedYawSlideAvbd.angularVelocity.magnitude()),
+		double(dampedYawSlideAvbd.maxEnergy),
+		double(dampedYawSlideAvbd.initialEnergy),
+		dampedYawSlideAvbd.singleContactFrames,
+		dampedYawSlideAvbd.multiContactFrames,
+		dampedYawSlideAvbd.maxContactPointsPerFrame,
+		double(dampedYawSlideTgs.position0.x),
+		double(dampedYawSlideTgs.velocity0.magnitude()),
+		double(dampedYawSlideTgs.angularVelocity.magnitude()),
+		double(dampedYawSlideTgs.maxEnergy),
+		double(dampedYawSlideTgs.initialEnergy),
+		dampedYawSlideTgs.singleContactFrames,
+		dampedYawSlideTgs.multiContactFrames,
+		dampedYawSlideTgs.maxContactPointsPerFrame);
+	TEST_CHECK(
+		dampedYawSlideAvbd.finite && dampedYawSlideTgs.finite &&
+			dampedYawSlideAvbd.multiContactFrames > 1200u &&
+			dampedYawSlideTgs.multiContactFrames > 1200u,
+		"Damped yaw slides retain persistent multi-point ground contact");
+	TEST_CHECK(
+		dampedYawSlideAvbd.maxEnergy <=
+			dampedYawSlideAvbd.initialEnergy * 1.01f + 1.0e-3f &&
+			dampedYawSlideAvbd.velocity0.magnitude() < 0.05f &&
+			dampedYawSlideAvbd.angularVelocity.magnitude() < 0.05f,
+		"AVBD damped multi-point yaw friction cannot inject kinetic energy");
+
+	const RigidContactProbe migratingSlideAvbd =
+		runRigidMigratingTwoPointSlideProbe(
+			*physics, *frictionRestitutionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe migratingSlideTgs =
+		runRigidMigratingTwoPointSlideProbe(
+			*physics, *frictionRestitutionMaterial, PxSolverType::eTGS);
+	printf(
+		"  migrating-two-point-slide AVBD=(x1=%.9g, v1=%.9g; "
+		"x10=%.9g, v10=%.9g, w10=%.9g; single=%u multi=%u max=%u) "
+		"TGS=(x1=%.9g, v1=%.9g; x10=%.9g, v10=%.9g, w10=%.9g; "
+		"single=%u multi=%u max=%u)\n",
+		double(migratingSlideAvbd.position1.x),
+		double(migratingSlideAvbd.velocity1.magnitude()),
+		double(migratingSlideAvbd.position0.x),
+		double(migratingSlideAvbd.velocity0.magnitude()),
+		double(migratingSlideAvbd.angularVelocity.magnitude()),
+		migratingSlideAvbd.singleContactFrames,
+		migratingSlideAvbd.multiContactFrames,
+		migratingSlideAvbd.maxContactPointsPerFrame,
+		double(migratingSlideTgs.position1.x),
+		double(migratingSlideTgs.velocity1.magnitude()),
+		double(migratingSlideTgs.position0.x),
+		double(migratingSlideTgs.velocity0.magnitude()),
+		double(migratingSlideTgs.angularVelocity.magnitude()),
+		migratingSlideTgs.singleContactFrames,
+		migratingSlideTgs.multiContactFrames,
+		migratingSlideTgs.maxContactPointsPerFrame);
+	TEST_CHECK(
+		migratingSlideAvbd.finite && migratingSlideTgs.finite &&
+			migratingSlideAvbd.contactPoints &&
+			migratingSlideTgs.contactPoints,
+		"Migrating two-point slide retains finite ground contact");
+	TEST_CHECK(
+		migratingSlideAvbd.velocity0.magnitude() < 0.02f &&
+			migratingSlideAvbd.angularVelocity.magnitude() < 0.02f &&
+			PxAbs(migratingSlideAvbd.position0.x) <
+				2.25f * PxAbs(migratingSlideTgs.position0.x) + 0.1f,
+		"AVBD migrating contacts stop within a bounded TGS-calibrated distance");
+
+	const RigidContactProbe heavyImpactAvbd = runRigidHeavyBoxImpactProbe(
+		*physics, *restitutionMaterial, PxSolverType::eAVBD);
+	const RigidContactProbe heavyImpactTgs = runRigidHeavyBoxImpactProbe(
+		*physics, *restitutionMaterial, PxSolverType::eTGS);
+	printf(
+		"  heavy-box-impact AVBD=(striker=%.9g, target=%.9g) "
+		"TGS=(striker=%.9g, target=%.9g)\n",
+		double(heavyImpactAvbd.velocity0.x),
+		double(heavyImpactAvbd.velocity1.x),
+		double(heavyImpactTgs.velocity0.x),
+		double(heavyImpactTgs.velocity1.x));
+	TEST_CHECK(
+		heavyImpactAvbd.finite && heavyImpactTgs.finite &&
+			heavyImpactAvbd.contactPoints && heavyImpactTgs.contactPoints,
+		"Heavy-box impact probes retain finite contact");
+	TEST_CHECK(
+		PxAbs(heavyImpactAvbd.velocity0.x -
+		      heavyImpactTgs.velocity0.x) < 0.05f &&
+			PxAbs(heavyImpactAvbd.velocity1.x -
+			      heavyImpactTgs.velocity1.x) < 0.1f,
+		"AVBD high-mass-ratio box impact velocities match TGS");
+
+	PX_RELEASE(restitutionMaterial);
+	PX_RELEASE(frictionRestitutionMaterial);
+	PX_RELEASE(frictionMaterial);
+	PX_RELEASE(inelasticMaterial);
+	PX_RELEASE(physics);
+}
+
 
 TestRunResult runSelectedTests(PxFoundation& foundation, int selectedId)
 {
@@ -9050,6 +10514,10 @@ TestRunResult runSelectedTests(PxFoundation& foundation, int selectedId)
 		testOgcTriangleCoreGeometryEpoch();
 	if (shouldRunTest(selectedId, 63))
 		testRigidCapsuleParallelFaceManifold();
+	if (shouldRunTest(selectedId, 64))
+		testBodyStaticRelativeDisplacementEndpointSymmetry();
+	if (shouldRunTest(selectedId, 65))
+		testUnifiedRigidContactContract(foundation);
 
 	printf("\n=== Results: %d PASSED, %d FAILED (out of %d) ===\n",
 	       gTestsPassed, gTestsFailed, gTestsPassed + gTestsFailed);

@@ -70,7 +70,7 @@ void reconstructPostAlBodyVelocities(
     const physx::PxArray<physx::PxQuat> &postBlockRot,
     const physx::PxArray<physx::PxVec3> &postDepenPos,
     const physx::PxArray<physx::PxQuat> &postDepenRot,
-    const AvbdPostAlVelocityState &velocityState,
+    AvbdPostAlVelocityState &velocityState,
     bool terminalCurrentPoseEpochApplied,
     const physx::PxArray<physx::PxVec3> &terminalVelocityBasePos,
     const physx::PxArray<physx::PxQuat> &terminalVelocityBaseRot,
@@ -151,6 +151,10 @@ struct AvbdPostAlTerminalState {
 struct AvbdPostAlVelocityState {
   physx::PxArray<physx::PxU32> physicalContactTangentOwnerIndex;
   physx::PxArray<bool> fastNormalImpactByBody;
+  /** Scalar gain actually applied to pose-derived linear contact response. */
+  physx::PxArray<physx::PxReal> linearPoseVelocityGain;
+  /** Scalar gain actually applied to pose-derived angular contact response. */
+  physx::PxArray<physx::PxReal> angularPoseVelocityGain;
   bool haveSolveStartLinear;
 
   void build(
@@ -201,7 +205,13 @@ void projectBodyStaticLockedD6LinearVelocities(
 void applyAvbdContactTargetVelocity(
     AvbdSolverBody *bodies, physx::PxU32 numBodies,
     AvbdContactConstraint *contacts, physx::PxU32 numContacts,
-    physx::PxReal dt, const AvbdPostAlContactWorkPlan *workPlan);
+    const AvbdBodyConstraintMap *contactMap,
+    const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
+    const physx::PxArray<physx::PxVec3> *angularVelAtSolveStart,
+    const physx::PxArray<physx::PxReal> *linearPoseVelocityGain,
+    const physx::PxArray<physx::PxReal> *angularPoseVelocityGain,
+    physx::PxReal dt, physx::PxReal bounceThreshold,
+    const AvbdPostAlContactWorkPlan *workPlan);
 
 bool isRigidDeepBodyStaticRecoverySplitSupported(
     const AvbdSolverBody *bodies, physx::PxU32 numBodies,
@@ -221,6 +231,8 @@ void clampBodyStaticInelasticNormalVelocities(
     const AvbdBodyConstraintMap *contactMap,
     const physx::PxArray<physx::PxVec3> *linearVelAtSolveStart,
     const physx::PxArray<physx::PxVec3> *angularVelAtSolveStart,
+    const physx::PxArray<physx::PxReal> *linearPoseVelocityGain,
+    const physx::PxArray<physx::PxReal> *angularPoseVelocityGain,
     const physx::PxArray<bool> *finiteMaterialPoseSplit,
     physx::PxReal dt, physx::PxReal bounceApproachThreshold,
     physx::PxReal lengthScale, bool hasJointConstraints,

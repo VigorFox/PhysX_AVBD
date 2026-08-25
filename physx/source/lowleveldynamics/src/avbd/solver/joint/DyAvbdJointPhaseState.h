@@ -67,6 +67,7 @@ void buildAvbdJointContactPhaseState(
     physx::PxU32 numContacts, physx::PxU32 numD6, physx::PxU32 numGear,
     AvbdSoftParticle *softParticles, physx::PxU32 numSoftParticles,
     AvbdSoftContact *softContacts, physx::PxU32 numSoftContacts,
+    const physx::PxVec3 &gravity, physx::PxReal dt,
     bool captureAngularVelocityForPassiveGear);
 
 struct AvbdJointPositionPhaseState {

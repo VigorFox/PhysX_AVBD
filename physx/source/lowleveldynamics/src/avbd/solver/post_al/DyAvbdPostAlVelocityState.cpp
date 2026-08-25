@@ -41,9 +41,13 @@ void AvbdPostAlVelocityState::build(
     bool deformableFastImpactIsland) {
   physicalContactTangentOwnerIndex.resize(numBodies);
   fastNormalImpactByBody.resize(numBodies);
+  linearPoseVelocityGain.resize(numBodies);
+  angularPoseVelocityGain.resize(numBodies);
   for (physx::PxU32 bodyIndex = 0; bodyIndex < numBodies; ++bodyIndex) {
     physicalContactTangentOwnerIndex[bodyIndex] = PX_MAX_U32;
     fastNormalImpactByBody[bodyIndex] = false;
+    linearPoseVelocityGain[bodyIndex] = 1.0f;
+    angularPoseVelocityGain[bodyIndex] = 1.0f;
   }
   haveSolveStartLinear = deformableFastImpactIsland &&
                          linearVelAtSolveStart &&
@@ -55,7 +59,8 @@ void AvbdPostAlVelocityState::build(
        ++contactIndex) {
     const AvbdContactConstraint &contact = contacts[contactIndex];
     if (hasVelocityTangentMaterialOwner(contact) &&
-        !hasVelocityBodyStaticFrictionSweepOwner(contact)) {
+        !hasVelocityBodyStaticFrictionSweepOwner(contact) &&
+        !hasVelocityPassiveFrictionComponentOwner(contact)) {
       const physx::PxU32 bodyA = contact.header.bodyIndexA;
       const physx::PxU32 bodyB = contact.header.bodyIndexB;
       if (bodyA < numBodies &&

@@ -95,6 +95,7 @@ public:
 	PX_FORCE_INLINE	PxI32					getTouchIdx()				const	{ return (mNpUnit.mStatusFlags & PxcNpWorkUnitStatusFlag::eHAS_TOUCH) ? 1 : (mNpUnit.mStatusFlags & PxcNpWorkUnitStatusFlag::eHAS_NO_TOUCH ? -1 : 0); }
 
 	PX_FORCE_INLINE	PxU32					getIndex()					const	{ return mCmIndex;	}
+	PX_FORCE_INLINE	PxU32					getCacheEpoch()			const	{ return mCacheEpoch;	}
 
 	PX_FORCE_INLINE	PxU16					getHasCCDRetouch()			const	{ return PxU16(mNpUnit.mStatusFlags & PxcNpWorkUnitStatusFlag::eHAS_CCD_RETOUCH); }
 	PX_FORCE_INLINE	void					clearCCDRetouch()					{ mNpUnit.mStatusFlags &= ~PxcNpWorkUnitStatusFlag::eHAS_CCD_RETOUCH; }
@@ -120,6 +121,11 @@ public:
 	PX_FORCE_INLINE	void					resetCachedState()
 											{ 
 												// happens when the body transform or shape relative transform changes.
+												// Keep external persistent solvers on the same exact cache
+												// lifecycle as the low-level narrow-phase cache. Zero is
+												// reserved for an object that has not entered a lifecycle.
+												if(++mCacheEpoch == 0)
+													mCacheEpoch = 1;
 												mNpUnit.clearCachedState();
 											}
 private:
@@ -129,6 +135,7 @@ private:
 					PxsRigidBody*			mRigidBody1;
 					PxU32					mFlags;
 					PxU32					mCmIndex;	// PT: moved to padding bytes from mNpUnit
+					PxU32					mCacheEpoch;	// Generation of the current cached-contact lifecycle
 					Sc::ShapeInteraction*	mShapeInteraction;
 
 	// everything required for narrow phase to run
