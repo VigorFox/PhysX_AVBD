@@ -79,12 +79,23 @@ struct AvbdJointPositionPhaseState {
   physx::PxArray<physx::PxQuat> chebyPrevPrevRot;
 };
 
+struct AvbdJointContactClosureMetrics {
+  physx::PxReal maxComplementarityResidual;
+  physx::PxReal maxClosingDisplacement;
+  bool finite;
+};
+
 void initializeAvbdJointPositionPhaseState(
     AvbdJointPositionPhaseState &state, const AvbdSolverConfig &config,
     bool slerpVelocityDriveIsland, bool coupledFixedD6Island,
     bool coupledSphericalConeIsland, bool coupledSpatialTendonIsland,
-    bool hasDynamicSoftRigidContact, AvbdSolverBody *bodies,
-    physx::PxU32 numBodies);
+    bool hasRigidContact, bool hasDynamicSoftRigidContact,
+    AvbdSolverBody *bodies, physx::PxU32 numBodies);
+
+AvbdJointContactClosureMetrics evaluateAvbdJointContactClosure(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxReal avbdAlpha);
 
 bool applyAvbdJointIterationPolicy(
     AvbdSolverBody *bodies, physx::PxU32 numBodies, physx::PxU32 iter,

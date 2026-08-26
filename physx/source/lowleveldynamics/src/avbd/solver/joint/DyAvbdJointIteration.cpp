@@ -392,12 +392,15 @@ void AvbdSolver::runAvbdJointIterationPhase(
     }
   }
 
+  const bool hasDrivenJointObjective =
+      slerpVelocityDriveIsland || coupledLinearPositionDriveIsland ||
+      coupledLinearDriveIsland || coupledAngularPositionDriveIsland;
   AvbdJointPositionPhaseState positionPhase;
   initializeAvbdJointPositionPhaseState(
       positionPhase, config, slerpVelocityDriveIsland,
       coupledFixedD6Island, coupledSphericalConeIsland,
-      coupledSpatialTendonIsland, hasDynamicSoftRigidContact, bodies,
-      numBodies);
+      coupledSpatialTendonIsland, numContacts > 0u,
+      hasDynamicSoftRigidContact, bodies, numBodies);
 
   const physx::PxU32 baseIterations =
       physx::PxMax(config.iterations, iterationOverride);
@@ -406,18 +409,36 @@ void AvbdSolver::runAvbdJointIterationPhase(
       hasExplicitJointConstraints && config.jointIterationOverride > 0
           ? physx::PxMax(baseIterations, config.jointIterationOverride)
           : baseIterations;
+  // Contacts change the active Hessian of a hard-joint island.  A fixed GS
+  // sweep count is not a convergence statement: on a long joint graph the
+  // contact correction may simply not have reached the supports yet.  Give
+  // the unified primal/dual system an iterative-refinement budget and close it
+  // with the contact KKT/trajectory certificate below.  The cap is only a
+  // finite-work guard for ill-conditioned input; ordinary and resting islands
+  // still finish at their configured minimum.
+  const bool contactJointClosure =
+      hasExplicitJointConstraints && numContacts > 0u &&
+      !hasCompleteSoftSelection && !hasDrivenJointObjective;
+  const physx::PxU32 closureGrowthLimit =
+      jointIterations > 16u ? 64u : jointIterations * 4u;
+  const physx::PxU32 maximumIterations =
+      contactJointClosure
+          ? physx::PxMax(jointIterations,
+                         physx::PxMin(closureGrowthLimit, physx::PxU32(64)))
+          : jointIterations;
   const physx::PxU32 minIterations =
       hasExplicitJointConstraints && config.jointIterationOverride > 0
           ? physx::PxMin(jointIterations, config.jointIterationOverride)
           : physx::PxMin(jointIterations, physx::PxU32(4));
   const bool enableEarlyStop =
       config.enableEarlyStop && !hasCompleteSoftSelection &&
-      jointIterations - minIterations > 1;
+      maximumIterations - minIterations > 1;
   const physx::PxReal rotationTolerance =
       physx::PxMax(4.0f * config.positionTolerance /
                        physx::PxMax(config.lengthScale, 1e-6f),
                    1e-4f);
   physx::PxU32 consecutiveConvergedIterations = 0;
+  physx::PxU32 consecutiveContactClosureIterations = 0;
   physx::PxArray<physx::PxVec3> earlyStopPrevPos;
   physx::PxArray<physx::PxQuat> earlyStopPrevRot;
   if (enableEarlyStop) {
@@ -432,7 +453,7 @@ void AvbdSolver::runAvbdJointIterationPhase(
           : AvbdTetMaterialPacketKernels{NULL, NULL};
   AvbdOgcPoseWritePhaseState ogcPoseWritePhase;
 
-  for (physx::PxU32 iter = 0; iter < jointIterations; ++iter) {
+  for (physx::PxU32 iter = 0; iter < maximumIterations; ++iter) {
     if (positionPhase.useChebyshev) {
       for (physx::PxU32 i = 0; i < numBodies; ++i) {
         positionPhase.chebyPrevPrevPos[i] = positionPhase.chebyPrevPos[i];
@@ -509,11 +530,30 @@ void AvbdSolver::runAvbdJointIterationPhase(
         numSoftParticles, softBodies, numSoftBodies, softContacts,
         numSoftContacts, stats);
 
-    if (applyAvbdJointIterationPolicy(
+    const bool poseConverged = applyAvbdJointIterationPolicy(
             bodies, numBodies, iter, positionPhase, config, enableEarlyStop,
             minIterations, rotationTolerance, earlyStopPrevPos,
-            earlyStopPrevRot, consecutiveConvergedIterations))
+            earlyStopPrevRot, consecutiveConvergedIterations);
+    if (contactJointClosure && (iter + 1u) >= minIterations &&
+        config.enableEarlyStop) {
+      const AvbdJointContactClosureMetrics closure =
+          evaluateAvbdJointContactClosure(
+              bodies, numBodies, contacts, numContacts, config.avbdAlpha);
+      const physx::PxReal closureTolerance =
+          physx::PxMax(4.0f * config.positionTolerance,
+                       1.0e-4f * physx::PxMax(config.lengthScale, 1.0e-6f));
+      if (closure.finite &&
+          closure.maxComplementarityResidual <= closureTolerance &&
+          closure.maxClosingDisplacement <= closureTolerance) {
+        ++consecutiveContactClosureIterations;
+        if (consecutiveContactClosureIterations >= 2u)
+          break;
+      } else {
+        consecutiveContactClosureIterations = 0u;
+      }
+    } else if (poseConverged) {
       break;
+    }
   }
 }
 

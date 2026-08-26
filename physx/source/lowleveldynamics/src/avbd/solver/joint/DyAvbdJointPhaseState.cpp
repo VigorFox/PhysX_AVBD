@@ -148,12 +148,13 @@ void initializeAvbdJointPositionPhaseState(
     AvbdJointPositionPhaseState &state, const AvbdSolverConfig &config,
     bool slerpVelocityDriveIsland, bool coupledFixedD6Island,
     bool coupledSphericalConeIsland, bool coupledSpatialTendonIsland,
-    bool hasDynamicSoftRigidContact, AvbdSolverBody *bodies,
-    physx::PxU32 numBodies) {
+    bool hasRigidContact, bool hasDynamicSoftRigidContact,
+    AvbdSolverBody *bodies, physx::PxU32 numBodies) {
   state.useChebyshev =
       !slerpVelocityDriveIsland && !coupledFixedD6Island &&
       !coupledSphericalConeIsland && !coupledSpatialTendonIsland &&
-      !hasDynamicSoftRigidContact && config.chebyshevRho > 0.0f &&
+      !hasRigidContact && !hasDynamicSoftRigidContact &&
+      config.chebyshevRho > 0.0f &&
       config.chebyshevRho < 1.0f;
   state.chebyOmega = 1.0f;
   if (!state.useChebyshev)
@@ -169,6 +170,74 @@ void initializeAvbdJointPositionPhaseState(
     state.chebyPrevRot[i] = bodies[i].rotation;
     state.chebyPrevPrevRot[i] = bodies[i].rotation;
   }
+}
+
+AvbdJointContactClosureMetrics evaluateAvbdJointContactClosure(
+    const AvbdSolverBody *bodies, physx::PxU32 numBodies,
+    const AvbdContactConstraint *contacts, physx::PxU32 numContacts,
+    physx::PxReal avbdAlpha) {
+  AvbdJointContactClosureMetrics metrics = {0.0f, 0.0f, true};
+  if (!bodies || !contacts)
+    return metrics;
+
+  for (physx::PxU32 contactIndex = 0; contactIndex < numContacts;
+       ++contactIndex) {
+    const AvbdContactConstraint &contact = contacts[contactIndex];
+    const physx::PxU32 bodyA = contact.header.bodyIndexA;
+    const physx::PxU32 bodyB = contact.header.bodyIndexB;
+    if (bodyA >= numBodies && bodyB >= numBodies)
+      continue;
+
+    const auto endpoint = [&](bool endpointA, bool previous) {
+      const physx::PxU32 bodyIndex = endpointA ? bodyA : bodyB;
+      const physx::PxVec3 &localOrWorld =
+          endpointA ? contact.contactPointA : contact.contactPointB;
+      if (bodyIndex < numBodies) {
+        const AvbdSolverBody &body = bodies[bodyIndex];
+        return (previous ? body.prevPosition : body.position) +
+               (previous ? body.prevRotation : body.rotation)
+                   .rotate(localOrWorld);
+      }
+      return previous ? contact.staticPrevWorldPoint : localOrWorld;
+    };
+
+    const physx::PxVec3 worldA = endpoint(true, false);
+    const physx::PxVec3 worldB = endpoint(false, false);
+    const physx::PxVec3 previousA = endpoint(true, true);
+    const physx::PxVec3 previousB = endpoint(false, true);
+    const physx::PxReal effectiveViolation =
+        (worldA - worldB).dot(contact.contactNormal) +
+        contact.penetrationDepth - avbdAlpha * contact.C0;
+    const physx::PxReal penalty =
+        physx::PxMax(contact.header.penalty, 1.0e-12f);
+    const physx::PxReal multiplierDistance =
+        physx::PxMax(0.0f, -contact.header.lambda) / penalty;
+    // C >= 0, y = -lambda/rho >= 0, C*y = 0. |min(C,y)| is the
+    // displacement-scaled natural residual of this unilateral row: it is zero
+    // both for a separated inactive row and for an active row at zero gap.
+    const physx::PxReal complementarityResidual =
+        physx::PxAbs(physx::PxMin(effectiveViolation, multiplierDistance));
+    const physx::PxReal relativeNormalDisplacement =
+        ((worldA - previousA) - (worldB - previousB))
+            .dot(contact.contactNormal);
+    if (!physx::PxIsFinite(effectiveViolation) ||
+        !physx::PxIsFinite(multiplierDistance) ||
+        !physx::PxIsFinite(complementarityResidual) ||
+        !physx::PxIsFinite(relativeNormalDisplacement)) {
+      metrics.finite = false;
+      return metrics;
+    }
+    metrics.maxComplementarityResidual = physx::PxMax(
+        metrics.maxComplementarityResidual, complementarityResidual);
+    // Velocity feasibility is required only on the active frontier. Applying
+    // it to an inactive positive-gap row would stop a legitimate approach at
+    // the speculative contact distance and create an artificial air cushion.
+    if (effectiveViolation <= 0.0f || multiplierDistance > 0.0f) {
+      metrics.maxClosingDisplacement = physx::PxMax(
+          metrics.maxClosingDisplacement, -relativeNormalDisplacement);
+    }
+  }
+  return metrics;
 }
 
 bool applyAvbdJointIterationPolicy(

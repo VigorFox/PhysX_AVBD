@@ -25,23 +25,34 @@ FRAMES = 600
 class RunSpec:
     name: str
     solver: str
+    case: str
     execution: str
     repeat: int
 
 
 def specs(mode: str) -> tuple[RunSpec, ...]:
     if mode == "authority":
-        return (RunSpec("tgs-parallel-r1", "tgs", "parallel", 1),)
+        return (
+            RunSpec("tgs-parallel-r1", "tgs", "impact", "parallel", 1),
+        )
     base = (
-        ("tgs", "parallel"),
-        ("avbd", "parallel"),
-        ("avbd", "sequential"),
+        ("tgs", "impact", "parallel"),
+        ("avbd", "impact", "parallel"),
+        ("avbd", "impact", "sequential"),
+        ("avbd", "projectile", "parallel"),
+        ("avbd", "projectile", "sequential"),
     )
     repeats = (1, 2) if mode == "acceptance" else (1,)
     return tuple(
-        RunSpec(f"{solver}-{execution}-r{repeat}", solver, execution, repeat)
+        RunSpec(
+            f"{solver}-{case}-{execution}-r{repeat}",
+            solver,
+            case,
+            execution,
+            repeat,
+        )
         for repeat in repeats
-        for solver, execution in base
+        for solver, case, execution in base
     )
 
 
@@ -66,7 +77,7 @@ def run_one(
         str(bin_dir / EXECUTABLE),
         "--headless",
         f"--solver={spec.solver}",
-        "--case=impact",
+        f"--case={spec.case}",
         f"--execution={spec.execution}",
         f"--frames={FRAMES}",
         "--dt=0.0166666675",
@@ -107,7 +118,7 @@ def run_one(
         "schema": "1",
         "snippet": "SnippetChainmail",
         "solver": spec.solver,
-        "case": "impact",
+        "case": spec.case,
         "execution": spec.execution,
         "frames": str(FRAMES),
         "completedFrames": str(FRAMES),
@@ -190,13 +201,15 @@ def compare_repeats(
         "maxNetSpeed": 5.0,
         "maxAnchorError": 0.05,
     }
-    for solver, execution in (
-        ("tgs", "parallel"),
-        ("avbd", "parallel"),
-        ("avbd", "sequential"),
+    for solver, case, execution in (
+        ("tgs", "impact", "parallel"),
+        ("avbd", "impact", "parallel"),
+        ("avbd", "impact", "sequential"),
+        ("avbd", "projectile", "parallel"),
+        ("avbd", "projectile", "sequential"),
     ):
-        first = results[f"{solver}-{execution}-r1"]
-        second = results[f"{solver}-{execution}-r2"]
+        first = results[f"{solver}-{case}-{execution}-r1"]
+        second = results[f"{solver}-{case}-{execution}-r2"]
         mismatches = []
         for key, tolerance in tolerances.items():
             try:
@@ -207,7 +220,7 @@ def compare_repeats(
         pair_ok = not mismatches
         passed = passed and pair_ok
         print(
-            f"[CHAINMAIL_REPEAT] pair={solver}-{execution} "
+            f"[CHAINMAIL_REPEAT] pair={solver}-{case}-{execution} "
             f"status={'PASS' if pair_ok else 'FAIL'} "
             f"mismatches={','.join(mismatches) if mismatches else 'none'}"
         )
@@ -216,9 +229,9 @@ def compare_repeats(
 
 def compare_physics(results: dict[str, dict[str, str]]) -> bool:
     try:
-        tgs = results["tgs-parallel-r1"]
-        avbd_parallel = results["avbd-parallel-r1"]
-        avbd_sequential = results["avbd-sequential-r1"]
+        tgs = results["tgs-impact-parallel-r1"]
+        avbd_parallel = results["avbd-impact-parallel-r1"]
+        avbd_sequential = results["avbd-impact-sequential-r1"]
         tgs_fell_through = (
             float(tgs["finalBallY"]) < 3.0
             and float(tgs["minBallY"]) < 3.0
@@ -260,6 +273,46 @@ def compare_physics(results: dict[str, dict[str, str]]) -> bool:
     return passed
 
 
+def compare_projectile(results: dict[str, dict[str, str]]) -> bool:
+    try:
+        parallel = results["avbd-projectile-parallel-r1"]
+        sequential = results["avbd-projectile-sequential-r1"]
+        caught = all(
+            float(fields["finalBallY"]) > 20.0
+            and float(fields["minBallY"]) > 20.0
+            and float(fields["maxAnchorError"]) < 1.0
+            and int(fields["ballNetPoints"]) > 0
+            for fields in (parallel, sequential)
+        )
+        execution_close = (
+            abs(
+                float(parallel["finalBallY"])
+                - float(sequential["finalBallY"])
+            )
+            < 0.1
+            and abs(
+                float(parallel["minBallY"])
+                - float(sequential["minBallY"])
+            )
+            < 0.2
+            and abs(
+                float(parallel["maxAnchorError"])
+                - float(sequential["maxAnchorError"])
+            )
+            < 0.05
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"[CHAINMAIL_PROJECTILE_ERROR] error={exc}")
+        return False
+    passed = caught and execution_close
+    print(
+        "[CHAINMAIL_PROJECTILE] "
+        f"status={'PASS' if passed else 'FAIL'} "
+        f"caught={int(caught)} executionClose={int(execution_close)}"
+    )
+    return passed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -291,7 +344,7 @@ def main() -> int:
             break
 
     physics_ok = (
-        compare_physics(results)
+        compare_physics(results) and compare_projectile(results)
         if infrastructure_ok and args.mode != "authority"
         else True
     )

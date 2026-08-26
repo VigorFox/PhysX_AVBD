@@ -120,6 +120,12 @@ struct ChainmailMetrics
 
 static ChainmailMetrics gMetrics;
 
+static bool isProjectileCase()
+{
+	return Snippets::equalsIgnoreCase(
+		gHeadlessOptions.caseName.c_str(), "projectile");
+}
+
 static bool parseHeadlessOptions(
 	int argc, const char* const* argv, std::string& error)
 {
@@ -138,7 +144,8 @@ static bool parseHeadlessOptions(
 			return false;
 		}
 	if(!Snippets::equalsIgnoreCase(
-		gHeadlessOptions.caseName.c_str(), "impact"))
+		gHeadlessOptions.caseName.c_str(), "impact") &&
+		!isProjectileCase())
 	{
 		error = "unsupported --case";
 		return false;
@@ -438,11 +445,17 @@ void initPhysics(bool /*interactive*/)
 	// Heavy ball dropping from above
 	// =====================================================================
 	{
-		PxVec3 ballPos(0.0f, BALL_DROP_HEIGHT, 0.0f);
+		const bool projectile =
+			gHeadlessOptions.headless && isProjectileCase();
+		const PxVec3 ballPos(
+			0.0f, projectile ? MESH_HEIGHT + 15.0f : BALL_DROP_HEIGHT, 0.0f);
 		gBall = PxCreateDynamic(
 			*gPhysics, PxTransform(ballPos),
-			PxSphereGeometry(BALL_RADIUS), *gMaterial, BALL_DENSITY);
+			PxSphereGeometry(projectile ? 1.0f : BALL_RADIUS), *gMaterial,
+			projectile ? 100.0f : BALL_DENSITY);
 		gBall->setAngularDamping(0.5f);
+		if(projectile)
+			gBall->setLinearVelocity(PxVec3(0.0f, -50.0f, 0.0f));
 		gBall->userData = gBall;
 		gScene->addActor(*gBall);
 	}
