@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-row-20261105\\tangent-replay.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 756,
+  "groups": 2880,
+  "activeNormalForces": 48,
+  "maximumForce": 129.56653515290188,
+  "symmetry": 7.275957614183426e-12,
+  "stationarity": 9.565504294206661e-08,
+  "relativeStationarity": 8.197770586044462e-11,
+  "unitStepRoot": 8.975745877624643e-11,
+  "relativeUnitStepRoot": 6.927518642859699e-13,
+  "minimumNormalResidual": -8.975745877624643e-11,
+  "tableIterations": 203,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

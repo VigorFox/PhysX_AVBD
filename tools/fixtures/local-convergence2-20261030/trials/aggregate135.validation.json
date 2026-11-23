@@ -1,0 +1,28 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence2-20261030\\aggregate135.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": true,
+  "executionSource": "grouped augmented primal/dual",
+  "dofs": 24,
+  "groups": 135,
+  "activeNormalForces": 5,
+  "maximumForce": 1339.186345632521,
+  "symmetry": 7.275957614183426e-12,
+  "stationarity": 0.0014858182580042012,
+  "relativeStationarity": 8.75080578645845e-07,
+  "unitStepRoot": 1.497422315477337e-06,
+  "relativeUnitStepRoot": 1.1181582909360374e-09,
+  "minimumNormalResidual": -1.4655219770341075e-06,
+  "tableIterations": 35,
+  "materialProducts": 32,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 0.06240379058954538,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

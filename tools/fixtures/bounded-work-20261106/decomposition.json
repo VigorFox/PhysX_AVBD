@@ -1,0 +1,58 @@
+{
+  "energy": {
+    "ratio": 1.21646379444646,
+    "body": 7,
+    "coordinate": 5,
+    "atWorst": -1.21646379444646
+  },
+  "contact": {
+    "ratio": 0.0,
+    "body": 0,
+    "coordinate": 0,
+    "atWorst": -0.0
+  },
+  "frozen": {
+    "ratio": 1.283706847505248e-05,
+    "body": 1,
+    "coordinate": 5,
+    "atWorst": -5.853582812209448e-06
+  },
+  "rounding": {
+    "ratio": 0.0009510845504483501,
+    "body": 7,
+    "coordinate": 4,
+    "atWorst": 0.0007713783987220741
+  },
+  "rayleighEnergy": 1.5799422009108334e-08,
+  "rayleighContact": 0.0,
+  "stepMetric": 1.2977345615781536e-07,
+  "actualStepMetric": 4.346388436885448e-15,
+  "actualRayleighEnergy": 0.5266255802331322,
+  "actualEnergyModelCorrection": 1.2163466092383357,
+  "worstStep": {
+    "proposed": -2.4668094173715306e-05,
+    "actual": -2.466692243852842e-05,
+    "tolerance": 9.999999747378752e-06
+  },
+  "force1.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 5.684341886080802e-14
+  },
+  "force1.5": {
+    "boundViolation": 0.0,
+    "coneViolation": 1.700805728432897e-05
+  },
+  "force2.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 3.4016114398127684e-05
+  },
+  "force4.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 0.00010204834325122647
+  },
+  "secant": {
+    "slope0": -4.10629378833939e-15,
+    "slope1": -1.8173744558460137e-15,
+    "alpha": 1.793987988150855
+  }
+}

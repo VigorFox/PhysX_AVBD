@@ -1,0 +1,6 @@
+Local blocks /fp:precise
+[LOCAL_BLOCK_CLOSED_CHAIN] a=0.5 b=0.5 force=1.5 sweeps=3 status=PASS
+[LOCAL_BLOCK] cases=48 threads=1,4 dimensions=3,6 maximumStepError=9.47375484e-10 failed=0 status=PASS
+Local blocks /fp:fast
+[LOCAL_BLOCK_CLOSED_CHAIN] a=0.5 b=0.5 force=1.5 sweeps=3 status=PASS
+[LOCAL_BLOCK] cases=48 threads=1,4 dimensions=3,6 maximumStepError=9.47352308e-10 failed=0 status=PASS

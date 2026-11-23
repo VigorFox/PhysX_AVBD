@@ -1,0 +1,38 @@
+{
+  "Surface": {
+    "passed": true,
+    "frames": 360,
+    "observedMax": {
+      "queuePeak": 16,
+      "primalMaxBlocks": 32,
+      "primalMaxRows": 256,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    },
+    "bounds": {
+      "queuePeak": 16,
+      "primalMaxBlocks": 32,
+      "primalMaxRows": 256,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    }
+  },
+  "Volume": {
+    "passed": true,
+    "frames": 360,
+    "observedMax": {
+      "queuePeak": 16,
+      "primalMaxBlocks": 23,
+      "primalMaxRows": 256,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    },
+    "bounds": {
+      "queuePeak": 16,
+      "primalMaxBlocks": 32,
+      "primalMaxRows": 256,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    }
+  }
+}

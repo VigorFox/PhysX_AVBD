@@ -1,0 +1,12 @@
+{
+  "file": "tools\\benchmark-results\\local-patches-20261029\\final-grouped.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "grouped augmented primal/dual",
+  "reason": "local_response_capture",
+  "materialProducts": 3977,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": true
+}

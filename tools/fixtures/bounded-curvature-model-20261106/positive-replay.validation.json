@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-curvature-model-20261106\\positive-replay.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 1152,
+  "groups": 1360,
+  "activeNormalForces": 16,
+  "maximumForce": 8173.570755783687,
+  "symmetry": 2.9103830456733704e-11,
+  "stationarity": 4.6922195906518027e-07,
+  "relativeStationarity": 4.6381827788257804e-11,
+  "unitStepRoot": 2.6261659513693303e-11,
+  "relativeUnitStepRoot": 3.2129971463341567e-15,
+  "minimumNormalResidual": -9.808978515864682e-12,
+  "tableIterations": 93,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

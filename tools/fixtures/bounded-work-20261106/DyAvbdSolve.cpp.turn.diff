@@ -1,0 +1,24 @@
+--- turn-start
++++ retained
+@@ -400,7 +400,11 @@
+         const PxMat33d inertia(avbdOgcDouble(body.inertiaWorldInvH2.column0),
+             avbdOgcDouble(body.inertiaWorldInvH2.column1),avbdOgcDouble(body.inertiaWorldInvH2.column2));
+         const auto rotation=avbdRotationInertialPotential<double>(avbdNpRotation(body.qHat),avbdNpRotation(pose.q),inertia);
+-        p.materialEnergies.pushBack(.5*double(body.massInvH2)*dp.magnitudeSquared());p.materialEnergies.pushBack(rotation.energy);
++        for(PxU32 d=0;d<3;++d)
++        {
++            p.energyPairs.pushBack({dp[d],double(body.massInvH2)*dp[d]});
++            p.energyPairs.pushBack({rotation.coordinate[d],rotation.conjugate[d]});
++        }
+         const PxU32 locked=mBodies[b].core?PxU32(mBodies[b].core->lockFlags):0;
+         AvbdCommonHBlock entry={};entry.row=entry.column=index[b];
+         for(PxU32 d=0;d<6;++d)
+@@ -434,7 +438,7 @@
+             {
+                 const auto e=evaluateElasticFrame(row,mElasticFrameMaterials,poses,mKernels,true,buildH);
+                 if(!e.valid){reason="invalid_frame_material";return false;}
+-                p.materialEnergies.pushBack(e.energy);
++                for(PxU32 k=0;k<FINITE_JOINT_ROWS;++k)p.energyPairs.pushBack({e.energyPairs[k][0],e.energyPairs[k][1]});
+                 const PxU32 ends[2]={row.bodyA,row.bodyB};avbdAssembleElasticFrame(r,e,ends,ids,count,assembled);
+             }
+             else

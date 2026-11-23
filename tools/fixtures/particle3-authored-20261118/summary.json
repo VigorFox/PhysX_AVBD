@@ -1,0 +1,428 @@
+{
+  "build": "Windows x64 Checked, 4 shared primal iterations, simulate + fetchResults",
+  "hashes": {
+    "avbd_smoke.exe": "a9357739c544ced616fc6e01e1758a1883ee9244a2e28eb5354c93b712ec8826",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PhysX_64.dll": "fea5b2e5a7e3f7ff2b944d2f2cc8cc0df1b9e0bf32478faa323a523034e38bf7",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetArticulationRC_64.exe": "8f7e5826dcda48b008bc51cce599bc44d8045e999d7af824d1bec5fa07a8042b",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a350b1b64242524793a33d545f0b5016b75f72fbe54eac2dd21e2cb6f57c6d88",
+    "SnippetDeformableVolumeAVBD_64.exe": "fb7f5362f71c499575aff17c825d953940f1cfb8a6a58806bcaa05101c33a867",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088",
+    "SnippetJoint_64.exe": "1e48b09ef700831d0ff8735e32cce637e5eeffaa1130bc472a32a4fe9ac933f3"
+  },
+  "binaryIdentityMatched": true,
+  "defaultModels": {
+    "Surface": "Rigid6",
+    "Volume": "Rigid6"
+  },
+  "cases": {
+    "cloth": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 26.1979756,
+          "p95Ms": 59.5477
+        },
+        "particle3-0": {
+          "meanMs": 11.0190775,
+          "p95Ms": 17.0459
+        },
+        "rigid6-4": {
+          "meanMs": 10.7535672,
+          "p95Ms": 29.4849
+        },
+        "particle3-4": {
+          "meanMs": 5.02918111,
+          "p95Ms": 6.7326
+        },
+        "rigid6-8": {
+          "meanMs": 8.2437775,
+          "p95Ms": 20.0994
+        },
+        "particle3-8": {
+          "meanMs": 3.97698444,
+          "p95Ms": 5.2079
+        }
+      },
+      "correct": true,
+      "costPassed": true,
+      "relativeScaling": {
+        "4": 0.8993583724579944,
+        "8": 0.8718662653999818
+      },
+      "passed": false
+    },
+    "volume": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 100.034337,
+          "p95Ms": 347.2359
+        },
+        "particle3-0": {
+          "meanMs": 15.700469,
+          "p95Ms": 25.2163
+        },
+        "rigid6-4": {
+          "meanMs": 43.0627011,
+          "p95Ms": 151.3777
+        },
+        "particle3-4": {
+          "meanMs": 7.709229,
+          "p95Ms": 10.6277
+        },
+        "rigid6-8": {
+          "meanMs": 35.7224308,
+          "p95Ms": 114.8546
+        },
+        "particle3-8": {
+          "meanMs": 6.668039,
+          "p95Ms": 8.9319
+        }
+      },
+      "correct": true,
+      "costPassed": true,
+      "relativeScaling": {
+        "4": 0.8767057371449483,
+        "8": 0.8408265178980071
+      },
+      "passed": false
+    }
+  },
+  "pairedRuns": 36,
+  "allAuthoredRunsPassedPhysics": true,
+  "regressionCount": 79,
+  "regressionsPassed": true,
+  "failedRegressions": [],
+  "otherCpuPercent": {
+    "min": 47.69607843137255,
+    "median": 60.02360203340596,
+    "max": 69.38297872340425
+  },
+  "mechanisms": {
+    "impact": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 22.4344283,
+          "p95Ms": 33.7947,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.452108,
+          "p95Ms": 2.1206,
+          "cpuMs": 1.475694,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.76994167,
+          "p95Ms": 10.2144,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.419511,
+          "p95Ms": 1.8617,
+          "cpuMs": 3.559028,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-8": {
+          "meanMs": 8.03590444,
+          "p95Ms": 9.5568,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.687562,
+          "p95Ms": 2.128,
+          "cpuMs": 4.166667,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.3998912060970798,
+        "8": 0.3082186666560479
+      },
+      "allPhysicalGatesPassed": true,
+      "withinWholeStepCost": true,
+      "scalingPassed": false
+    },
+    "release": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 19.2255783,
+          "p95Ms": 30.022,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.176621,
+          "p95Ms": 1.8347,
+          "cpuMs": 1.215278,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.43585333,
+          "p95Ms": 9.7681,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.258346,
+          "p95Ms": 1.5815,
+          "cpuMs": 2.864583,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.67395889,
+          "p95Ms": 8.7853,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.478694,
+          "p95Ms": 1.8928,
+          "cpuMs": 3.472222,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.41028546388330256,
+        "8": 0.3176130518372535
+      },
+      "allPhysicalGatesPassed": true,
+      "withinWholeStepCost": true,
+      "scalingPassed": false
+    }
+  },
+  "physics": {
+    "fiveGeometry": {
+      "ground": "0",
+      "rigid": "1.97252283e-07",
+      "between": "0",
+      "self": "0",
+      "limit": "0.002"
+    },
+    "five": {
+      "schema": "1",
+      "snippet": "SnippetDeformableVolumeAVBD",
+      "solver": "avbd",
+      "case": "visual-showcase",
+      "execution": "parallel",
+      "frames": "360",
+      "completedFrames": "360",
+      "status": "PASS",
+      "reason": "none",
+      "capability": "SUPPORTED",
+      "validation": "GATED",
+      "simVertices": "685",
+      "simulationTets": "1755",
+      "trajectoryHash": "711d3c68bd1ad539",
+      "firstVolumeRatioFailFrame": "4294967295",
+      "firstBody4VolumeRatioFailFrame": "4294967295",
+      "minDetF": "0.741606653",
+      "minVolumeRatio": "0.943330884",
+      "maxVolumeRatio": "1.0104146",
+      "peakEdgeStrain": "0.247301534",
+      "finalEdgeStrain": "0.138609797",
+      "body0MinDetF": "0.958074391",
+      "body1MinDetF": "0.92684412",
+      "body2MinDetF": "0.886204302",
+      "body3MinDetF": "0.741606653",
+      "body4MinDetF": "0.779310167",
+      "body0MinVolumeRatio": "0.998064876",
+      "body1MinVolumeRatio": "0.995000482",
+      "body2MinVolumeRatio": "0.991245687",
+      "body3MinVolumeRatio": "0.943330884",
+      "body4MinVolumeRatio": "0.951931655",
+      "body0PeakEdgeStrain": "0.0796323791",
+      "body1PeakEdgeStrain": "0.138609797",
+      "body2PeakEdgeStrain": "0.180930167",
+      "body3PeakEdgeStrain": "0.247003078",
+      "body4PeakEdgeStrain": "0.247301534",
+      "body0FinalEdgeStrain": "0.0279670656",
+      "body1FinalEdgeStrain": "0.138609797",
+      "body2FinalEdgeStrain": "0.122169137",
+      "body3FinalEdgeStrain": "0.0307821892",
+      "body4FinalEdgeStrain": "0.130480304",
+      "averageStepMs": "6.15805944",
+      "maxStepMs": "9.6384",
+      "nonFinite": "0",
+      "fatalErrors": "0",
+      "embeddingMaxVertexError": "0",
+      "embeddingMaxErrorRatio": "0",
+      "embeddingSamples": "269667",
+      "embeddingInvalid": "0",
+      "embeddingOracleValidated": "1",
+      "embeddingRestError": "2.52881091e-07",
+      "embeddingRestErrorRatio": "0.156393378",
+      "embeddingPartitionError": "2.06476546e-07",
+      "embeddingPartitionErrorRatio": "0.124999985"
+    },
+    "drape": {
+      "schema": "1",
+      "snippet": "SnippetDeformableSurfaceAVBD",
+      "solver": "avbd",
+      "case": "static-box",
+      "execution": "parallel",
+      "frames": "360",
+      "completedFrames": "360",
+      "status": "PASS",
+      "reason": "none",
+      "capability": "SUPPORTED",
+      "validation": "GATED",
+      "centerY": "2.0589838",
+      "minY": "0.0590603091",
+      "averageY": "1.39661789",
+      "minBoxSdf": "0.058577776",
+      "minBoxX": "0.0787982196",
+      "minBoxY": "2.05857778",
+      "minBoxZ": "-0.151046917",
+      "maxBoxCoreEdgeHits": "0",
+      "maxBoxCoreTriangleHits": "0",
+      "firstBoxCoreEdgeHitFrame": "4294967295",
+      "firstBoxCoreTriangleHitFrame": "4294967295",
+      "pinError": "0",
+      "maxStretch": "1.13994181",
+      "maxPlanarityError": "4.29153442e-06",
+      "mutationReadback": "1",
+      "nonFinite": "0",
+      "fatalErrors": "0"
+    },
+    "drapeStretch": {
+      "youngs": "1000000",
+      "thickness": "0.0199999996",
+      "arealYoungs": "20000",
+      "finalEdgeStretch": "1.15099704",
+      "peakEdgeStretch": "1.17588997",
+      "finalPrincipalStretch": "1.22066545",
+      "peakPrincipalStretch": "1.24510193",
+      "peakStrainFrame": "58",
+      "finalAreaRatio": "1.03745103",
+      "peakAreaRatio": "1.11124349",
+      "initialKineticGravity": "25751.2488",
+      "peakKineticGravity": "25751.2488",
+      "meanStepMs": "3.73869861",
+      "p95StepMs": "4.739",
+      "maxStepMs": "6.1496"
+    }
+  },
+  "parallel": {
+    "five": {
+      "frames": 360,
+      "fourSweepsSinglePublication": true,
+      "colors": [
+        7,
+        23
+      ],
+      "maxSimultaneousTasks": 8,
+      "maxPrimalBlocks": 32,
+      "maxPrimalRows": 182,
+      "maxPacketsPerTask": 16,
+      "maxMixedRows": 287
+    },
+    "drape": {
+      "frames": 360,
+      "fourSweepsSinglePublication": true,
+      "colors": [
+        7,
+        10
+      ],
+      "maxSimultaneousTasks": 8,
+      "maxPrimalBlocks": 18,
+      "maxPrimalRows": 133,
+      "maxPacketsPerTask": 16,
+      "maxMixedRows": 825
+    }
+  },
+  "profiles": {
+    "Surface-4": {
+      "primalSpanMs": 3.085369722222222,
+      "primalWorkMs": 8.780761944444444,
+      "primalWaves": 29.677777777777777,
+      "criticalTileSumMs": 1.4475272222222222,
+      "scheduleLowerMs": 2.2301830555555555,
+      "lptMs": 2.4850744444444444,
+      "queueStartupMs": 0.22445222222222222,
+      "npSpanMs": 0.7547557692307693
+    },
+    "Surface-8": {
+      "primalSpanMs": 2.1667655555555556,
+      "primalWorkMs": 10.032092222222222,
+      "primalWaves": 29.677777777777777,
+      "criticalTileSumMs": 0.9169,
+      "scheduleLowerMs": 1.3393833333333334,
+      "lptMs": 1.5785441666666666,
+      "queueStartupMs": 0.32934166666666664,
+      "npSpanMs": 0.5550947802197802
+    },
+    "Volume-4": {
+      "primalSpanMs": 4.780915555555556,
+      "primalWorkMs": 10.093164166666666,
+      "primalWaves": 78.47777777777777,
+      "criticalTileSumMs": 3.019866111111111,
+      "scheduleLowerMs": 3.432171388888889,
+      "lptMs": 3.645555,
+      "queueStartupMs": 0.46847527777777775,
+      "npSpanMs": 1.5724408108108108
+    },
+    "Volume-8": {
+      "primalSpanMs": 4.001561944444444,
+      "primalWorkMs": 10.232855277777778,
+      "primalWaves": 78.47777777777777,
+      "criticalTileSumMs": 2.5077202777777776,
+      "scheduleLowerMs": 2.57497,
+      "lptMs": 2.626213888888889,
+      "queueStartupMs": 0.6766616666666667,
+      "npSpanMs": 1.0067486486486485
+    },
+    "impact-4": {
+      "primalSpanMs": 0.94219,
+      "primalWorkMs": 1.5814916666666667,
+      "primalWaves": 47.15555555555556,
+      "criticalTileSumMs": 0.23938666666666666,
+      "scheduleLowerMs": 0.44769888888888887,
+      "lptMs": 0.4784333333333333,
+      "queueStartupMs": 0.26326055555555555,
+      "npSpanMs": 0.10167321428571428
+    },
+    "impact-8": {
+      "primalSpanMs": 1.0554472222222222,
+      "primalWorkMs": 2.0030872222222222,
+      "primalWaves": 47.15555555555556,
+      "criticalTileSumMs": 0.27777277777777776,
+      "scheduleLowerMs": 0.33504666666666666,
+      "lptMs": 0.3639833333333333,
+      "queueStartupMs": 0.35656166666666667,
+      "npSpanMs": 0.1456547619047619
+    },
+    "release-4": {
+      "primalSpanMs": 1.0881483333333333,
+      "primalWorkMs": 1.840568888888889,
+      "primalWaves": 40.0,
+      "criticalTileSumMs": 0.2297061111111111,
+      "scheduleLowerMs": 0.48879388888888886,
+      "lptMs": 0.530135,
+      "queueStartupMs": 0.2638916666666667,
+      "npSpanMs": null
+    },
+    "release-8": {
+      "primalSpanMs": 1.1094622222222221,
+      "primalWorkMs": 1.9822283333333333,
+      "primalWaves": 40.0,
+      "criticalTileSumMs": 0.2389688888888889,
+      "scheduleLowerMs": 0.298845,
+      "lptMs": 0.32623,
+      "queueStartupMs": 0.3322361111111111,
+      "npSpanMs": null
+    }
+  }
+}

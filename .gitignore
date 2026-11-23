@@ -1,0 +1,44 @@
+# PhysX build trees
+physx/bin/
+physx/compiler/vc*/
+physx/compiler/linux-*/
+physx/include/PxConfig.h
+
+# Local compile probes and traces
+/*.obj
+/*.txt
+/*.csv
+tools/*.csv
+tools/*.exe
+tools/*.obj
+tools/_c01*.log
+tools/_c01*.json
+tools/__pycache__/
+*.pyc
+
+# Local reference checkouts and the independent research project.
+/reference/
+/experiments/avbd_contact_lab/
+tools/jolt_soft_benchmark/build/
+tools/benchmark-results/
+
+
+# Per-machine editor settings, not part of the solver checkpoint.
+.vscode/
+
+# The public architecture contract lives alongside private iteration records.
+/docs/*
+!/docs/AVBD_ARCHITECTURE.md
+
+# Historical source archives with copies of the private development records.
+/tools/fixtures/*/sources/docs__*
+/tools/fixtures/native-cooked-stage1-20261117/evidence-initial.zip
+/tools/fixtures/native-cost-restart-20261117/operator-candidates.zip
+/tools/fixtures/particle3-native-restart-20261117/source.zip
+/tools/fixtures/particle3-np-input-20261118/source.zip
+/tools/fixtures/particle3-shared-np-20261118/source.zip
+/tools/fixtures/particle3-volume-step-20261117/evidence.zip
+/tools/fixtures/particle3-volume-step-20261117/source.zip
+
+# Compiler symbol files emitted by standalone probes.
+/*.pdb

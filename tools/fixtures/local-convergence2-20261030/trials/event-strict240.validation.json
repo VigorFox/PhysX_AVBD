@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence2-20261030\\event-strict240.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "grouped augmented primal/dual",
+  "dofs": 24,
+  "groups": 240,
+  "activeNormalForces": 6,
+  "maximumForce": 9197.504112557886,
+  "symmetry": 1.4551915228366852e-11,
+  "stationarity": 2.424167178105563e-08,
+  "relativeStationarity": 1.9006049746787355e-12,
+  "unitStepRoot": 9.2707068688469e-09,
+  "relativeUnitStepRoot": 1.0079589805444138e-12,
+  "minimumNormalResidual": -8.18012400723841e-14,
+  "tableIterations": 979,
+  "materialProducts": 14,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

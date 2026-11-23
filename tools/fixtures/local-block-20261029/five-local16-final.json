@@ -1,0 +1,23 @@
+{
+  "command": [
+    "D:\\projects\\PhysX_AVBD_3\\physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.exe",
+    "--headless",
+    "--case=visual-showcase",
+    "--solver=avbd",
+    "--frames=16",
+    "--grid=5",
+    "--dispatcher-threads=4",
+    "--volume-material"
+  ],
+  "mode": "local",
+  "elapsed": 11.6448374,
+  "exit": 1,
+  "timedOut": false,
+  "accepted": 15,
+  "rejected": 1,
+  "nonstationary": 2,
+  "inexact": 0,
+  "gate": [
+    "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=visual-showcase frames=16 completedFrames=16 status=FAIL reason=incomplete capability=EXPERIMENTAL validation=GATED model=convex_cell_joint_volume materialElements=2514 grid=5 dispatcherThreads=4 bodies=5 nodes=787 joints=1888 mass=7530.66113 cellSize=0.200000003 trajectoryHash=38e4a5fa6fdc2b63 contacts=1466 crossContacts=0 crossMask=0 minCellDet=0.927001834 minVolumeRatio=0.993843973 maxVolumeRatio=1.00000072 finalVolumeRatio=0.993843973 maxExternalPenetration=8.78169999e-08 maxSelfPenetration=0 maxJointAnchorError=0.0807671249 maxPostContactStep=0.130748883 maxMomentumRelativeError=5.24598217 initialMechanicalEstimate=882856.97 maxMechanicalEstimate=882857 finalMechanicalEstimate=880737.521 finalAwake=788 skinRestError=6.03421586e-06 massRelativeError=1.30616327e-05 assetBytes=352636 skinBytes=101156 diagnosticBytes=50280 averageStepMs=704.217375 p95StepMs=4687.6693 maxStepMs=4687.6693 activeContactFrames=11 averageActiveContactMs=990.392391 averageSkinMs=0.05145625 averageObserverMs=2.6477 averageFrameMs=704.268831 nonFinite=0 fetchFailures=0 fatalErrors=1"
+  ]
+}

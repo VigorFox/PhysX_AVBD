@@ -1,0 +1,247 @@
+{
+  "recordedUtc": "2026-10-28T16:02:06.134063+00:00",
+  "qualified": false,
+  "defaultCommonStep": false,
+  "npDefault": "off",
+  "frozenInputUnchanged": true,
+  "independentFrozenCheck": {
+    "file": "tools\\benchmark-results\\common-publication-20261028\\box-convex-pair-fixed.json",
+    "passed": true,
+    "complete": true,
+    "solved": true,
+    "executionSource": "production Table diagnostic",
+    "dofs": 6,
+    "groups": 4,
+    "activeNormalForces": 2,
+    "maximumForce": 882.1089074158988,
+    "symmetry": 0.0,
+    "stationarity": 7.105427357601002e-15,
+    "relativeStationarity": 2.3684759786140694e-18,
+    "unitStepRoot": 6.946988702300183e-14,
+    "relativeUnitStepRoot": 7.875431983394314e-17,
+    "minimumNormalResidual": -5.551115123125783e-17,
+    "tableIterations": 2,
+    "materialProducts": 226,
+    "publication": "none"
+  },
+  "public": [
+    {
+      "name": "hello_world-avbd",
+      "exit": 0,
+      "seconds": 11.1719401
+    },
+    {
+      "name": "joint-avbd",
+      "exit": 0,
+      "seconds": 0.8003985999999994
+    },
+    {
+      "name": "articulation_rc-avbd",
+      "exit": 0,
+      "seconds": 15.413844100000002
+    },
+    {
+      "name": "hello_world-pgs",
+      "exit": 0,
+      "seconds": 1.6215295999999988
+    },
+    {
+      "name": "joint-pgs",
+      "exit": 0,
+      "seconds": 0.7246184000000007
+    },
+    {
+      "name": "articulation_rc-pgs",
+      "exit": 0,
+      "seconds": 0.8891223000000004
+    },
+    {
+      "name": "hello_world-tgs",
+      "exit": 0,
+      "seconds": 1.6208670000000005
+    },
+    {
+      "name": "joint-tgs",
+      "exit": 0,
+      "seconds": 0.848087900000003
+    },
+    {
+      "name": "articulation_rc-tgs",
+      "exit": 0,
+      "seconds": 0.9624501999999993
+    },
+    {
+      "name": "smoke",
+      "exit": 0
+    }
+  ],
+  "lab": [
+    {
+      "name": "run_sparse_coulomb-precise",
+      "exit": 0
+    },
+    {
+      "name": "run_mixed_coulomb-precise",
+      "exit": 0
+    },
+    {
+      "name": "run_sparse_coulomb-fast",
+      "exit": 0
+    },
+    {
+      "name": "run_mixed_coulomb-fast",
+      "exit": 0
+    }
+  ],
+  "fiveTrial": {
+    "diagnosticFramesRequested": 16,
+    "acceptedFrames": 14,
+    "rejected": false,
+    "timedOut": true,
+    "exit": 1,
+    "seconds": 180.0170741,
+    "fullGateQualified": false
+  },
+  "smallScenes": {
+    "initial-recovery-rejected": [
+      "[COMMON_BDF] linearError=0.22360681",
+      "[COMMON_PHYSICAL] overlap=1 depth=0.0199999809 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=0 fetchedFinite=FAIL",
+      "[AVBD_COMMON_FRAME] status=REJECTED poseForcePublications=0 bdf=0"
+    ],
+    "mode0": [
+      "[COMMON_BDF] linearError=1.49011612e-08",
+      "[COMMON_PHYSICAL] overlap=0 depth=0 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=0 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ],
+    "mode1": [
+      "[COMMON_BDF] linearError=1.66600049e-08",
+      "[COMMON_PHYSICAL] overlap=1 depth=0.00283885002 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=1 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ],
+    "mode2": [
+      "[COMMON_BDF] linearError=1.66600049e-08",
+      "[COMMON_PHYSICAL] overlap=0 depth=0 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=2 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ],
+    "mode3": [
+      "[COMMON_BDF] linearError=1.19209517e-07",
+      "[COMMON_PHYSICAL] overlap=1 depth=0 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=3 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ],
+    "mode4": [
+      "[COMMON_BDF] linearError=1.66665117e-08",
+      "[COMMON_PHYSICAL] overlap=0 depth=0 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=4 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ],
+    "mode5": [
+      "[COMMON_BDF] linearError=1.66600049e-08",
+      "[COMMON_PHYSICAL] overlap=0 depth=0 driveForce=0",
+      "[COMMON_PROGRAM_SCENE] mode=5 fetchedFinite=PASS",
+      "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+    ]
+  },
+  "limits": [
+    "Native 360-frame regressions use the original production loop; the common step is disabled.",
+    "The final trial-only stopping check changed after those regressions; final six common scenes and 16-frame diagnostic use the final build.",
+    "Finite iteration acceptance with stationary=0 is not convergence.",
+    "Particle3, initial recovery, negative rest distance and restitution are not compiled.",
+    "Post-test cleanup only restored equivalent explicit local types and one original line ending; no arithmetic or control flow changed."
+  ],
+  "binaries": {
+    "PhysXCommon_64.dll": "718db234b81962c1b3ae79234bad9804916a5acc9de2d60fb86e9021262eb41e",
+    "PhysXFoundation_64.dll": "3cfc09278ab8d7677b7184e4b848726fc7767ee1e28a3964ea171184fa6a5e3b",
+    "PhysX_64.dll": "b447406323b378a092975ff4c359c85909af3198708eaf76915f79c0bc88250f"
+  },
+  "coreFiles": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp": "04d591a81ccd0c1e72995385ce521c291f3bbb51bfb49147755124482967dc9e",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCoulombNcp.h": "ef52040e02aec41374300f5763ae5e56e845eb65ed802ab87aa5923dce18ede9",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "777df173b6fb3f2ec098b0c58578948baf3f0adda837252b2cbdaa2dd417d3b7",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "645522898531b8d413a909f64d1e51b7882c321e9b0e1bd8f457febd55a29848",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h": "d5f34054f2c66e0f784355f3d721861f57cd2dcf0d0e8237f6494fc3d6e9d942",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp": "be22f91cd7a7b1423d3f9a4444b178b79de189113a0bb47d9671a8f6734b92e8",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h": "8f96b2b52e332030cb4ecf7651fca7692eb8d18c17f32e24cd5858ce8361edd6",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "3f5e27fe8d53f9824b8e1423d2ff4064c90a37d41544ed502906da41687bc5e2",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h": "1ee90d478594876891f6a0544c06ed1e90f8a05047bbc1ba35ea3b9aa2b3234b"
+  },
+  "nativeRegressions": {
+    "passed": true,
+    "commonStep": false,
+    "physicsDll": "a776547aa0dc45ac1580cab279e2398e63540822f5360d8a081b4e9e919a6d22",
+    "cases": [
+      {
+        "case": "reaction",
+        "status": "PASS",
+        "completedFrames": "360",
+        "minCellDet": "0.982132673",
+        "minVolumeRatio": "0.995845199",
+        "finalVolumeRatio": "1.00000012",
+        "maxExternalPenetration": "0",
+        "maxSelfPenetration": null,
+        "maxMechanicalEstimate": "175.999939",
+        "maxMomentumRelativeError": "0.00304783694",
+        "trajectoryHash": "7da755790d6f19c4",
+        "fatalErrors": "0",
+        "fetchFailures": "0",
+        "nonFinite": "0"
+      },
+      {
+        "case": "compression-recovery",
+        "status": "PASS",
+        "completedFrames": "360",
+        "minCellDet": "0.649048865",
+        "minVolumeRatio": "0.723655462",
+        "finalVolumeRatio": "0.990128756",
+        "maxExternalPenetration": "0",
+        "maxSelfPenetration": null,
+        "maxMechanicalEstimate": "44932.0078",
+        "maxMomentumRelativeError": "4438.12305",
+        "trajectoryHash": "46eb01d4c8c4f74b",
+        "fatalErrors": "0",
+        "fetchFailures": "0",
+        "nonFinite": "0"
+      },
+      {
+        "case": "visual-showcase",
+        "status": "PASS",
+        "completedFrames": "360",
+        "minCellDet": "0.515581787",
+        "minVolumeRatio": "0.853220761",
+        "finalVolumeRatio": "0.972447991",
+        "maxExternalPenetration": "6.6045186e-07",
+        "maxSelfPenetration": "0",
+        "maxMechanicalEstimate": "882857",
+        "maxMomentumRelativeError": "12.0304461",
+        "trajectoryHash": "3cf08d25b128e7e1",
+        "fatalErrors": "0",
+        "fetchFailures": "0",
+        "nonFinite": "0"
+      }
+    ],
+    "logSha256": "532711c35a63c0f6c1b93bd9441069119ff3c80c6ecba98bf6d85a6af4b53cfe"
+  },
+  "geometryTrial": [
+    "[NP_GEOMETRY_SCENE] kind=0 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0 status=FAIL",
+    "[NP_GEOMETRY_SCENE] kind=1 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.640834689 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=0 disabled=0 overlap=1 depth=4.47034836e-08 moved=0.654071152 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=3 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.465661049 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=0 convexTarget=0 disabled=1 overlap=1 depth=0.372626424 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=1 convexTarget=0 disabled=1 overlap=1 depth=0.213466421 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=0 disabled=1 overlap=1 depth=0.233322859 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=3 convexTarget=0 disabled=1 overlap=1 depth=0.405851483 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=0 convexTarget=1 disabled=0 overlap=0 depth=0 moved=0 status=FAIL",
+    "[NP_GEOMETRY_SCENE] kind=1 convexTarget=1 disabled=0 overlap=0 depth=0 moved=0.640834689 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=1 disabled=0 overlap=1 depth=3.7252903e-08 moved=0.654071152 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=3 convexTarget=1 disabled=0 overlap=0 depth=0 moved=0 status=FAIL",
+    "[NP_GEOMETRY_SCENE] kind=0 convexTarget=1 disabled=1 overlap=1 depth=0.372626394 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=1 convexTarget=1 disabled=1 overlap=1 depth=0.213466421 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=1 disabled=1 overlap=1 depth=0.233322829 moved=0.833333373 status=PASS",
+    "[NP_GEOMETRY_SCENE] kind=3 convexTarget=1 disabled=1 overlap=1 depth=0.405851424 moved=0.833333373 status=PASS"
+  ],
+  "coreNetLines": 315
+}

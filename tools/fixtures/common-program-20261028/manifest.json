@@ -1,0 +1,918 @@
+{
+  "scope": "Frozen production coefficients, not a physical-state takeover",
+  "fixtures": [
+    {
+      "file": "compression.json.gz",
+      "originalArtifact": "compression-recovery-final-capture.json",
+      "sha256": "77233951e5472feda4985680c3a28cfb2128a9f0bae3a0a251c73d78d34abff2",
+      "packedSha256": "46ea0751cef7e5f4443c1b099f6564a9e1a64d205956327df7a31477dfc3504c",
+      "dofs": 750,
+      "groups": 100,
+      "bytes": 29767
+    },
+    {
+      "file": "five.json.gz",
+      "originalArtifact": "visual-showcase-final-capture.json",
+      "sha256": "ba6af7f718ff11fb6b1f7c59925e1307365881d791ef119dbab07a44152888ee",
+      "packedSha256": "24367b14f52ed2b7be5b522cd8d28ed8e73acca7ce1d08e17b4783f0f959b501",
+      "dofs": 4728,
+      "groups": 136,
+      "bytes": 1736735
+    }
+  ],
+  "replay-final.json": {
+    "passed": true,
+    "results": [
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode0.json",
+        "passed": true,
+        "dofs": 18,
+        "groups": 2,
+        "sourceRows": 3,
+        "symmetry": 0.0,
+        "minEigenvalue": 719.9999389648433,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 2.236506003225457e-16,
+        "originalStationarity": 7.105427357601002e-15,
+        "tableNcpResidual": 1.1182530016127277e-16,
+        "tableStationarity": 7.105427357601002e-15,
+        "tableMaterialProducts": 346,
+        "tableIterations": 1,
+        "tableStepDifference": 1.0408340855860843e-17,
+        "tableForceDifference": 3.552713678800501e-14,
+        "diagonalNegativeControlStationarity": 6.540570851275148,
+        "boundsUpper": [
+          "inf",
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            63.54042732148858,
+            3.534802343119284,
+            0.0
+          ],
+          [
+            -0.800000011920929,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.01617491561095989,
+          0.0012338119936030284,
+          0.0,
+          0.0,
+          0.0,
+          -0.0014469296019753144,
+          0.00882506054718219,
+          -0.0004909448364663335,
+          0.0,
+          0.0,
+          0.0,
+          0.001386197190630543,
+          -0.0004176610947929988,
+          -8.397411068669355e-05,
+          0.0,
+          0.0,
+          0.0,
+          -0.0014457066585311423
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 1.1182530016127284e-16,
+          "seconds": 6.64e-05,
+          "sweeps": 0,
+          "materialSolves": 13,
+          "factorBytes": 4180,
+          "stationarity": 1.4210854715202004e-14,
+          "factorNonzeros": 81,
+          "actualThreads": 1,
+          "responseRank": 4,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      },
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode1.json",
+        "passed": true,
+        "dofs": 18,
+        "groups": 2,
+        "sourceRows": 3,
+        "symmetry": 0.0,
+        "minEigenvalue": 719.9999389648433,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 2.5969728204257914e-19,
+        "originalStationarity": 4.440892098500626e-16,
+        "tableNcpResidual": 4.155156512681266e-18,
+        "tableStationarity": 3.3306690738754696e-16,
+        "tableMaterialProducts": 206,
+        "tableIterations": 1,
+        "tableStepDifference": 5.421010862427522e-20,
+        "tableForceDifference": 1.1102230246251565e-16,
+        "diagonalNegativeControlStationarity": 0.16932733711462022,
+        "boundsUpper": [
+          0.05999999865889549,
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            0.059999998658895486,
+            0.023999999821186054,
+            0.0
+          ],
+          [
+            -0.800000011920929,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.00015200487448916217,
+          0.00036309720236290193,
+          0.0,
+          0.0,
+          0.0,
+          0.0002989696100467855,
+          8.333334277349617e-06,
+          -3.3333337606103893e-06,
+          0.0,
+          0.0,
+          0.0,
+          9.411765948390673e-06,
+          0.00011918682592487563,
+          -0.00011881018365211527,
+          0.0,
+          0.0,
+          0.0,
+          0.0001720060396825331
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 2.5969728204257914e-19,
+          "seconds": 4.59e-05,
+          "sweeps": 0,
+          "materialSolves": 13,
+          "factorBytes": 4180,
+          "stationarity": 4.440892098500626e-16,
+          "factorNonzeros": 81,
+          "actualThreads": 1,
+          "responseRank": 4,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      },
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode2.json",
+        "passed": true,
+        "dofs": 18,
+        "groups": 2,
+        "sourceRows": 3,
+        "symmetry": 0.0,
+        "minEigenvalue": 0.9999999999999593,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 2.7858390911589393e-17,
+        "originalStationarity": 1.4210854715202004e-14,
+        "tableNcpResidual": 3.3430069093907274e-16,
+        "tableStationarity": 2.842170943040401e-14,
+        "tableMaterialProducts": 262,
+        "tableIterations": 1,
+        "tableStepDifference": 1.0408340855860843e-17,
+        "tableForceDifference": 4.440892098500626e-16,
+        "diagonalNegativeControlStationarity": 6.764165060565016,
+        "boundsUpper": [
+          "inf",
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            63.763799030519976,
+            2.276891460352757,
+            0.0
+          ],
+          [
+            -0.8000000119209291,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.01614389175827544,
+          0.0009218403285643341,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.008856084399866652,
+          -0.00031623496794110664,
+          0.0,
+          0.0,
+          0.0,
+          0.0008928987364330139,
+          -0.0004486849488800819,
+          -9.645680192163786e-05,
+          0.0,
+          0.0,
+          0.0,
+          -0.0011726190685873907
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 1.1143356364635757e-16,
+          "seconds": 4.62e-05,
+          "sweeps": 0,
+          "materialSolves": 13,
+          "factorBytes": 4180,
+          "stationarity": 1.4210854715202004e-14,
+          "factorNonzeros": 81,
+          "actualThreads": 1,
+          "responseRank": 4,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      },
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode3.json",
+        "passed": true,
+        "dofs": 12,
+        "groups": 2,
+        "sourceRows": 3,
+        "symmetry": 0.0,
+        "minEigenvalue": 761.4495086149188,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 2.267000148031753e-16,
+        "originalStationarity": 1.4210854715202004e-14,
+        "tableNcpResidual": 2.267000148031753e-16,
+        "tableStationarity": 1.7763568394002505e-15,
+        "tableMaterialProducts": 306,
+        "tableIterations": 1,
+        "tableStepDifference": 1.3010426069826053e-18,
+        "tableForceDifference": 1.4210854715202004e-14,
+        "diagonalNegativeControlStationarity": 13.137301139392184,
+        "boundsUpper": [
+          "inf",
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            125.37144938027552,
+            11.94389796439271,
+            0.0
+          ],
+          [
+            -0.8000000119209287,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.0009788396456390455,
+          -5.485314462547791e-07,
+          0.0,
+          0.0,
+          0.0,
+          -0.0026550914093982016,
+          -0.031666666269302354,
+          0.0033193954788165235,
+          0.0,
+          0.0,
+          0.0,
+          -0.0012383233224991434
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 2.267000148031753e-16,
+          "seconds": 4.18e-05,
+          "sweeps": 0,
+          "materialSolves": 13,
+          "factorBytes": 3268,
+          "stationarity": 1.4210854715202004e-14,
+          "factorNonzeros": 66,
+          "actualThreads": 1,
+          "responseRank": 4,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      },
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode4.json",
+        "passed": true,
+        "dofs": 24,
+        "groups": 2,
+        "sourceRows": 4,
+        "symmetry": 0.0,
+        "minEigenvalue": 719.9999389648475,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 1.1907333892767223e-16,
+        "originalStationarity": 2.1316282072803006e-14,
+        "tableNcpResidual": 1.3924510675037837e-13,
+        "tableStationarity": 5.7218174642770236e-11,
+        "tableMaterialProducts": 611,
+        "tableIterations": 1,
+        "tableStepDifference": 5.617034615212901e-15,
+        "tableForceDifference": 7.192468842731614e-12,
+        "diagonalNegativeControlStationarity": 6.630025687295702,
+        "boundsUpper": [
+          "inf",
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            59.6726976969798,
+            4.701273548272716,
+            1.048006419175533
+          ],
+          [
+            -0.8000000119209296,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.016163845702708433,
+          0.0006081685618756314,
+          -0.0007079764553762062,
+          0.00022370403217744807,
+          -0.000610716619757409,
+          -0.0009569832988885093,
+          0.008836130455433662,
+          -0.0006520440269205996,
+          -0.00014464726365616333,
+          0.0,
+          -0.0005374393158135361,
+          0.0018436369427237895,
+          -0.00042873099912763457,
+          0.00023197315425683827,
+          -2.394288943988774e-05,
+          0.00014699612797518165,
+          -0.0001696347346538464,
+          -0.001353150118212144,
+          0.0,
+          0.0,
+          0.00026727487929191924,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 2.976833473191806e-17,
+          "seconds": 0.0001285,
+          "sweeps": 0,
+          "materialSolves": 13,
+          "factorBytes": 10852,
+          "stationarity": 1.4210854715202004e-14,
+          "factorNonzeros": 276,
+          "actualThreads": 1,
+          "responseRank": 4,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      },
+      {
+        "file": "tools\\benchmark-results\\common-program-20261028\\mode5.json",
+        "passed": true,
+        "dofs": 18,
+        "groups": 2,
+        "sourceRows": 3,
+        "symmetry": 0.0,
+        "minEigenvalue": 719.9999389648433,
+        "crossBodyH": 539.9822584268312,
+        "originalNcpResidual": 1.1222996879026818e-16,
+        "originalStationarity": 1.4210854715202004e-14,
+        "tableNcpResidual": 1.7535932623479406e-18,
+        "tableStationarity": 2.1316282072803006e-14,
+        "tableMaterialProducts": 332,
+        "tableIterations": 1,
+        "tableStepDifference": 6.938893903907228e-18,
+        "tableForceDifference": 7.105427357601002e-15,
+        "diagonalNegativeControlStationarity": 6.286970549827875,
+        "boundsUpper": [
+          "inf",
+          0.800000011920929
+        ],
+        "compliance": [
+          0.0,
+          0.002631578947368421
+        ],
+        "force": [
+          [
+            63.31131901924877,
+            0.0,
+            0.0
+          ],
+          [
+            -0.800000011920929,
+            0.0,
+            0.0
+          ]
+        ],
+        "step": [
+          -0.016206736212809148,
+          0.0003571142981416303,
+          0.0,
+          0.0,
+          0.0,
+          -0.002931009349004102,
+          0.008793239945332938,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.0003858404915050947,
+          -0.00011903810476240292,
+          0.0,
+          0.0,
+          0.0,
+          -0.001725817284470118
+        ],
+        "execution": {
+          "converged": true,
+          "iterations": 1,
+          "linearIterations": 16,
+          "residual": 0.0,
+          "seconds": 4.14e-05,
+          "sweeps": 0,
+          "materialSolves": 11,
+          "factorBytes": 4180,
+          "stationarity": 2.842170943040401e-14,
+          "factorNonzeros": 81,
+          "actualThreads": 1,
+          "responseRank": 2,
+          "responseProducts": 46,
+          "cachedIterations": 1
+        },
+        "publication": "none"
+      }
+    ],
+    "provenance": {
+      "activationSha256": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780",
+      "sourceSha256": "2b948f2f9815b6bb1a2651379334bbe5ad9bbbf81863989dfd8f1e391cb1cd1f",
+      "coneSha256": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f",
+      "responseSha256": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c",
+      "dllSha256": "7229416249be7ca57dfdb012457a7d7b8a8c82e39f873b5efe9bbdef95dffbf6",
+      "dependencies": "Microsoft (R) COFF/PE Dumper Version 14.38.33145.0\nCopyright (C) Microsoft Corporation.  All rights reserved.\n\n\nDump of file split_kernel.dll\n\nFile Type: DLL\n\n  Image has the following dependencies:\n\n    MSVCP140.dll\n    VCOMP140.DLL\n    KERNEL32.dll\n    VCRUNTIME140.dll\n    VCRUNTIME140_1.dll\n    api-ms-win-crt-runtime-l1-1-0.dll\n    api-ms-win-crt-math-l1-1-0.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n\n  Summary\n\n        1000 .data\n        1000 .pdata\n        3000 .rdata\n        1000 .reloc\n       1E000 .text\n",
+      "physxRuntimeLinked": false,
+      "precision": "double",
+      "fpMode": "precise",
+      "mixedSha256": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e",
+      "coneQpSha256": "666c39907c42d58db28f1ae03499ed4958d827927b95c66109145b6bfbf408a7",
+      "sparseSha256": "4f4f101e0fb724068480e8550d8ae7218489fe8a5fe7a1b15651cf74ef4a434a",
+      "ncpSha256": "99d3dc824f3f2cd220c38eecd319a2036232ecc8acde8f7f4cb1c43fd50f5c39"
+    }
+  },
+  "compression-table-final-validation.json": {
+    "file": "tools\\benchmark-results\\common-program-20261028\\compression-recovery-final-capture.json",
+    "passed": true,
+    "complete": true,
+    "solved": true,
+    "executionSource": "production Table diagnostic",
+    "dofs": 750,
+    "groups": 100,
+    "activeNormalForces": 100,
+    "maximumForce": 33.185067897523076,
+    "symmetry": 2.1827872842550278e-11,
+    "stationarity": 1.2378009315926805e-10,
+    "relativeStationarity": 9.325260740575085e-13,
+    "unitStepRoot": 4.263256414560601e-14,
+    "relativeUnitStepRoot": 1.2846911833134473e-15,
+    "minimumNormalResidual": -4.406067524720392e-14,
+    "tableIterations": 4,
+    "materialProducts": 33596,
+    "publication": "none"
+  },
+  "five-final-fast.validation.json": {
+    "file": "tools\\benchmark-results\\common-program-20261028\\five-final-fast.json",
+    "passed": true,
+    "complete": true,
+    "solved": true,
+    "executionSource": "experimental sparse adapter; shared production NCP",
+    "dofs": 4728,
+    "groups": 136,
+    "activeNormalForces": 4,
+    "maximumForce": 645.1362318544052,
+    "symmetry": 2.9103830456733704e-11,
+    "stationarity": 7.474909580196254e-12,
+    "relativeStationarity": 2.0626966707641975e-15,
+    "unitStepRoot": 1.8758328224066645e-12,
+    "relativeUnitStepRoot": 2.907653809823541e-15,
+    "minimumNormalResidual": -3.469446951953614e-17,
+    "tableIterations": 0,
+    "materialProducts": 65,
+    "publication": "none",
+    "execution": {
+      "converged": true,
+      "iterations": 10,
+      "linearIterations": 320,
+      "residual": 6.28890274776228e-15,
+      "seconds": 16.5629734,
+      "sweeps": 1,
+      "materialSolves": 2109,
+      "factorBytes": 10290292,
+      "stationarity": 6.821210263296962e-12,
+      "factorNonzeros": 558768,
+      "actualThreads": 1,
+      "responseRank": 0,
+      "responseProducts": 1635,
+      "cachedIterations": 10
+    }
+  },
+  "five-capture-reproduction.json": {
+    "dimensions": true,
+    "sourceBlocks": true,
+    "sourceRows": true,
+    "H": true,
+    "J": true,
+    "base": true,
+    "offset": true,
+    "lower": true,
+    "upper": true,
+    "compliance": true,
+    "mu": true,
+    "coulomb": true
+  },
+  "public-final-checks.json": [
+    {
+      "name": "hello_world-avbd",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "hello_world-pgs",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "hello_world-tgs",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-avbd",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-pgs",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-tgs",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-avbd",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-pgs",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-tgs",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    }
+  ],
+  "probes-final-checks.json": [
+    {
+      "name": "common_program",
+      "command": [
+        "tools/run_avbd_common_program_probe.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "contact_potential",
+      "command": [
+        "tools/run_avbd_contact_potential_probe.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "locked_quadratic_scene",
+      "command": [
+        "tools/run_avbd_locked_quadratic_scene_probe.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "elastic_frame_scene",
+      "command": [
+        "tools/run_avbd_elastic_frame_scene_probe.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "np_contact_law",
+      "command": [
+        "tools/run_avbd_np_contact_law_probe.py"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "np_locked_motion",
+      "command": [
+        "tools/run_avbd_np_locked_motion_probe.py"
+      ],
+      "exit": 0
+    }
+  ],
+  "native": [
+    {
+      "schema": "1",
+      "snippet": "SnippetJointSoftBody",
+      "solver": "avbd",
+      "case": "reaction",
+      "frames": "360",
+      "completedFrames": "360",
+      "status": "PASS",
+      "reason": "none",
+      "capability": "EXPERIMENTAL",
+      "validation": "GATED",
+      "model": "rigid_cell_joint_volume",
+      "materialElements": "384",
+      "sleepEnabled": "1",
+      "grid": "5",
+      "nodes": "125",
+      "joints": "300",
+      "mass": "800.000732",
+      "cellSize": "0.400000006",
+      "dispatcherThreads": "4",
+      "compressionHoldFrames": "60",
+      "maxJointAngle": "0.00878906995",
+      "trajectoryHash": "7da755790d6f19c4",
+      "minVolumeRatio": "0.995845199",
+      "minCellDet": "0.982132673",
+      "finalVolumeRatio": "1.00000012",
+      "maxShapeError": "0.00349942269",
+      "finalShapeError": "8.64750348e-07",
+      "maxGroundPenetration": "0",
+      "maxExternalPenetration": "0",
+      "compressionMinimum": "1",
+      "recoveredFraction": "0",
+      "contacts": "252",
+      "firstContactFrame": "18",
+      "maxPostContactStep": "0.00496697426",
+      "zeroMotionFrames": "0",
+      "systemComDrift": "0.00466525415",
+      "maxPostImpactVy": "0.240683541",
+      "maxMechanicalEstimate": "175.999939",
+      "finalMechanicalEstimate": "2.53157187",
+      "averageStepMs": "30.6163703",
+      "maxStepMs": "92.9573975",
+      "averageFrameMs": "30.9308267",
+      "activeFrames": "360",
+      "activeContactFrames": "7",
+      "averageActiveStepMs": "30.6163703",
+      "averageActiveContactMs": "69.4913143",
+      "maxMomentumRelativeError": "0.00304783694",
+      "maxBallisticError": "3.53406811",
+      "sleepingBeforeWake": "0",
+      "maxWakeMotion": "0.000388288696",
+      "nonFinite": "0",
+      "fetchFailures": "0",
+      "fatalErrors": "0"
+    },
+    {
+      "schema": "1",
+      "snippet": "SnippetJointSoftBody",
+      "solver": "avbd",
+      "case": "compression-recovery",
+      "frames": "360",
+      "completedFrames": "360",
+      "status": "PASS",
+      "reason": "none",
+      "capability": "EXPERIMENTAL",
+      "validation": "GATED",
+      "model": "rigid_cell_joint_volume",
+      "materialElements": "384",
+      "sleepEnabled": "1",
+      "grid": "5",
+      "nodes": "125",
+      "joints": "300",
+      "mass": "800.000732",
+      "cellSize": "0.400000006",
+      "dispatcherThreads": "4",
+      "compressionHoldFrames": "60",
+      "maxJointAngle": "0.412516117",
+      "trajectoryHash": "46eb01d4c8c4f74b",
+      "minVolumeRatio": "0.723655462",
+      "minCellDet": "0.649048865",
+      "finalVolumeRatio": "0.990128756",
+      "maxShapeError": "0.19716312",
+      "finalShapeError": "0.0186947826",
+      "maxGroundPenetration": "4.28557396e-05",
+      "maxExternalPenetration": "0",
+      "compressionMinimum": "0.723655462",
+      "recoveredFraction": "0.964279234",
+      "contacts": "31566",
+      "firstContactFrame": "0",
+      "maxPostContactStep": "0.17632255",
+      "zeroMotionFrames": "0",
+      "systemComDrift": "1.50423539",
+      "maxPostImpactVy": "-3.40282347e+38",
+      "maxMechanicalEstimate": "44932.0078",
+      "finalMechanicalEstimate": "563.018982",
+      "averageStepMs": "105.691353",
+      "maxStepMs": "1761.28186",
+      "averageFrameMs": "106.053586",
+      "activeFrames": "360",
+      "activeContactFrames": "300",
+      "averageActiveStepMs": "105.691353",
+      "averageActiveContactMs": "121.401428",
+      "maxMomentumRelativeError": "4438.12305",
+      "maxBallisticError": "3.31085205",
+      "sleepingBeforeWake": "0",
+      "maxWakeMotion": "0.0930731222",
+      "nonFinite": "0",
+      "fetchFailures": "0",
+      "fatalErrors": "0"
+    },
+    {
+      "schema": "1",
+      "snippet": "SnippetJointSoftBody",
+      "solver": "avbd",
+      "case": "visual-showcase",
+      "frames": "360",
+      "completedFrames": "360",
+      "status": "PASS",
+      "reason": "none",
+      "capability": "EXPERIMENTAL",
+      "validation": "GATED",
+      "model": "convex_cell_joint_volume",
+      "materialElements": "2514",
+      "grid": "5",
+      "dispatcherThreads": "4",
+      "bodies": "5",
+      "nodes": "787",
+      "joints": "1888",
+      "mass": "7530.66113",
+      "cellSize": "0.200000003",
+      "trajectoryHash": "3b68953e43a44f51",
+      "contacts": "1049022",
+      "crossContacts": "19357",
+      "crossMask": "12779552",
+      "minCellDet": "0.501501799",
+      "minVolumeRatio": "0.853220761",
+      "maxVolumeRatio": "1.02300358",
+      "finalVolumeRatio": "0.982580245",
+      "maxExternalPenetration": "6.6045186e-07",
+      "maxSelfPenetration": "0",
+      "maxJointAnchorError": "1.02460575",
+      "maxPostContactStep": "0.894366622",
+      "maxMomentumRelativeError": "12.0304461",
+      "initialMechanicalEstimate": "882856.97",
+      "maxMechanicalEstimate": "882857",
+      "finalMechanicalEstimate": "99529.0242",
+      "finalAwake": "663",
+      "skinRestError": "6.03421586e-06",
+      "massRelativeError": "1.30616327e-05",
+      "assetBytes": "352636",
+      "skinBytes": "101156",
+      "diagnosticBytes": "50280",
+      "averageStepMs": "512.437753",
+      "p95StepMs": "957.1569",
+      "maxStepMs": "1803.657",
+      "activeContactFrames": "355",
+      "averageActiveContactMs": "514.844256",
+      "averageSkinMs": "0.0734697222",
+      "averageObserverMs": "3.52438333",
+      "averageFrameMs": "512.511223",
+      "nonFinite": "0",
+      "fetchFailures": "0",
+      "fatalErrors": "0"
+    }
+  ],
+  "knownFailures": [
+    "[NP_GEOMETRY_SCENE] kind=1 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.030331254 status=FAIL",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=0 disabled=0 overlap=0 depth=0 moved=-0.0788201094 status=FAIL",
+    "[NP_GEOMETRY_SCENE] kind=2 convexTarget=1 disabled=0 overlap=0 depth=0 moved=-0.0788209438 status=FAIL"
+  ],
+  "recordedBinaries": [
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/PhysX_64.dll",
+      "sha256": "0f0851eec480a6b6e6977dc49d10e9f1d32b3d17ff891b9deaff7e6048b99a3d",
+      "bytes": 3180032
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/PhysXCommon_64.dll",
+      "sha256": "718db234b81962c1b3ae79234bad9804916a5acc9de2d60fb86e9021262eb41e",
+      "bytes": 2267648
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/SnippetJointSoftBody_64.exe",
+      "sha256": "906b5b7a14b44ed0c95d832cf9f5f45485588efdabfbc8e56d99104540ef0411",
+      "bytes": 1743872
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/SnippetHelloWorld_64.exe",
+      "sha256": "66c196e1a5636370f11aab688fddf2e14e4e30442584895ca6f45d41a575c8ed",
+      "bytes": 1598464
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/SnippetJoint_64.exe",
+      "sha256": "59d58fa695416c325454f2e001a089bb27906313c939ec8debf1cf3aed8d61df",
+      "bytes": 1545728
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/SnippetArticulationRC_64.exe",
+      "sha256": "18b9e133529eab80191c15a31dc503ab827f7139b19942c0a5302ad03ca43bc9",
+      "bytes": 1587712
+    }
+  ],
+  "replay": "python tools/replay_avbd_common_sparse.py tools/fixtures/common-program-20261028/five.json.gz --output <local-results.json>"
+}

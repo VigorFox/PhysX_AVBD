@@ -1,0 +1,1163 @@
+{
+  "scope": "shared NP / mixed rows integration; no production qualification",
+  "before": {
+    "avbd_smoke.exe": "5b7e52282dc4785d2bfc07b27ab6b91365181d3f0203f2a84a0b032f29b6eb3d",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysX_64.dll": "ce4f62437941054dfad95a76595cd2979562476c839fc2cc99625c8ab9a9f26a",
+    "PhysXCommon_64.dll": "818f0398751e726a6ad0b20241605673a8bfbb4d6dca95d36bfd01a88e8cb2ad",
+    "PhysXCooking_64.dll": "47fc92cf968715853bb5bb8bbdc459117dbebeaedeb4e71064ee8395da0aca74",
+    "PhysXFoundation_64.dll": "cad43d5e6215c2346f1008dc7ab66861de5dcf1144f7e74c1d8042a4f6bac788",
+    "PVDRuntime_64.dll": "434a786fca25a02de707870f838045374aad181fd933ae899772eae58782fe8a",
+    "SnippetArticulationRC_64.exe": "382769d5e0ddaf609a7f42133e3929fbaae407ed938dd5a06f00a834bdb0c2ce",
+    "SnippetBVHStructure_64.exe": "b30502b5fb1ab4dd014ee2f5c8e695522fe64816152c07301ef2c2469de27b1f",
+    "SnippetCCD_64.exe": "9e0e21042541d3c65663c342debbc762ca7b559c462eb92eca6d70a1772542e6",
+    "SnippetChainmail_64.exe": "8770171797da415f82de0c553fec59d8f747c1e4201173cba7f6147f91d6e657",
+    "SnippetContactModification_64.exe": "110435bc367d0b177723c82dda8ebc0da3ccf660a87d7d39856d3699466aab74",
+    "SnippetContactReport_64.exe": "6252ebdc59ccf3bbcce003fe2298efdbf53184b7d7513f4f7cb65db4c7b69355",
+    "SnippetContactReportCCD_64.exe": "878bce99bd746651f34a6d490488950f14516af49576c98da99d17cddaa1bc89",
+    "SnippetConvexMeshCreate_64.exe": "b18e1f2bc2e2410c7a59cec87464e278ee3fefbce0f24dfda4337097e755eb55",
+    "SnippetCustomConvex_64.exe": "a6d42eecc234da62ad7edd000edb5c742238481d39e298e4742ad03eba41c63e",
+    "SnippetCustomGeometry_64.exe": "911a4e7c672bc8e52f28bf619b53978965fe1d7883f460db41afd4b10136dbed",
+    "SnippetCustomGeometryCollision_64.exe": "51520e7a92c4328483c1bfab2f3908c87a1e0d508e837491c97238d296f7ed34",
+    "SnippetCustomGeometryQueries_64.exe": "af3d7f90d828f2877c99716787f93abc636157b6a4ebbb95e432f89da350fef2",
+    "SnippetCustomJoint_64.exe": "75271510303d366aa607fa736498db8562ff908bdabf167f02f86ecd1422dbda",
+    "SnippetCustomProfiler_64.exe": "bebad646c4d4302506fb4f49fd307cc6a26a9c3b19d194507fe07ae9815ecbee",
+    "SnippetDeformableMesh_64.exe": "5f254d421350ad732fa628c17a1ec9c38eadea10f8c2bc4888dd52c6bde201a9",
+    "SnippetDeformableSurfaceAVBD_64.exe": "f99fa4fd382ddd3af898f522e8fd2603adf03e46bd38c7e117de0a7f52fa07de",
+    "SnippetDeformableVolumeAVBD_64.exe": "7cae502a6c452a1e70a0da07fb4c2131bf6139a89bda285f94d53a5c79a3e803",
+    "SnippetDeformableVolumeAVBD_Motion.exe": "fc42a1539270cb0d97b3f3a4df191e4067e416e26d0df3e77f973ec5c0a5601c",
+    "SnippetDelayLoadHook_64.exe": "57b1fd11ba85c36412f81d5156598a320c6dc36124abcd92a5fb0d2597ea935b",
+    "SnippetFixedTendon_64.exe": "67fc508710ba200dee64045d4060057e664f7f755ca706cac3d15fb12626fe5b",
+    "SnippetFrustumQuery_64.exe": "01d9361fb102de5d412b7c6c79bf1b49db266810b94bb380cd95c15d8cf1074e",
+    "SnippetGearJoint_64.exe": "d821c9a0b08a150c0c53da20074ab3424c52269fa4131a987dc74c473180ff37",
+    "SnippetGeometryQuery_64.exe": "f1034bd6a9cd244b42383395d60ca646cf80b543605372ab1fa51691bf2ea70b",
+    "SnippetGyroscopic_64.exe": "b98ab98a05e77ad2691602d95520155cdeba169a93de1bf0db3bf744f7676172",
+    "SnippetHelloWorld_64.exe": "38e9ac38bca3d540e0de8035004763ec50c590c415f0e2544204cc6265aac7f0",
+    "SnippetImmediateArticulation_64.exe": "d92d42a2cff1abd19900fdabb1f000aef0d8464e69cdee04d08d5556451fadee",
+    "SnippetImmediateMode_64.exe": "77295d2c6c5b8d5cc3b66e2bde6894a4bb7f1b8a2aa63729f4708a1e61dc6d05",
+    "SnippetJoint_64.exe": "1ef1e0a5c0f0248cde96de29c9622621af96ba7e6f44fa428e927458c668ebcc",
+    "SnippetJointDrive_64.exe": "f51443521b46bdf3228857f38d56a50a64ab393bed71c872de5a65fa81d32bda",
+    "SnippetJointSoftBody_64.exe": "8a3ea52a5f94b3101a716909c53a25fc0ce25db69bca6066360d5150bc140322",
+    "SnippetLoadCollection_64.exe": "cce9357df20d443ff4c3c74f1ff45cfea0b40ca7a8437908420a93b4a7621eef",
+    "SnippetMassProperties_64.exe": "10e61316c426ed5bfb1c304e70d783f67f2fcab6fc3aa26e80eaf4288ab4126c",
+    "SnippetMBP_64.exe": "f6ec47aa7c7e8f36064a1f36aac184ba9074b6d42943d9ebae49b62812259472",
+    "SnippetMimicJoint_64.exe": "b2bc434413ad05dd217a8eb921f8f379b98d7fb2e0275a9f48bd69a9e680f291",
+    "SnippetMultiPruners_64.exe": "73766dbf3aafd48c0bf9a1067f9b658ea43b0bd5408a7e1e457c07e11d09c8b6",
+    "SnippetMultiThreading_64.exe": "eeaa3a55372258c317ff1226f7d04e6ed3b46d12e232da9505595ab6f5ee4690",
+    "SnippetOmniPvd_64.exe": "b48c0a8436fa063106a4bb46abf8cf3175ae693ec89c0240d7fb2cc414f9b643",
+    "SnippetPathTracing_64.exe": "995928ec7f2fe5b940cdce70e1d0f2ec19bf8c3e74672ea63d152688a18274cf",
+    "SnippetPointDistanceQuery_64.exe": "cff6117143ffad3d55bda2dbc436f5f372b1d6ee6770ff19d577210582a7099c",
+    "SnippetProfilerConverter_64.exe": "bae92506c5a50adf753d4a669019b0d0d8d32fd8cf1f163f8e57291c77898933",
+    "SnippetPrunerSerialization_64.exe": "56dedf1fc256538352feb9e66744a8182bd4b8d3795059f19085380ae20ccdd5",
+    "SnippetQuerySystemAllQueries_64.exe": "d4dd7cb26579662d6945d213459980956b9933b906ac90eb44d1f04671450479",
+    "SnippetQuerySystemCustomCompound_64.exe": "d6a30fa78974228256d716923d3408bff545f108403479fb0589f07239a40f08",
+    "SnippetRackJoint_64.exe": "1a3c54d3ad27199df93817bf5169694fbecbb29eb33e81f15b91126003d3e051",
+    "SnippetSerialization_64.exe": "39b5a72c2471ed128f37acc708d79c398066a807e3083f71f203db1412f2ba85",
+    "SnippetSpatialTendon_64.exe": "d30d167e7ea8eca417735c5435c038e06e7b2acf80daf4ad5dfab9665a90aaba",
+    "SnippetSplitFetchResults_64.exe": "5c9948a385018012c72b0754be69acffe3688c5abced3ad4dca0b22fcfc6aa5f",
+    "SnippetSplitSim_64.exe": "fa90ece5eb9a5d555a3e851c3dc632a88bb3a6e3e6e506518f3b940b1fa0e716",
+    "SnippetStandaloneBroadphase_64.exe": "fa8a850ceed330d8998c1f51d0ab2c90c93ff30150d25d301a747ff2e35d7de2",
+    "SnippetStandaloneBVH_64.exe": "1cf760bf9c4d18938fd00f45cd736a28afe15e0f92448a770f8ede14821723ad",
+    "SnippetStandaloneQuerySystem_64.exe": "ac5f28aa97ada216563ed33bc30d7b5c2ad10c8567294e8c4ace1c44bea990c9",
+    "SnippetStepper_64.exe": "3be183f0a673fe9990b0a6a8b6959812de7a1e817da572d4501219c094321858",
+    "SnippetToleranceScale_64.exe": "4dd0bbdcb0a57e6072813c3b51324dd08a559a2cb13139a3520fc0f65cb114e6",
+    "SnippetTriangleMeshCreate_64.exe": "1075345aa2db6d1cb49512d03a3020ff0bd289048c93167f0bdfb51c32fffcee",
+    "SnippetTriggers_64.exe": "d361472bfcdb0cb204bd8e36d2192923e314e5fd2ae6e7eb443fbaa30f0b6135",
+    "SnippetVehicleCustomSuspension_64.exe": "e32b2f8ef65ce298ada653dbcf0875d38f5a1c50f616c385440625862636f68d",
+    "SnippetVehicleCustomTire_64.exe": "eb1c0e5142ecd2ed2d68ff07a8f1b2dfe172111c739dac5085fbe0c340908604",
+    "SnippetVehicleDirectDrive_64.exe": "6a892b3c526c0905d26f331756e87ba179771ba43e51c41494f15cdf28eaffc8",
+    "SnippetVehicleFourWheelDrive_64.exe": "5a2d886e6276c1a0e211e733eefde342299d622f60085a9b9a9f33b23f0d3ce5",
+    "SnippetVehicleMultithreading_64.exe": "e6742a3b7a5e87dfdb070ae90459f13268fe403cace4eb4320c891f02ea71e48",
+    "SnippetVehicleTankDrive_64.exe": "15b8706d2b256d72c768b7a817b57dcdb78370a4cb82a207ecd4689ebad2c6ff",
+    "SnippetVehicleTruck_64.exe": "15792d99aff05745d612ff81a774769b2185e33e521ce0c4bc3f751ef82a0830"
+  },
+  "checks": [
+    {
+      "name": "self-near",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "selfContacts": [
+        0
+      ]
+    },
+    {
+      "name": "self-far",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "selfContacts": [
+        1
+      ]
+    },
+    {
+      "name": "domain-f32",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hinge-simd-f32",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "membrane-simd-f32",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "domain-f32-fast",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hinge-simd-f32-fast",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "membrane-simd-f32-fast",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "domain-f64",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hinge-simd-f64",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "membrane-simd-f64",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "row-program",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "fixed-chain-impact",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-vertex-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-tet-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-vertex-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-tet-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-vertex-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "attachment-tet-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-contact-translating",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-contact-relative-slide",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-plane-slide",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "drape-settle",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "fold": [
+        {
+          "samples": "31",
+          "perimeterDrop": "0.165024995",
+          "earlyDrop": "0.457108098",
+          "peakBrakingTravel": "0.0278107682",
+          "gridSpacing": "0.100000001"
+        }
+      ]
+    },
+    {
+      "name": "drape-25",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "drape-50",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "fold": [
+        {
+          "samples": "31",
+          "perimeterDrop": "0.165008299",
+          "earlyDrop": "0.457108098",
+          "peakBrakingTravel": "0.0278107682",
+          "gridSpacing": "0.100000001"
+        }
+      ]
+    },
+    {
+      "name": "five-release",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "skinStretch": [
+        {
+          "body": "0",
+          "peakLengthRatio": "1.2019893",
+          "peakFrame": "50",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0049314"
+        },
+        {
+          "body": "1",
+          "peakLengthRatio": "1.0367318",
+          "peakFrame": "27",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0105495"
+        },
+        {
+          "body": "2",
+          "peakLengthRatio": "1.23683",
+          "peakFrame": "105",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0120397"
+        },
+        {
+          "body": "3",
+          "peakLengthRatio": "1.1996778",
+          "peakFrame": "173",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0134935"
+        },
+        {
+          "body": "4",
+          "peakLengthRatio": "1.1642277",
+          "peakFrame": "133",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.02165"
+        }
+      ],
+      "tipping": [
+        {
+          "impactFrame": "127",
+          "impactAngleRad": "0.065197072",
+          "postImpact15Frame": "147",
+          "floorBandFrame": "154",
+          "halfSecondRad": "0.44428353",
+          "oneSecondRad": "0.53033378",
+          "peakRateRadS": "4.1427943"
+        }
+      ],
+      "residence": [
+        {
+          "pair": "prism-sphere",
+          "firstEntry": "45",
+          "firstExit": "57",
+          "longestFrames": "16",
+          "longestAirborneFrames": "16",
+          "nearFrames": "28",
+          "sustainedExit": "59"
+        }
+      ],
+      "pedestal": [
+        {
+          "status": "PASS",
+          "contactFrame": "127",
+          "lowerIn": "20.547396",
+          "boxIn": "20.205458",
+          "upperIn": "20.050095",
+          "lowerUp": "1.2353771",
+          "boxUp": "4.157114",
+          "upperUp": "0.54930115",
+          "lowerRise": "0.11365283",
+          "boxRise": "0.2759099",
+          "upperRise": "0.044630766",
+          "minLowerVolume": "0.94549626",
+          "unloadedLowerVolume": "1.0023044",
+          "flightDvError": "0.065788448",
+          "worstFlightFrame": "56",
+          "boxDropOneSecond": "0.34597969",
+          "boxUnloadingTravel": "0.2759099",
+          "upperUnloadingTravel": "1.4894958"
+        }
+      ],
+      "impacts": [
+        {
+          "pair": "cone-ground",
+          "axis": "worldY",
+          "windowFrames": "60",
+          "contactFrame": "89",
+          "apexFrame": "123",
+          "departureFrame": "104",
+          "incoming": "14.334733",
+          "up": "3.3709567",
+          "rise": "1.0075999",
+          "minVolume": "0.88422877",
+          "recoveredVolume": "0.9984138",
+          "clearance": "0.42557797"
+        },
+        {
+          "pair": "prism-sphere",
+          "axis": "incidentNormal",
+          "windowFrames": "60",
+          "contactFrame": "45",
+          "apexFrame": "65",
+          "departureFrame": "59",
+          "incoming": "8.2406721",
+          "up": "1.3476516",
+          "rise": "0.18223143",
+          "minVolume": "0.97568387",
+          "recoveredVolume": "1.0029521",
+          "clearance": "0.35374951"
+        }
+      ]
+    },
+    {
+      "name": "pedestal-tip",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "tipping": [
+        {
+          "loaded": "0",
+          "frames": "240",
+          "overhangM": "0.5000005",
+          "rigidTimeScaleS": "0.4614601",
+          "tip15S": "0.45",
+          "floorBandS": "0.6",
+          "peakRateRadS": "1.465646",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "pedestal-tip-loaded",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "tipping": [
+        {
+          "loaded": "1",
+          "frames": "240",
+          "overhangM": "0.5000005",
+          "rigidTimeScaleS": "0.802608",
+          "tip15S": "1.1",
+          "floorBandS": "1.366667",
+          "peakRateRadS": "0.7978934",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "resting-sphere",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "groundRest": [
+        {
+          "case": "resting-sphere",
+          "frames": "2400",
+          "initialJperKg": "18.0503999",
+          "excessJperKg": "0",
+          "latePeakRms": "0.00107730054",
+          "horizontalExcursion": "0.00130380258",
+          "band": "0.0399999991",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "resting-cone",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "groundRest": [
+        {
+          "case": "resting-cone",
+          "frames": "2400",
+          "initialJperKg": "5.35628187",
+          "excessJperKg": "0",
+          "latePeakRms": "0.00195782577",
+          "horizontalExcursion": "0.000288360811",
+          "band": "0.0399999991",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "volume-flight",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-release",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-compression-release",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-contact-rebound",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-reset",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-eccentric",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-frictionless",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "reaction-rigid6-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-rigid6-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-rigid6-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-rigid6",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-particle3",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-rigid6-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-particle3-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-rigid6",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-particle3",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-rigid6-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-particle3-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "initial-overlap-plane",
+      "exit": 2,
+      "negativeDomainTest": true,
+      "passed": true
+    },
+    {
+      "name": "initial-overlap-sphere",
+      "exit": 2,
+      "negativeDomainTest": true,
+      "passed": true
+    },
+    {
+      "name": "reaction-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "cloth-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "soft-soft-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "shell-work",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-work",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "five-observer",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-membrane",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-bending",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-free-flight",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "rigid6-Surface",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "route": [
+        {
+          "model": "joint_sheet",
+          "commonStep": "budget",
+          "case": "static-box",
+          "grid": "24",
+          "workers": "4"
+        }
+      ]
+    },
+    {
+      "name": "rigid6-Volume",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "route": [
+        {
+          "model": "joint",
+          "volumeMaterial": "1",
+          "commonStep": "budget",
+          "npCertificates": "2",
+          "case": "visual-showcase",
+          "grid": "5",
+          "workers": "4"
+        }
+      ],
+      "impacts": [
+        {
+          "pair": "prism-sphere",
+          "axis": "incidentNormal",
+          "windowFrames": "60",
+          "contactFrame": "46",
+          "apexFrame": "66",
+          "departureFrame": "0",
+          "incoming": "7.6753016",
+          "up": "0.34737039",
+          "rise": "0.034240007",
+          "minVolume": "0.9417789",
+          "recoveredVolume": "0.98970658"
+        }
+      ]
+    },
+    {
+      "name": "particle3-authored-surface",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "route": [
+        {
+          "model": "particle3",
+          "stateDof": "3",
+          "commonStep": "budget",
+          "iterations": "4"
+        }
+      ]
+    },
+    {
+      "name": "particle3-authored-volume",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "route": [
+        {
+          "model": "particle3",
+          "stateDof": "3",
+          "commonStep": "budget",
+          "iterations": "4"
+        }
+      ]
+    },
+    {
+      "name": "drape-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "maxTiledValence": 0,
+      "tiledFrames": 0,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "five-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "skinStretch": [
+        {
+          "body": "0",
+          "peakLengthRatio": "1.2031478",
+          "peakFrame": "50",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0047137"
+        },
+        {
+          "body": "1",
+          "peakLengthRatio": "1.0367054",
+          "peakFrame": "27",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0119058"
+        },
+        {
+          "body": "2",
+          "peakLengthRatio": "1.23683",
+          "peakFrame": "105",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0303458"
+        },
+        {
+          "body": "3",
+          "peakLengthRatio": "1.1230575",
+          "peakFrame": "168",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0190531"
+        },
+        {
+          "body": "4",
+          "peakLengthRatio": "1.164203",
+          "peakFrame": "133",
+          "longestDoubledS": "0",
+          "finalLengthRatio": "1.0652354"
+        }
+      ],
+      "tipping": [
+        {
+          "impactFrame": "127",
+          "impactAngleRad": "0.065197062",
+          "postImpact15Frame": "148",
+          "floorBandFrame": "155",
+          "halfSecondRad": "0.43944849",
+          "oneSecondRad": "0.51085924",
+          "peakRateRadS": "4.1427944"
+        }
+      ],
+      "residence": [
+        {
+          "pair": "prism-sphere",
+          "firstEntry": "45",
+          "firstExit": "57",
+          "longestFrames": "14",
+          "longestAirborneFrames": "14",
+          "nearFrames": "26",
+          "sustainedExit": "59"
+        }
+      ],
+      "pedestal": [
+        {
+          "status": "PASS",
+          "contactFrame": "127",
+          "lowerIn": "20.547396",
+          "boxIn": "20.205458",
+          "upperIn": "20.050095",
+          "lowerUp": "1.2354996",
+          "boxUp": "4.1587157",
+          "upperUp": "0.4746961",
+          "lowerRise": "0.1116873",
+          "boxRise": "0.27401471",
+          "upperRise": "0.049457788",
+          "minLowerVolume": "0.94549626",
+          "unloadedLowerVolume": "1.0022999",
+          "flightDvError": "0.065788448",
+          "worstFlightFrame": "56",
+          "boxDropOneSecond": "0.30675721",
+          "boxUnloadingTravel": "0.27401471",
+          "upperUnloadingTravel": "1.2183182"
+        }
+      ],
+      "impacts": [
+        {
+          "pair": "cone-ground",
+          "axis": "worldY",
+          "windowFrames": "60",
+          "contactFrame": "89",
+          "apexFrame": "123",
+          "departureFrame": "104",
+          "incoming": "14.334733",
+          "up": "3.3709567",
+          "rise": "1.0075999",
+          "minVolume": "0.88422877",
+          "recoveredVolume": "0.9984138",
+          "clearance": "0.42557797"
+        },
+        {
+          "pair": "prism-sphere",
+          "axis": "incidentNormal",
+          "windowFrames": "60",
+          "contactFrame": "45",
+          "apexFrame": "65",
+          "departureFrame": "59",
+          "incoming": "8.2404137",
+          "up": "1.3531656",
+          "rise": "0.18332529",
+          "minVolume": "0.97560132",
+          "recoveredVolume": "1.0029683",
+          "clearance": "0.36143804"
+        }
+      ],
+      "maxTiledValence": 520,
+      "tiledFrames": 38,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "wide-star-bending",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "maxTiledValence": 576
+    },
+    {
+      "name": "wide-star-membrane",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "maxTiledValence": 0
+    },
+    {
+      "name": "five-inline-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "maxTiledValence": 557,
+      "tiledFrames": 41,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "smoke",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    }
+  ],
+  "after": {
+    "avbd_smoke.exe": "5b7e52282dc4785d2bfc07b27ab6b91365181d3f0203f2a84a0b032f29b6eb3d",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysX_64.dll": "ce4f62437941054dfad95a76595cd2979562476c839fc2cc99625c8ab9a9f26a",
+    "PhysXCommon_64.dll": "818f0398751e726a6ad0b20241605673a8bfbb4d6dca95d36bfd01a88e8cb2ad",
+    "PhysXCooking_64.dll": "47fc92cf968715853bb5bb8bbdc459117dbebeaedeb4e71064ee8395da0aca74",
+    "PhysXFoundation_64.dll": "cad43d5e6215c2346f1008dc7ab66861de5dcf1144f7e74c1d8042a4f6bac788",
+    "PVDRuntime_64.dll": "434a786fca25a02de707870f838045374aad181fd933ae899772eae58782fe8a",
+    "SnippetArticulationRC_64.exe": "382769d5e0ddaf609a7f42133e3929fbaae407ed938dd5a06f00a834bdb0c2ce",
+    "SnippetBVHStructure_64.exe": "b30502b5fb1ab4dd014ee2f5c8e695522fe64816152c07301ef2c2469de27b1f",
+    "SnippetCCD_64.exe": "9e0e21042541d3c65663c342debbc762ca7b559c462eb92eca6d70a1772542e6",
+    "SnippetChainmail_64.exe": "8770171797da415f82de0c553fec59d8f747c1e4201173cba7f6147f91d6e657",
+    "SnippetContactModification_64.exe": "110435bc367d0b177723c82dda8ebc0da3ccf660a87d7d39856d3699466aab74",
+    "SnippetContactReport_64.exe": "6252ebdc59ccf3bbcce003fe2298efdbf53184b7d7513f4f7cb65db4c7b69355",
+    "SnippetContactReportCCD_64.exe": "878bce99bd746651f34a6d490488950f14516af49576c98da99d17cddaa1bc89",
+    "SnippetConvexMeshCreate_64.exe": "b18e1f2bc2e2410c7a59cec87464e278ee3fefbce0f24dfda4337097e755eb55",
+    "SnippetCustomConvex_64.exe": "a6d42eecc234da62ad7edd000edb5c742238481d39e298e4742ad03eba41c63e",
+    "SnippetCustomGeometry_64.exe": "911a4e7c672bc8e52f28bf619b53978965fe1d7883f460db41afd4b10136dbed",
+    "SnippetCustomGeometryCollision_64.exe": "51520e7a92c4328483c1bfab2f3908c87a1e0d508e837491c97238d296f7ed34",
+    "SnippetCustomGeometryQueries_64.exe": "af3d7f90d828f2877c99716787f93abc636157b6a4ebbb95e432f89da350fef2",
+    "SnippetCustomJoint_64.exe": "75271510303d366aa607fa736498db8562ff908bdabf167f02f86ecd1422dbda",
+    "SnippetCustomProfiler_64.exe": "bebad646c4d4302506fb4f49fd307cc6a26a9c3b19d194507fe07ae9815ecbee",
+    "SnippetDeformableMesh_64.exe": "5f254d421350ad732fa628c17a1ec9c38eadea10f8c2bc4888dd52c6bde201a9",
+    "SnippetDeformableSurfaceAVBD_64.exe": "f99fa4fd382ddd3af898f522e8fd2603adf03e46bd38c7e117de0a7f52fa07de",
+    "SnippetDeformableVolumeAVBD_64.exe": "7cae502a6c452a1e70a0da07fb4c2131bf6139a89bda285f94d53a5c79a3e803",
+    "SnippetDeformableVolumeAVBD_Motion.exe": "fc42a1539270cb0d97b3f3a4df191e4067e416e26d0df3e77f973ec5c0a5601c",
+    "SnippetDelayLoadHook_64.exe": "57b1fd11ba85c36412f81d5156598a320c6dc36124abcd92a5fb0d2597ea935b",
+    "SnippetFixedTendon_64.exe": "67fc508710ba200dee64045d4060057e664f7f755ca706cac3d15fb12626fe5b",
+    "SnippetFrustumQuery_64.exe": "01d9361fb102de5d412b7c6c79bf1b49db266810b94bb380cd95c15d8cf1074e",
+    "SnippetGearJoint_64.exe": "d821c9a0b08a150c0c53da20074ab3424c52269fa4131a987dc74c473180ff37",
+    "SnippetGeometryQuery_64.exe": "f1034bd6a9cd244b42383395d60ca646cf80b543605372ab1fa51691bf2ea70b",
+    "SnippetGyroscopic_64.exe": "b98ab98a05e77ad2691602d95520155cdeba169a93de1bf0db3bf744f7676172",
+    "SnippetHelloWorld_64.exe": "38e9ac38bca3d540e0de8035004763ec50c590c415f0e2544204cc6265aac7f0",
+    "SnippetImmediateArticulation_64.exe": "d92d42a2cff1abd19900fdabb1f000aef0d8464e69cdee04d08d5556451fadee",
+    "SnippetImmediateMode_64.exe": "77295d2c6c5b8d5cc3b66e2bde6894a4bb7f1b8a2aa63729f4708a1e61dc6d05",
+    "SnippetJoint_64.exe": "1ef1e0a5c0f0248cde96de29c9622621af96ba7e6f44fa428e927458c668ebcc",
+    "SnippetJointDrive_64.exe": "f51443521b46bdf3228857f38d56a50a64ab393bed71c872de5a65fa81d32bda",
+    "SnippetJointSoftBody_64.exe": "8a3ea52a5f94b3101a716909c53a25fc0ce25db69bca6066360d5150bc140322",
+    "SnippetLoadCollection_64.exe": "cce9357df20d443ff4c3c74f1ff45cfea0b40ca7a8437908420a93b4a7621eef",
+    "SnippetMassProperties_64.exe": "10e61316c426ed5bfb1c304e70d783f67f2fcab6fc3aa26e80eaf4288ab4126c",
+    "SnippetMBP_64.exe": "f6ec47aa7c7e8f36064a1f36aac184ba9074b6d42943d9ebae49b62812259472",
+    "SnippetMimicJoint_64.exe": "b2bc434413ad05dd217a8eb921f8f379b98d7fb2e0275a9f48bd69a9e680f291",
+    "SnippetMultiPruners_64.exe": "73766dbf3aafd48c0bf9a1067f9b658ea43b0bd5408a7e1e457c07e11d09c8b6",
+    "SnippetMultiThreading_64.exe": "eeaa3a55372258c317ff1226f7d04e6ed3b46d12e232da9505595ab6f5ee4690",
+    "SnippetOmniPvd_64.exe": "b48c0a8436fa063106a4bb46abf8cf3175ae693ec89c0240d7fb2cc414f9b643",
+    "SnippetPathTracing_64.exe": "995928ec7f2fe5b940cdce70e1d0f2ec19bf8c3e74672ea63d152688a18274cf",
+    "SnippetPointDistanceQuery_64.exe": "cff6117143ffad3d55bda2dbc436f5f372b1d6ee6770ff19d577210582a7099c",
+    "SnippetProfilerConverter_64.exe": "bae92506c5a50adf753d4a669019b0d0d8d32fd8cf1f163f8e57291c77898933",
+    "SnippetPrunerSerialization_64.exe": "56dedf1fc256538352feb9e66744a8182bd4b8d3795059f19085380ae20ccdd5",
+    "SnippetQuerySystemAllQueries_64.exe": "d4dd7cb26579662d6945d213459980956b9933b906ac90eb44d1f04671450479",
+    "SnippetQuerySystemCustomCompound_64.exe": "d6a30fa78974228256d716923d3408bff545f108403479fb0589f07239a40f08",
+    "SnippetRackJoint_64.exe": "1a3c54d3ad27199df93817bf5169694fbecbb29eb33e81f15b91126003d3e051",
+    "SnippetSerialization_64.exe": "39b5a72c2471ed128f37acc708d79c398066a807e3083f71f203db1412f2ba85",
+    "SnippetSpatialTendon_64.exe": "d30d167e7ea8eca417735c5435c038e06e7b2acf80daf4ad5dfab9665a90aaba",
+    "SnippetSplitFetchResults_64.exe": "5c9948a385018012c72b0754be69acffe3688c5abced3ad4dca0b22fcfc6aa5f",
+    "SnippetSplitSim_64.exe": "fa90ece5eb9a5d555a3e851c3dc632a88bb3a6e3e6e506518f3b940b1fa0e716",
+    "SnippetStandaloneBroadphase_64.exe": "fa8a850ceed330d8998c1f51d0ab2c90c93ff30150d25d301a747ff2e35d7de2",
+    "SnippetStandaloneBVH_64.exe": "1cf760bf9c4d18938fd00f45cd736a28afe15e0f92448a770f8ede14821723ad",
+    "SnippetStandaloneQuerySystem_64.exe": "ac5f28aa97ada216563ed33bc30d7b5c2ad10c8567294e8c4ace1c44bea990c9",
+    "SnippetStepper_64.exe": "3be183f0a673fe9990b0a6a8b6959812de7a1e817da572d4501219c094321858",
+    "SnippetToleranceScale_64.exe": "4dd0bbdcb0a57e6072813c3b51324dd08a559a2cb13139a3520fc0f65cb114e6",
+    "SnippetTriangleMeshCreate_64.exe": "1075345aa2db6d1cb49512d03a3020ff0bd289048c93167f0bdfb51c32fffcee",
+    "SnippetTriggers_64.exe": "d361472bfcdb0cb204bd8e36d2192923e314e5fd2ae6e7eb443fbaa30f0b6135",
+    "SnippetVehicleCustomSuspension_64.exe": "e32b2f8ef65ce298ada653dbcf0875d38f5a1c50f616c385440625862636f68d",
+    "SnippetVehicleCustomTire_64.exe": "eb1c0e5142ecd2ed2d68ff07a8f1b2dfe172111c739dac5085fbe0c340908604",
+    "SnippetVehicleDirectDrive_64.exe": "6a892b3c526c0905d26f331756e87ba179771ba43e51c41494f15cdf28eaffc8",
+    "SnippetVehicleFourWheelDrive_64.exe": "5a2d886e6276c1a0e211e733eefde342299d622f60085a9b9a9f33b23f0d3ce5",
+    "SnippetVehicleMultithreading_64.exe": "e6742a3b7a5e87dfdb070ae90459f13268fe403cace4eb4320c891f02ea71e48",
+    "SnippetVehicleTankDrive_64.exe": "15b8706d2b256d72c768b7a817b57dcdb78370a4cb82a207ecd4689ebad2c6ff",
+    "SnippetVehicleTruck_64.exe": "15792d99aff05745d612ff81a774769b2185e33e521ce0c4bc3f751ef82a0830"
+  },
+  "binariesUnchanged": true,
+  "allPassed": true
+}

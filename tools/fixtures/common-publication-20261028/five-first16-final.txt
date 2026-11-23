@@ -1,0 +1,12 @@
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1935715779514187e-05 candidate=7.0788593264925481e-08 witness=-1.2405166671669576e-07
+[AVBD_COMMON_STEP] iteration=11 blocks=788 groups=136 fraction=0.00048828125 requested=3390.23297 initial=0.174165494 residual=0.174004581 status=PASS storage=backend_iterate
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1913332703676947e-05 candidate=7.6386762193347835e-08 witness=-1.6875515029823873e-07
+[AVBD_COMMON_STEP] iteration=12 blocks=788 groups=136 fraction=6.10351562e-05 requested=3389.1739 initial=0.174004585 residual=0.173986955 status=PASS storage=backend_iterate
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1925435982389541e-05 candidate=6.6472682080931378e-08 witness=-1.9855747268593404e-07
+[AVBD_COMMON_STEP] iteration=13 blocks=788 groups=136 fraction=0.00048828125 requested=3389.02172 initial=0.17398696 residual=0.173825589 status=PASS storage=backend_iterate
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1903052935584633e-05 candidate=7.6386762193347835e-08 witness=-1.6875515029823873e-07
+[AVBD_COMMON_STEP] iteration=14 blocks=788 groups=136 fraction=6.10351562e-05 requested=3387.96166 initial=0.173825584 residual=0.173807283 status=PASS storage=backend_iterate
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1915156217572385e-05 candidate=7.8582370888202746e-08 witness=-1.6875515029823873e-07
+[AVBD_COMMON_STEP] iteration=15 blocks=788 groups=136 fraction=0.00048828125 requested=3387.8212 initial=0.173807286 residual=0.173646268 status=PASS storage=backend_iterate
+[AVBD_COMMON_GEOMETRY] a=58 b=4294967295 domain=1 current=7.1895291387458204e-05 candidate=4.4166288570846035e-08 witness=-1.6875515029823873e-07
+[AVBD_COMMON_STEP] iteration=16 blocks=788 groups=136 fraction=6.10351562e-05 requested=3386.74664 initial=0.173646266 residual=0.173628081 status=PASS storage=backend_iterate

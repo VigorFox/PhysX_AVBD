@@ -1,0 +1,13 @@
+{
+  "file": "tools\\benchmark-results\\bounded-contact-20261105\\reaction-reference.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "strict full response",
+  "reason": "local_response_capture",
+  "materialProducts": 520,
+  "tableIterations": 69128,
+  "solverConverged": false,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

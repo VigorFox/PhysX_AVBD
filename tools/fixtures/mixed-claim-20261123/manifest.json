@@ -1,0 +1,36 @@
+{
+  "sourceBase": {
+    "DyAvbdColorTasks.h": "0397b5fdc3d0cefa375c5f8fc4c8d66e3024c2b9f9a18e07d2edf177c171c88e",
+    "DyAvbdDynamics.cpp": "7887c7fb8db2afb144f195b1f09dd43d758b9d661fe5488eea667cc5245fca97",
+    "DyAvbdDynamics.h": "92d8b8bea731e126e9b7fa884ab08feff8d515754990554c59c804e44e7d7767"
+  },
+  "runtime": {
+    "baseline": "6b3badbf3c6de581705b22fa9a00ca9d35d01e33d255f2d990327ece30005e27",
+    "candidate": "f09b8b35df6187934b89699b57f344cc26e7209dd35959146bd5db1b8d748ac4",
+    "probe": "d33886fd8faddddb6012b14059c5923bae43521fc587bee01183c0b30e6dedca",
+    "candidate-entry": "affd05094cd8129fd8333cebf8b9c05c470eb4ef97ab17fb91d94ae456e8ab2f",
+    "probe-entry": "988fc0f7f69169733ed6ce4ad9b15146a0be0f924d59b235557e8f252e8c56c4"
+  },
+  "runs": {
+    "aa": 32,
+    "ab": 64,
+    "confirm": 48
+  },
+  "physics": 109,
+  "passed": 109,
+  "records": 468,
+  "sha256": {
+    "analysis.json": "31a44f810d0b087a29a1b34e07ec30182417a2402982119bd88bf7430c553480",
+    "analyze.py": "28441bca14f5f56779a93724a0e206aa43d81aa144f30943bbd558b6aa6fbe08",
+    "baseline-timing-probe.patch": "62dfd354d96e3ec0a038416920ff2701000d54056b07dfd95625fc3983aa4032",
+    "callback-probes.json.gz": "81f80e83e9232719057b2fb748102c52c800954f8ff632d073b1769b3ff1a8d3",
+    "candidate.patch": "6f2e4b4970aaf0faa6fe53339625492756ca9d79468d513c4567fa1f6f5d9d7d",
+    "confirmation.json": "7aff4ed73b263e2494e546b4127a4dd9ffe58e62a637d45046cfd9762927d59d",
+    "entry.json.gz": "60f14e04d241007efd63166775200effebc32bb050ccbe98c9fc1016130255af",
+    "raw-runs.json.gz": "3d4885450114708080214ca888d5e4eed5b402826dfc68a491ed710e806fb16d",
+    "README.md": "5623b8f0a9f4def6c09b87fc5952fa9bfcdf1eb04d369134ad5f7ec8bcb2b80d",
+    "registration.json": "6ffb5b05949d3e2f096479daaa8876cb88fda8a7c21d4337cc31b661bab0c503",
+    "ticket-domain.json": "946dd21b30cfc9db3be9a90ca2341591b2837482b9ffcfae45f6111e5d86046c",
+    "trace.json.gz": "af35ea3412aeacac0bc6c9608c33882876a466fa1f93368ac8186d7fb9ea8ec4"
+  }
+}

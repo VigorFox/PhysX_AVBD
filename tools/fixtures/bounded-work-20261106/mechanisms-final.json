@@ -1,0 +1,172 @@
+{
+  "mechanismChecksPassed": true,
+  "sceneQualified": false,
+  "gpuImplementation": false,
+  "sharedKernelChecks": {
+    "precise": [
+      "[STAGNATION_FACE] order=0 frozenSingleSolved=1 singleGap=-0.00010000704567203478 singleCertified=0 bundleDy=0 bundleAngle=0 force0=5.0000000000000002e-05 force1=5.0000000000000002e-05 status=PASS",
+      "[STAGNATION_FACE] order=1 frozenSingleSolved=1 singleGap=-0.00010000704567203478 singleCertified=0 bundleDy=0 bundleAngle=0 force0=5.0000000000000002e-05 force1=5.0000000000000002e-05 status=PASS",
+      "[STAGNATION_GROUP] singleA=0 singleB=0 groupA=0.5 groupB=0.49999999999999983 force=1.4999999999999998 status=PASS",
+      "[STAGNATION_WORK] accepted=16 oldMeritRejected=16 uphillRejected=1 status=PASS",
+      "[STAGNATION_ENERGY_SUM] globalDifferenceErased=1 localWork=-0.00014496249999998434 status=PASS",
+      "[STAGNATION_MATERIAL_WORK] scalarDifference=0 pairWork=-0.039933366022528227 reverseRejected=1 status=PASS",
+      "[STAGNATION_SCREEN] activeGroups=2 newlyClosingConstraint=included status=PASS",
+      "[STAGNATION_PATH] endpointOnlyMissesCrossing=1 crossingRejected=1 liftAccepted=1 derivativeError=4.07818106e-06 endpointError=7.77156117e-16 status=PASS",
+      "[STAGNATION_SLIP] old=0 direct=-1.0057655337042393e-07 linear=-1.0057655342349961e-07 oldRelativeError=1 newRelativeError=5.27714246e-10 status=PASS",
+      "[STAGNATION_ROTATION] cases=1000 oldZeroMoves=255 maxOldAngle=6.49651173e-08 zeroStable=1 status=PASS"
+    ],
+    "fast": [
+      "[STAGNATION_FACE] order=0 frozenSingleSolved=1 singleGap=-0.00010000704567203478 singleCertified=0 bundleDy=0 bundleAngle=0 force0=5.0000000000000002e-05 force1=5.0000000000000002e-05 status=PASS",
+      "[STAGNATION_FACE] order=1 frozenSingleSolved=1 singleGap=-0.00010000704567203478 singleCertified=0 bundleDy=0 bundleAngle=0 force0=5.0000000000000002e-05 force1=5.0000000000000002e-05 status=PASS",
+      "[STAGNATION_GROUP] singleA=0 singleB=0 groupA=0.5 groupB=0.49999999999999983 force=1.4999999999999998 status=PASS",
+      "[STAGNATION_WORK] accepted=16 oldMeritRejected=16 uphillRejected=1 status=PASS",
+      "[STAGNATION_ENERGY_SUM] globalDifferenceErased=1 localWork=-0.00014496249999998434 status=PASS",
+      "[STAGNATION_MATERIAL_WORK] scalarDifference=0 pairWork=-0.039933366022528227 reverseRejected=1 status=PASS",
+      "[STAGNATION_SCREEN] activeGroups=2 newlyClosingConstraint=included status=PASS",
+      "[STAGNATION_PATH] endpointOnlyMissesCrossing=1 crossingRejected=1 liftAccepted=1 derivativeError=4.07808111e-06 endpointError=1.16573418e-15 status=PASS",
+      "[STAGNATION_SLIP] old=0 direct=-1.0057655337042393e-07 linear=-1.0057655342349961e-07 oldRelativeError=1 newRelativeError=5.27714246e-10 status=PASS",
+      "[STAGNATION_ROTATION] cases=1000 oldZeroMoves=530 maxOldAngle=6.71377122e-08 zeroStable=1 status=PASS"
+    ]
+  },
+  "analyticMerit": {
+    "x": 0.01,
+    "gn": 0.10020000000000001,
+    "trueHessian": -0.8997,
+    "step": 0.09979041916167665,
+    "initialEnergy": 0.24995000250000002,
+    "initialGradientSquared": 9.998000100000002e-05,
+    "all16StepsDecreaseEnergy": true,
+    "all16StepsIncreaseStationarityMerit": true,
+    "samples": [
+      {
+        "alpha": 1.0,
+        "energy": 0.2445072626620898,
+        "gradientSquared": 0.009699880341911979
+      },
+      {
+        "alpha": 0.5,
+        "energy": 0.24833397595608755,
+        "gradientSquared": 0.0029910856154948713
+      },
+      {
+        "alpha": 0.25,
+        "energy": 0.24942082452379008,
+        "gradientSquared": 0.0010504185733606604
+      },
+      {
+        "alpha": 0.125,
+        "energy": 0.24975530766463955,
+        "gradientSquared": 0.0004500792490757278
+      },
+      {
+        "alpha": 0.0625,
+        "energy": 0.24987014384268877,
+        "gradientSquared": 0.00024363870918620638
+      },
+      {
+        "alpha": 0.03125,
+        "energy": 0.2499144467677146,
+        "gradientSquared": 0.0001639513260562985
+      },
+      {
+        "alpha": 0.015625,
+        "energy": 0.2499333181777037,
+        "gradientSquared": 0.0001300000917752668
+      },
+      {
+        "alpha": 0.0078125,
+        "energy": 0.24994193374096824,
+        "gradientSquared": 0.00011449853433381057
+      },
+      {
+        "alpha": 0.00390625,
+        "energy": 0.24994603647291133,
+        "gradientSquared": 0.00010711637563583537
+      },
+      {
+        "alpha": 0.001953125,
+        "energy": 0.2499480365747922,
+        "gradientSquared": 0.00010351746361244404
+      },
+      {
+        "alpha": 0.0009765625,
+        "energy": 0.24994902380950842,
+        "gradientSquared": 0.00010174105092104647
+      },
+      {
+        "alpha": 0.00048828125,
+        "energy": 0.24994951422278583,
+        "gradientSquared": 0.00010085860558834138
+      },
+      {
+        "alpha": 0.000244140625,
+        "energy": 0.24994975862840121,
+        "gradientSquared": 0.00010041882319790252
+      },
+      {
+        "alpha": 0.0001220703125,
+        "energy": 0.24994988063095272,
+        "gradientSquared": 0.0001001992920744822
+      },
+      {
+        "alpha": 6.103515625e-05,
+        "energy": 0.2499499415821644,
+        "gradientSquared": 0.00010008961653107363
+      },
+      {
+        "alpha": 3.0517578125e-05,
+        "energy": 0.2499499720452542,
+        "gradientSquared": 0.0001000348012639887
+      }
+    ],
+    "scope": "Analytic counterexample to GN direction plus monotone squared-residual acceptance; not a captured material"
+  },
+  "traces": [
+    {
+      "file": "tools\\benchmark-results\\common-publication-20261028\\five-first16-final.log",
+      "acceptedIterates": 68,
+      "acceptedFrames": 14,
+      "rejectedFrames": 0,
+      "unfinishedAtBudget": 1,
+      "maxBlocks": 788.0,
+      "afterFirstGeometryRejection": {
+        "iterates": 54,
+        "minimumFraction": 6.10351562e-05,
+        "medianFraction": 0.000122070312,
+        "fractionAtMostOneOver1024": 42
+      },
+      "firstReportedViolatorCounts": {
+        "58/4294967295": 49
+      },
+      "scope": "Observed iterates, not a count of all violating pairs or successful scene frames"
+    },
+    {
+      "file": "tools\\benchmark-results\\common-publication-20261028\\five-first16-v11.log",
+      "acceptedIterates": 58,
+      "acceptedFrames": 13,
+      "rejectedFrames": 0,
+      "unfinishedAtBudget": 1,
+      "maxBlocks": 788.0,
+      "afterFirstGeometryRejection": {
+        "iterates": 42,
+        "minimumFraction": 6.10351562e-05,
+        "medianFraction": 0.000122070312,
+        "fractionAtMostOneOver1024": 31
+      },
+      "firstReportedViolatorCounts": {
+        "97/4294967295": 1,
+        "98/4294967295": 32,
+        "58/4294967295": 1
+      },
+      "scope": "Observed iterates, not a count of all violating pairs or successful scene frames"
+    }
+  ],
+  "missingTraces": [],
+  "disconnectedThrottle": {
+    "sharedAlpha": 6.103515625e-05,
+    "unconstrainedStep": 1,
+    "globalAcceptedStep": 6.103515625e-05,
+    "independentAcceptedStep": 1,
+    "scope": "Two uncoupled components; demonstrates lost progress, not measured runtime speedup"
+  }
+}

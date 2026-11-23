@@ -1,0 +1,7 @@
+[COMMON_STEP_TEST] case=mode0 status=PASS
+[COMMON_STEP_TEST] case=mode1 status=PASS
+[COMMON_STEP_TEST] case=mode2 status=PASS
+[COMMON_STEP_TEST] case=mode3 status=PASS
+[COMMON_STEP_TEST] case=mode4 status=PASS
+[COMMON_STEP_TEST] case=mode5 status=PASS
+[COMMON_STEP_TEST] case=initial-recovery-rejected status=PASS

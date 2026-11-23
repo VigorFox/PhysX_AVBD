@@ -1,0 +1,22 @@
+[
+  {
+    "name": "local-unit",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_block_probe.py"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 10.8097814
+  },
+  {
+    "name": "common",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_program_probe.py"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 13.2597567
+  }
+]

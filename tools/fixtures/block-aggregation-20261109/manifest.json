@@ -1,0 +1,116 @@
+{
+  "scope": "Read-only grouping audit and mechanism qualification; no production solver change",
+  "productionChanged": false,
+  "fullFiveQualified": false,
+  "speedupMeasured": false,
+  "baseline": "tools/fixtures/bounded-curvature-model-20261106/manifest.json",
+  "tests": {
+    "mechanismPrecise": true,
+    "mechanismFast": true,
+    "solvedCaptureRoundtrip": true
+  },
+  "entries": [
+    {
+      "file": "inventory.json",
+      "source": "tools/benchmark-results/block-aggregation-20261109/inventory.json",
+      "sha256": "9f049a3b152237adc8d27df1d2dca7f731ad7c3fa3ab3f2800fe170162bdc467",
+      "storedSha256": "9f049a3b152237adc8d27df1d2dca7f731ad7c3fa3ab3f2800fe170162bdc467"
+    },
+    {
+      "file": "mechanism.log",
+      "source": "tools/benchmark-results/block-aggregation-20261109/mechanism.log",
+      "sha256": "51e833fc659e5be59f25288fff28937545c69f30d81d1414c0bd8a35c0edfb87",
+      "storedSha256": "51e833fc659e5be59f25288fff28937545c69f30d81d1414c0bd8a35c0edfb87"
+    },
+    {
+      "file": "record.py",
+      "source": "tools/benchmark-results/block-aggregation-20261109/record.py",
+      "sha256": "0006cc710c85392aa61b4a6bdbc3f1c8ba1d0fc642781376d93314cb411d96ee",
+      "storedSha256": "0006cc710c85392aa61b4a6bdbc3f1c8ba1d0fc642781376d93314cb411d96ee"
+    },
+    {
+      "file": "inputs/original-candidate.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original-candidate.json",
+      "sha256": "3f708a6720557bbc44b8331ac2494e9aa473b0f93f83cd6ca64fc81249e552da",
+      "storedSha256": "a791aaf667c6eb7b70f1f39442b7fd5d093c4bd636a3c8c76b0566292148c4fe"
+    },
+    {
+      "file": "inputs/local-candidate.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local-candidate.json",
+      "sha256": "66160000b84b175734e4526f2113447aa0cd9d8b840c80584e2f2bf188c57697",
+      "storedSha256": "d034e91aafc131abcecd13355918c30c3a59716f4aea401fdfc0ebad30044fab"
+    },
+    {
+      "file": "inputs/positive-replay.program.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-replay.program.json",
+      "sha256": "6930773accc46e0e3fc1fe7232d343decabe1afdeea030accf0a1772be6d6187",
+      "storedSha256": "bbdacb7e6406ba3e34248c0e8626efb583082a91bb889784c37422f0d0a3447d"
+    },
+    {
+      "file": "inputs/reaction-next-failure.json.gz",
+      "source": "tools/fixtures/bounded-contact-20261105/reaction-next-failure.json.gz",
+      "sha256": "a98c28118587c54d904dc1f7a4dd263a186c9bb7aaa85c19404a95f7809ac93c",
+      "storedSha256": "a98c28118587c54d904dc1f7a4dd263a186c9bb7aaa85c19404a95f7809ac93c"
+    },
+    {
+      "file": "sources/tools__analyze_avbd_block_aggregation.py.gz",
+      "source": "tools/analyze_avbd_block_aggregation.py",
+      "sha256": "4798de0d139f63ef2f8a6dffaeff571ea4a16b8a4de5470c1828bca0890d4626",
+      "storedSha256": "46c9f83fe06f8b956889a681699143c0306cd3597e2acf360bd789ef8d0aa96f"
+    },
+    {
+      "file": "sources/tools__avbd_contact_bundle_probe.cpp.gz",
+      "source": "tools/avbd_contact_bundle_probe.cpp",
+      "sha256": "cf83ad5335fe322e8d1750c2614702016318f0852dd0a73fb23ba204973de518",
+      "storedSha256": "4ad782d51b21cf0910fc4acd51eb847f1b73201722c5662d07951c8343a213c4"
+    },
+    {
+      "file": "sources/tools__run_avbd_contact_bundle_probe.py.gz",
+      "source": "tools/run_avbd_contact_bundle_probe.py",
+      "sha256": "df5143128200aceb04f5fb1be351e102da85ad71b6a15b9f727e20445a10b007",
+      "storedSha256": "88d3193988f619224117625800e33f9bbf0052bc17f6bf8d000226273751aa79"
+    },
+    {
+      "file": "sources/tools__validate_avbd_common_capture.py.gz",
+      "source": "tools/validate_avbd_common_capture.py",
+      "sha256": "e4d5175401dcaeacc867ae2635725b1c8b4c58b061ea414b5ae25bccd8168946",
+      "storedSha256": "5146050196cb4b1afabb9de21f4d736e7d393fcd9e9ccf30ef79d503931cc6e5"
+    },
+    {
+      "file": "sources/docs__LOCAL_BLOCK_AGGREGATION_20261109.md.gz",
+      "source": "docs/LOCAL_BLOCK_AGGREGATION_20261109.md",
+      "sha256": "aa6460e96d5e7d39bedabbdc22e78c24e3eb1cb353b15110646e3edaa450828b",
+      "storedSha256": "5088750643b4d0546b6712d64fa33ccf5464dcf5f7d754235fa8dbb04f65c0b4"
+    },
+    {
+      "file": "sources/docs__REFACTOR_OUTLINE.md.gz",
+      "source": "docs/REFACTOR_OUTLINE.md",
+      "sha256": "ffd1f56bfff1c433d6c93b886cdff00a5232c35c1904e7950c0a87bcfc39a724",
+      "storedSha256": "e99910f5bf4b0d3473e907e970db3a4b47f1832f7d3ca7af8e0ccc891fb24c89"
+    },
+    {
+      "file": "sources/docs__ITERATION.md.gz",
+      "source": "docs/ITERATION.md",
+      "sha256": "efa1cc75c3e8d93b15fe17aa69dd3994f644ed6eb849cd69c7835491410de071",
+      "storedSha256": "7ec0d04fbea08a56cbcc8beac21972bda85ae2677187873155d8c926a001d505"
+    },
+    {
+      "file": "sources/.cursor__skills__avbd-whole-step__dead-paths.md.gz",
+      "source": ".cursor/skills/avbd-whole-step/dead-paths.md",
+      "sha256": "4f0189d54adb8ba29a781540be993501df045d957146aa54a37c6d66356032ed",
+      "storedSha256": "c29711e7ad134226085e867feed0d5a5382b5fd3e6f502f0b28bcd5b1b7959c2"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdNpDomain.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h",
+      "sha256": "3959a7c3d5e0036baf6bc57f9a9a18121df2bc2209be289c04b197d6ddc4bdac",
+      "storedSha256": "01c05b978db27095fe3c731de8c0343b67503a0529294f69381314d1859c2651"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdCommonProgram.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h",
+      "sha256": "c9a9ad32f69493cb65acbe2fca59805568edf52f41b0699052e9860582be288a",
+      "storedSha256": "f7ae5140aca1c74258a2cc65ce411dfef29b24259aebbbc442a74eb31871e35f"
+    }
+  ]
+}

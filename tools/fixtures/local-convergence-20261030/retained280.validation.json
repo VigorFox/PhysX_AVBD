@@ -1,0 +1,28 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\retained280.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": true,
+  "executionSource": "grouped augmented primal/dual",
+  "dofs": 24,
+  "groups": 280,
+  "activeNormalForces": 5,
+  "maximumForce": 8836.036847612831,
+  "symmetry": 1.4551915228366852e-11,
+  "stationarity": 1.3043136732449057e-05,
+  "relativeStationarity": 1.2165838177758772e-09,
+  "unitStepRoot": 1.1058246514039638e-06,
+  "relativeUnitStepRoot": 1.2514939338474086e-10,
+  "minimumNormalResidual": -1.1083247858831686e-09,
+  "tableIterations": 6,
+  "materialProducts": 27,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 6.616972107134042e-05,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

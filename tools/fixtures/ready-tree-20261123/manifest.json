@@ -1,0 +1,45 @@
+{
+  "sources": {
+    "DyAvbdDynamics.cpp": "7887c7fb8db2afb144f195b1f09dd43d758b9d661fe5488eea667cc5245fca97",
+    "DyAvbdDynamics.h": "92d8b8bea731e126e9b7fa884ab08feff8d515754990554c59c804e44e7d7767",
+    "DyAvbdSolve.cpp": "33d77fa6879c6651a7abc738ede26aaf9ede7022c30d4d66f5578e7aa38089ff"
+  },
+  "runtime": {
+    "base": "6b3badbf3c6de581705b22fa9a00ca9d35d01e33d255f2d990327ece30005e27",
+    "ready": "a3ea816c292b6932e4763af980740d8ce08c216c3a9e3e5739c6d27dc79170cb"
+  },
+  "diagnosticDLL": {
+    "base": "d48e778e78c165340ee29239a56c0b13b3028af069b5bc7edd9bfdb3bcf1d5e6",
+    "ready": "a8c10233abcfe7948e0c2fdb2c1a4dc69a8a72502df12bf051a4fa3f66d21f34"
+  },
+  "cpuWindow": "d71c8f82fa9021f82378e5adf10ddc0f7d36270f8933d8d7073269b3bd5c7e0d",
+  "runs": 100,
+  "quality": 109,
+  "rawCount": 315,
+  "rootMergeScreenDLL": "ec6a0def0d4a5ba5b83b83a78e4f69db482882302191e28f68c68a09b969f39e",
+  "sha256": {
+    "analysis.json": "9367cff732c8fb92a97385606425036690e34a01dfcc6703d970055b1b462799",
+    "analyze.py": "67ec3900e7e6f01164567e3688e89cc8e4e9f695904f6b0015ac87d5d420910f",
+    "build.py": "703a99982a3599887ffc3a76c11297bef75c2ac49417e99244a87884dd204c87",
+    "build_diagnostics.py": "8b7f19e1cd7660ae7cb79f276ecb816e275f04c107b892fed39e799126a02212",
+    "candidate.patch": "3c67cb61b8e11e56389e8e900c3566772c1adc274e7d0645f8946b81d26c5a8a",
+    "confirm.py": "9306cdf7ae455b5df0c22bf127847c6b343d314cfac3aea2d71b44699599b151",
+    "five-720-8.json": "901bdd8c6750e732443398245a15781cb650376343f4796c1ff389078637ef09",
+    "fused.py": "1edebaf92fcea4f0699b1abaf83a1fbcd9bc436b2c1c18087627c36c198912df",
+    "fused_registration.json": "66f5425c5da43c186344f68ccd134cf42ff7c099c290ea5c989a70dd5fce3eb9",
+    "multi-star.json": "4b1a4a2b2bd5e695737b85e702ce8305725aeba3482ebeb5c0d498a9ea47e941",
+    "physics.json": "56abc31f9f1d849b0e336cef3285e9f96bc2f6dd96ab16e5524c2e3ebbdb0032",
+    "raw.json.gz": "38ff58081b98ce0f911733db7a1640c9efa10edff644f1a899a38576a7128240",
+    "README.md": "d9b9a2d4ea6f18c13039099933b21fe9a344179dbc4835a166fbfd0ade88b3c9",
+    "registration.json": "19c89136bcb4ebec29eb1fe1972b6856ea4ebf8e65aeb777e83045cd5a482406",
+    "replay.py": "b16c356c699e6d75d5f6164c2e8e099bb5256ad32f1b4d46a1b9c83dd5b1e3e6",
+    "rigid.py": "6b845138dd3ccf0920e877d7f46e0c7e61eb9daf2f30ea64b2900440665b8151",
+    "root-merge-screen.json": "6f9b2a0d2d8616f85c8eca62db58e843681aa322397eaa66816b3b534089e2d1",
+    "root-merge.patch": "ea769964fa2e04d8db4dc9ebd1a20a334c290c3ca775dd7b9d9d29a6ec0af1c1",
+    "runs.json.gz": "1268e5f86aabcb66b1a7c647cb122fabe2a918beca557f4128b8de32bf6aa2b2",
+    "stress.py": "9be560dff412ed6c5cb0b2b723a995e15a157b86d4acd3184910e06d07787b09",
+    "study.py": "3fb62facd68fe6dc7171801213542c6f1fbfd175f4559214535e9fdab30c83c7",
+    "wide-rigid.cpp": "eb26266bbf58b62fd6f9ed93d7705774ac71d4202d96accf819420cf2fafd557",
+    "wide-rigid.json": "96782a6bdd81a132353db6656c5ef27c0c816a157e5fd3dee2576cad10226c38"
+  }
+}

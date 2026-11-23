@@ -1,0 +1,22 @@
+{
+  "docs/NATIVE_COOKED_MATERIAL_STAGE1_20261117.md": "d6848c3039de3153b0c0cd641d1a4314b030b68d87a7a88860a78524f53f31e6",
+  "docs/REFACTOR_OUTLINE.md": "46cbfec94ca26d37344ad6257ebcd3f7e04a7eca74f2cd2ea3b167ca6f693d1d",
+  "physx/include/PxConstraintDesc.h": "c441d585cac1fca62b1727e54b99e8c00b9421bc53cb278dde72c4ba761ae8f3",
+  "physx/source/lowleveldynamics/include/DyConstraint.h": "9750432bb608a1f39d9d6944331ee66db0a45c3e20f2a7fafe99f828546323a3",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "54181bcbba3311cc6a67755e996735a9a906c53312e12abf42dc072b6ea1b024",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "e389cd504eb88e020d7c1662edab2cb6458a3704b69d7ae4589f4f47a6b5bc38",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameData.h": "273f29a921e643cd004b225cbdaf5c5d41e2a897fac193db766f146c5b815697",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp": "c2c5d6023c94f519c2e825967ddead796699b3f2881d7b0331b6a467b634eca5",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdPositionMaterial.h": "ffc8b90de77a52334cbf21956a73b255d1de03cf321ea7037ab3130bf4fe5c68",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "9807bc775835556d5d53a2d7afe09438be7afde8d1e4be5049449b5ba23aa66c",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdTetrahedron.h": "50b91f65344b99d5eee9dc8f906251962850cdc5ba40fa878046a527df112868",
+  "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "eb0e0f740202b146a3fb3fc966d2073dea0696cb4dfe6f4f66125eb310772023",
+  "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "af849e9a9bd8d67ab481de74b4d5390f39773549ab078d054e5e64ee89c41012",
+  "physx/source/physx/src/NpConstraint.cpp": "4577c303346874131594636751c0234d8c726ec9f9a400ff20a8249c11559bb0",
+  "tools/avbd_elastic_frame_scene_probe.cpp": "43c445ee2fc3461c9396b867b3e6a63b94422be271265fda404d785ba6c594ca",
+  "tools/avbd_multi_body_probe.cpp": "b1912cf6c90f8f0f4531719ad955ade21b17ddf2e299fac958ae1d964665a64d",
+  "tools/avbd_position_material_probe.cpp": "0fabd0a970dcd8665016afbe30541ab69a813a00e9530f6a8d2a88e96dcdff9e",
+  "tools/benchmark_native_material_pair.py": "dc8918a4ff4a3a406a465b7f1d5685cd292aecc361a1da5a22802080cda9d79a",
+  "tools/profile_native_material_pair.py": "5c09b3a4262d21ef324bf50136290c180fea280da6b72851d6d80efd3baa7227",
+  "tools/run_avbd_position_material_probe.py": "3cca8f585f8a4e966b64dfb9ad2eb7b559ba28232e8f218725181fa3b4699f9d"
+}

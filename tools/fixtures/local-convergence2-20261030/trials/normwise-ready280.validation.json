@@ -1,0 +1,18 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence2-20261030\\normwise-ready280.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "grouped augmented primal/dual",
+  "reason": "local_response_capture",
+  "materialProducts": 15,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 5.839142320372492e-06,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

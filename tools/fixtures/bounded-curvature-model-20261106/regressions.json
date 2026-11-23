@@ -1,0 +1,107 @@
+[
+  {
+    "name": "public-hello_world-avbd",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-hello_world-pgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-hello_world-tgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-joint-avbd",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-joint-pgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-joint-tgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-articulation_rc-avbd",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-articulation_rc-pgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "public-articulation_rc-tgs",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "publication-t0",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "publication-t1",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "publication-t4",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "curvature",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "factorization",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "bounded",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "stagnation",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "frozen",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "elastic-material",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "material-assembly",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "np-final",
+    "exit": 0,
+    "passed": true
+  },
+  {
+    "name": "smoke-final",
+    "exit": 0,
+    "passed": true
+  }
+]

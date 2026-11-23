@@ -1,0 +1,33 @@
+{
+  "frames": 360,
+  "ids": [
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    163,
+    164,
+    165,
+    166,
+    167,
+    274,
+    275,
+    276,
+    277,
+    278,
+    279
+  ],
+  "workers": [
+    4,
+    8
+  ],
+  "pairs": 8,
+  "aaPairs": 4,
+  "profilePairs": 3,
+  "baseline": "frozen qualified Checked runtime 6b3badbf3c6de581705b22fa9a00ca9d35d01e33d255f2d990327ece30005e27",
+  "design": "At most four items per claimant, only mixed colors with available Assemble leaves. Single fan-in, original ordinary color lanes. No waits inside claimant.",
+  "metrics": "paired simulate/fetch P95 (360 and 18), fixed18 mean, mean step, process CPU and T4/T8. Compare number of external submissions and their submit-to-start time for fixed18, plus mixed-wave item residence. Gate: preserve physics, lower submissions, demonstrable five-body tail/scaling and no sustained default cloth cost regression. No timing-based exclusions."
+}

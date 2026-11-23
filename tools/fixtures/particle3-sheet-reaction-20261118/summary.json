@@ -1,0 +1,932 @@
+{
+  "scope": "Two zero-bending 625-node membrane mechanisms, CPU Checked, 4 common primal iterations, 180 steps, dt=1/60",
+  "physicalThresholds": {
+    "relativeP": 0.005,
+    "centerMeters": 0.001,
+    "peakTotalEnergyRatio": 1.05,
+    "minRelativeScaling": 1
+  },
+  "sdkSHA256": {
+    "avbd_smoke.exe": "a9357739c544ced616fc6e01e1758a1883ee9244a2e28eb5354c93b712ec8826",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysX_64.dll": "db1ebff6c0e5e9047115ecf713f72e3da05fd898908dd05a76c945f4745202a5",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetArticulationRC_64.exe": "8f7e5826dcda48b008bc51cce599bc44d8045e999d7af824d1bec5fa07a8042b",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a350b1b64242524793a33d545f0b5016b75f72fbe54eac2dd21e2cb6f57c6d88",
+    "SnippetDeformableVolumeAVBD_64.exe": "e998ffda3a896466ec4c5cff5983f295b87e721a0344b6e9db9c4c56d0c1cc18",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088",
+    "SnippetJoint_64.exe": "1e48b09ef700831d0ff8735e32cce637e5eeffaa1130bc472a32a4fe9ac933f3"
+  },
+  "gates": [
+    {
+      "name": "domain-f32",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "domain-f32-fast",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "domain-f64",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-0",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-4",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mesh-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "plane-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-particle3-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-rigid6-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-particle3-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-release-rigid6-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-8",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-flight",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "volume-release",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-reset",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-eccentric",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-frictionless",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "cloth-impact-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "reaction-rigid6-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-early-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-rigid6-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-late-half",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-rigid6-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "reaction-particle3-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "soft-soft-late-full",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-rigid6",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-particle3",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-rigid6-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "eccentric-particle3-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-rigid6",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-particle3",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-rigid6-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "mirror-particle3-soft",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "initial-overlap-plane",
+      "exit": 2,
+      "negativeDomainTest": true,
+      "passed": true
+    },
+    {
+      "name": "initial-overlap-sphere",
+      "exit": 2,
+      "negativeDomainTest": true,
+      "passed": true
+    },
+    {
+      "name": "reaction-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "cloth-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "soft-soft-audit",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true,
+      "executionAuditPassed": true
+    },
+    {
+      "name": "shell-work",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-avbd",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-pgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "hello-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "joint-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "articulation-tgs",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-membrane",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-bending",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "material-free-flight",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "rigid6-Surface",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "rigid6-Volume",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    },
+    {
+      "name": "particle3-authored-surface",
+      "exit": 1,
+      "negativeDomainTest": false,
+      "passed": false
+    },
+    {
+      "name": "smoke",
+      "exit": 0,
+      "negativeDomainTest": false,
+      "passed": true
+    }
+  ],
+  "compared": {
+    "impact": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 19.2256144,
+          "p95Ms": 30.8721,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.430962,
+          "p95Ms": 2.2226,
+          "cpuMs": 1.388889,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.15048389,
+          "p95Ms": 9.2765,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.375348,
+          "p95Ms": 1.8154,
+          "cpuMs": 3.038194,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.49473611,
+          "p95Ms": 8.7775,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.709218,
+          "p95Ms": 2.1624,
+          "cpuMs": 3.993056,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.4410813208949702,
+        "8": 0.32636739235698087
+      },
+      "allPhysicalGatesPassed": true,
+      "withinWholeStepCost": true,
+      "scalingPassed": false,
+      "mechanismPassed": false,
+      "previousBuildMedians": {
+        "rigid6-0": {
+          "meanMs": 18.2075106,
+          "p95Ms": 20.5784,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.486202,
+          "p95Ms": 2.2506,
+          "cpuMs": 1.5625,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.38592167,
+          "p95Ms": 9.6963,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.376937,
+          "p95Ms": 1.9248,
+          "cpuMs": 2.517361,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.57922611,
+          "p95Ms": 8.7571,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.732662,
+          "p95Ms": 2.2733,
+          "cpuMs": 4.861111,
+          "maxMomentumError": 0.000547950319,
+          "maxComError": 7.81449548e-05
+        }
+      },
+      "previousBuildRelativeScaling": {
+        "4": 0.4971231654592761,
+        "8": 0.3570576009919645
+      },
+      "models": {
+        "rigid6": {
+          "physical": {
+            "schema": "1",
+            "snippet": "SnippetDeformableSurfaceAVBD",
+            "solver": "avbd",
+            "case": "reaction",
+            "model": "rigid_patch_joint_sheet",
+            "capability": "EXPERIMENTAL",
+            "validation": "GATED",
+            "status": "PASS",
+            "reason": "none",
+            "frames": "180",
+            "completedFrames": "180",
+            "grid": "24",
+            "cells": "576",
+            "joints": "1104",
+            "dispatcherThreads": "4",
+            "mass": "625.004272",
+            "contacts": "12146",
+            "crossContacts": "12146",
+            "centerY": "4.03872108",
+            "minY": "3.71901727",
+            "peakPrincipalStrain": "1.03369665",
+            "finalPrincipalStrain": "1.00870359",
+            "finalAreaRatio": "1.00041902",
+            "maxPenetration": "0",
+            "maxSelfPenetration": "0",
+            "initialEnergy": "40.0000003",
+            "peakEnergy": "40.0000003",
+            "maxMomentumError": "0.000150493783",
+            "maxBallisticError": "2.10955041e-05",
+            "finalAwake": "577",
+            "averageStepMs": "8.16130556",
+            "p95StepMs": "9.2891",
+            "maxStepMs": "10.3351",
+            "averageObserverMs": "0.834435556",
+            "nonFinite": "0",
+            "fetchFailures": "0",
+            "fatalErrors": "0"
+          },
+          "maxAngularDrift": "14.2146624"
+        },
+        "particle3": {
+          "physical": {
+            "mode": "impact",
+            "workers": "4",
+            "nodes": "625",
+            "iterations": "4",
+            "frames": "180",
+            "maxMomentumError": "0.000547950319",
+            "maxBallisticError": "7.81449548e-05",
+            "initialEnergy": "40",
+            "peakEnergy": "40",
+            "initialStrainEnergy": "0",
+            "minStrainEnergy": "0",
+            "peakSheetSpeed": "0.0666071923",
+            "meanMs": "1.295864",
+            "p95Ms": "1.813500",
+            "cpuMs": "3.125000",
+            "status": "PASS"
+          },
+          "maxAngularDrift": "0.0289986635"
+        }
+      }
+    },
+    "release": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 18.25307,
+          "p95Ms": 29.6832,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.155005,
+          "p95Ms": 1.6985,
+          "cpuMs": 1.215278,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.03432944,
+          "p95Ms": 9.5987,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.367841,
+          "p95Ms": 1.9202,
+          "cpuMs": 3.125,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.04291,
+          "p95Ms": 8.0574,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.470324,
+          "p95Ms": 1.8227,
+          "cpuMs": 5.381944,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.3716738131837734,
+        "8": 0.3031007684189831
+      },
+      "allPhysicalGatesPassed": true,
+      "withinWholeStepCost": true,
+      "scalingPassed": false,
+      "mechanismPassed": false,
+      "previousBuildMedians": {
+        "rigid6-0": {
+          "meanMs": 17.6697856,
+          "p95Ms": 20.3803,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.189878,
+          "p95Ms": 1.963,
+          "cpuMs": 1.215278,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-4": {
+          "meanMs": 7.75887444,
+          "p95Ms": 8.9497,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.131698,
+          "p95Ms": 1.5189,
+          "cpuMs": 2.256944,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.05457889,
+          "p95Ms": 8.0425,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.494791,
+          "p95Ms": 1.9781,
+          "cpuMs": 3.90625,
+          "maxMomentumError": 2.01986072e-05,
+          "maxComError": 2.31938087e-05
+        }
+      },
+      "previousBuildRelativeScaling": {
+        "4": 0.4616781598802772,
+        "8": 0.3178057678818775
+      },
+      "models": {
+        "rigid6": {
+          "physical": {
+            "schema": "1",
+            "snippet": "SnippetDeformableSurfaceAVBD",
+            "solver": "avbd",
+            "case": "strain-release",
+            "model": "rigid_patch_joint_sheet",
+            "capability": "EXPERIMENTAL",
+            "validation": "GATED",
+            "status": "PASS",
+            "reason": "none",
+            "frames": "180",
+            "completedFrames": "180",
+            "grid": "24",
+            "cells": "576",
+            "joints": "1104",
+            "dispatcherThreads": "4",
+            "mass": "625.004272",
+            "contacts": "0",
+            "crossContacts": "0",
+            "centerY": "3.44608212",
+            "minY": "2.98868513",
+            "peakPrincipalStrain": "1.08472204",
+            "finalPrincipalStrain": "1.05652583",
+            "finalAreaRatio": "1.00147641",
+            "maxPenetration": "0",
+            "maxSelfPenetration": "0",
+            "initialEnergy": "2707.69472",
+            "peakEnergy": "2707.69472",
+            "maxMomentumError": "1.47571564e-05",
+            "maxBallisticError": "1.22758074e-05",
+            "finalAwake": "576",
+            "averageStepMs": "8.01348833",
+            "p95StepMs": "9.265",
+            "maxStepMs": "10.7256",
+            "averageObserverMs": "0.762488333",
+            "nonFinite": "0",
+            "fetchFailures": "0",
+            "fatalErrors": "0"
+          },
+          "maxAngularDrift": "10.9711802"
+        },
+        "particle3": {
+          "physical": {
+            "mode": "release",
+            "workers": "4",
+            "nodes": "625",
+            "iterations": "4",
+            "frames": "180",
+            "maxMomentumError": "2.01986072e-05",
+            "maxBallisticError": "2.31938087e-05",
+            "initialEnergy": "940.519051",
+            "peakEnergy": "970.342367",
+            "initialStrainEnergy": "830.3628",
+            "minStrainEnergy": "8.69048069",
+            "peakSheetSpeed": "0.593716627",
+            "meanMs": "1.103357",
+            "p95Ms": "1.562300",
+            "cpuMs": "1.996528",
+            "status": "PASS"
+          },
+          "maxAngularDrift": "0.898247002"
+        }
+      }
+    }
+  },
+  "profiles": {
+    "0": {
+      "backendMs": 1.4644527777777778,
+      "packMs": 0.23328055555555555,
+      "warmMs": 0.10323388888888889,
+      "taskMs": 1.009115,
+      "spanMs": 1.0282533333333332,
+      "waves": 490.53333333333336,
+      "lowerMs": 1.009115,
+      "startupMs": 0.006831111111111111,
+      "drainMs": 0.012307222222222223
+    },
+    "4": {
+      "backendMs": 1.3564922222222222,
+      "packMs": 0.2766461111111111,
+      "warmMs": 0.11779888888888888,
+      "taskMs": 1.4043955555555556,
+      "spanMs": 0.833645,
+      "waves": 47.15555555555556,
+      "lowerMs": 0.40757611111111114,
+      "startupMs": 0.237195,
+      "drainMs": 0.009107777777777777
+    },
+    "8": {
+      "backendMs": 1.6405883333333333,
+      "packMs": 0.3270166666666667,
+      "warmMs": 0.14780166666666666,
+      "taskMs": 1.824531111111111,
+      "spanMs": 1.034266111111111,
+      "waves": 47.15555555555556,
+      "lowerMs": 0.32283833333333334,
+      "startupMs": 0.3634688888888889,
+      "drainMs": 0.012775555555555556
+    }
+  },
+  "backendTextSHA256": "6b743cfa97e709ede8fd2890571eb07470598166567257a893300c5d224880a1",
+  "flight": {
+    "summary": {
+      "0": {
+        "rigid6": {
+          "meanMs": 18.9090694,
+          "p95Ms": 21.7353,
+          "cpuMsPerFrame": 18.663194444444443
+        },
+        "particle3": {
+          "meanMs": 4.47516833,
+          "p95Ms": 5.9275,
+          "cpuMsPerFrame": 4.340277777777778
+        },
+        "meanRatio": 0.2366678251231126,
+        "p95Ratio": 0.2727130520397694
+      },
+      "4": {
+        "rigid6": {
+          "meanMs": 8.65467556,
+          "p95Ms": 10.1485,
+          "cpuMsPerFrame": 21.52777777777778
+        },
+        "particle3": {
+          "meanMs": 2.44865611,
+          "p95Ms": 3.1847,
+          "cpuMsPerFrame": 6.510416666666667
+        },
+        "meanRatio": 0.28292870056471536,
+        "p95Ratio": 0.31380992264866725
+      },
+      "8": {
+        "rigid6": {
+          "meanMs": 7.61842389,
+          "p95Ms": 8.93,
+          "cpuMsPerFrame": 25.60763888888889
+        },
+        "particle3": {
+          "meanMs": 2.166875,
+          "p95Ms": 2.709,
+          "cpuMsPerFrame": 7.03125
+        },
+        "meanRatio": 0.28442562809405453,
+        "p95Ratio": 0.30335946248600226
+      }
+    },
+    "relativeScaling": {
+      "4": 0.8364928148000972,
+      "8": 0.8320903665011886
+    },
+    "physicalPassed": true,
+    "identityStable": true,
+    "measuredCostWithinBaseline": true,
+    "environmentClean": true,
+    "performanceQualified": false
+  },
+  "scheduleAudit": {
+    "frames": 180,
+    "contactFrames": 86,
+    "colors": [
+      10,
+      14
+    ],
+    "peakTasks": [
+      5,
+      8
+    ],
+    "dualRows": [
+      1152,
+      1344
+    ],
+    "membranePrimal": [
+      4608,
+      4608
+    ],
+    "contactPrimal": [
+      0,
+      192
+    ],
+    "mixedContactRows": [
+      0,
+      48
+    ],
+    "primalMaxBlocks": [
+      27,
+      32
+    ],
+    "primalMaxRows": [
+      27,
+      32
+    ],
+    "dualMaxRows": [
+      256,
+      256
+    ],
+    "queryMaxRows": [
+      0,
+      32
+    ],
+    "peakPacketsPerTask": [
+      4,
+      4
+    ]
+  },
+  "profileBinarySHA256": "b1ecbe50800c08cc66a0487f66fe2692111a77054122c886f0729d34b6523709",
+  "qualifiesForProduction": false,
+  "failureReasons": [
+    "relative CPU dispatcher scaling below Rigid6",
+    "authored static-box self filter unavailable",
+    "full five-volume Particle3 snippet unavailable"
+  ],
+  "evidenceSHA256": "ca5b571a102c20b8e5facba01e14402b16b002411ca8a376ed77d360129c7f1a"
+}

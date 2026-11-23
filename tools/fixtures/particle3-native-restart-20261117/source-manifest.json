@@ -1,0 +1,21 @@
+{
+  "docs/ITERATION.md": "036a54e0ce3b6f4fd436815f788a2d665910b258e7131b71693b0d992d587e2e",
+  "docs/PARTICLE3_NATIVE_RESTART_20261117.md": "6d2201775b6dfc6c388db3a90278023587caf902ea3850bc9d69e6ad828a7cf6",
+  "physx/snippets/snippetcommon/SnippetHeadless.h": "c4081738023fb61af89451fd426bd0609b5912728a450f7e9624469bcda2ce8d",
+  "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBD.cpp": "f898fc02e39be990b55f60cf5d7f272c809c835a287e0f7edbb0a70871afacf0",
+  "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBDCommon.h": "71668be723c3745fac25024df4c495c36b9f601ea16d03ae853e7d2c698c67b1",
+  "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBDHeadless.cpp": "d590cac129eb2d5015fd99e5f269be3d2f0bdad30fab36c8a18208b665d9cc8a",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "06d5d7d33713134e5258bf20eee794e3d2a71d07e48a5e68b6fc10313432b6ca",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "c36b121b054e68d65ce4e688e0a68a029c74da16d010bceb023c09f7d10af0cd",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp": "8f80b4db1363f993c9e8f87c3a43b77e6a188f6dd3ee6a274f483da6278b8bdc",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalShell.h": "d986231c24a0d692e934461322a5e066c943dad0ad6af4c23f009ce9e25ba647",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdRows.h": "c8494412db8ae286fcdd850e5f410eeea185c8135fc9cc4e11188c0d93408488",
+  "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "4b0f2dd527baee0e85d402d3ceb3c39c507e277d79b03759055d511c0388ead2",
+  "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "42954df80b8b6eaec8386790fe2ca668cfa48fe39f3cb4ad0024441b481857ea",
+  "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "61096ac150aa437febcb589b9ec93ef085472f9d7eeb6e2794683a590b44f985",
+  "tools/avbd_nodal_release_probe.cpp": "654484175ea4c56fcb5318aac4271dc005664daa8cee3217e3e60587f4d899ce",
+  "tools/avbd_nodal_shell_probe.cpp": "d7c8adcba5f3e95069ad546ca8a3fa9c2241242e25c12b7d78005b59b46c4f85",
+  "tools/benchmark_particle3_flight.py": "86ead5b877879daac8fc3a1ed23208c3e4a147ab442c1da3b91e939608656403",
+  "tools/run_avbd_nodal_release_probe.py": "93f78f512c61a4f3d26cf3301132cf53c9816d87734d1fb926143ca49d6eca4c",
+  "tools/run_avbd_nodal_shell_probe.py": "2fa570de829d9a85e775f3496bf649444399bb689b0b2d15ec04f06ef173f50d"
+}

@@ -1,0 +1,132 @@
+{
+  "scope": "volume kernel only; no whole-step volume/NP or default switch",
+  "productionSwitched": false,
+  "volumeStepIntegrated": false,
+  "particleContactsIntegrated": false,
+  "knownMomentumAndScalingFailuresRemain": true,
+  "kernelConfigurations": 4,
+  "kernelPassed": true,
+  "regressions": [
+    {
+      "name": "hello-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "passed": true
+    },
+    {
+      "name": "hello-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "passed": true
+    },
+    {
+      "name": "hello-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "passed": true
+    },
+    {
+      "name": "p3-membrane",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--particle3",
+        "--headless",
+        "--case=membrane",
+        "--frames=180",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true
+    },
+    {
+      "name": "r6-cloth",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=static-box",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true
+    },
+    {
+      "name": "r6-volume",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\particle3-default-switch-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true
+    }
+  ],
+  "defaultProducts": [
+    {
+      "file": "PhysX_64.dll",
+      "baseline": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "current": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXCommon_64.dll",
+      "baseline": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "current": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXFoundation_64.dll",
+      "baseline": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "current": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableSurfaceAVBD_64.exe",
+      "baseline": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "current": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableVolumeAVBD_64.exe",
+      "baseline": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "current": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "unchanged": true
+    }
+  ],
+  "sourceHashes": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalVolume.h": "abd758aefc6301df9817016d248fcd99026037278bc65e3756a1bc5690881420",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "b4b1fc387bf57ffd41c78be19330b6b903213dd93964d50102fd1cffbfde9b81",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "bd31ea2567dfa055f0571f76ea80602e12de6b19fa0dbf134eac4edd087a7b64",
+    "tools/avbd_nodal_volume_probe.cpp": "d55a972acd2c1d5e959bf2ab62ae7dd742005e5934d6d0fd282e5e0e207015e4",
+    "tools/run_avbd_nodal_volume_probe.py": "0da3dd8e73770637aedf8d2697a9d14571404d9c6d763d9ccb0afb6548db521c"
+  }
+}

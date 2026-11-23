@@ -1,0 +1,22 @@
+{
+  "file": "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\five-local-final.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "local block primal/dual",
+  "dofs": 4728,
+  "groups": 136,
+  "activeNormalForces": 4,
+  "maximumForce": 645.1362319187448,
+  "symmetry": 2.9103830456733704e-11,
+  "stationarity": 3.4288943595583987e-07,
+  "relativeStationarity": 9.46201275611624e-11,
+  "unitStepRoot": 9.947598300641403e-13,
+  "relativeUnitStepRoot": 1.5419376262677969e-15,
+  "minimumNormalResidual": -9.917726362385082e-13,
+  "tableIterations": 72,
+  "materialProducts": 65,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false
+}

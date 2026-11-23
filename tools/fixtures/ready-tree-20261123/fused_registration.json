@@ -1,0 +1,10 @@
+{
+  "purpose": "Remove duplicated root synchronization under the same block-ready implementation. Keep all independent sibling reductions and every pose/energy check.",
+  "pairedRepetitions": 6,
+  "workers": [
+    4,
+    8
+  ],
+  "policy": "Advance to full uninstrumented and physics acceptance if paired inclusive fixed-18 tree span beats production in both sample halves at 8 workers and has no repeatable 4-worker tree regression. Run only after the primary study and extended 720-frame physics runs finish.",
+  "order": "fresh base/fused AB/BA, alternate worker order, use identical wide-interval instrumentation and startup argv"
+}

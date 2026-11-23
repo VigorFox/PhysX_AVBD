@@ -1,0 +1,43 @@
+[COMMON_CHAIN] bodies=12 positionError=1.61554498e-07 bdfError=0 momentumError=1.70744041e-05 angular=0 status=PASS
+[COMMON_PROGRAM_SCENE] mode=6 fetchedFinite=PASS
+[AVBD_PATCH_GUESS] blocks=12 fraction=1 accepted=1
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=9.65411436e-20 station=9.65411436e-20 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=0 search=0 fraction=1 initial=0.002415459666944102 residual=2.335114125604098e-17 work=-0.0012547772280045468 slope=-0.0025095544632508524 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=5.80783536e-06 body=3 coordinate=0
+[AVBD_COMMON_STEP] iteration=0 blocks=4 groups=0 fraction=1 requested=75.2866289 initial=0.00241545967 residual=2.33511413e-17 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=3.86164574e-19 station=3.86164574e-19 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=0 search=0 fraction=1 initial=0.062914106751539189 residual=4.7574017159302974e-16 work=-0.028079395461792698 slope=-0.056158795336917484 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=2.12166712e-05 body=9 coordinate=0
+[AVBD_COMMON_STEP] iteration=0 blocks=4 groups=0 fraction=1 requested=172.720369 initial=0.0629141068 residual=4.75740172e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=2.69373978e-20 station=2.69373978e-20 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=0 search=0 fraction=1 initial=0.076984827563581243 residual=2.576041036176519e-16 work=-0.034062599734540816 slope=-0.068125195731982682 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=1.56043899e-05 body=5 coordinate=0
+[AVBD_COMMON_STEP] iteration=0 blocks=4 groups=0 fraction=1 requested=208.204161 initial=0.0769848276 residual=2.57604104e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_PATCH_SWEEP] iteration=0 groups=3 colors=2 maxBlocks=4 skipped=0 stationary=0
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=6.64804262e-20 station=6.64804262e-20 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=1 search=0 fraction=1 initial=0.00064893692229463435 residual=8.966069961952845e-17 work=-0.00033256915730352427 slope=-0.00066513817540274714 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=1.20222676e-05 body=1 coordinate=0
+[AVBD_COMMON_STEP] iteration=1 blocks=4 groups=0 fraction=1 requested=31.9464443 initial=0.000648936922 residual=8.96606996e-17 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=1.02283236e-22 station=1.02283236e-22 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=1 search=0 fraction=1 initial=5.5501934210506403e-09 residual=1.0025794868231227e-16 work=-2.8132622565605996e-09 slope=-5.6259292993671192e-09 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=8.6755579e-06 body=8 coordinate=0
+[AVBD_COMMON_STEP] iteration=1 blocks=4 groups=0 fraction=1 requested=0.082011631 initial=5.55019342e-09 residual=1.00257949e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=7.88510788e-21 station=7.88510788e-21 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=1 search=0 fraction=1 initial=1.4496943929007425e-05 residual=1.8036607483618004e-16 work=-7.3928461832472236e-06 slope=-1.478564434389456e-05 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=1.50321967e-05 body=4 coordinate=0
+[AVBD_COMMON_STEP] iteration=1 blocks=4 groups=0 fraction=1 requested=4.62826929 initial=1.44969439e-05 residual=1.80366075e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_PATCH_SWEEP] iteration=1 groups=3 colors=2 maxBlocks=4 skipped=0 stationary=0
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=2.74481587e-22 station=2.74481587e-22 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=2 search=0 fraction=1 initial=3.2067589298658487e-07 residual=1.086016970652753e-16 work=-1.6434088824724335e-07 slope=-3.2868168172824278e-07 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=1.5020252e-05 body=1 coordinate=0
+[AVBD_COMMON_STEP] iteration=2 blocks=4 groups=0 fraction=1 requested=0.710156976 initial=3.20675893e-07 residual=1.08601697e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=0 station=0 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=2 search=0 fraction=1 initial=9.6005987948554546e-17 residual=9.6005987948554546e-17 work=0 slope=0 closed=1 descent=0
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=8.3385248e-06 body=8 coordinate=0
+[AVBD_COMMON_STEP] iteration=2 blocks=4 groups=0 fraction=1 requested=8.3385248e-06 initial=9.60059879e-17 residual=9.60059879e-17 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=0 colors=2 sweeps=1 primalProducts=0 corrections=0 correctionIterations=0 residual=1.92299399e-23 station=1.92299399e-23 force=0 status=PASS
+[AVBD_COMMON_TRIAL] iteration=2 search=0 fraction=1 initial=7.1658573789366947e-09 residual=1.4194280667515945e-16 work=-3.654292811465466e-09 slope=-7.3093721493918343e-09 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=1.10715684e-05 body=4 coordinate=0
+[AVBD_COMMON_STEP] iteration=2 blocks=4 groups=0 fraction=1 requested=0.102900076 initial=7.16585738e-09 residual=1.41942807e-16 activeGroups=0 materialProducts=10 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_PATCH_SWEEP] iteration=2 groups=3 colors=2 maxBlocks=4 skipped=0 stationary=1
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=3

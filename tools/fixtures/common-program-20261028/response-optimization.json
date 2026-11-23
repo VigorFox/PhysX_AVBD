@@ -1,0 +1,1942 @@
+{
+  "checkpoint": "22024df",
+  "scope": "Shared sparse material response; diagnostic only, no physics publication",
+  "timingScope": "Sequential frozen C++ response, not frame time; baseline is one earlier observation, final has three samples per mode",
+  "baseline": {
+    "converged": true,
+    "iterations": 9,
+    "linearIterations": 272,
+    "residual": 6.233833546818656e-15,
+    "seconds": 11.1667452,
+    "sweeps": 1,
+    "materialSolves": 1981,
+    "factorBytes": 10290292,
+    "stationarity": 6.366462912410498e-12,
+    "factorNonzeros": 558768,
+    "actualThreads": 1,
+    "responseRank": 0,
+    "responseProducts": 1507,
+    "cachedIterations": 9,
+    "symbolicSeconds": 7.0645649,
+    "factorSeconds": 0.4382572,
+    "triangularSeconds": 3.6003877
+  },
+  "comparison": {
+    "sameCoefficients": true,
+    "sameStep": true,
+    "sameForce": true
+  },
+  "samples": [
+    {
+      "mode": "precise",
+      "case": "five",
+      "repeat": 0,
+      "statistics": {
+        "converged": true,
+        "iterations": 9,
+        "linearIterations": 272,
+        "residual": 6.233833546818656e-15,
+        "seconds": 1.6086805,
+        "sweeps": 1,
+        "materialSolves": 1981,
+        "factorBytes": 10252468,
+        "stationarity": 6.366462912410498e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1507,
+        "cachedIterations": 9,
+        "symbolicSeconds": 0.2450145,
+        "factorSeconds": 0.0677874,
+        "triangularSeconds": 1.2713918999999996
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-precise-0.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544049,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 6.622258297284134e-12,
+        "relativeStationarity": 1.827408077140905e-15,
+        "unitStepRoot": 1.8900436771218665e-12,
+        "relativeUnitStepRoot": 2.9296814902009935e-15,
+        "minimumNormalResidual": -2.42861286636753e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 9,
+          "linearIterations": 272,
+          "residual": 6.233833546818656e-15,
+          "seconds": 1.6086805,
+          "sweeps": 1,
+          "materialSolves": 1981,
+          "factorBytes": 10252468,
+          "stationarity": 6.366462912410498e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1507,
+          "cachedIterations": 9,
+          "symbolicSeconds": 0.2450145,
+          "factorSeconds": 0.0677874,
+          "triangularSeconds": 1.2713918999999996
+        }
+      }
+    },
+    {
+      "mode": "precise",
+      "case": "five",
+      "repeat": 1,
+      "statistics": {
+        "converged": true,
+        "iterations": 9,
+        "linearIterations": 272,
+        "residual": 6.233833546818656e-15,
+        "seconds": 1.607201,
+        "sweeps": 1,
+        "materialSolves": 1981,
+        "factorBytes": 10252468,
+        "stationarity": 6.366462912410498e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1507,
+        "cachedIterations": 9,
+        "symbolicSeconds": 0.2670551,
+        "factorSeconds": 0.0630932,
+        "triangularSeconds": 1.2528144000000045
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-precise-1.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544049,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 6.622258297284134e-12,
+        "relativeStationarity": 1.827408077140905e-15,
+        "unitStepRoot": 1.8900436771218665e-12,
+        "relativeUnitStepRoot": 2.9296814902009935e-15,
+        "minimumNormalResidual": -2.42861286636753e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 9,
+          "linearIterations": 272,
+          "residual": 6.233833546818656e-15,
+          "seconds": 1.607201,
+          "sweeps": 1,
+          "materialSolves": 1981,
+          "factorBytes": 10252468,
+          "stationarity": 6.366462912410498e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1507,
+          "cachedIterations": 9,
+          "symbolicSeconds": 0.2670551,
+          "factorSeconds": 0.0630932,
+          "triangularSeconds": 1.2528144000000045
+        }
+      }
+    },
+    {
+      "mode": "precise",
+      "case": "five",
+      "repeat": 2,
+      "statistics": {
+        "converged": true,
+        "iterations": 9,
+        "linearIterations": 272,
+        "residual": 6.233833546818656e-15,
+        "seconds": 1.5451265,
+        "sweeps": 1,
+        "materialSolves": 1981,
+        "factorBytes": 10252468,
+        "stationarity": 6.366462912410498e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1507,
+        "cachedIterations": 9,
+        "symbolicSeconds": 0.2550702,
+        "factorSeconds": 0.0660596,
+        "triangularSeconds": 1.2004067999999997
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-precise-2.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544049,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 6.622258297284134e-12,
+        "relativeStationarity": 1.827408077140905e-15,
+        "unitStepRoot": 1.8900436771218665e-12,
+        "relativeUnitStepRoot": 2.9296814902009935e-15,
+        "minimumNormalResidual": -2.42861286636753e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 9,
+          "linearIterations": 272,
+          "residual": 6.233833546818656e-15,
+          "seconds": 1.5451265,
+          "sweeps": 1,
+          "materialSolves": 1981,
+          "factorBytes": 10252468,
+          "stationarity": 6.366462912410498e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1507,
+          "cachedIterations": 9,
+          "symbolicSeconds": 0.2550702,
+          "factorSeconds": 0.0660596,
+          "triangularSeconds": 1.2004067999999997
+        }
+      }
+    },
+    {
+      "mode": "precise",
+      "case": "compression",
+      "repeat": 0,
+      "statistics": {
+        "converged": true,
+        "iterations": 4,
+        "linearIterations": 208,
+        "residual": 4.558231494591947e-13,
+        "seconds": 0.1338855,
+        "sweeps": 0,
+        "materialSolves": 1126,
+        "factorBytes": 1621396,
+        "stationarity": 3.979039320256561e-13,
+        "factorNonzeros": 78951,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 760,
+        "cachedIterations": 4,
+        "symbolicSeconds": 0.0285892,
+        "factorSeconds": 0.0072598,
+        "triangularSeconds": 0.09302170000000003
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\compression-shared-precise-0.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 750,
+        "groups": 100,
+        "activeNormalForces": 100,
+        "maximumForce": 33.1850678964516,
+        "symmetry": 2.1827872842550278e-11,
+        "stationarity": 3.979039320256561e-13,
+        "relativeStationarity": 2.997701666868146e-15,
+        "unitStepRoot": 1.4515840786322176e-15,
+        "relativeUnitStepRoot": 4.374208554165508e-17,
+        "minimumNormalResidual": -7.86697096355482e-16,
+        "tableIterations": 4,
+        "materialProducts": 33596,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 4,
+          "linearIterations": 208,
+          "residual": 4.558231494591947e-13,
+          "seconds": 0.1338855,
+          "sweeps": 0,
+          "materialSolves": 1126,
+          "factorBytes": 1621396,
+          "stationarity": 3.979039320256561e-13,
+          "factorNonzeros": 78951,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 760,
+          "cachedIterations": 4,
+          "symbolicSeconds": 0.0285892,
+          "factorSeconds": 0.0072598,
+          "triangularSeconds": 0.09302170000000003
+        }
+      }
+    },
+    {
+      "mode": "fast",
+      "case": "five",
+      "repeat": 0,
+      "statistics": {
+        "converged": true,
+        "iterations": 10,
+        "linearIterations": 320,
+        "residual": 6.28890274776228e-15,
+        "seconds": 1.543935,
+        "sweeps": 1,
+        "materialSolves": 2109,
+        "factorBytes": 10252468,
+        "stationarity": 6.821210263296962e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1635,
+        "cachedIterations": 10,
+        "symbolicSeconds": 0.2421773,
+        "factorSeconds": 0.0668147,
+        "triangularSeconds": 1.2098433000000024
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-fast-0.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544052,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 7.474909580196254e-12,
+        "relativeStationarity": 2.0626966707641975e-15,
+        "unitStepRoot": 1.8758328224066645e-12,
+        "relativeUnitStepRoot": 2.907653809823541e-15,
+        "minimumNormalResidual": -3.469446951953614e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 10,
+          "linearIterations": 320,
+          "residual": 6.28890274776228e-15,
+          "seconds": 1.543935,
+          "sweeps": 1,
+          "materialSolves": 2109,
+          "factorBytes": 10252468,
+          "stationarity": 6.821210263296962e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1635,
+          "cachedIterations": 10,
+          "symbolicSeconds": 0.2421773,
+          "factorSeconds": 0.0668147,
+          "triangularSeconds": 1.2098433000000024
+        }
+      }
+    },
+    {
+      "mode": "fast",
+      "case": "five",
+      "repeat": 1,
+      "statistics": {
+        "converged": true,
+        "iterations": 10,
+        "linearIterations": 320,
+        "residual": 6.28890274776228e-15,
+        "seconds": 1.6270828000000002,
+        "sweeps": 1,
+        "materialSolves": 2109,
+        "factorBytes": 10252468,
+        "stationarity": 6.821210263296962e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1635,
+        "cachedIterations": 10,
+        "symbolicSeconds": 0.24899120000000002,
+        "factorSeconds": 0.0678374,
+        "triangularSeconds": 1.2842697999999981
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-fast-1.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544052,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 7.474909580196254e-12,
+        "relativeStationarity": 2.0626966707641975e-15,
+        "unitStepRoot": 1.8758328224066645e-12,
+        "relativeUnitStepRoot": 2.907653809823541e-15,
+        "minimumNormalResidual": -3.469446951953614e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 10,
+          "linearIterations": 320,
+          "residual": 6.28890274776228e-15,
+          "seconds": 1.6270828000000002,
+          "sweeps": 1,
+          "materialSolves": 2109,
+          "factorBytes": 10252468,
+          "stationarity": 6.821210263296962e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1635,
+          "cachedIterations": 10,
+          "symbolicSeconds": 0.24899120000000002,
+          "factorSeconds": 0.0678374,
+          "triangularSeconds": 1.2842697999999981
+        }
+      }
+    },
+    {
+      "mode": "fast",
+      "case": "five",
+      "repeat": 2,
+      "statistics": {
+        "converged": true,
+        "iterations": 10,
+        "linearIterations": 320,
+        "residual": 6.28890274776228e-15,
+        "seconds": 1.6519088000000002,
+        "sweeps": 1,
+        "materialSolves": 2109,
+        "factorBytes": 10252468,
+        "stationarity": 6.821210263296962e-12,
+        "factorNonzeros": 558768,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 1635,
+        "cachedIterations": 10,
+        "symbolicSeconds": 0.25708230000000004,
+        "factorSeconds": 0.0758347,
+        "triangularSeconds": 1.2924166999999998
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\five-shared-fast-2.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 4728,
+        "groups": 136,
+        "activeNormalForces": 4,
+        "maximumForce": 645.1362318544052,
+        "symmetry": 2.9103830456733704e-11,
+        "stationarity": 7.474909580196254e-12,
+        "relativeStationarity": 2.0626966707641975e-15,
+        "unitStepRoot": 1.8758328224066645e-12,
+        "relativeUnitStepRoot": 2.907653809823541e-15,
+        "minimumNormalResidual": -3.469446951953614e-17,
+        "tableIterations": 0,
+        "materialProducts": 65,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 10,
+          "linearIterations": 320,
+          "residual": 6.28890274776228e-15,
+          "seconds": 1.6519088000000002,
+          "sweeps": 1,
+          "materialSolves": 2109,
+          "factorBytes": 10252468,
+          "stationarity": 6.821210263296962e-12,
+          "factorNonzeros": 558768,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 1635,
+          "cachedIterations": 10,
+          "symbolicSeconds": 0.25708230000000004,
+          "factorSeconds": 0.0758347,
+          "triangularSeconds": 1.2924166999999998
+        }
+      }
+    },
+    {
+      "mode": "fast",
+      "case": "compression",
+      "repeat": 0,
+      "statistics": {
+        "converged": true,
+        "iterations": 4,
+        "linearIterations": 208,
+        "residual": 4.507527329572625e-13,
+        "seconds": 0.1287397,
+        "sweeps": 0,
+        "materialSolves": 1126,
+        "factorBytes": 1621396,
+        "stationarity": 4.831690603168681e-13,
+        "factorNonzeros": 78951,
+        "actualThreads": 1,
+        "responseRank": 0,
+        "responseProducts": 760,
+        "cachedIterations": 4,
+        "symbolicSeconds": 0.029329400000000002,
+        "factorSeconds": 0.0077111,
+        "triangularSeconds": 0.08692409999999998
+      },
+      "validation": {
+        "file": "tools\\benchmark-results\\common-response-20261028\\compression-shared-fast-0.json",
+        "passed": true,
+        "complete": true,
+        "solved": true,
+        "executionSource": "experimental sparse adapter; shared production NCP",
+        "dofs": 750,
+        "groups": 100,
+        "activeNormalForces": 100,
+        "maximumForce": 33.18506789642165,
+        "symmetry": 2.1827872842550278e-11,
+        "stationarity": 4.547473508864641e-13,
+        "relativeStationarity": 3.425944762135655e-15,
+        "unitStepRoot": 1.4513130280890962e-15,
+        "relativeUnitStepRoot": 4.3733917695120685e-17,
+        "minimumNormalResidual": -3.426078865054194e-16,
+        "tableIterations": 4,
+        "materialProducts": 33596,
+        "publication": "none",
+        "execution": {
+          "converged": true,
+          "iterations": 4,
+          "linearIterations": 208,
+          "residual": 4.507527329572625e-13,
+          "seconds": 0.1287397,
+          "sweeps": 0,
+          "materialSolves": 1126,
+          "factorBytes": 1621396,
+          "stationarity": 4.831690603168681e-13,
+          "factorNonzeros": 78951,
+          "actualThreads": 1,
+          "responseRank": 0,
+          "responseProducts": 760,
+          "cachedIterations": 4,
+          "symbolicSeconds": 0.029329400000000002,
+          "factorSeconds": 0.0077111,
+          "triangularSeconds": 0.08692409999999998
+        }
+      }
+    }
+  ],
+  "sdkCoefficients": [
+    {
+      "case": "compression-recovery",
+      "coefficientsIdentical": true,
+      "different": [],
+      "beforeProducts": 33596,
+      "afterProducts": 1386,
+      "beforeSolved": true,
+      "afterSolved": true
+    },
+    {
+      "case": "visual-showcase",
+      "coefficientsIdentical": true,
+      "different": [],
+      "beforeProducts": 65,
+      "afterProducts": 3808,
+      "beforeSolved": false,
+      "afterSolved": true
+    }
+  ],
+  "sdkCompression": {
+    "file": "tools\\benchmark-results\\common-response-20261028\\compression-recovery-final-capture.json",
+    "passed": true,
+    "complete": true,
+    "solved": true,
+    "executionSource": "production Table diagnostic",
+    "dofs": 750,
+    "groups": 100,
+    "activeNormalForces": 100,
+    "maximumForce": 33.18506790066943,
+    "symmetry": 2.1827872842550278e-11,
+    "stationarity": 6.252776074688882e-13,
+    "relativeStationarity": 4.71067404783269e-15,
+    "unitStepRoot": 7.105427357601002e-14,
+    "relativeUnitStepRoot": 2.141151971986071e-15,
+    "minimumNormalResidual": -6.812952979551312e-14,
+    "tableIterations": 4,
+    "materialProducts": 1386,
+    "publication": "none"
+  },
+  "sdkFive": {
+    "file": "tools\\benchmark-results\\common-response-20261028\\visual-showcase-final-capture.json",
+    "passed": true,
+    "complete": true,
+    "solved": true,
+    "executionSource": "production Table diagnostic",
+    "dofs": 4728,
+    "groups": 136,
+    "activeNormalForces": 4,
+    "maximumForce": 645.1362318544055,
+    "symmetry": 2.9103830456733704e-11,
+    "stationarity": 6.821210263296962e-12,
+    "relativeStationarity": 1.88230874898634e-15,
+    "unitStepRoot": 1.8900436771218665e-12,
+    "relativeUnitStepRoot": 2.9296814902009904e-15,
+    "minimumNormalResidual": -2.0816681711721685e-17,
+    "tableIterations": 13,
+    "materialProducts": 3808,
+    "publication": "none"
+  },
+  "public": [
+    {
+      "name": "hello_world-avbd",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "hello_world-pgs",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "hello_world-tgs",
+      "command": [
+        "tools/run_snippet_hello_world_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-avbd",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-pgs",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "joint-tgs",
+      "command": [
+        "tools/run_snippet_joint_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-avbd",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-pgs",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "articulation_rc-tgs",
+      "command": [
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0
+    }
+  ],
+  "native": [
+    {
+      "case": "reaction",
+      "ok": true,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "reaction",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "rigid_cell_joint_volume",
+        "materialElements": "384",
+        "sleepEnabled": "1",
+        "grid": "5",
+        "nodes": "125",
+        "joints": "300",
+        "mass": "800.000732",
+        "cellSize": "0.400000006",
+        "dispatcherThreads": "4",
+        "compressionHoldFrames": "60",
+        "maxJointAngle": "0.00878906995",
+        "trajectoryHash": "7da755790d6f19c4",
+        "minVolumeRatio": "0.995845199",
+        "minCellDet": "0.982132673",
+        "finalVolumeRatio": "1.00000012",
+        "maxShapeError": "0.00349942269",
+        "finalShapeError": "8.64750348e-07",
+        "maxGroundPenetration": "0",
+        "maxExternalPenetration": "0",
+        "compressionMinimum": "1",
+        "recoveredFraction": "0",
+        "contacts": "252",
+        "firstContactFrame": "18",
+        "maxPostContactStep": "0.00496697426",
+        "zeroMotionFrames": "0",
+        "systemComDrift": "0.00466525415",
+        "maxPostImpactVy": "0.240683541",
+        "maxMechanicalEstimate": "175.999939",
+        "finalMechanicalEstimate": "2.53157187",
+        "averageStepMs": "39.0471361",
+        "maxStepMs": "165.924194",
+        "averageFrameMs": "39.4190858",
+        "activeFrames": "360",
+        "activeContactFrames": "7",
+        "averageActiveStepMs": "39.0471361",
+        "averageActiveContactMs": "135.364571",
+        "maxMomentumRelativeError": "0.00304783694",
+        "maxBallisticError": "3.53406811",
+        "sleepingBeforeWake": "0",
+        "maxWakeMotion": "0.000388288696",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "e56848cfcd036a840e8e42179113c7510cffe051b93923762d1c95e171680eae"
+    },
+    {
+      "case": "compression-recovery",
+      "ok": true,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "compression-recovery",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "rigid_cell_joint_volume",
+        "materialElements": "384",
+        "sleepEnabled": "1",
+        "grid": "5",
+        "nodes": "125",
+        "joints": "300",
+        "mass": "800.000732",
+        "cellSize": "0.400000006",
+        "dispatcherThreads": "4",
+        "compressionHoldFrames": "60",
+        "maxJointAngle": "0.412516117",
+        "trajectoryHash": "46eb01d4c8c4f74b",
+        "minVolumeRatio": "0.723655462",
+        "minCellDet": "0.649048865",
+        "finalVolumeRatio": "0.990128756",
+        "maxShapeError": "0.19716312",
+        "finalShapeError": "0.0186947826",
+        "maxGroundPenetration": "4.28557396e-05",
+        "maxExternalPenetration": "0",
+        "compressionMinimum": "0.723655462",
+        "recoveredFraction": "0.964279234",
+        "contacts": "31566",
+        "firstContactFrame": "0",
+        "maxPostContactStep": "0.17632255",
+        "zeroMotionFrames": "0",
+        "systemComDrift": "1.50423539",
+        "maxPostImpactVy": "-3.40282347e+38",
+        "maxMechanicalEstimate": "44932.0078",
+        "finalMechanicalEstimate": "563.018982",
+        "averageStepMs": "100.522479",
+        "maxStepMs": "646.44519",
+        "averageFrameMs": "100.879826",
+        "activeFrames": "360",
+        "activeContactFrames": "300",
+        "averageActiveStepMs": "100.522479",
+        "averageActiveContactMs": "115.131675",
+        "maxMomentumRelativeError": "4438.12305",
+        "maxBallisticError": "3.31085205",
+        "sleepingBeforeWake": "0",
+        "maxWakeMotion": "0.0930731222",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "e56848cfcd036a840e8e42179113c7510cffe051b93923762d1c95e171680eae"
+    },
+    {
+      "case": "visual-showcase",
+      "ok": true,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "visual-showcase",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "convex_cell_joint_volume",
+        "materialElements": "2514",
+        "grid": "5",
+        "dispatcherThreads": "4",
+        "bodies": "5",
+        "nodes": "787",
+        "joints": "1888",
+        "mass": "7530.66113",
+        "cellSize": "0.200000003",
+        "trajectoryHash": "3b68953e43a44f51",
+        "contacts": "1049022",
+        "crossContacts": "19357",
+        "crossMask": "12779552",
+        "minCellDet": "0.501501799",
+        "minVolumeRatio": "0.853220761",
+        "maxVolumeRatio": "1.02300358",
+        "finalVolumeRatio": "0.982580245",
+        "maxExternalPenetration": "6.6045186e-07",
+        "maxSelfPenetration": "0",
+        "maxJointAnchorError": "1.02460575",
+        "maxPostContactStep": "0.894366622",
+        "maxMomentumRelativeError": "12.0304461",
+        "initialMechanicalEstimate": "882856.97",
+        "maxMechanicalEstimate": "882857",
+        "finalMechanicalEstimate": "99529.0242",
+        "finalAwake": "663",
+        "skinRestError": "6.03421586e-06",
+        "massRelativeError": "1.30616327e-05",
+        "assetBytes": "352636",
+        "skinBytes": "101156",
+        "diagnosticBytes": "50280",
+        "averageStepMs": "543.886409",
+        "p95StepMs": "943.0546",
+        "maxStepMs": "10601.5998",
+        "activeContactFrames": "355",
+        "averageActiveContactMs": "549.201031",
+        "averageSkinMs": "0.0653519444",
+        "averageObserverMs": "3.25080083",
+        "averageFrameMs": "543.951761",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "e56848cfcd036a840e8e42179113c7510cffe051b93923762d1c95e171680eae"
+    }
+  ],
+  "captureReplay": [
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode0.json",
+      "passed": true,
+      "dofs": 18,
+      "groups": 2,
+      "tableNcpResidual": 1.1182530016127277e-16,
+      "tableStationarity": 7.105427357601002e-15,
+      "tableMaterialProducts": 88,
+      "diagonalNegativeControlStationarity": 6.540570851275148
+    },
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode1.json",
+      "passed": true,
+      "dofs": 18,
+      "groups": 2,
+      "tableNcpResidual": 4.155156512681266e-18,
+      "tableStationarity": 4.440892098500626e-16,
+      "tableMaterialProducts": 52,
+      "diagonalNegativeControlStationarity": 0.16932733711462022
+    },
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode2.json",
+      "passed": true,
+      "dofs": 18,
+      "groups": 2,
+      "tableNcpResidual": 1.1143356364635757e-16,
+      "tableStationarity": 7.105427357601002e-15,
+      "tableMaterialProducts": 88,
+      "diagonalNegativeControlStationarity": 6.764165060565016
+    },
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode3.json",
+      "passed": true,
+      "dofs": 12,
+      "groups": 2,
+      "tableNcpResidual": 1.1335000740158764e-16,
+      "tableStationarity": 1.887379141862766e-15,
+      "tableMaterialProducts": 88,
+      "diagonalNegativeControlStationarity": 13.137301139392184
+    },
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode4.json",
+      "passed": true,
+      "dofs": 24,
+      "groups": 2,
+      "tableNcpResidual": 1.1907333892767223e-16,
+      "tableStationarity": 3.774758283725532e-15,
+      "tableMaterialProducts": 88,
+      "diagonalNegativeControlStationarity": 6.630025687295702
+    },
+    {
+      "file": "tools\\benchmark-results\\common-response-20261028\\mode5.json",
+      "passed": true,
+      "dofs": 18,
+      "groups": 2,
+      "tableNcpResidual": 5.260779787043822e-18,
+      "tableStationarity": 2.1316282072803006e-14,
+      "tableMaterialProducts": 82,
+      "diagonalNegativeControlStationarity": 6.286970549827875
+    }
+  ],
+  "lab": {
+    "historical-shared-precise": {
+      "passed": true,
+      "captures": [
+        {
+          "name": "friction-stall",
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 3.9041286465364686e-11,
+            "seconds": 0.0013364,
+            "sweeps": 0,
+            "materialSolves": 96,
+            "factorBytes": 41480,
+            "stationarity": 2.168404344971009e-18,
+            "factorNonzeros": 528,
+            "actualThreads": 1,
+            "responseRank": 18,
+            "responseProducts": 41,
+            "cachedIterations": 0,
+            "coneRounds": 2,
+            "coneIterations": 23,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 21,
+            "regularizedPivots": 0
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 3.9041123205576345e-11,
+            "stationarity": 3.469446951953614e-18,
+            "physical": true
+          }
+        },
+        {
+          "name": "friction-stall-impact",
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 16,
+            "residual": 1.5306598197994836e-14,
+            "seconds": 0.0068025,
+            "sweeps": 0,
+            "materialSolves": 66,
+            "factorBytes": 29816,
+            "stationarity": 1.4210854715202004e-14,
+            "factorNonzeros": 483,
+            "actualThreads": 1,
+            "responseRank": 6,
+            "responseProducts": 85,
+            "cachedIterations": 1,
+            "coneRounds": 32,
+            "coneIterations": 384,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 352,
+            "regularizedPivots": 50
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.5306598197994836e-14,
+            "stationarity": 2.1316282072803006e-14,
+            "physical": true
+          }
+        },
+        {
+          "name": "friction-stall-slab",
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 80,
+            "residual": 1.728223625264102e-11,
+            "seconds": 0.044919,
+            "sweeps": 0,
+            "materialSolves": 156,
+            "factorBytes": 92456,
+            "stationarity": 1.5987211554602254e-14,
+            "factorNonzeros": 1248,
+            "actualThreads": 1,
+            "responseRank": 24,
+            "responseProducts": 257,
+            "cachedIterations": 1,
+            "coneRounds": 32,
+            "coneIterations": 571,
+            "unfinishedConeSeeds": 3,
+            "coneFactorizations": 542,
+            "regularizedPivots": 15
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.7282231308292188e-11,
+            "stationarity": 1.5987211554602254e-14,
+            "physical": true
+          }
+        },
+        {
+          "name": "native-friction-kkt",
+          "execution": {
+            "converged": true,
+            "iterations": 13,
+            "linearIterations": 4208,
+            "residual": 1.3587490637793654e-15,
+            "seconds": 0.157993,
+            "sweeps": 0,
+            "materialSolves": 366,
+            "factorBytes": 268424,
+            "stationarity": 1.6653345369377348e-16,
+            "factorNonzeros": 4128,
+            "actualThreads": 1,
+            "responseRank": 42,
+            "responseProducts": 9176,
+            "cachedIterations": 13,
+            "coneRounds": 32,
+            "coneIterations": 545,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 513,
+            "regularizedPivots": 0
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.4441154971058181e-15,
+            "stationarity": 2.0122792321330962e-16,
+            "physical": true
+          }
+        },
+        {
+          "name": "native-friction-curvature",
+          "execution": {
+            "converged": true,
+            "iterations": 64,
+            "linearIterations": 17504,
+            "residual": 2.983421380866469e-13,
+            "seconds": 0.4331676,
+            "sweeps": 28,
+            "materialSolves": 364,
+            "factorBytes": 450728,
+            "stationarity": 1.9326762412674725e-12,
+            "factorNonzeros": 7008,
+            "actualThreads": 1,
+            "responseRank": 40,
+            "responseProducts": 41819,
+            "cachedIterations": 64,
+            "coneRounds": 32,
+            "coneIterations": 513,
+            "unfinishedConeSeeds": 31,
+            "coneFactorizations": 512,
+            "regularizedPivots": 566
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 2.9834213808664725e-13,
+            "stationarity": 1.3642420526593924e-12,
+            "physical": true
+          }
+        }
+      ],
+      "random": {
+        "count": 96,
+        "worstResidual": 7.319883288278472e-13,
+        "totalSeconds": 0.44288419999999984,
+        "maxIterations": 2
+      },
+      "limits": [
+        {
+          "mu": 0.0,
+          "x": [
+            0.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              1.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 0.0,
+            "seconds": 6.68e-05,
+            "sweeps": 0,
+            "materialSolves": 14,
+            "factorBytes": 2672,
+            "stationarity": 0.0,
+            "factorNonzeros": 36,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 7,
+            "cachedIterations": 0,
+            "coneRounds": 1,
+            "coneIterations": 8,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 7,
+            "regularizedPivots": 0
+          }
+        },
+        {
+          "mu": 0.4,
+          "x": [
+            -4.739397763131592e-11,
+            1.6000000000189674,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.999999999952606,
+              -0.3999999999810327,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369698881565796e-11,
+            "seconds": 0.0003377,
+            "sweeps": 0,
+            "materialSolves": 25,
+            "factorBytes": 2672,
+            "stationarity": 0.0,
+            "factorNonzeros": 36,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 18,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 0
+          }
+        }
+      ],
+      "parallel": [
+        {
+          "threads": 1,
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369169231139236e-11,
+            "seconds": 0.0235843,
+            "sweeps": 0,
+            "materialSolves": 465,
+            "factorBytes": 409352,
+            "stationarity": 4.440892098500626e-16,
+            "factorNonzeros": 4572,
+            "actualThreads": 1,
+            "responseRank": 0,
+            "responseProducts": 207,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 1374
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 2.3691609560253916e-11,
+            "stationarity": 5.551115123125783e-16,
+            "physical": true
+          }
+        },
+        {
+          "threads": 4,
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369169231139236e-11,
+            "seconds": 0.0272839,
+            "sweeps": 0,
+            "materialSolves": 465,
+            "factorBytes": 409352,
+            "stationarity": 4.440892098500626e-16,
+            "factorNonzeros": 4572,
+            "actualThreads": 4,
+            "responseRank": 0,
+            "responseProducts": 207,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 1374
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 2.3691609560253916e-11,
+            "stationarity": 5.551115123125783e-16,
+            "physical": true
+          }
+        }
+      ],
+      "scope": "Frozen unbounded normal/Coulomb; no physical state publication"
+    },
+    "historical-shared-fast": {
+      "passed": true,
+      "captures": [
+        {
+          "name": "friction-stall",
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 3.9041299023809956e-11,
+            "seconds": 0.0007087,
+            "sweeps": 0,
+            "materialSolves": 96,
+            "factorBytes": 41480,
+            "stationarity": 2.6020852139652106e-18,
+            "factorNonzeros": 528,
+            "actualThreads": 1,
+            "responseRank": 18,
+            "responseProducts": 41,
+            "cachedIterations": 0,
+            "coneRounds": 2,
+            "coneIterations": 23,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 21,
+            "regularizedPivots": 0
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 3.90411357640216e-11,
+            "stationarity": 1.951563910473908e-18,
+            "physical": true
+          }
+        },
+        {
+          "name": "friction-stall-impact",
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 16,
+            "residual": 1.9857175493146033e-14,
+            "seconds": 0.005548900000000001,
+            "sweeps": 0,
+            "materialSolves": 66,
+            "factorBytes": 29816,
+            "stationarity": 3.552713678800501e-14,
+            "factorNonzeros": 483,
+            "actualThreads": 1,
+            "responseRank": 6,
+            "responseProducts": 85,
+            "cachedIterations": 1,
+            "coneRounds": 32,
+            "coneIterations": 384,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 352,
+            "regularizedPivots": 61
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.985717549314603e-14,
+            "stationarity": 4.263256414560601e-14,
+            "physical": true
+          }
+        },
+        {
+          "name": "friction-stall-slab",
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 80,
+            "residual": 1.6958383876877025e-11,
+            "seconds": 0.0285402,
+            "sweeps": 0,
+            "materialSolves": 156,
+            "factorBytes": 92456,
+            "stationarity": 2.6645352591003757e-14,
+            "factorNonzeros": 1248,
+            "actualThreads": 1,
+            "responseRank": 24,
+            "responseProducts": 257,
+            "cachedIterations": 1,
+            "coneRounds": 32,
+            "coneIterations": 571,
+            "unfinishedConeSeeds": 3,
+            "coneFactorizations": 542,
+            "regularizedPivots": 12
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.6958352562667795e-11,
+            "stationarity": 2.842170943040401e-14,
+            "physical": true
+          }
+        },
+        {
+          "name": "native-friction-kkt",
+          "execution": {
+            "converged": true,
+            "iterations": 14,
+            "linearIterations": 4464,
+            "residual": 1.1311052415754925e-15,
+            "seconds": 0.12918480000000002,
+            "sweeps": 0,
+            "materialSolves": 366,
+            "factorBytes": 268424,
+            "stationarity": 9.71445146547012e-17,
+            "factorNonzeros": 4128,
+            "actualThreads": 1,
+            "responseRank": 42,
+            "responseProducts": 9726,
+            "cachedIterations": 14,
+            "coneRounds": 32,
+            "coneIterations": 545,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 513,
+            "regularizedPivots": 0
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 1.1737884582387191e-15,
+            "stationarity": 1.1796119636642288e-16,
+            "physical": true
+          }
+        },
+        {
+          "name": "native-friction-curvature",
+          "execution": {
+            "converged": true,
+            "iterations": 45,
+            "linearIterations": 12368,
+            "residual": 3.059426181389728e-13,
+            "seconds": 0.2703996,
+            "sweeps": 18,
+            "materialSolves": 364,
+            "factorBytes": 450728,
+            "stationarity": 1.2505552149377763e-12,
+            "factorNonzeros": 7008,
+            "actualThreads": 1,
+            "responseRank": 40,
+            "responseProducts": 29365,
+            "cachedIterations": 45,
+            "coneRounds": 32,
+            "coneIterations": 508,
+            "unfinishedConeSeeds": 31,
+            "coneFactorizations": 507,
+            "regularizedPivots": 562
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 3.0585899135436726e-13,
+            "stationarity": 1.0231815394945443e-12,
+            "physical": true
+          }
+        }
+      ],
+      "random": {
+        "count": 96,
+        "worstResidual": 4.089280952393957e-13,
+        "totalSeconds": 0.37325500000000017,
+        "maxIterations": 2
+      },
+      "limits": [
+        {
+          "mu": 0.0,
+          "x": [
+            0.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              1.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 0.0,
+            "seconds": 3.9800000000000005e-05,
+            "sweeps": 0,
+            "materialSolves": 14,
+            "factorBytes": 2672,
+            "stationarity": 0.0,
+            "factorNonzeros": 36,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 7,
+            "cachedIterations": 0,
+            "coneRounds": 1,
+            "coneIterations": 8,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 7,
+            "regularizedPivots": 0
+          }
+        },
+        {
+          "mu": 0.4,
+          "x": [
+            -4.739397763131592e-11,
+            1.6000000000189671,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.999999999952606,
+              -0.39999999998103275,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369698881565796e-11,
+            "seconds": 0.00021070000000000003,
+            "sweeps": 0,
+            "materialSolves": 25,
+            "factorBytes": 2672,
+            "stationarity": 0.0,
+            "factorNonzeros": 36,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 18,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 0
+          }
+        }
+      ],
+      "parallel": [
+        {
+          "threads": 1,
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369169231139236e-11,
+            "seconds": 0.019241900000000003,
+            "sweeps": 0,
+            "materialSolves": 465,
+            "factorBytes": 409352,
+            "stationarity": 4.440892098500626e-16,
+            "factorNonzeros": 4572,
+            "actualThreads": 1,
+            "responseRank": 0,
+            "responseProducts": 207,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 1387
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 2.3691609560253916e-11,
+            "stationarity": 4.996003610813204e-16,
+            "physical": true
+          }
+        },
+        {
+          "threads": 4,
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 2.369169231139236e-11,
+            "seconds": 0.025489300000000003,
+            "sweeps": 0,
+            "materialSolves": 465,
+            "factorBytes": 409352,
+            "stationarity": 4.440892098500626e-16,
+            "factorNonzeros": 4572,
+            "actualThreads": 4,
+            "responseRank": 0,
+            "responseProducts": 207,
+            "cachedIterations": 0,
+            "coneRounds": 12,
+            "coneIterations": 108,
+            "unfinishedConeSeeds": 0,
+            "coneFactorizations": 96,
+            "regularizedPivots": 1387
+          },
+          "oracle": {
+            "passed": true,
+            "originalResidual": 2.3691609560253916e-11,
+            "stationarity": 4.996003610813204e-16,
+            "physical": true
+          }
+        }
+      ],
+      "scope": "Frozen unbounded normal/Coulomb; no physical state publication"
+    },
+    "mixed-shared-precise": {
+      "passed": true,
+      "random": {
+        "count": 128,
+        "worstResidual": 8.775057069865255e-11,
+        "totalSeconds": 0.009244199999999996,
+        "maxIterations": 7
+      },
+      "limits": [
+        {
+          "cap": "0.0",
+          "compliance": 0.0,
+          "x": [
+            -2.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 0.0,
+            "seconds": 1.08e-05,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 5,
+            "cachedIterations": 0,
+            "symbolicSeconds": 4.6e-06,
+            "factorSeconds": 7e-07,
+            "triangularSeconds": 7e-07
+          }
+        },
+        {
+          "cap": "0.5",
+          "compliance": 0.0,
+          "x": [
+            -1.5,
+            1.8,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.5,
+              -0.2,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 0.0,
+            "seconds": 9.7e-06,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 3.6e-06,
+            "factorSeconds": 5e-07,
+            "triangularSeconds": 7e-07
+          }
+        },
+        {
+          "cap": "inf",
+          "compliance": 0.0,
+          "x": [
+            0.0,
+            1.2,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              2.0,
+              -0.8,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 0.0,
+            "seconds": 7.8e-06,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 2.9e-06,
+            "factorSeconds": 4e-07,
+            "triangularSeconds": 4e-07
+          }
+        },
+        {
+          "cap": "inf",
+          "compliance": 0.25,
+          "x": [
+            -0.3999999999999999,
+            1.3599999999999999,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              1.6,
+              -0.64,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 6.938893903907228e-17,
+            "seconds": 7.7e-06,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 2.5e-06,
+            "factorSeconds": 4e-07,
+            "triangularSeconds": 5e-07
+          }
+        }
+      ],
+      "scope": "Frozen mixed NCP only; cone seed generator still unbounded contact-only"
+    },
+    "mixed-shared-fast": {
+      "passed": true,
+      "random": {
+        "count": 128,
+        "worstResidual": 8.775057069865255e-11,
+        "totalSeconds": 0.009493899999999996,
+        "maxIterations": 7
+      },
+      "limits": [
+        {
+          "cap": "0.0",
+          "compliance": 0.0,
+          "x": [
+            -2.0,
+            2.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 0,
+            "linearIterations": 0,
+            "residual": 0.0,
+            "seconds": 1.69e-05,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 5,
+            "cachedIterations": 0,
+            "symbolicSeconds": 6.8e-06,
+            "factorSeconds": 1.0000000000000002e-06,
+            "triangularSeconds": 1.1000000000000003e-06
+          }
+        },
+        {
+          "cap": "0.5",
+          "compliance": 0.0,
+          "x": [
+            -1.5,
+            1.8,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              0.5,
+              -0.20000000000000004,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 1.3877787807814457e-17,
+            "seconds": 1.3300000000000001e-05,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 5.4e-06,
+            "factorSeconds": 6.000000000000001e-07,
+            "triangularSeconds": 4.0000000000000003e-07
+          }
+        },
+        {
+          "cap": "inf",
+          "compliance": 0.0,
+          "x": [
+            0.0,
+            1.1999999999999997,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              2.0,
+              -0.8000000000000002,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 5.551115123125783e-17,
+            "seconds": 2.2100000000000002e-05,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 6.900000000000001e-06,
+            "factorSeconds": 1.1e-06,
+            "triangularSeconds": 1.0000000000000002e-06
+          }
+        },
+        {
+          "cap": "inf",
+          "compliance": 0.25,
+          "x": [
+            -0.40000000000000013,
+            1.3599999999999999,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "force": [
+            [
+              1.5999999999999999,
+              -0.64,
+              0.0
+            ]
+          ],
+          "execution": {
+            "converged": true,
+            "iterations": 1,
+            "linearIterations": 12,
+            "residual": 1.3877787807814457e-16,
+            "seconds": 1.87e-05,
+            "sweeps": 0,
+            "materialSolves": 9,
+            "factorBytes": 940,
+            "stationarity": 0.0,
+            "factorNonzeros": 15,
+            "actualThreads": 1,
+            "responseRank": 3,
+            "responseProducts": 35,
+            "cachedIterations": 1,
+            "symbolicSeconds": 6.1e-06,
+            "factorSeconds": 1.1e-06,
+            "triangularSeconds": 1.0000000000000002e-06
+          }
+        }
+      ],
+      "scope": "Frozen mixed NCP only; cone seed generator still unbounded contact-only"
+    }
+  },
+  "probes": {
+    "modes": [
+      "precise",
+      "fast"
+    ],
+    "mixed3x6PerMode": 120,
+    "invalidRejectedPerMode": 480,
+    "sparseIndefinitePerMode": 192,
+    "sparseSpdPerMode": 192,
+    "derivativesPerMode": 192,
+    "passed": true
+  },
+  "buildCheckedPassed": true,
+  "smokePassed": true,
+  "coreNetLines": 171,
+  "remaining": [
+    "physical pose/force joint publication",
+    "Particle3 and unsupported row compilation",
+    "three existing sphere/capsule response failures",
+    "trial joint/contactOffset/unloading qualification",
+    "performance and continuous candidate coverage"
+  ],
+  "sourceSha256": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSparseSymmetric.h": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResponse.h": "f53d72479355809933e2e44267db8269c1be50aa2a437a71be1829a99da9b90e",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "48abc2d50251b725df3317a520575fffa358717d96c1ac74b68425d78d52ac12",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "87b2b07bfc1a75e950ed91acc76b090ce3af0210d7ea50d1382a35c16fad0cf3",
+    "experiments/avbd_contact_lab/sparse_symmetric.h": "aa2f4c0813917f09b7729c4282aec6f29adca0fe09ea3785285daaa69d607684",
+    "experiments/avbd_contact_lab/split.py": "c80560bc6dd8e3a0b848b1b5e118a229ad5850caa4d431db6b9ead4fd24ede64",
+    "experiments/avbd_contact_lab/split_kernel.cpp": "5c9d20b058b3b59226d38e06912b921e1146a95b921c1472c4c9345a5c0e7022"
+  },
+  "labProvenance": {
+    "precise": {
+      "activationSha256": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780",
+      "sourceSha256": "5c9d20b058b3b59226d38e06912b921e1146a95b921c1472c4c9345a5c0e7022",
+      "coneSha256": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f",
+      "responseSha256": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c",
+      "dllSha256": "aee3112f4e8c58935eb9af209bc6deb6ba29a277b5e0b97c18611f80ea76a83d",
+      "dependencies": "Microsoft (R) COFF/PE Dumper Version 14.38.33145.0\nCopyright (C) Microsoft Corporation.  All rights reserved.\n\n\nDump of file split_kernel.dll\n\nFile Type: DLL\n\n  Image has the following dependencies:\n\n    MSVCP140.dll\n    VCOMP140.DLL\n    KERNEL32.dll\n    VCRUNTIME140.dll\n    VCRUNTIME140_1.dll\n    api-ms-win-crt-runtime-l1-1-0.dll\n    api-ms-win-crt-math-l1-1-0.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n\n  Summary\n\n        1000 .data\n        1000 .pdata\n        3000 .rdata\n        1000 .reloc\n       1E000 .text\n",
+      "physxRuntimeLinked": false,
+      "precision": "double",
+      "fpMode": "precise",
+      "mixedSha256": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e",
+      "coneQpSha256": "666c39907c42d58db28f1ae03499ed4958d827927b95c66109145b6bfbf408a7",
+      "sparseSha256": "aa2f4c0813917f09b7729c4282aec6f29adca0fe09ea3785285daaa69d607684",
+      "sparseCoreSha256": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf",
+      "ncpSha256": "99d3dc824f3f2cd220c38eecd319a2036232ecc8acde8f7f4cb1c43fd50f5c39"
+    },
+    "fast": {
+      "activationSha256": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780",
+      "sourceSha256": "5c9d20b058b3b59226d38e06912b921e1146a95b921c1472c4c9345a5c0e7022",
+      "coneSha256": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f",
+      "responseSha256": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c",
+      "dllSha256": "625350b47b06c003741a6bb0b105e9eb71f6240f96a9b6bd9183b2799e20b458",
+      "dependencies": "Microsoft (R) COFF/PE Dumper Version 14.38.33145.0\nCopyright (C) Microsoft Corporation.  All rights reserved.\n\n\nDump of file split_kernel.dll\n\nFile Type: DLL\n\n  Image has the following dependencies:\n\n    MSVCP140.dll\n    VCOMP140.DLL\n    KERNEL32.dll\n    VCRUNTIME140.dll\n    VCRUNTIME140_1.dll\n    api-ms-win-crt-runtime-l1-1-0.dll\n    api-ms-win-crt-math-l1-1-0.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n\n  Summary\n\n        1000 .data\n        1000 .pdata\n        3000 .rdata\n        1000 .reloc\n       1D000 .text\n",
+      "physxRuntimeLinked": false,
+      "precision": "double",
+      "fpMode": "fast",
+      "mixedSha256": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e",
+      "coneQpSha256": "666c39907c42d58db28f1ae03499ed4958d827927b95c66109145b6bfbf408a7",
+      "sparseSha256": "aa2f4c0813917f09b7729c4282aec6f29adca0fe09ea3785285daaa69d607684",
+      "sparseCoreSha256": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf",
+      "ncpSha256": "99d3dc824f3f2cd220c38eecd319a2036232ecc8acde8f7f4cb1c43fd50f5c39"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -33,6 +33,11 @@
+     // suffice even when the actual material or contact row IDs have changed.
+     PxArray<PxU32> incidenceOffsets,incidenceShape;
+     PxU32 workers=0,firstTile=0,lanes=0;
++    struct QueueTiming
++    {
++        PxU64 ticks=0, maxTicks=0;
++        PxU32 count=0, inlineSlot=0;
++    } wait;
+     void clear()
+     {
+         offsets.clear();wideOffsets.clear();wideBlocks.clear();tiles.clear();waves.clear();splits.clear();nodal.clear();rigid.clear();
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -1333,6 +1333,14 @@
+         const PxU64 loss=span>lpt?span-lpt:0;
+         for(PxU32 i=0;i<mStep.localWaveTaskCount;++i)
+         {
++            if(mColorTasks && i!=mColorTasks->wait.inlineSlot)
++            {
++                auto& wait=mColorTasks->wait;
++                const PxU64 delay=mStep.localWaveTaskStarts[i]-mStep.localWaveTaskReady[i];
++                wait.ticks+=delay;
++                wait.maxTicks=PxMax(wait.maxTicks,delay);
++                ++wait.count;
++            }
+             const PxU64 ready=mStep.localWaveTaskReady[i]-mStep.localWaveStart;
+             const PxU64 start=mStep.localWaveTaskStarts[i]-mStep.localWaveStart;
+             const PxU64 end=start+mStep.localWaveTaskTicks[i];
+@@ -1647,7 +1655,8 @@
+     mStep.localQueuePeak=PxMax(mStep.localQueuePeak,count);
+     if(mStep.profile)
+     {mStep.localWaveStart=PxTime::getCurrentCounterValue();mStep.localWaveStage=stage;
+-        mStep.localWaveJobs=PxMin(count,workers);mStep.localWaveTaskCount=count;}
++        mStep.localWaveJobs=PxMin(count,workers);mStep.localWaveTaskCount=count;
++        if(mStep.localTimeline && mColorTasks)mColorTasks->wait.inlineSlot=starts?count-1:0;}
+     if(count>1)
+     {
+         if(!mColorContinuation)mColorContinuation=PX_NEW(AvbdAdvanceTask)(*this,mContextID);
+@@ -3065,6 +3074,7 @@
+ 	const PxVec3& gravity, Cm::PinnableBitMap& /*changedHandleMap*/)
+ {
+ 	mStep=StepState();
++    if(mColorTasks)mColorTasks->wait={};
+     mFixedReactions.clear();
+     mReleasedRigidBodies.clear();
+     mAttachmentRows.clear();
+@@ -3748,6 +3758,12 @@
+         {
+             if(mStep.localTimeline)
+             {
++                if(mColorTasks)
++                {
++                    const auto& wait=mColorTasks->wait;
++                    std::fprintf(stderr,"[AVBD_QUEUE_WAIT] external=%u sumMs=%.7f maxMs=%.7f\n",
++                        wait.count,wait.ticks*ms,wait.maxTicks*ms);
++                }
+                 std::fprintf(stderr,"[AVBD_LOCAL_TIMELINE] stage=%u jobs=%u lanes=%u spanMs=%.6f lptMs=%.6f selection=worstGapPerStep\n",
+                     mStep.localTraceStage,mStep.localTraceJobs,mStep.localTraceLanes,mStep.localTraceSpan*ms,mStep.localTraceLpt*ms);
+                 for(PxU32 i=0;i<mStep.localTraceJobs;++i)

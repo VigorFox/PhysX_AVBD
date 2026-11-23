@@ -1,0 +1,30 @@
+{
+  "frames": 360,
+  "workers": [
+    4,
+    8
+  ],
+  "pairs": 7,
+  "indices": [
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    163,
+    164,
+    165,
+    166,
+    167,
+    274,
+    275,
+    276,
+    277,
+    278,
+    279
+  ],
+  "primary": "Five-body full-step P95, frozen 18-frame mean and T4/T8; retain only for reproducible gain beyond noise, preserving physical/cloth guards.",
+  "intervention": "Overlap ready Assemble leaves with ordinary work of the same color. Keep all later search phases, incidence, grain and bounds fixed."
+}

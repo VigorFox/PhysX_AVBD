@@ -1,0 +1,18 @@
+Bounded response /fp:precise
+[BOUNDED_CASE] name=coupled_coulomb blocks=16 rows=15 colors=2 depth=0 sweeps=77 error=5.53752912e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=four_support_row blocks=4 rows=3 colors=4 depth=0 sweeps=46 error=9.50605462e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=high_degree_star blocks=1025 rows=1024 colors=2 depth=3 sweeps=3 error=4.52698816e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=long_chain blocks=1025 rows=1024 colors=2 depth=0 sweeps=6 error=1.26390669e-11 threadDifference=0 status=PASS
+[BOUNDED_HARD_CHAIN] blocks=257 rows=256 sweeps=1024 result=budget_exhausted budgetContract=PASS
+[BOUNDED_CLOSED_CHAIN] sweeps=4 a=0.5 b=0.5 force=1.5 status=PASS
+[BOUNDED_BUDGET] sweeps=1024 status=PASS
+[BOUNDED_RESPONSE] threads=1,4 peak=4 leaf=32 fanIn=8 matrix=6 batch=32 sweepLimit=1024 failed=0 status=PASS
+Bounded response /fp:fast
+[BOUNDED_CASE] name=coupled_coulomb blocks=16 rows=15 colors=2 depth=0 sweeps=77 error=5.53653911e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=four_support_row blocks=4 rows=3 colors=4 depth=0 sweeps=46 error=9.50606573e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=high_degree_star blocks=1025 rows=1024 colors=2 depth=3 sweeps=3 error=4.52698816e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=long_chain blocks=1025 rows=1024 colors=2 depth=0 sweeps=6 error=1.26390669e-11 threadDifference=0 status=PASS
+[BOUNDED_HARD_CHAIN] blocks=257 rows=256 sweeps=1024 result=budget_exhausted budgetContract=PASS
+[BOUNDED_CLOSED_CHAIN] sweeps=4 a=0.5 b=0.5 force=1.5 status=PASS
+[BOUNDED_BUDGET] sweeps=1024 status=PASS
+[BOUNDED_RESPONSE] threads=1,4 peak=4 leaf=32 fanIn=8 matrix=6 batch=32 sweepLimit=1024 failed=0 status=PASS

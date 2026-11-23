@@ -1,0 +1,4 @@
+Material assembly /fp:precise
+[MATERIAL_ASSEMBLY] cases=1200 matrixError=2.32377426e-07 gradientError=5.81395449e-08 finiteDifferenceError=2.12354181e-08 oldDuplicateSupportFailures=138 failures=0
+Material assembly /fp:fast
+[MATERIAL_ASSEMBLY] cases=1200 matrixError=2.32377425e-07 gradientError=5.81395449e-08 finiteDifferenceError=2.12354181e-08 oldDuplicateSupportFailures=138 failures=0

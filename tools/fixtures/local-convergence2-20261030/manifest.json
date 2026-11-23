@@ -1,0 +1,586 @@
+{
+  "schema": 1,
+  "head": "ead9fb33e66026a131d92807e0c369024665a6c5",
+  "dirty": true,
+  "configuration": "Checked; grid=5; dispatcher-threads=4",
+  "environment": {
+    "PHYSX_AVBD_COMMON_STEP": "patch",
+    "PHYSX_NP_GEOMETRY_CERTIFICATES": "2"
+  },
+  "scope": "Five-body target 360 did NOT complete: timeout at 600 s, 41 accepted, 0 rejected, 37 nonstationary. Reaction 360 stationary PASS. Default takeover and GPU remain unsupported.",
+  "replayInputs": {
+    "135": "../local-convergence-20261030/remaining-135.json.gz",
+    "240": "../local-patches-20261029/certificate-failure.json.gz",
+    "280": "../local-convergence-20261030/projected-stagnation-280.json.gz"
+  },
+  "sources": [
+    {
+      "path": "physx/source/lowlevel/software/include/PxsContactBoxAxis.h",
+      "sha256": "bea92193cc9116f38e58222a685c5900410c830720dd9370d6d5ffc9c96a4837"
+    },
+    {
+      "path": "physx/source/lowlevel/software/include/PxsContactGeometry.h",
+      "sha256": "1e984af01e5326fe7db19fa985cb1eacbb15a1870db41b272fc307991063d861"
+    },
+    {
+      "path": "physx/source/lowlevel/software/src/PxsNphaseImplementationContext.cpp",
+      "sha256": "50a04de630e84619b44c7fa3a7489b5a23e8c8accd46afbb33111209dc9d0405"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdBlockGroup.h",
+      "sha256": "48dee08fdac6bfb7b7e52744fe54982263a483e9484212bdd16365341fa8129c"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdColoring.h",
+      "sha256": "f28683aea00ab1eb42976d41418381af95ab8ca9c95109f88617f297264763d5"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h",
+      "sha256": "4ca10312dcf5e2ab9c9fa2fe0f521a121070a3d0de7b2145da2adfa8de91e4c9"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h",
+      "sha256": "d1c7029f8e16f14f25404b7db86adbd27ec70e2119b8989bd334ecca5b6ccb02"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResponse.h",
+      "sha256": "090126c1e991a5364cda6da96490d827c2a1a32e53ad737a1a7e1db917da3cbf"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactGeometry.h",
+      "sha256": "aa17a28e9d25ee927af6b9534031e3b18ff08f3a436b2c33db4f4648792f11b0"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPotential.h",
+      "sha256": "4b7a4a423a18387e7b2b9c7e23d812c4ee675e9c58f4b7f1b84418165241565c"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp",
+      "sha256": "86aa393edc11bb2db4e420aaadb004b61f5b44027b3875c27cf1fecae1f21aa5"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCoulombNcp.h",
+      "sha256": "4a214c4ca34a0780f98b30cb5721775e2581ffba5507ca96d0f1b07a477d2974"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCoupledDomain.h",
+      "sha256": "7abdc90212907d00e7dc371172b68463739299ce7f879144b6d74b4c93668d13"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp",
+      "sha256": "6c3f5bcc5e4145fd60332836eb4d01e70d128c4fdd50bff895716b5984b41800"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h",
+      "sha256": "54dd69acb54d88432a9d32d71e251ce1136802ab70caf553b5a372a3d137823c"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrame.h",
+      "sha256": "1eb0902e8f687033ded03ae410eed5985c9452a07d593cbe865962f5f25f4ce5"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameCurvature.h",
+      "sha256": "a2bb3a44aef332a90fd061256bf3ca0326a56a465d7c4ac10987fbe193b08419"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameMath.h",
+      "sha256": "927d0e7ab348cf7422f482952427d18d5b38978385ffa620fe48c8d53ea9b4d3"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h",
+      "sha256": "d5f34054f2c66e0f784355f3d721861f57cd2dcf0d0e8237f6494fc3d6e9d942"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp",
+      "sha256": "be22f91cd7a7b1423d3f9a4444b178b79de189113a0bb47d9671a8f6734b92e8"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdKernelsScalar.h",
+      "sha256": "99ca2f5c3d7d3d1db8784c464ea25a852afb3e8d03b3d041bd2dcc5b290237a2"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdLinearResponse.h",
+      "sha256": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalAcceleration.h",
+      "sha256": "b7fcaaededa1f98d6c03788dc27f7f095d8e1fea63a674d745fe86146288c1a4"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalCorrection.h",
+      "sha256": "397a89e4fb8d9d2380536312531235265e0e9ff428bb2ddbe6281bbe838496af"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalResponse.h",
+      "sha256": "83ae6c4f8b60cf062abdb54e4b3738bb07a984473c70dd6a87e353630f3de844"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdMaterialAssembly.h",
+      "sha256": "da1d6061297dd0931f5751c8efc368f7f290d847ba5cc5a9fca0ab2e892f7b7e"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdMixedKkt.h",
+      "sha256": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNormalCone.h",
+      "sha256": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h",
+      "sha256": "3959a7c3d5e0036baf6bc57f9a9a18121df2bc2209be289c04b197d6ddc4bdac"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdOgc.h",
+      "sha256": "f62be4adcdebeb3c93b541bbe33119103a3b70da2a33f9c11b9f7b78fa280110"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcActivation.h",
+      "sha256": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcProjection.h",
+      "sha256": "05dbc797c3c281dbfdb80096b6c07271a3f89ec92645a4316b06a6f809f15b74"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdProgramSchedule.h",
+      "sha256": "e595943707ece5f4b557a7e92fcc01fdcd387a32446907c81152d882eebb506c"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdRigidMetric.h",
+      "sha256": "1692c827f82b153bcf0e2d70ce270f695bf9541bb8ffdac803a36fe0a26c5d63"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdRowProgram.h",
+      "sha256": "580504c9c8e3e078051a0f870a374c30948bfa7f66d8ba595122d14d72c37461"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp",
+      "sha256": "61de8ac23a256dfd976c5bab47ab11a0596f7f936bb62b167125eb573e628f48"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdSparseSymmetric.h",
+      "sha256": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdTetrahedron.h",
+      "sha256": "f4e5da89ea2ca339233595e0d3a9a33a43d14d41c918931b2a0e524e0170bf1d"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdVbd.h",
+      "sha256": "ff4fb434ac5d8bd4aff412d76db530e2f0f1e0d3c2bcd13d743a0c2962bd550f"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp",
+      "sha256": "28637f6dc54969343c4ca4d4f87b48c80feef2cb0a4d515c4b5e183bb895bc08"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h",
+      "sha256": "24c742f1d177bc73b835f671676ab7789782c415221263bd9e5f47918cd0b1b6"
+    },
+    {
+      "path": "tools/avbd_local_correction_probe.cpp",
+      "sha256": "a4edc8db66d5893c10473a8b5becbb30ba088b539e04d7e5be196ca818b58b1b"
+    },
+    {
+      "path": "tools/avbd_np_box_axis_probe.cpp",
+      "sha256": "89e90a21bb719a0dc2f29adedb19cd11208b85d628aecde5831c6e7541d8cd26"
+    },
+    {
+      "path": "tools/run_avbd_local_correction_probe.py",
+      "sha256": "9e8b790ffae9d64bbc6dc1fd874df7c8138d134e1548bd3cef016f85a90efb55"
+    },
+    {
+      "path": "tools/run_avbd_local_scene.py",
+      "sha256": "97e19e4792a8edb8be0aadd2a23f955709eda9f7e17a90a94f00951775b107af"
+    },
+    {
+      "path": "tools/run_avbd_np_box_axis_probe.py",
+      "sha256": "614d4d5fbaaab94d968ed64c14e4127fdf2da9993b24bea5b5d2028b24666a70"
+    }
+  ],
+  "binaries": [
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/PhysX_64.dll",
+      "sha256": "40f46bd4b495f96142e6ab18cfed9080d2abaa86932ca4bd36f5615aa9a3baaf"
+    },
+    {
+      "path": "physx/bin/win.x86_64.vc143.md/checked/SnippetJointSoftBody_64.exe",
+      "sha256": "906b5b7a14b44ed0c95d832cf9f5f45485588efdabfbc8e56d99104540ef0411"
+    }
+  ],
+  "files": [
+    {
+      "path": "final-135-engineering.json",
+      "sha256": "1eb4937a65a8aae2fff89b4be681943f56e02d39c551433956f000a169057b17"
+    },
+    {
+      "path": "final-135-engineering.log",
+      "sha256": "86b3a8a79f9d1dc0544915b9f389ec2a1ea310842379258006551e18cd39de82"
+    },
+    {
+      "path": "final-135-engineering.program.json.gz",
+      "sha256": "98123a44aeb5eac8902f89374b5186fdf6d11b2b923ff65cf3c4c433e2cc97b4"
+    },
+    {
+      "path": "final-135-engineering.validation.json",
+      "sha256": "01d316ce1914deb4ae41f61783a262844a9e2dc168f95bba17e07f3bd14e69b1"
+    },
+    {
+      "path": "final-135-strict.json",
+      "sha256": "ee6dbfa17f34e4d8e3e543db679e0c183851e2758de3db6b3492bb684a45d505"
+    },
+    {
+      "path": "final-135-strict.log",
+      "sha256": "020db1a7a689a60054f201c1dd433e4a00fe28c8dc0cfc928c5c00a83eb5ed4f"
+    },
+    {
+      "path": "final-135-strict.program.json.gz",
+      "sha256": "3e78222ea3ae94778f1a27d70319234d7ca12dea151e0e9396e0d06f15f0b853"
+    },
+    {
+      "path": "final-135-strict.validation.json",
+      "sha256": "1ef1319c85fdfab7cfaeddeeb9d27dbf174c0430d1440be63dafe9510937431e"
+    },
+    {
+      "path": "final-240-engineering.json",
+      "sha256": "36f958b8e1950e5a1fc35251602dc6f56af1b7a1eb41d0277f70eb70a836543f"
+    },
+    {
+      "path": "final-240-engineering.log",
+      "sha256": "e6e7f8b418535c8aa3748e2782ba967ae807e827c6b5878d1dcf980810e3ee42"
+    },
+    {
+      "path": "final-240-engineering.program.json.gz",
+      "sha256": "ddf124903f958f0e1af8cfc8e8684cbf049a5e5a2cea077edb38eb533897d4f7"
+    },
+    {
+      "path": "final-240-engineering.validation.json",
+      "sha256": "6f0a7e1b93d33e6b2c506b3fbd1ea7ab3c832c0a5d7958ee41bf1c3b8712de05"
+    },
+    {
+      "path": "final-240-strict.json",
+      "sha256": "4041d2c293665eb7a9343488c9199dfff3b14e39a4c4167f9d1ed274df46903d"
+    },
+    {
+      "path": "final-240-strict.log",
+      "sha256": "fa90a68ba8f5e75ec65349b93f1bc8ee1db5bf26fcdce0d94841260bf85900ce"
+    },
+    {
+      "path": "final-240-strict.program.json.gz",
+      "sha256": "f902c866543b07ddd3fcfb459670afc116504f5d61511c38319a56a55f8a2151"
+    },
+    {
+      "path": "final-240-strict.validation.json",
+      "sha256": "55ede5e660949c7326d6a848fff3f374f624bb77d67e28b4adf5aeedb66cbdaf"
+    },
+    {
+      "path": "final-280-engineering.json",
+      "sha256": "9ff5a664b302f640bfd25a1191b3a7d27f0417db992d505757554ea3b6878714"
+    },
+    {
+      "path": "final-280-engineering.log",
+      "sha256": "922cd6fc0bbdd774102cacaa9da8b84ccd250cfc82b12b3d7454b308faaf8690"
+    },
+    {
+      "path": "final-280-engineering.program.json.gz",
+      "sha256": "0a2fe2fe0991ca3346d73769790a655e0a37419b1e717f43181769ac800ea847"
+    },
+    {
+      "path": "final-280-engineering.validation.json",
+      "sha256": "03d9c698ca80deb880554af0e0f2f2c68aad088bb93cd9b51bb4c25d7d363a08"
+    },
+    {
+      "path": "final-280-strict.json",
+      "sha256": "fb68516812353785aaf2f09cea32fd72b7cb1408574c9ffc97d5b6170fcf4ed5"
+    },
+    {
+      "path": "final-280-strict.log",
+      "sha256": "3afbbdcf6f1bb89d80224f2bfb646d26df9b6cc55923b2950c202202a3d73941"
+    },
+    {
+      "path": "final-280-strict.program.json.gz",
+      "sha256": "0e5d6b5eb731a768f36a416396854b1013ea55a54cff313d6a5d6af1849235c4"
+    },
+    {
+      "path": "final-280-strict.validation.json",
+      "sha256": "f43b53877a37554784fc2d489824b9c1713a53bd96144296d547401017f05898"
+    },
+    {
+      "path": "final-correction.log",
+      "sha256": "e96a442c2b26525f56b9b096854dfec653a1862a741e7cbfaa20df37aeafd661"
+    },
+    {
+      "path": "final-local.log",
+      "sha256": "a5758907dc811a99b164cf7fd8fa1d6a57b5fde993f5df5a37c1e2df14ad6c43"
+    },
+    {
+      "path": "final-schedule.log",
+      "sha256": "049b40b8bec47a09bc83364c7e20d5d8ed354e547c8e92ee333a805df5f15d4b"
+    },
+    {
+      "path": "kernel-checks.json",
+      "sha256": "880ee8480cdc901c334adae597ee700fa51b18f67c6eb898ba490e1a50b23268"
+    },
+    {
+      "path": "reaction-axis-oracle.json",
+      "sha256": "b53158bcef42a062e6c01fd0577b71ecbc285c0619af9601a1a071fcda50d856"
+    },
+    {
+      "path": "reaction-np-domain.json",
+      "sha256": "51b74c8f122c900d4073b1d1400ca0344a9253dfd3b44dbe88446de10ac17283"
+    },
+    {
+      "path": "README.md",
+      "sha256": "6b25d17aa7ea87353ae206817376719a48c3bc46561af4f9fdfcec2668be5b86"
+    },
+    {
+      "path": "replay-checks.json",
+      "sha256": "725b010f81acef8f449da2d4927070a90dff05630989e58cca4ab6f683654d3e"
+    },
+    {
+      "path": "retained-axis5.log",
+      "sha256": "4c8126708e6f726c58ff21393cd8389e87876e4c5f636bf9ec580962ebd7a23e"
+    },
+    {
+      "path": "retained-checks.json",
+      "sha256": "8b963383253b2d2755abc1c809260a2d1ddd7113c11c72cd083ed297539499fa"
+    },
+    {
+      "path": "retained-five360.json",
+      "sha256": "9f42c138d8009c78ee95ccb51bcadff83860f88872e15e018d766b4eb7cfb3d3"
+    },
+    {
+      "path": "retained-five360.txt.gz",
+      "sha256": "21c3791022901e829b566dafafef0a0ef1d04f2e1c86fc7ec15ea4df5f5137cf"
+    },
+    {
+      "path": "retained-geometry.log",
+      "sha256": "437ceb40a5066d5fb9a996fa3664ec910d2e119e7c94ae6d463d91cfb3781269"
+    },
+    {
+      "path": "retained-independent.log",
+      "sha256": "d800b3f81cad951de111d1d463cb182548fbcf7994066c65308cc1b7bda53e78"
+    },
+    {
+      "path": "retained-patch/initial-recovery-rejected.log",
+      "sha256": "4ae5722c91e1dcc798eaa318c9564e827116cc077f0b0adf742efbc277c44411"
+    },
+    {
+      "path": "retained-patch/mode0.log",
+      "sha256": "054440f63eda783b4c0cbb8f199e85503968860363c9218c506a154721e960a9"
+    },
+    {
+      "path": "retained-patch/mode1.log",
+      "sha256": "e570c9c3ccdfe840f25e3d27ee3b8a041ab23b5fc1597a2d11ecc597f6d01efe"
+    },
+    {
+      "path": "retained-patch/mode2.log",
+      "sha256": "e361b8f418e7a20ee93f3b4e54e468ca48abb8cf6e249a9bcf3ac695459cb4f8"
+    },
+    {
+      "path": "retained-patch/mode3.log",
+      "sha256": "717a27656edf3000c8ad366b462d55b2a6e23313c9f1c39c218b1df7433f9a48"
+    },
+    {
+      "path": "retained-patch/mode4.log",
+      "sha256": "d69091d22a713c79db744255ae66b2da86aa359801a408f096744c33c30e4e21"
+    },
+    {
+      "path": "retained-patch/mode5.log",
+      "sha256": "88032caf87c42d47e533392730d18104140c5a9cf4e898b32c2bae8d9871d0a3"
+    },
+    {
+      "path": "retained-patch/mode6.log",
+      "sha256": "ee84d6af460f1e5b021ce741b4ff1d319baa69dc8406cee002267df565dc9e71"
+    },
+    {
+      "path": "retained-patch.log",
+      "sha256": "818d8e9d1f20202ef0508f12430204cb5ec1274b991fbe11717b3aea3917de60"
+    },
+    {
+      "path": "retained-public-articulation_rc-avbd.log",
+      "sha256": "722a9bd128c8062ff6dea5df6d8f1b9e52684c51d2bc6afc5281876e2b0f888f"
+    },
+    {
+      "path": "retained-public-articulation_rc-pgs.log",
+      "sha256": "26ab8cee94c523c037ffa0700dd4e70439075f469b49776a2d90ff2ef758f006"
+    },
+    {
+      "path": "retained-public-articulation_rc-tgs.log",
+      "sha256": "f61edcbbe6dc6915bf004e2296ecf39f8273488c78ba8316af234bf02a01c06c"
+    },
+    {
+      "path": "retained-public-checks.json",
+      "sha256": "7a5664350b74fad9a35746305dd25342334ac8bc548f61cdf8c135d73d57eb64"
+    },
+    {
+      "path": "retained-public-hello_world-avbd.log",
+      "sha256": "e81c24b4fc4dc523b3751f60f95273575fb0e2b4104d595b7f8c3c283cb3a6c5"
+    },
+    {
+      "path": "retained-public-hello_world-pgs.log",
+      "sha256": "cfeb3812a72e709618c7d550c4003869fa9870451143648d83f5dc8cd4d3082b"
+    },
+    {
+      "path": "retained-public-hello_world-tgs.log",
+      "sha256": "b121bf4bb6239ecad8166300e8f66bd1be784c6c963089af6e8858e25798a0cf"
+    },
+    {
+      "path": "retained-public-joint-avbd.log",
+      "sha256": "726a1bf150573287ef3f0632d3f432a51cce8e052c76afe0362c78b83c7d8749"
+    },
+    {
+      "path": "retained-public-joint-pgs.log",
+      "sha256": "9a0e62a84edd06fa6fb1a431379dde4c3f443a27d1e2c22a09386b0afb3a445c"
+    },
+    {
+      "path": "retained-public-joint-tgs.log",
+      "sha256": "ec37195f19bee8c64807fa8e2f258911ac61e76e1d55075ae652e1d6ca5e5d04"
+    },
+    {
+      "path": "retained-public-smoke.log",
+      "sha256": "9a8bfd8be5acf51cc0cfd3d2a41d963fd6dec34b95ddad4bc5a36df8e5352281"
+    },
+    {
+      "path": "retained-reaction360.json",
+      "sha256": "f823d6ad12ab6eb510ba3d6fc00fe2774b607aa0838bb3873bad16e71f53e019"
+    },
+    {
+      "path": "retained-reaction360.txt.gz",
+      "sha256": "482d3533654de7566aedf3e70297d96c253c69212455d17c1cf6c887a9c1198a"
+    },
+    {
+      "path": "retained-strict/initial-recovery-rejected.log",
+      "sha256": "6f5039e3f20fbbb6cbfa9c917308e74625cb2e56c4aadf651db44e1cac3bef28"
+    },
+    {
+      "path": "retained-strict/mode0.log",
+      "sha256": "a4cc04fa69c02b248731639f887569bc7e909609b33f428f19ff4f37c00a9748"
+    },
+    {
+      "path": "retained-strict/mode1.log",
+      "sha256": "b380db2cf03db77bfe9ac87151ae6fc4f1619ca48e4d45927074ddb2b8366dec"
+    },
+    {
+      "path": "retained-strict/mode2.log",
+      "sha256": "4c477727a86ffd7093e8fc38c515ab87b76589414fb57108d96ef66be6c08004"
+    },
+    {
+      "path": "retained-strict/mode3.log",
+      "sha256": "f62f941687d90943909e55357268b8cc59e1f36845419e96c71e15d1e11ff901"
+    },
+    {
+      "path": "retained-strict/mode4.log",
+      "sha256": "e224fabefb3caafdf2377631ba7fe491aa6a1401b39b384ffb0663685dba2f8d"
+    },
+    {
+      "path": "retained-strict/mode5.log",
+      "sha256": "725e25f609074e008438998785b7fe0a7780b0e05180589f05b4b6cb6033da91"
+    },
+    {
+      "path": "retained-strict/mode6.log",
+      "sha256": "fc25c708ac3ee8f092a7b868ae4fb65ac59d95dc05ae21cd6b9c3555c370d194"
+    },
+    {
+      "path": "retained-strict.log",
+      "sha256": "818d8e9d1f20202ef0508f12430204cb5ec1274b991fbe11717b3aea3917de60"
+    },
+    {
+      "path": "trials/aggregate135.json",
+      "sha256": "ca35c4169e3957a7f45e331dd4b25f5adfed1bd3d4e0fc27ff2bd1fc9dd1b15a"
+    },
+    {
+      "path": "trials/aggregate135.validation.json",
+      "sha256": "3ecd961bad31b3e47a63ebe53d8ccff9577d736bbbacff088cba2bdbfe7ae576"
+    },
+    {
+      "path": "trials/canonical-strict135.json",
+      "sha256": "7300deda2145f49af79e9f58e583ef90fac745afbd55dd7dc69a5feb9c59c0a4"
+    },
+    {
+      "path": "trials/canonical-strict135.validation.json",
+      "sha256": "325feaf1daaa60386ee856c5a59cf5922a6f214c3578bf0068cbfcfcaf41e485"
+    },
+    {
+      "path": "trials/canonical135.json",
+      "sha256": "91e66227c9ae5d2c73b4063bd6490523c12b3638ff2a77089ce4183dc6c0f389"
+    },
+    {
+      "path": "trials/canonical135.validation.json",
+      "sha256": "bf6c1717479b7fcb494eea4df73b182cfdc58e99cfd5064117ebeaa3686f100f"
+    },
+    {
+      "path": "trials/event-strict240.json",
+      "sha256": "bbf2aa03844e17cbc060a3c142bf54c383eeba828a6dbd050b5012d7e818d482"
+    },
+    {
+      "path": "trials/event-strict240.validation.json",
+      "sha256": "e193c3692987e84d06cd915ec346ce7958becba88937e2365da13d3a54f178a4"
+    },
+    {
+      "path": "trials/event-strict280.json",
+      "sha256": "7ee01ed60eda95a6a7fc7dce77e124bebe4f1d383017d4bebd82fcbec63a9151"
+    },
+    {
+      "path": "trials/event-strict280.validation.json",
+      "sha256": "d68544f92f691cb71c544cc1ebc63ed97207089d551b13f3bbf226ac098493c0"
+    },
+    {
+      "path": "trials/extra-direction-condition-280.json.gz",
+      "sha256": "2fc88046ef92ffe2a94f70e5cfa76bc6c7dc2b43da75e932172d6a605083787f"
+    },
+    {
+      "path": "trials/five360-aggregate.json",
+      "sha256": "751257fa5392bba2ddb9e04f367e6c1f561fe4c04b67f1477a80bd344aacd2e3"
+    },
+    {
+      "path": "trials/five360-aggregate.txt.gz",
+      "sha256": "7c751e39408fed3e6ab0a602d84f9fd5a2465df85afa9719a226bfa5c1e0fdb0"
+    },
+    {
+      "path": "trials/five360-canonical.json",
+      "sha256": "6e6ca57c1c021c0c1c52b374cfd5e1437e9999c5dcd925c30872c7b0b4f19163"
+    },
+    {
+      "path": "trials/five360-canonical.txt.gz",
+      "sha256": "a4b553454d2306dcd0860761219edc2ec49df65b499167ee79040cfa53b894cd"
+    },
+    {
+      "path": "trials/five360-minimal.json",
+      "sha256": "e5950d8600219cc5d74369ea846dd6513e2813ed9cec727368817b4cd060b341"
+    },
+    {
+      "path": "trials/five360-minimal.txt.gz",
+      "sha256": "8bb9058969019c4e1a0a8c61edcbd804afa9c79a304a7caec0fbf290e7218d51"
+    },
+    {
+      "path": "trials/five360-ready.json",
+      "sha256": "13ca5d6e331f5141736d06345bb77e30b523009af4ebac91c1f5a76edd0a8d86"
+    },
+    {
+      "path": "trials/five360-ready.txt.gz",
+      "sha256": "279ccc0f57950f6d08fb6c2b92b8c2f25e43d6a14ebeafca0f692179586e52d3"
+    },
+    {
+      "path": "trials/normwise-ready280.json",
+      "sha256": "7ca2563f60159724da00a1b365c1d3058a58f51233510a18eff499466dbf962e"
+    },
+    {
+      "path": "trials/normwise-ready280.validation.json",
+      "sha256": "6051e4cbc7916d084a1edd0c379b9940a74cadec968ae8d768f20da0d741896a"
+    },
+    {
+      "path": "trials/reaction360.json",
+      "sha256": "fe8e43bc167a30b1a4f3ff7331319fd91116a442ca194c3899ea207e41579999"
+    },
+    {
+      "path": "trials/reaction360.txt.gz",
+      "sha256": "ea1f7d8fc5eff07c044c21bcfc6f6289950171b54d20941d4e031b427c293171"
+    },
+    {
+      "path": "trials/withdrawn-force-face.h.gz",
+      "sha256": "3c69bf3dc89c22ef8895c16a5e6a55d38e986c904325276f2cf9176a78e7a089"
+    }
+  ]
+}

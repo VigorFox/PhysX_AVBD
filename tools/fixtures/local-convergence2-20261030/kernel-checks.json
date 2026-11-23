@@ -1,0 +1,29 @@
+[
+  {
+    "name": "correction",
+    "command": [
+      "python",
+      "tools/run_avbd_local_correction_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 11.602055400000001
+  },
+  {
+    "name": "local",
+    "command": [
+      "python",
+      "tools/run_avbd_local_block_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 12.760453300000002
+  },
+  {
+    "name": "schedule",
+    "command": [
+      "python",
+      "tools/run_avbd_program_schedule_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 3.7631724999999996
+  }
+]

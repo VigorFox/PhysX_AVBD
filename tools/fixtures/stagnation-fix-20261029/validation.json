@@ -1,0 +1,840 @@
+{
+  "base": "ead9fb3",
+  "config": "Checked",
+  "newPathQualified": false,
+  "fullFiveQualified": false,
+  "gpuImplemented": false,
+  "physicalThresholdsChanged": false,
+  "newFiveDiagnostic": {
+    "seconds": 63.8028721,
+    "timedOut": false,
+    "exit": 1,
+    "requestedFrames": 16,
+    "acceptedFrames": 15,
+    "rejectedFrames": 1,
+    "fullGateQualified": false
+  },
+  "newFiveTrace": {
+    "file": "tools\\benchmark-results\\stagnation-fix-20261029\\five-final-capture-first16.log",
+    "acceptedIterates": 111,
+    "acceptedFrames": 15,
+    "rejectedFrames": 1,
+    "unfinishedAtBudget": 0,
+    "maxBlocks": 251.0,
+    "afterFirstGeometryRejection": {
+      "iterates": 51,
+      "minimumFraction": 0.25,
+      "medianFraction": 1.0,
+      "fractionAtMostOneOver1024": 0
+    },
+    "firstReportedViolatorCounts": {
+      "98/4294967295": 10,
+      "58/4294967295": 5,
+      "97/4294967295": 1,
+      "57/4294967295": 1
+    },
+    "scope": "Observed iterates, not a count of all violating pairs or successful scene frames"
+  },
+  "small": [
+    {
+      "name": "publication",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+        "--logs",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\stagnation-fix-20261029\\final-publication"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 15.004565900000001
+    },
+    {
+      "name": "geometry",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 2.3300129999999992
+    },
+    {
+      "name": "independent",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py",
+        "0",
+        "independent"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 2.196501999999999
+    }
+  ],
+  "numeric": [
+    {
+      "name": "common_program",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_program_probe.py"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 8.2978294
+    },
+    {
+      "name": "sparse_coulomb",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_sparse_coulomb_probe.py"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 7.026405500000001
+    },
+    {
+      "name": "material_assembly",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_material_assembly_probe.py"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 5.263147700000001
+    },
+    {
+      "name": "elastic_frame",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_elastic_frame_probe.py"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 2.2118216000000004
+    },
+    {
+      "name": "mechanisms",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\analyze_avbd_stagnation.py",
+        "--report",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\stagnation-fix-20261029\\final-mechanisms.json"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 5.941270299999999
+    }
+  ],
+  "public": [
+    {
+      "name": "hello_world-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 11.4371202
+    },
+    {
+      "name": "joint-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 0.7511650999999997
+    },
+    {
+      "name": "articulation_rc-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "avbd",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 16.249755399999998
+    },
+    {
+      "name": "hello_world-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 1.4530081999999993
+    },
+    {
+      "name": "joint-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 0.7657162
+    },
+    {
+      "name": "articulation_rc-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "pgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 0.7835526000000002
+    },
+    {
+      "name": "hello_world-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 1.276820800000003
+    },
+    {
+      "name": "joint-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 0.5619216999999992
+    },
+    {
+      "name": "articulation_rc-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+        "--solver",
+        "tgs",
+        "--cases",
+        "gated"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 0.8680963999999989
+    },
+    {
+      "name": "smoke",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\avbd_smoke.exe"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "seconds": 7.019683700000002
+    }
+  ],
+  "defaultNative": [
+    {
+      "case": "reaction",
+      "passed": true,
+      "exit": 0,
+      "wallSeconds": 13.1177202,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "reaction",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "rigid_cell_joint_volume",
+        "materialElements": "384",
+        "sleepEnabled": "1",
+        "grid": "5",
+        "nodes": "125",
+        "joints": "300",
+        "mass": "800.000732",
+        "cellSize": "0.400000006",
+        "dispatcherThreads": "4",
+        "compressionHoldFrames": "60",
+        "maxJointAngle": "0.00878906995",
+        "trajectoryHash": "7da755790d6f19c4",
+        "minVolumeRatio": "0.995845199",
+        "minCellDet": "0.982132673",
+        "finalVolumeRatio": "1.00000012",
+        "maxShapeError": "0.00349942269",
+        "finalShapeError": "8.64750348e-07",
+        "maxGroundPenetration": "0",
+        "maxExternalPenetration": "0",
+        "compressionMinimum": "1",
+        "recoveredFraction": "0",
+        "contacts": "252",
+        "firstContactFrame": "18",
+        "maxPostContactStep": "0.00496697426",
+        "zeroMotionFrames": "0",
+        "systemComDrift": "0.00466525415",
+        "maxPostImpactVy": "0.240683541",
+        "maxMechanicalEstimate": "175.999939",
+        "finalMechanicalEstimate": "2.53157187",
+        "averageStepMs": "35.1948886",
+        "maxStepMs": "104.068199",
+        "averageFrameMs": "35.5450636",
+        "activeFrames": "360",
+        "activeContactFrames": "7",
+        "averageActiveStepMs": "35.1948886",
+        "averageActiveContactMs": "49.3963286",
+        "maxMomentumRelativeError": "0.00304783694",
+        "maxBallisticError": "3.53406811",
+        "sleepingBeforeWake": "0",
+        "maxWakeMotion": "0.000388288696",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "822589ad6ec3e78bdca750cca494da327521242899fee5c5b517c9f5e0a33f24",
+      "qualification": {
+        "runtimeObservation": {
+          "status": "OBSERVED_COMPLETE",
+          "scope": "process completion and published finite/error counters only",
+          "fullBasicContractQualification": "NOT_ASSESSED",
+          "requestedFrames": 360,
+          "completedFrames": 360.0,
+          "issues": [],
+          "source": "process exit and existing AVBD_GATE; no derivative/API/force-limit qualification inferred"
+        },
+        "legacySceneQuality": {
+          "status": "PASS",
+          "gateStatus": "PASS",
+          "gateReason": "none",
+          "source": "SnippetJointSoftBodyHeadless.cpp",
+          "criteria": "existing scene-specific gate, unchanged",
+          "fullReplacementQualification": "NOT_ASSESSED"
+        },
+        "performance": {
+          "status": "OBSERVATIONS_ONLY",
+          "referenceStepBudgetMs": 16.67,
+          "metrics": {
+            "averageStepMs": {
+              "observedMs": 35.1948886,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "maxStepMs": {
+              "observedMs": 104.068199,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageActiveStepMs": {
+              "observedMs": 35.1948886,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageActiveContactMs": {
+              "observedMs": 49.3963286,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageFrameMs": {
+              "observedMs": 35.5450636,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            }
+          },
+          "source": "existing AVBD_GATE timing fields",
+          "completedRuntimeObservation": true,
+          "legacySceneQualityPassed": true,
+          "isolatedBenchmark": false,
+          "isolationScope": "runner does not enforce an isolated timing environment",
+          "realtimeQualification": "NOT_ASSESSED"
+        },
+        "research": {
+          "status": "not_assessed",
+          "engineeringRequirement": "not_required_for_engineering",
+          "scope": "strict global stationarity, continuous geometric guarantees and complete work ledger"
+        }
+      }
+    },
+    {
+      "case": "compression-recovery",
+      "passed": true,
+      "exit": 0,
+      "wallSeconds": 36.9117098,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "compression-recovery",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "rigid_cell_joint_volume",
+        "materialElements": "384",
+        "sleepEnabled": "1",
+        "grid": "5",
+        "nodes": "125",
+        "joints": "300",
+        "mass": "800.000732",
+        "cellSize": "0.400000006",
+        "dispatcherThreads": "4",
+        "compressionHoldFrames": "60",
+        "maxJointAngle": "0.412516117",
+        "trajectoryHash": "46eb01d4c8c4f74b",
+        "minVolumeRatio": "0.723655462",
+        "minCellDet": "0.649048865",
+        "finalVolumeRatio": "0.990128756",
+        "maxShapeError": "0.19716312",
+        "finalShapeError": "0.0186947826",
+        "maxGroundPenetration": "4.28557396e-05",
+        "maxExternalPenetration": "0",
+        "compressionMinimum": "0.723655462",
+        "recoveredFraction": "0.964279234",
+        "contacts": "31566",
+        "firstContactFrame": "0",
+        "maxPostContactStep": "0.17632255",
+        "zeroMotionFrames": "0",
+        "systemComDrift": "1.50423539",
+        "maxPostImpactVy": "-3.40282347e+38",
+        "maxMechanicalEstimate": "44932.0078",
+        "finalMechanicalEstimate": "563.018982",
+        "averageStepMs": "101.355541",
+        "maxStepMs": "188.893005",
+        "averageFrameMs": "101.73846",
+        "activeFrames": "360",
+        "activeContactFrames": "300",
+        "averageActiveStepMs": "101.355541",
+        "averageActiveContactMs": "115.560523",
+        "maxMomentumRelativeError": "4438.12305",
+        "maxBallisticError": "3.31085205",
+        "sleepingBeforeWake": "0",
+        "maxWakeMotion": "0.0930731222",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "822589ad6ec3e78bdca750cca494da327521242899fee5c5b517c9f5e0a33f24",
+      "qualification": {
+        "runtimeObservation": {
+          "status": "OBSERVED_COMPLETE",
+          "scope": "process completion and published finite/error counters only",
+          "fullBasicContractQualification": "NOT_ASSESSED",
+          "requestedFrames": 360,
+          "completedFrames": 360.0,
+          "issues": [],
+          "source": "process exit and existing AVBD_GATE; no derivative/API/force-limit qualification inferred"
+        },
+        "legacySceneQuality": {
+          "status": "PASS",
+          "gateStatus": "PASS",
+          "gateReason": "none",
+          "source": "SnippetJointSoftBodyHeadless.cpp",
+          "criteria": "existing scene-specific gate, unchanged",
+          "fullReplacementQualification": "NOT_ASSESSED"
+        },
+        "performance": {
+          "status": "OBSERVATIONS_ONLY",
+          "referenceStepBudgetMs": 16.67,
+          "metrics": {
+            "averageStepMs": {
+              "observedMs": 101.355541,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "maxStepMs": {
+              "observedMs": 188.893005,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageActiveStepMs": {
+              "observedMs": 101.355541,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageActiveContactMs": {
+              "observedMs": 115.560523,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageFrameMs": {
+              "observedMs": 101.73846,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            }
+          },
+          "source": "existing AVBD_GATE timing fields",
+          "completedRuntimeObservation": true,
+          "legacySceneQualityPassed": true,
+          "isolatedBenchmark": false,
+          "isolationScope": "runner does not enforce an isolated timing environment",
+          "realtimeQualification": "NOT_ASSESSED"
+        },
+        "research": {
+          "status": "not_assessed",
+          "engineeringRequirement": "not_required_for_engineering",
+          "scope": "strict global stationarity, continuous geometric guarantees and complete work ledger"
+        }
+      }
+    },
+    {
+      "case": "visual-showcase",
+      "passed": true,
+      "exit": 0,
+      "wallSeconds": 221.1577165,
+      "fields": {
+        "schema": "1",
+        "snippet": "SnippetJointSoftBody",
+        "solver": "avbd",
+        "case": "visual-showcase",
+        "frames": "360",
+        "completedFrames": "360",
+        "status": "PASS",
+        "reason": "none",
+        "capability": "EXPERIMENTAL",
+        "validation": "GATED",
+        "model": "convex_cell_joint_volume",
+        "materialElements": "2514",
+        "grid": "5",
+        "dispatcherThreads": "4",
+        "bodies": "5",
+        "nodes": "787",
+        "joints": "1888",
+        "mass": "7530.66113",
+        "cellSize": "0.200000003",
+        "trajectoryHash": "3cf08d25b128e7e1",
+        "contacts": "1052303",
+        "crossContacts": "18784",
+        "crossMask": "12779552",
+        "minCellDet": "0.515581787",
+        "minVolumeRatio": "0.853220761",
+        "maxVolumeRatio": "1.02300358",
+        "finalVolumeRatio": "0.972447991",
+        "maxExternalPenetration": "6.6045186e-07",
+        "maxSelfPenetration": "0",
+        "maxJointAnchorError": "1.02460575",
+        "maxPostContactStep": "0.894366622",
+        "maxMomentumRelativeError": "12.0304461",
+        "initialMechanicalEstimate": "882856.97",
+        "maxMechanicalEstimate": "882857",
+        "finalMechanicalEstimate": "93657.5597",
+        "finalAwake": "663",
+        "skinRestError": "6.03421586e-06",
+        "massRelativeError": "1.30616327e-05",
+        "assetBytes": "352636",
+        "skinBytes": "101156",
+        "diagnosticBytes": "50280",
+        "averageStepMs": "608.668684",
+        "p95StepMs": "935.1146",
+        "maxStepMs": "1947.5064",
+        "activeContactFrames": "355",
+        "averageActiveContactMs": "615.537716",
+        "averageSkinMs": "0.0834838889",
+        "averageObserverMs": "4.8468775",
+        "averageFrameMs": "608.752168",
+        "nonFinite": "0",
+        "fetchFailures": "0",
+        "fatalErrors": "0"
+      },
+      "physxSha256": "822589ad6ec3e78bdca750cca494da327521242899fee5c5b517c9f5e0a33f24",
+      "qualification": {
+        "runtimeObservation": {
+          "status": "OBSERVED_COMPLETE",
+          "scope": "process completion and published finite/error counters only",
+          "fullBasicContractQualification": "NOT_ASSESSED",
+          "requestedFrames": 360,
+          "completedFrames": 360.0,
+          "issues": [],
+          "source": "process exit and existing AVBD_GATE; no derivative/API/force-limit qualification inferred"
+        },
+        "legacySceneQuality": {
+          "status": "PASS",
+          "gateStatus": "PASS",
+          "gateReason": "none",
+          "source": "SnippetJointSoftBodyMultiHeadless.cpp",
+          "criteria": "existing scene-specific gate, unchanged",
+          "fullReplacementQualification": "NOT_ASSESSED"
+        },
+        "performance": {
+          "status": "OBSERVATIONS_ONLY",
+          "referenceStepBudgetMs": 16.67,
+          "metrics": {
+            "averageStepMs": {
+              "observedMs": 608.668684,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "p95StepMs": {
+              "observedMs": 935.1146,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "maxStepMs": {
+              "observedMs": 1947.5064,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageActiveContactMs": {
+              "observedMs": 615.537716,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            },
+            "averageFrameMs": {
+              "observedMs": 608.752168,
+              "hasSamples": true,
+              "withinReferenceBudget": false
+            }
+          },
+          "source": "existing AVBD_GATE timing fields",
+          "completedRuntimeObservation": true,
+          "legacySceneQualityPassed": true,
+          "isolatedBenchmark": false,
+          "isolationScope": "runner does not enforce an isolated timing environment",
+          "realtimeQualification": "NOT_ASSESSED"
+        },
+        "research": {
+          "status": "not_assessed",
+          "engineeringRequirement": "not_required_for_engineering",
+          "scope": "strict global stationarity, continuous geometric guarantees and complete work ledger"
+        }
+      }
+    }
+  ],
+  "dllSha256": "822589ad6ec3e78bdca750cca494da327521242899fee5c5b517c9f5e0a33f24",
+  "performanceScope": "Concurrent verification runs; no isolated benchmark or realtime qualification",
+  "remainingPrimaryNcpReplay": [
+    {
+      "mode": "precise",
+      "seed": "cold",
+      "converged": false,
+      "iterations": 656,
+      "originalRoot": 0.002717645766073072,
+      "physical": false,
+      "passed": false
+    },
+    {
+      "mode": "precise",
+      "seed": "captured",
+      "converged": false,
+      "iterations": 656,
+      "originalRoot": 0.002709667451721786,
+      "physical": false,
+      "passed": false
+    },
+    {
+      "mode": "fast",
+      "seed": "cold",
+      "converged": false,
+      "iterations": 656,
+      "originalRoot": 0.002613734940491659,
+      "physical": false,
+      "passed": false
+    },
+    {
+      "mode": "fast",
+      "seed": "captured",
+      "converged": false,
+      "iterations": 656,
+      "originalRoot": 0.0026115414889047762,
+      "physical": false,
+      "passed": false
+    }
+  ],
+  "fixedNcpReplays": {
+    "failed16": [
+      {
+        "mode": "precise",
+        "seed": "cold",
+        "converged": true,
+        "iterations": 10,
+        "originalRoot": 2.1190209938648872e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "precise",
+        "seed": "captured",
+        "converged": true,
+        "iterations": 4,
+        "originalRoot": 1.4126806625765896e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "fast",
+        "seed": "cold",
+        "converged": true,
+        "iterations": 10,
+        "originalRoot": 1.4126806625765883e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "fast",
+        "seed": "captured",
+        "converged": true,
+        "iterations": 4,
+        "originalRoot": 2.1190209938648817e-16,
+        "physical": true,
+        "passed": true
+      }
+    ],
+    "failed16-next": [
+      {
+        "mode": "precise",
+        "seed": "cold",
+        "converged": true,
+        "iterations": 12,
+        "originalRoot": 7.731144796294693e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "precise",
+        "seed": "captured",
+        "converged": true,
+        "iterations": 5,
+        "originalRoot": 6.325482106059324e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "fast",
+        "seed": "cold",
+        "converged": true,
+        "iterations": 12,
+        "originalRoot": 2.8113253804708143e-16,
+        "physical": true,
+        "passed": true
+      },
+      {
+        "mode": "fast",
+        "seed": "captured",
+        "converged": true,
+        "iterations": 5,
+        "originalRoot": 2.811325380470807e-16,
+        "physical": true,
+        "passed": true
+      }
+    ]
+  },
+  "coreChanges": [
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h",
+      "added": 1,
+      "removed": 0,
+      "sha256": "b9ba26a254c506503f4a2646f1500b1b3c0c4264f21495f4bb4ae6a41d9ff804"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h",
+      "added": 17,
+      "removed": 0,
+      "sha256": "d1c7029f8e16f14f25404b7db86adbd27ec70e2119b8989bd334ecca5b6ccb02"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResponse.h",
+      "added": 116,
+      "removed": 7,
+      "sha256": "14bc8c4a02e2343c48b21550cf1a5ba64bee39e830ce8ebef36746f7aebb1054"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp",
+      "added": 46,
+      "removed": 5,
+      "sha256": "59bb903ebc3a6d2b1a09739bc342de618e80d69c3e6e2bc82abbba16cd6d87ef"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCoulombNcp.h",
+      "added": 121,
+      "removed": 4,
+      "sha256": "4c353d6d18a92be04cdddc709f8cb8e2a22c32952c32cfacff9178f9d5241cd3"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp",
+      "added": 6,
+      "removed": 2,
+      "sha256": "6c3f5bcc5e4145fd60332836eb4d01e70d128c4fdd50bff895716b5984b41800"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h",
+      "added": 3,
+      "removed": 1,
+      "sha256": "bcf55c073b7f79dcb3b6918bee4cb1fbaa29292fdc6a5b02ac43d2d7af8f5d61"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrame.h",
+      "added": 7,
+      "removed": 3,
+      "sha256": "1eb0902e8f687033ded03ae410eed5985c9452a07d593cbe865962f5f25f4ce5"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdMaterialAssembly.h",
+      "added": 9,
+      "removed": 8,
+      "sha256": "da1d6061297dd0931f5751c8efc368f7f290d847ba5cc5a9fca0ab2e892f7b7e"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h",
+      "added": 119,
+      "removed": 0,
+      "sha256": "3959a7c3d5e0036baf6bc57f9a9a18121df2bc2209be289c04b197d6ddc4bdac"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdRigidMetric.h",
+      "added": 16,
+      "removed": 0,
+      "sha256": "1692c827f82b153bcf0e2d70ce270f695bf9541bb8ffdac803a36fe0a26c5d63"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp",
+      "added": 193,
+      "removed": 35,
+      "sha256": "54a1627d8949c0729df524a094272d1732511bb91c4612d979362a4ddc7a6c17"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp",
+      "added": 1,
+      "removed": 1,
+      "sha256": "c7825f5c3a22dba8a5f9b32aec7296f8b24f12ef6be12a9838c83232333c4e07"
+    }
+  ],
+  "coreNetLines": 589,
+  "scopeNotes": [
+    "Final native runs used the recorded final DLL; default common path remains off.",
+    "Public/small verification immediately preceded a nonphysical SOC statistics rename. No default/public behavior changed afterward.",
+    "Frame 16 primary NCP failure is a real rejection, in addition to the expected short-run incomplete gate.",
+    "No GPU implementation, full-five new-path qualification, or performance speedup claimed."
+  ]
+}

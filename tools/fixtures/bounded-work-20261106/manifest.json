@@ -1,0 +1,871 @@
+{
+  "scope": "Stable quadratic material work; all scalar extension trials withdrawn; full five-body still fails at frame 18",
+  "dllSha256": "333c5ce93e6fdeb65b8d62147d0c43dfc5c6499767ba688f977848c2a037805f",
+  "baseline": "tools/fixtures/bounded-root-20261106/manifest.json",
+  "defaultChanged": false,
+  "numericalBudgetsChanged": false,
+  "fullFiveQualified": false,
+  "entries": [
+    {
+      "file": "analyze.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\analyze.py",
+      "bytes": 3142,
+      "sha256": "ccd553e5f504e6897721438618f03303e7c31f260a2208d7a0945cc3f286059d",
+      "storedSha256": "ccd553e5f504e6897721438618f03303e7c31f260a2208d7a0945cc3f286059d"
+    },
+    {
+      "file": "analyze_final.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\analyze_final.py",
+      "bytes": 510,
+      "sha256": "d461bc3f1617f98c9bebce3bf80e6af3305df9acb5445021743f0bc9b8325f34",
+      "storedSha256": "d461bc3f1617f98c9bebce3bf80e6af3305df9acb5445021743f0bc9b8325f34"
+    },
+    {
+      "file": "archive.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\archive.py",
+      "bytes": 3292,
+      "sha256": "bf1620678ad967492f0af254ea5d86fe68f1a0e8a508abb69ff59bffd329bf6f",
+      "storedSha256": "bf1620678ad967492f0af254ea5d86fe68f1a0e8a508abb69ff59bffd329bf6f"
+    },
+    {
+      "file": "build-combined.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-combined.log",
+      "bytes": 2904,
+      "sha256": "86ce77a0837fc45337e3c2f9cd8f19b6f1fd8a80d90268b8a113782fa80b2201",
+      "storedSha256": "f6a9971d48020bc54475d568fbcb9e97d83d1486dda4b8a60d549f43ab740abc"
+    },
+    {
+      "file": "build-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-final.log",
+      "bytes": 2946,
+      "sha256": "88c93104e73d62f50bf1b129bcf130d33199f507e62dd502baf18a93befa9869",
+      "storedSha256": "0c4806930a933b5b9d378236742741d611ab1a9c59762bff9b5a05a8c3101960"
+    },
+    {
+      "file": "build-line-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-line-final.log",
+      "bytes": 2764,
+      "sha256": "453d9a9a2ce6e51f25fd5528dad5503402d2bb2a8fc8c81e25b6234f8ddfceef",
+      "storedSha256": "537065526cb1b839284920ca36b72b5d52b7f5f8ddc8f65e3b6c786df633f52f"
+    },
+    {
+      "file": "build-line.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-line.log",
+      "bytes": 2904,
+      "sha256": "0ad8edc0e3fd01199a420ca66a1885392adc59b815c5ef1527487f08c698cfcb",
+      "storedSha256": "c0045c8ccca77044d9695073ed8b70de99abf5bb3a81437cf8afee4fd58a8cb8"
+    },
+    {
+      "file": "build-spectral.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-spectral.log",
+      "bytes": 2764,
+      "sha256": "1bd0f4d99ee395ca6880b690a1f211c6e2b1cbb7752b0d9a2218cb77451d17bc",
+      "storedSha256": "a9d115bda2aaeefd962a5ff6c0b876064698ac13e8264c6250a81e5ff588fea7"
+    },
+    {
+      "file": "build-work-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-work-final.log",
+      "bytes": 2764,
+      "sha256": "3cf83833425f15062da81ffcad5c138efc6ae6b0d1fad48d80acd5a82f3e1ca7",
+      "storedSha256": "805eec531f2c12f1abf22d33946573043a67a57edd17ab55be3ac97057100f13"
+    },
+    {
+      "file": "build-work.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\build-work.log",
+      "bytes": 2946,
+      "sha256": "678fc982ec76718aed481fc7487d0b3a8828a85821444757ae322f1ff2e1112c",
+      "storedSha256": "06d2b8d57c0b16712ff7b354234466a259ae323e5a8e15638508d163620f62e5"
+    },
+    {
+      "file": "combine.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\combine.py",
+      "bytes": 1659,
+      "sha256": "142a6c043a623ea53449b20814291d32ac4d1bed8349d67ac5374b515e6bb073",
+      "storedSha256": "142a6c043a623ea53449b20814291d32ac4d1bed8349d67ac5374b515e6bb073"
+    },
+    {
+      "file": "decomposition-final.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\decomposition-final.json",
+      "bytes": 1420,
+      "sha256": "87fbab602b41b89e50a2dca11d404c051bfc3a60b9808417da7c3d2e29cf7bbb",
+      "storedSha256": "87fbab602b41b89e50a2dca11d404c051bfc3a60b9808417da7c3d2e29cf7bbb"
+    },
+    {
+      "file": "decomposition.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\decomposition.json",
+      "bytes": 1417,
+      "sha256": "c60e9d80010338ae62113305bc0632312ead51965c732d497cf4692f9c967ea4",
+      "storedSha256": "c60e9d80010338ae62113305bc0632312ead51965c732d497cf4692f9c967ea4"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.before.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdCommonResidual.h.before",
+      "bytes": 4329,
+      "sha256": "038e58fd56513bfba64e4559193d419ce4f6872fe1c5f2140a7c2f96c349f17f",
+      "storedSha256": "669ac12411f4964569c58e88ab66d73a5d02de1ce0d5110fd6820f9675078b09"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.combined.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdCommonResidual.h.combined",
+      "bytes": 5713,
+      "sha256": "9b7b19027bf1e18da3ebae520c5eeeff83af0c5867b215da83378facd3a31811",
+      "storedSha256": "c834c6f132f6f3da8d1fed1db4a55402e3b1c0cd42be5f56588df579c679988d"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.energy-line.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdCommonResidual.h.energy-line",
+      "bytes": 4917,
+      "sha256": "3ed3ab8d6e4e2c6f1da3ec58cf4e7c904f4f09d25713fed6b362687dbfb13137",
+      "storedSha256": "1916ba7e7d419c5a57da3df5be0f3d539d48199932be9e0d16b70df6994730a8"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.spectral.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdCommonResidual.h.spectral",
+      "bytes": 5100,
+      "sha256": "edcea404335e13121f382bafbd90a167f8e5f7c30ee38c4c730e7b9713ff9b3e",
+      "storedSha256": "779f10c46a4969dc6f769d52a82c3cf95f2bd1622a14f869b1cb83f49b88d830"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.stable-work.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdCommonResidual.h.stable-work",
+      "bytes": 4942,
+      "sha256": "f511af432b9cf676dd3247cbe3361c79cd2f939845f0f14df639e19be4c132ac",
+      "storedSha256": "f49ddf7483ac9a16a03c00e8c7c13e825b2136c14d844d748cd239dab2a2af84"
+    },
+    {
+      "file": "DyAvbdDynamics.cpp.before.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.cpp.before",
+      "bytes": 291807,
+      "sha256": "8f5f664c36035ca0ce846b07c46e4557d07999161232d9a3cb20fca50f9371de",
+      "storedSha256": "1505aa49868796bbcee3ca0918ed989f2e693f0d5cc792d75268bc6909f07e5e"
+    },
+    {
+      "file": "DyAvbdDynamics.cpp.combined.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.cpp.combined",
+      "bytes": 291867,
+      "sha256": "ecab71ddbee192ff5701cf276d2eba6c28ddf50cc87a9ef5b8fe33b0b6bc915c",
+      "storedSha256": "ffd655f2153e9438ee1d587646bbdcfbe2ec09fa12e046357b898ecdb4cfa230"
+    },
+    {
+      "file": "DyAvbdDynamics.cpp.spectral.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.cpp.spectral",
+      "bytes": 291867,
+      "sha256": "ecab71ddbee192ff5701cf276d2eba6c28ddf50cc87a9ef5b8fe33b0b6bc915c",
+      "storedSha256": "ffd655f2153e9438ee1d587646bbdcfbe2ec09fa12e046357b898ecdb4cfa230"
+    },
+    {
+      "file": "DyAvbdDynamics.cpp.stable-work.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.cpp.stable-work",
+      "bytes": 291807,
+      "sha256": "8f5f664c36035ca0ce846b07c46e4557d07999161232d9a3cb20fca50f9371de",
+      "storedSha256": "1505aa49868796bbcee3ca0918ed989f2e693f0d5cc792d75268bc6909f07e5e"
+    },
+    {
+      "file": "DyAvbdDynamics.h.before.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.h.before",
+      "bytes": 28762,
+      "sha256": "dd71158b0f2d3481c9fd6fac7698c09f26c940c161fc442690054825a727bd01",
+      "storedSha256": "79175d6fb14cb120205d39d320404e21e89360ad73c6326bf2b155ed3eadc9ec"
+    },
+    {
+      "file": "DyAvbdDynamics.h.combined.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.h.combined",
+      "bytes": 28803,
+      "sha256": "63ade5db908a98340b62e01b28bb9c1e7c1de0af7e2d5e85242e42456330c783",
+      "storedSha256": "efb7fb5be9a4356442d4623063bb8f005f0f1bee3257956acfc6f3fb85759c97"
+    },
+    {
+      "file": "DyAvbdDynamics.h.spectral.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.h.spectral",
+      "bytes": 28803,
+      "sha256": "63ade5db908a98340b62e01b28bb9c1e7c1de0af7e2d5e85242e42456330c783",
+      "storedSha256": "efb7fb5be9a4356442d4623063bb8f005f0f1bee3257956acfc6f3fb85759c97"
+    },
+    {
+      "file": "DyAvbdDynamics.h.stable-work.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdDynamics.h.stable-work",
+      "bytes": 28762,
+      "sha256": "dd71158b0f2d3481c9fd6fac7698c09f26c940c161fc442690054825a727bd01",
+      "storedSha256": "79175d6fb14cb120205d39d320404e21e89360ad73c6326bf2b155ed3eadc9ec"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.before.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdSolve.cpp.before",
+      "bytes": 147124,
+      "sha256": "d5ea7bc20fa39ed9ec0ed32f2438f2b270d846f336fdb970f564a6b7d5668186",
+      "storedSha256": "43fd600d643ba61c6a9e55916276b8730620785b3d6a42fa03cb429b445bcfb6"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.combined.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdSolve.cpp.combined",
+      "bytes": 148450,
+      "sha256": "7a74b0c7ece7194c02f80a2bcfceb3bc2012c22ea9b205ff997a3607c81791c9",
+      "storedSha256": "0e5d614bb13b6387f27e04b3258502ba6de66b308fadc907b4aa2082cf8d997b"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.energy-line.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdSolve.cpp.energy-line",
+      "bytes": 148277,
+      "sha256": "40061c7106ce4f3f27b1e87c02ce408a25f97c673a92a33b9370cf1f4603d4b3",
+      "storedSha256": "de5d66e266029e0506c13354de4816716ee0644fef2401bb5d1265edc7c98c40"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.spectral.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdSolve.cpp.spectral",
+      "bytes": 148304,
+      "sha256": "d4f4244c03e9cadedea790b178349bc7f727b6981c454fa64688f1982b572505",
+      "storedSha256": "71e3f20168eae2cd3e736b7e3e99fc7a973d079546d20450031379e899a22da0"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.stable-work.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\DyAvbdSolve.cpp.stable-work",
+      "bytes": 147270,
+      "sha256": "6c623d899a2156cd6a8f9619bb228b35c48539b75ab61ce4a5825e0bc9140ade",
+      "storedSha256": "b0738d9a2d5c7d7e1e46ff0eb5d459a1e1ff42e672f678a2f5e1adaa5f32c347"
+    },
+    {
+      "file": "elastic-material.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\elastic-material.log",
+      "bytes": 165,
+      "sha256": "65117082cbbb1809dad1a1aadca2a3f0cb37808f57e36307bf99b7222473ac77",
+      "storedSha256": "d42431ba6455faf2f48c0e2897e3ec953412c155ff71fd892c869ec7bce5de7f"
+    },
+    {
+      "file": "five-combined-candidate.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-combined-candidate.json",
+      "bytes": 1276483,
+      "sha256": "1d98a9e7e3379757627363fb667eb71183877b2cd54e8912f03cc2190b2662b6",
+      "storedSha256": "4041534665f4b40212b044983eaf947dde28abbd37b800ae468d07573f4f3e48"
+    },
+    {
+      "file": "five-combined-candidate.json.trial.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-combined-candidate.json.trial.json",
+      "bytes": 246038,
+      "sha256": "715389c4c0db15719aa086fab0996c299529e1309839be001ee42da255a621d5",
+      "storedSha256": "9c20e5bac6905495802321eadb3bc8c040611488c7ca20b16b7428887cedf0a6"
+    },
+    {
+      "file": "five-combined.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-combined.json",
+      "bytes": 591,
+      "sha256": "27ad4ae7432cf8a3fe1562f14031132749d9cf8329f3e1e081f5b6458d517d38",
+      "storedSha256": "27ad4ae7432cf8a3fe1562f14031132749d9cf8329f3e1e081f5b6458d517d38"
+    },
+    {
+      "file": "five-combined.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-combined.txt",
+      "bytes": 27710,
+      "sha256": "8be0c6d771c758fb9d47074b8063ad90b006e07ef1accdb48557f4b22913b031",
+      "storedSha256": "7efa07a51b06b05918811df1c811983a0d6ee12e61101a5e8fc6fb082c66a37e"
+    },
+    {
+      "file": "five-final-candidate.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-final-candidate.json",
+      "bytes": 1659621,
+      "sha256": "3f708a6720557bbc44b8331ac2494e9aa473b0f93f83cd6ca64fc81249e552da",
+      "storedSha256": "a791aaf667c6eb7b70f1f39442b7fd5d093c4bd636a3c8c76b0566292148c4fe"
+    },
+    {
+      "file": "five-final-candidate.json.trial.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-final-candidate.json.trial.json",
+      "bytes": 660255,
+      "sha256": "2a776f65441b6daddae2c80956173b29a942d7d248fa6130fc6029f208202223",
+      "storedSha256": "c29479a286834a7a6ab79b8646c8127c824f3a6d8b7e657c46293a20c4764f71"
+    },
+    {
+      "file": "five-final-t4.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-final-t4.json",
+      "bytes": 601,
+      "sha256": "84441cb3cfaa88783e50ba82e15e79981052f962424e9a45c2f2c3f7ab4d5ac0",
+      "storedSha256": "84441cb3cfaa88783e50ba82e15e79981052f962424e9a45c2f2c3f7ab4d5ac0"
+    },
+    {
+      "file": "five-final-t4.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-final-t4.txt",
+      "bytes": 62989,
+      "sha256": "2b67932cd4e4ef6f8c1a9fef4e9593681b05bff19d34d6682410f04309747ef0",
+      "storedSha256": "ed05a306704f1cd1f3798fa1d7283de92d262c1001dff2b30fb6f12cc40c3a87"
+    },
+    {
+      "file": "five-line-candidate.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-line-candidate.json",
+      "bytes": 1603691,
+      "sha256": "d5ab7c15aaa63a96904064eaef0de1ebe3e17c2c0c4a022d0474f10a76f25ee5",
+      "storedSha256": "cf21a025c9799b9ecc618f33360aca1dbb1d4ce7089e669cc9baf1f523c41471"
+    },
+    {
+      "file": "five-line-candidate.json.trial.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-line-candidate.json.trial.json",
+      "bytes": 599166,
+      "sha256": "1bbbf96b4e88e5d7d0d623fd57bc559f0aeef611ec60498f8e69e7463ddf61f0",
+      "storedSha256": "1c09b3b8f4d4651a990e43d71ac959329549ba370420ddee1946b9fbb59d94e9"
+    },
+    {
+      "file": "five-line-failure.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-line-failure.json",
+      "bytes": 1552946,
+      "sha256": "03adb9465f6195b535ceffd097e46ba893218f3bc8428d75602fafc15942b726",
+      "storedSha256": "def9a35359032e0702a186facc6a2cb5053d3194f05ae8354238d21eb062fa54"
+    },
+    {
+      "file": "five-line.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-line.json",
+      "bytes": 591,
+      "sha256": "9f5081e9b7b881edbf26ad9202886fd990fbdcb51a4804ea1d8fa51217ae852b",
+      "storedSha256": "9f5081e9b7b881edbf26ad9202886fd990fbdcb51a4804ea1d8fa51217ae852b"
+    },
+    {
+      "file": "five-line.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-line.txt",
+      "bytes": 52238,
+      "sha256": "666e4bb5bf35b85c4454ca8c1d72d81586a98024afb35aeee8f9a299b92102d0",
+      "storedSha256": "0d492456059c89149cc6eef64a93475ba2daa0500f3c4bfee1aaeb99c1b1d9bd"
+    },
+    {
+      "file": "five-spectral-candidate.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-spectral-candidate.json",
+      "bytes": 1276483,
+      "sha256": "1d98a9e7e3379757627363fb667eb71183877b2cd54e8912f03cc2190b2662b6",
+      "storedSha256": "4041534665f4b40212b044983eaf947dde28abbd37b800ae468d07573f4f3e48"
+    },
+    {
+      "file": "five-spectral-candidate.json.trial.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-spectral-candidate.json.trial.json",
+      "bytes": 246038,
+      "sha256": "715389c4c0db15719aa086fab0996c299529e1309839be001ee42da255a621d5",
+      "storedSha256": "9c20e5bac6905495802321eadb3bc8c040611488c7ca20b16b7428887cedf0a6"
+    },
+    {
+      "file": "five-spectral.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-spectral.json",
+      "bytes": 599,
+      "sha256": "e07415af0eb3d72ff4e93ab53021fc74af9e4e31eb62f3c8a392542cc897ce8b",
+      "storedSha256": "e07415af0eb3d72ff4e93ab53021fc74af9e4e31eb62f3c8a392542cc897ce8b"
+    },
+    {
+      "file": "five-spectral.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-spectral.txt",
+      "bytes": 28074,
+      "sha256": "b759f92b604fd18b1213eea423b43beea82d9c12e73f80ba9436a2511a3fb371",
+      "storedSha256": "345c29d8c37c3d452a62e886737d1c8af19c5798c3e6e2932f4e448ca934d4e2"
+    },
+    {
+      "file": "five-work-candidate.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-work-candidate.json",
+      "bytes": 1659621,
+      "sha256": "3f708a6720557bbc44b8331ac2494e9aa473b0f93f83cd6ca64fc81249e552da",
+      "storedSha256": "a791aaf667c6eb7b70f1f39442b7fd5d093c4bd636a3c8c76b0566292148c4fe"
+    },
+    {
+      "file": "five-work-candidate.json.trial.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-work-candidate.json.trial.json",
+      "bytes": 660255,
+      "sha256": "2a776f65441b6daddae2c80956173b29a942d7d248fa6130fc6029f208202223",
+      "storedSha256": "c29479a286834a7a6ab79b8646c8127c824f3a6d8b7e657c46293a20c4764f71"
+    },
+    {
+      "file": "five-work-failure.json.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-work-failure.json",
+      "bytes": 1658736,
+      "sha256": "0c2ed19b0827646a73d2b3daaffc8429d49cc025ade3919ce842d34a21c4ca30",
+      "storedSha256": "0c7bde1c2b2d097b94fcbf317514f61bb1e2dc272f12836dc76fae6596873a82"
+    },
+    {
+      "file": "five-work.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-work.json",
+      "bytes": 594,
+      "sha256": "a77c70edf7024cb2097ed702a74f9719f78ae07f33c7d7b04356b4a843f0a08f",
+      "storedSha256": "a77c70edf7024cb2097ed702a74f9719f78ae07f33c7d7b04356b4a843f0a08f"
+    },
+    {
+      "file": "five-work.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\five-work.txt",
+      "bytes": 62914,
+      "sha256": "692ef1c53b322ec42cc394b4f506e13a6207839e25b961c79cbc3f6fdd2b856c",
+      "storedSha256": "9080791294baf03fb2c096564c3d02fa3b598cb8be61a99adfbf107dc664abaa"
+    },
+    {
+      "file": "material-assembly.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\material-assembly.log",
+      "bytes": 395,
+      "sha256": "1a6e035b2935404fd6e0da274ae9e09c452f6541a46f1e13586e8e03b20b45af",
+      "storedSha256": "7c81e21d0ed65c9b791401e4fffd53e043fb6a047cf0c08f0a6e1a176599e36a"
+    },
+    {
+      "file": "mechanisms-final.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\mechanisms-final.json",
+      "bytes": 7263,
+      "sha256": "8c5cd1a3f656211724fbe524da3048b48122800a9dbf8245cfa3337d48b59432",
+      "storedSha256": "8c5cd1a3f656211724fbe524da3048b48122800a9dbf8245cfa3337d48b59432"
+    },
+    {
+      "file": "mechanisms-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\mechanisms-final.log",
+      "bytes": 7728,
+      "sha256": "015ce8314b4009995bf2f33911543f80a232f44d89ec198d17845539fb88ee31",
+      "storedSha256": "78c972ac5c23f8559b05bd7f479a4b3f4d60015c5d1c76dc460aca088efca7f5"
+    },
+    {
+      "file": "mechanisms.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\mechanisms.json",
+      "bytes": 7261,
+      "sha256": "bda8d451118991bda7c18c5568e8b7cb5d75584dbc48611966097dffb9d5e19d",
+      "storedSha256": "bda8d451118991bda7c18c5568e8b7cb5d75584dbc48611966097dffb9d5e19d"
+    },
+    {
+      "file": "mechanisms.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\mechanisms.log",
+      "bytes": 7724,
+      "sha256": "c08ef4a15baf5acc8b4e7484ddf0fcb037d59a84817fc40cde6ec6908c1ebf79",
+      "storedSha256": "c430859362bfd2d585ac677653d348f89eb4f63e2443f5f52186b14abd20bed1"
+    },
+    {
+      "file": "np-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\np-final.log",
+      "bytes": 16389,
+      "sha256": "e86c2cc82e1fab7c02a4c7b5492f03cc38e82c65ad3d8135d112bd32ec521a9a",
+      "storedSha256": "187454b0ef38f9de76de5a3f9c5093b0f3b1e1e7564639dba9e1fdd050bca4e1"
+    },
+    {
+      "file": "public-articulation_rc-avbd.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-articulation_rc-avbd.log",
+      "bytes": 13331,
+      "sha256": "722a9bd128c8062ff6dea5df6d8f1b9e52684c51d2bc6afc5281876e2b0f888f",
+      "storedSha256": "52a40053104ffc81d72e5821be3c1863bb6a80d49c17763e7d9bea8b69880ca9"
+    },
+    {
+      "file": "public-articulation_rc-pgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-articulation_rc-pgs.log",
+      "bytes": 13260,
+      "sha256": "26ab8cee94c523c037ffa0700dd4e70439075f469b49776a2d90ff2ef758f006",
+      "storedSha256": "a1f179ddbc6c8b18b2e079797ff32fe79eaf8c736b1632cb0f0a4f6d548e1395"
+    },
+    {
+      "file": "public-articulation_rc-tgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-articulation_rc-tgs.log",
+      "bytes": 13298,
+      "sha256": "f61edcbbe6dc6915bf004e2296ecf39f8273488c78ba8316af234bf02a01c06c",
+      "storedSha256": "38e90145e3852683e4dad22a665a1b0c948617a743a3495b9fcd27f4fecb2f97"
+    },
+    {
+      "file": "public-hello_world-avbd.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-hello_world-avbd.log",
+      "bytes": 12348,
+      "sha256": "e81c24b4fc4dc523b3751f60f95273575fb0e2b4104d595b7f8c3c283cb3a6c5",
+      "storedSha256": "78e6d62c40bef3530f4767ec25cfe212b795893fe3113e09c22cd5032f654237"
+    },
+    {
+      "file": "public-hello_world-pgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-hello_world-pgs.log",
+      "bytes": 12254,
+      "sha256": "cfeb3812a72e709618c7d550c4003869fa9870451143648d83f5dc8cd4d3082b",
+      "storedSha256": "8b6f7eebc5c61d52074a762b47b47acc1e013a3f1cfb12c35887664728533e99"
+    },
+    {
+      "file": "public-hello_world-tgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-hello_world-tgs.log",
+      "bytes": 12249,
+      "sha256": "b121bf4bb6239ecad8166300e8f66bd1be784c6c963089af6e8858e25798a0cf",
+      "storedSha256": "da28341930f7bc2211512ad6f3dbeff5c7997f2e71d66915a0cc0d325478154d"
+    },
+    {
+      "file": "public-joint-avbd.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-joint-avbd.log",
+      "bytes": 4378,
+      "sha256": "726a1bf150573287ef3f0632d3f432a51cce8e052c76afe0362c78b83c7d8749",
+      "storedSha256": "f5978e6a1e8f7ffb160f4a6d4981d99c8372388d39e321eaf9fc4bed11b374a9"
+    },
+    {
+      "file": "public-joint-pgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-joint-pgs.log",
+      "bytes": 4339,
+      "sha256": "9a0e62a84edd06fa6fb1a431379dde4c3f443a27d1e2c22a09386b0afb3a445c",
+      "storedSha256": "5165742bc8a8568b0c52e124e61f2ccfc32691d2019036a72a1e4506ea68bb0e"
+    },
+    {
+      "file": "public-joint-tgs.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\public-joint-tgs.log",
+      "bytes": 4338,
+      "sha256": "ec37195f19bee8c64807fa8e2f258911ac61e76e1d55075ae652e1d6ca5e5d04",
+      "storedSha256": "cf3c6dc4c5460ca4cdab74e50bd0b799c41c660909290659203780d8712c81ad"
+    },
+    {
+      "file": "publication-t0.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "publication-t1.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "publication-t4.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "reaction-final.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\reaction-final.json",
+      "bytes": 1789,
+      "sha256": "c41ffb4eddcd5ef0011914db3e23106b90c1fe425e1c3dfeac6dc5a84a50e5a6",
+      "storedSha256": "c41ffb4eddcd5ef0011914db3e23106b90c1fe425e1c3dfeac6dc5a84a50e5a6"
+    },
+    {
+      "file": "reaction-final.txt.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\reaction-final.txt",
+      "bytes": 232851,
+      "sha256": "a954a8d5aeb6c4ddae2cb27936118afd9bddf188b2a886a9c84e590f3f2c7e53",
+      "storedSha256": "33d4b23c0469a379617064dcad0b220f20e9f87a31bd3f6f47e68643abab4f1b"
+    },
+    {
+      "file": "regressions.json",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\regressions.json",
+      "bytes": 1316,
+      "sha256": "d4b505ed3f0a7c8237624cada774e025b3770e3d8258b92702c8d006a94d8154",
+      "storedSha256": "d4b505ed3f0a7c8237624cada774e025b3770e3d8258b92702c8d006a94d8154"
+    },
+    {
+      "file": "smoke-final.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\smoke-final.log",
+      "bytes": 2357,
+      "sha256": "9a8bfd8be5acf51cc0cfd3d2a41d963fd6dec34b95ddad4bc5a36df8e5352281",
+      "storedSha256": "c7a08e88060266164327495c97273e9188cdfd916917527404294434e88fc08f"
+    },
+    {
+      "file": "spectral_trial.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\spectral_trial.py",
+      "bytes": 3235,
+      "sha256": "f3a1ca54e7b9d83f5e9d1cb26b1930a10ab643d19d9d1d3f031babf790f57b9d",
+      "storedSha256": "f3a1ca54e7b9d83f5e9d1cb26b1930a10ab643d19d9d1d3f031babf790f57b9d"
+    },
+    {
+      "file": "stable_work.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\stable_work.py",
+      "bytes": 4080,
+      "sha256": "7b1cfbaaea3a63000c95962568aabc5c64ea96f01ffb0e314bfa6aeffc422e11",
+      "storedSha256": "7b1cfbaaea3a63000c95962568aabc5c64ea96f01ffb0e314bfa6aeffc422e11"
+    },
+    {
+      "file": "stagnation-probe.spectral.cpp",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\stagnation-probe.spectral.cpp",
+      "bytes": 13758,
+      "sha256": "31bd15ae56f7a22b0fb591d1981a301dcf51e4eaa2896ac9afc4361ad3e3c78d",
+      "storedSha256": "31bd15ae56f7a22b0fb591d1981a301dcf51e4eaa2896ac9afc4361ad3e3c78d"
+    },
+    {
+      "file": "validate.py",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\validate.py",
+      "bytes": 1622,
+      "sha256": "0329130ce6be3909d26a90d9599d86a4b74c18aa4e5749d7b4d4dc6b5a43ca09",
+      "storedSha256": "0329130ce6be3909d26a90d9599d86a4b74c18aa4e5749d7b4d4dc6b5a43ca09"
+    },
+    {
+      "file": "publication-t0\\conflicting-anchors-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\conflicting-anchors-rejected.log",
+      "bytes": 659,
+      "sha256": "e22693fc71ed817d191e5e570b8d07194fbcec6d25635ea8fabbc4f72555f0aa",
+      "storedSha256": "3c2cd6a1992f4ef9b46b3e4c1264f101ba2a36f1b855835e7167a3a800e4f10b"
+    },
+    {
+      "file": "publication-t0\\initial-recovery-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\initial-recovery-rejected.log",
+      "bytes": 610,
+      "sha256": "c9f75a26d716b553d79ac4b18fa5ce40e91b99d7fb9c2ea41dc59e08d22228e0",
+      "storedSha256": "c5b3cd78fb113b81c1f25a3954a7ba8df5517b10a6e75fd68edc8e8ec8bbc3d5"
+    },
+    {
+      "file": "publication-t0\\mode0.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode0.log",
+      "bytes": 1052,
+      "sha256": "df489ad1fd2253afc9e818affa40b106818493c69d5cf0ef89ae4105ddf913dd",
+      "storedSha256": "707bdfba61721732ab88a618bb2257c4806e62605feac3aa13e833093a4af23c"
+    },
+    {
+      "file": "publication-t0\\mode1.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode1.log",
+      "bytes": 1075,
+      "sha256": "214e9f2643ffa5d9136103c24564c215298a4ba167e5eda35eb58665c285385f",
+      "storedSha256": "5fbf636aee0e0042e48f5ab78d8d89f9046f3fe9d3f66fc942d98173086424d0"
+    },
+    {
+      "file": "publication-t0\\mode2.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode2.log",
+      "bytes": 1055,
+      "sha256": "80a2c6d02539b78905b29f826bc6d0abdebb5ae14550b8bd405288763108b798",
+      "storedSha256": "263256316759874f90efa20b19e38059806aad4eafd378932c5de891fdc3a779"
+    },
+    {
+      "file": "publication-t0\\mode3.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode3.log",
+      "bytes": 1051,
+      "sha256": "3d6dad0173348cce3b32cde84c6834662e9b6acb8add0abb8a8a22a95ec8b961",
+      "storedSha256": "cc7ed93918051094294864fbcfc95056e956f7238c052344f4b09869139eb363"
+    },
+    {
+      "file": "publication-t0\\mode4.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode4.log",
+      "bytes": 1054,
+      "sha256": "fce8986d612b1d970189a76608297b43a84ff7e7aaa775a5f65fcf38048e70ee",
+      "storedSha256": "39855534dab6a63f8448422c06dd9e7b163e873ab0c4a0abfadcdbcc0de6087b"
+    },
+    {
+      "file": "publication-t0\\mode5.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode5.log",
+      "bytes": 1055,
+      "sha256": "bf2fed0948a8706e0d65ccd2713ebe785bb28243622fcfc9b550b20b00040ebe",
+      "storedSha256": "0f1b90c3ee3316240d05c5be5cfd997ade8d007cc39aa0c27210389e7d44b3e4"
+    },
+    {
+      "file": "publication-t0\\mode6.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode6.log",
+      "bytes": 1084,
+      "sha256": "639c7fd688d8787184d2e6393efbdaa2423011ef4ee2a512563ae012f9ccd808",
+      "storedSha256": "ac44550b0bd5bef91feb29f42bbe58f928120ddf2ab8e2172471b636c1990ccc"
+    },
+    {
+      "file": "publication-t0\\mode8.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t0\\mode8.log",
+      "bytes": 1735,
+      "sha256": "6fdcef157eba2301290a08518515807ac7fa2e6e4e7898a1ee062a22127a5f9a",
+      "storedSha256": "96a583530bd41263e3588615f5018c497eae89ea75622f1ac6593c58ad04f3e0"
+    },
+    {
+      "file": "publication-t1\\conflicting-anchors-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\conflicting-anchors-rejected.log",
+      "bytes": 659,
+      "sha256": "b5de2197454739f03fd7788b1ba232cf47f8cdd8ba8eebbce71b23de736ba781",
+      "storedSha256": "a867a11c94e4ef68a1d0ef87680e76b75402eeb7e4354b742c13eb87058ed33f"
+    },
+    {
+      "file": "publication-t1\\initial-recovery-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\initial-recovery-rejected.log",
+      "bytes": 610,
+      "sha256": "5c709ae52286e8c9aca1faf3ca4e0c22c448480149b8df0d2b00db5b7058cea9",
+      "storedSha256": "3d39d1aa4f0010321d30ae6a2a86fb084745d34a71503b04548fede9f1ecc6d6"
+    },
+    {
+      "file": "publication-t1\\mode0.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode0.log",
+      "bytes": 1052,
+      "sha256": "d3f9353b2ab649bbfa3b5dc68347394c7b28eceb10087049b230ea37291c6d30",
+      "storedSha256": "c94f2866d677822d1813e8bbce9928e91b3a56eb028a237c9a579f4a3fa5710a"
+    },
+    {
+      "file": "publication-t1\\mode1.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode1.log",
+      "bytes": 1075,
+      "sha256": "51c5ab1883d281c7b4545e8f34c7a090154a108ca5433093b21dec4b5f358c62",
+      "storedSha256": "df743f21d542c71b1f3f844e1043bf119dd98ce214c3e46b2194d15d41166952"
+    },
+    {
+      "file": "publication-t1\\mode2.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode2.log",
+      "bytes": 1055,
+      "sha256": "e56485517c6a1e65fc6be0aa885df2cb5f6455efd08fad2d939b81c52e12ea12",
+      "storedSha256": "381354004a8d9dd87c50436303c2a3a134728a0b02d04d502b941ec57176240a"
+    },
+    {
+      "file": "publication-t1\\mode3.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode3.log",
+      "bytes": 1051,
+      "sha256": "9371bc988b182759e73e4342611c86bbe0af8408badfbab82926edd1aaed8588",
+      "storedSha256": "94ec56e5ba103554b2424537278bfd6a604e028daccf0bf09e6527b522f1ba10"
+    },
+    {
+      "file": "publication-t1\\mode4.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode4.log",
+      "bytes": 1054,
+      "sha256": "4aedea82f442dccc853ef950d5262e13d6dd8d10752c8f0505c566a7e0b14aa1",
+      "storedSha256": "d00ef3fadf888d2cbce81b1eb96be13ac048fe1617ae5f881f740e50912468c9"
+    },
+    {
+      "file": "publication-t1\\mode5.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode5.log",
+      "bytes": 1055,
+      "sha256": "205b8f25413fdf58eac5e02dd84c0b80159afe32ae489e542ded9aafb4a48149",
+      "storedSha256": "e48cc7c9e0d1a219865956bf41536bc903fd5e7058e11bbf28366f730b76fe68"
+    },
+    {
+      "file": "publication-t1\\mode6.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode6.log",
+      "bytes": 1084,
+      "sha256": "a991a0a36500c67c687f204406a4929de0f93db84b3af3ab28994118017d84fb",
+      "storedSha256": "61305b0805d9d5dd141e4f9497a2954d86f98ffadee36c47e4e96f0dabd9d6d8"
+    },
+    {
+      "file": "publication-t1\\mode8.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t1\\mode8.log",
+      "bytes": 1735,
+      "sha256": "c5294b5b4bcbfc4412986977e0197e898fe04772e1ff0818bd4da281ba967c87",
+      "storedSha256": "495b60610d82aaf9a8d97ce95c57cfe4433fc8769dfb5b55343d4572c0431102"
+    },
+    {
+      "file": "publication-t4\\conflicting-anchors-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\conflicting-anchors-rejected.log",
+      "bytes": 659,
+      "sha256": "8f5d7443c18091ba9ddd772a9f8e837da504146ec63b041ef3dd08f25204db75",
+      "storedSha256": "3a4f457a94b3c19712ebd7303b685843e36ce9309e387df2248503012eb9b2b0"
+    },
+    {
+      "file": "publication-t4\\initial-recovery-rejected.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\initial-recovery-rejected.log",
+      "bytes": 610,
+      "sha256": "e3298ee0dc70caf114f4f64739aad6a56ae9181ba14a8d82d2ea80a4da583999",
+      "storedSha256": "1c916d316e541a6961f01f3df40b70e004ccd96b4d045aedb5ce24e3f1e68489"
+    },
+    {
+      "file": "publication-t4\\mode0.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode0.log",
+      "bytes": 1052,
+      "sha256": "d2f8ac5ba387be3a87b00f2dbd67f09c1ead980c1373d0872e02251378146d38",
+      "storedSha256": "fbcf4abf82c6c7cc9a7d8d32ac2286f7378eee471e03acbfdefd6ddc094b95ed"
+    },
+    {
+      "file": "publication-t4\\mode1.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode1.log",
+      "bytes": 1075,
+      "sha256": "883f8c2dba5a486163d4c9d40c9ec9987f3f3f91039b4e7a1ff413cdaa653815",
+      "storedSha256": "f5039c45a0f06c2590b2f7918944ce23de79746eef68b0a22dc9d252e6fd91ed"
+    },
+    {
+      "file": "publication-t4\\mode2.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode2.log",
+      "bytes": 1055,
+      "sha256": "fb04f6d3e98af3a9725cf86d311a0f9f3a8a49510b03352883afb824e93f77a2",
+      "storedSha256": "b2c34286f1c98f08c62b6b1e410c6dded523b6fab376cbf095cafe0d5cfb9f70"
+    },
+    {
+      "file": "publication-t4\\mode3.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode3.log",
+      "bytes": 1051,
+      "sha256": "73ebe185d341fa39e44c0202651fb86620abb67fbce3eead3d1d375d799ad1e0",
+      "storedSha256": "a2681532232d1717974f9446138e25588d9a7ddc24809261bbe3379e16f8058f"
+    },
+    {
+      "file": "publication-t4\\mode4.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode4.log",
+      "bytes": 1054,
+      "sha256": "225b2a54806cd9c715f02f2f7d6c998fa0cbeab666d0fa8d52ea389f8dea7940",
+      "storedSha256": "c5f07ce22265d2eb0bbd4fd6be18537d21a676f685883c26a4150662c4c27c34"
+    },
+    {
+      "file": "publication-t4\\mode5.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode5.log",
+      "bytes": 1055,
+      "sha256": "3fb790fe9d92ea82bb9ecf9abe08c17d3f59f58aecd3f0656cc9591b7c52d30f",
+      "storedSha256": "0e9bd73c125558a509e25cde793ad4466e983a615b9a982d586c9ab5af63e9b3"
+    },
+    {
+      "file": "publication-t4\\mode6.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode6.log",
+      "bytes": 1086,
+      "sha256": "e3cc71a3c9d01902c1b1208fe4bc055fba6e192166049938eb3db776eaf2f023",
+      "storedSha256": "2c32a57eaba4f1387238ba36ff2dbaa67aa7b1c86516e7ca42e57d863873d015"
+    },
+    {
+      "file": "publication-t4\\mode8.log.gz",
+      "source": "tools\\benchmark-results\\bounded-curvature-20261106\\publication-t4\\mode8.log",
+      "bytes": 1735,
+      "sha256": "61809be227a2d7bdd7dc1c8db2a686eabbe55a4f63b899a94d71489eb7a8a108",
+      "storedSha256": "0475a2efa64b5bff52fc3765fdc886ae5d739d2f2fa26e5092cd4e558896df62"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdCommonProgram.h.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdCommonProgram.h",
+      "bytes": 11618,
+      "sha256": "874f1154bc7c8ad37583da70d9e9802799fb93ba0df40aeb2b29a0664a377dfa",
+      "storedSha256": "d8abc1483ac8863d6768fd731694ddb6183c795f2372c790e624e4d2f4fa16e4"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdCommonResidual.h.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdCommonResidual.h",
+      "bytes": 4942,
+      "sha256": "f511af432b9cf676dd3247cbe3361c79cd2f939845f0f14df639e19be4c132ac",
+      "storedSha256": "f49ddf7483ac9a16a03c00e8c7c13e825b2136c14d844d748cd239dab2a2af84"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdElasticFrame.h.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdElasticFrame.h",
+      "bytes": 5406,
+      "sha256": "9b7267670eb47b014853d06e22ed3bf945c355f54ced7651ebb7d1f4a2469620",
+      "storedSha256": "851243bc5080621453eb6273494866113a7e74c2691326db1c711cadd862fbdf"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdRigidMetric.h.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdRigidMetric.h",
+      "bytes": 6604,
+      "sha256": "05389050eaf77118634f9abde6aa07f5a6257ce8fb1c5f7dda04a4747e6a8047",
+      "storedSha256": "288899f78df126301dbb2044051fc393e6ba67fe4afd8286a9487c46c1cfff5b"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdDynamics.cpp.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdDynamics.cpp",
+      "bytes": 291807,
+      "sha256": "8f5f664c36035ca0ce846b07c46e4557d07999161232d9a3cb20fca50f9371de",
+      "storedSha256": "1505aa49868796bbcee3ca0918ed989f2e693f0d5cc792d75268bc6909f07e5e"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdDynamics.h.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdDynamics.h",
+      "bytes": 28762,
+      "sha256": "dd71158b0f2d3481c9fd6fac7698c09f26c940c161fc442690054825a727bd01",
+      "storedSha256": "79175d6fb14cb120205d39d320404e21e89360ad73c6326bf2b155ed3eadc9ec"
+    },
+    {
+      "file": "sources\\physx__source__lowleveldynamics__src__avbd__DyAvbdSolve.cpp.gz",
+      "source": "physx\\source\\lowleveldynamics\\src\\avbd\\DyAvbdSolve.cpp",
+      "bytes": 147268,
+      "sha256": "7dad0532cfea4ab1ecb9d75facc02866e1c215ac47a2070a40596e90b1219f2e",
+      "storedSha256": "1b78f590403d3aa24e875b66449323ccafb7ff8466f22605a1f363f5bb4e36d5"
+    },
+    {
+      "file": "sources\\tools__avbd_stagnation_mechanism_probe.cpp.gz",
+      "source": "tools\\avbd_stagnation_mechanism_probe.cpp",
+      "bytes": 13981,
+      "sha256": "0d9bfc20d5559fc69ffa77c765d22044545aa32805610b65dd93e9e686a4518f",
+      "storedSha256": "3599ccf024d16a061fb3a004a05c5892d0a04525cd4dfca0069c0a04befe5547"
+    },
+    {
+      "file": "sources\\tools__analyze_avbd_stagnation.py.gz",
+      "source": "tools\\analyze_avbd_stagnation.py",
+      "bytes": 5479,
+      "sha256": "f358d79b76b4e3e6025fae1f5f7a15b64cafdd335aabff50f5f61717be78c57e",
+      "storedSha256": "41c00b685c927555bf9d37f6b6f0ead57e5132512d451e63628db791bf2b21b4"
+    },
+    {
+      "file": "sources\\docs__BOUNDED_WORK_CURVATURE_20261106.md.gz",
+      "source": "docs\\BOUNDED_WORK_CURVATURE_20261106.md",
+      "bytes": 6052,
+      "sha256": "d00309c114713ebb48fe7f7f41892261daa1dc1ec7320c9c542dcf006e363ed1",
+      "storedSha256": "e5c6dba75faf577895c5abc0b9f6effd4e6c4b6424c0019e218ab3cb350fbe67"
+    },
+    {
+      "file": "sources\\docs__REFACTOR_OUTLINE.md.gz",
+      "source": "docs\\REFACTOR_OUTLINE.md",
+      "bytes": 189587,
+      "sha256": "5068d5dcff458f0a40d27dc9059978d278061fdc462e606eaaa82f109974f695",
+      "storedSha256": "a1108520ad2ca4bd01064eda581643f0a5546f03059939194ee973a873b4f070"
+    },
+    {
+      "file": "sources\\docs__ITERATION.md.gz",
+      "source": "docs\\ITERATION.md",
+      "bytes": 351593,
+      "sha256": "1d3b1d8e6d066aa253d7d540eef4ee2e6c646a819c0dc6cd7a6c916d1dcd5a33",
+      "storedSha256": "e382481875197fd12a7b0403ab87e46315f89d99b0416c8afaf54a262afd4050"
+    },
+    {
+      "file": "sources\\.cursor__skills__avbd-whole-step__dead-paths.md.gz",
+      "source": ".cursor\\skills\\avbd-whole-step\\dead-paths.md",
+      "bytes": 155318,
+      "sha256": "669dc91cfb82ed06688e21b69b3f1e4def0d67bb156b62030f8ba8fcea6fa96d",
+      "storedSha256": "925486d7d2352c674504626df94ad6543afdec43fa0db4782a8cc53e1b41015a"
+    }
+  ]
+}

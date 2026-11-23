@@ -1,0 +1,33 @@
+[
+  {
+    "script": "audit_dispatch.py",
+    "exit": 0,
+    "seconds": 11.5936727
+  },
+  {
+    "script": "validate.py",
+    "exit": 0,
+    "seconds": 206.59613140000002,
+    "firstExit": 1
+  },
+  {
+    "script": "extras.py",
+    "exit": 0,
+    "seconds": 32.0151427
+  },
+  {
+    "script": "paired.py",
+    "exit": 0,
+    "seconds": 94.2250391
+  },
+  {
+    "script": "scaling.py",
+    "exit": 0,
+    "seconds": 83.51346609999999
+  },
+  {
+    "script": "timeline.py",
+    "exit": 0,
+    "seconds": 18.76758239999998
+  }
+]

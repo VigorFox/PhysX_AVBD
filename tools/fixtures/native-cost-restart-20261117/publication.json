@@ -1,0 +1,455 @@
+{
+  "baseline": "f9abbe0cd869136d20cba6462551bbb141a75cd0",
+  "backup": "tools\\benchmark-results\\restart-baseline-20261117\\previous-default-products.zip",
+  "backupSha256": "37f0c0ff7724f73e25675ea0329b7da7f13004e7a556b35afb6f44727bf9b027",
+  "verified": true,
+  "products": [
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\avbd_smoke.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\avbd_smoke.exe",
+      "newSha256": "3d4ba4fcbea261b805b856425b3f83cd0cefc8d339326c4ee4911f16a311751c",
+      "existed": false
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\freeglut.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\freeglut.dll",
+      "newSha256": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+      "existed": true,
+      "previousSha256": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevelAABB_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevelAABB_static_64.lib",
+      "newSha256": "17ee2d5a612a76f27be5f8c8b0ab5acb7b4521b7dc3a0e757fb4c351c9debafe",
+      "existed": true,
+      "previousSha256": "d6c02659516c81bc3c7f7361f5f1eeeb28c68c4b04b047f48d85d1583297b88a"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevelAABB_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevelAABB_static_64.pdb",
+      "newSha256": "9818b184244a43eaf6e088b1918ff0582902fdb84a4312eb3d762269f6e93afa",
+      "existed": true,
+      "previousSha256": "3bb73adc82cb013eb4d8c2f72bda13b8d1bd39042fd0cf5912e490ad16e997ef"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevelDynamics_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevelDynamics_static_64.lib",
+      "newSha256": "d2ab6094d51dad30a3b5f7a339d424e427573618153a2899ac4407e02a248801",
+      "existed": true,
+      "previousSha256": "3702a0ebb861e53f7cd7351bc257fed5b62673c3efcf9c36e97016d16750539f"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevelDynamics_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevelDynamics_static_64.pdb",
+      "newSha256": "f83104bbb94c1f9afe11018da1087fe803fb46bb60e07962992e0c29dc7dc4f9",
+      "existed": true,
+      "previousSha256": "cdec7816c1c9de62a0a55d4bba86a2de60890a5b349eed1b3244070b50436c85"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevel_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevel_static_64.lib",
+      "newSha256": "1edc2eefb97b8afb1b8a314d073562ee571f644f2e864d0a4f5de270e685d0aa",
+      "existed": true,
+      "previousSha256": "fb2ce4e2cf8024a0e133b74c0663691855117e516a42f357f1dc03fc64269dcb"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\LowLevel_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\LowLevel_static_64.pdb",
+      "newSha256": "3a503bf6f9f45f76bb91cef8433a958b34acd4dd0848d580f8741af8cfe6d2c2",
+      "existed": true,
+      "previousSha256": "e0f43087f5452f2fba435c5af0fe6e8103ebd5e497c36ef5063b80b2ca97fa77"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCharacterKinematic_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCharacterKinematic_static_64.lib",
+      "newSha256": "c5eae9eb7d63e28e04866315527af73071ce6033b7dacec029ffcd814f08c56a",
+      "existed": true,
+      "previousSha256": "0f2236002084da0d723e3e70ced3fd98bf246f66b76ad5eca481aaa217258f94"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCharacterKinematic_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCharacterKinematic_static_64.pdb",
+      "newSha256": "fb6ae38e579d080283c8521b13c06f6eb988a599db68260803fc0296c40f043b",
+      "existed": true,
+      "previousSha256": "d309999c489792d938a9fb3d5deeb68f8628222ddb1f6c09e5f78cccca88f9ec"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.dll",
+      "newSha256": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "existed": true,
+      "previousSha256": "b16aee96e10a125dbf957653ca70f48641e1aec249277fcbcbb36c8cd921a7f6"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.exp",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.exp",
+      "newSha256": "8a98149bbb32e9c1189c7f9f4d3836d5d4d229f902193363082fbbf5a8c5a12d",
+      "existed": true,
+      "previousSha256": "6590306cf309677a572d28857d9b81572099261150a529c11bbb7cde859919b5"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.lib",
+      "newSha256": "61be0579fbd1ebfb3f8e6d7446daec5e47b983d62193597e7b108682f4b011e3",
+      "existed": true,
+      "previousSha256": "61be0579fbd1ebfb3f8e6d7446daec5e47b983d62193597e7b108682f4b011e3"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.map",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.map",
+      "newSha256": "1ea51bb6d32c79b6de3181c10c7f5a9bc986c8358c6d4e74b931a73067accf00",
+      "existed": true,
+      "previousSha256": "cbc4a5b9aeb2b367fa8cb869a6a5b41fa53a14db77c6a4bc7583f4e9cc702b9f"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.pdb",
+      "newSha256": "8f894ebd78cabc99b0df9d97c0891e426af2edacb74f70b4735e5689925b58c6",
+      "existed": true,
+      "previousSha256": "a8bd986c7f034b730abb171cc48b220d0874157a759605cf9d5de2fa37beefcb"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.dll",
+      "newSha256": "ff6a474874abbecc7753e3e67a94ee468cb30376e1f1ca98b5a4f2de379acd91",
+      "existed": true,
+      "previousSha256": "22e5e81dd231681a8aec9026b83c6ee17eca6fc0290a56fb9c193c6f28c9e7ec"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.exp",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.exp",
+      "newSha256": "045144d32aec7b43b11d9455d4096561746c1dbf56e5e12d64e807f15aa02bf7",
+      "existed": true,
+      "previousSha256": "8ac9afe82fd00af7ee8f7880dc6d5fffa71d4b178f3c0c1f47fe87bc3dafee13"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.lib",
+      "newSha256": "7a3a374d2ed64e004a79473ebc8bf51a528ad57b0c0bfc58f0f3d9c106fe2270",
+      "existed": true,
+      "previousSha256": "7a3a374d2ed64e004a79473ebc8bf51a528ad57b0c0bfc58f0f3d9c106fe2270"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.map",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.map",
+      "newSha256": "5170bac7cf5a9b6b79bf8aae6e2bce43d99144fd0ffa4c77880440ff585ce527",
+      "existed": true,
+      "previousSha256": "32bb139177d0a86217fcbcf013e0ca3112ca0fbef85327ce8672065021d90212"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXCooking_64.pdb",
+      "newSha256": "db370696ca503daafefc694db9352410eb10e6fb1e3f3627d72c1e9dd635002e",
+      "existed": true,
+      "previousSha256": "cc5c8e869f487a2942e761a3835144bc8a6b9f33421d8264e6dd7188f86318a8"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXExtensions_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXExtensions_static_64.lib",
+      "newSha256": "e690e66e558238c85e83d2341a0a41ed4b43863fb3745d7431eef806752e60d9",
+      "existed": true,
+      "previousSha256": "5bc2ab8b837b7cebfa9845b5893fe9c409e9fdba5c7e4090c59eb5f3ce1048ba"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXExtensions_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXExtensions_static_64.pdb",
+      "newSha256": "96a6afcd4a8049aebfb8e425e2d42090fe6ba2eca82adba7e84ba6f109ab366e",
+      "existed": true,
+      "previousSha256": "d7d4791c5c8181e0c4088561fec39938a44adcc42a85f5e41e191172ef71b27c"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.dll",
+      "newSha256": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "existed": true,
+      "previousSha256": "d9fa71b54925fc28dc0d3c6b7b42bd2f0d734f7b16e9c82f575d232b7c385984"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.exp",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.exp",
+      "newSha256": "6b271a72153f1911bb7f0add7690de3f32ca5a8a784cc75be335ce2740297dbc",
+      "existed": true,
+      "previousSha256": "ab05ac49b5fc63402522b9e3fa5def1f43122a555ecb6e312b1a140ae1141820"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.lib",
+      "newSha256": "2e1de3e15be23efb43ae06924ed04b3e67ae314f3b3b46ba38aede0a6da1bf9e",
+      "existed": true,
+      "previousSha256": "2e1de3e15be23efb43ae06924ed04b3e67ae314f3b3b46ba38aede0a6da1bf9e"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.pdb",
+      "newSha256": "83b83d8555cb4972fa858add843a613216bb91b606c78e18811fc0bf90fba4f2",
+      "existed": true,
+      "previousSha256": "75cc7ae9754fb17f959155789e2ca74ccb28219a2b5b44eb38b62f611093a9c8"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXPvdSDK_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXPvdSDK_static_64.lib",
+      "newSha256": "cecc9dd9964c297629985740462b52d51a65a16ccfed3624f7861b3c8d4aed15",
+      "existed": true,
+      "previousSha256": "56ac9297d17f7c83df54ed7f9c91ca1e3977f8e7ab10d58c5e9b68d19fef2a10"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXPvdSDK_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXPvdSDK_static_64.pdb",
+      "newSha256": "44a1d33610f9fbb27bb0736ce5f7bf8e50395a8efbe09403c1813587b85c5e96",
+      "existed": true,
+      "previousSha256": "5530321fafbaaa881d45b6a6d86dde6fad0ecad395ebb155f048b728f01832e0"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXTask_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXTask_static_64.lib",
+      "newSha256": "3362cbb9d6f044d8708a564bdb9e41bbbe3c2709195f448957ba2b59122a8adf",
+      "existed": true,
+      "previousSha256": "afa4cfe47e31dc86b1f171cc3955cde91a79cb77689e049df52d988071465943"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXTask_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXTask_static_64.pdb",
+      "newSha256": "140d26903b9b10e59f22b94259a1b7775d3e9cb942492e896006891ffdeaae3b",
+      "existed": true,
+      "previousSha256": "080d9c83726cbcbb16bd81242aa402c02446a39690c7761331c4fef6c087594d"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXVehicle_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXVehicle_static_64.lib",
+      "newSha256": "5b12c70d1fb01e79e6de35557ce93c3a5d481d7bb166ea41a0a0a52824fd7f48",
+      "existed": true,
+      "previousSha256": "30c1821e95f02cf891bd27523f8a95663fdf1c886a026c1856f33e3922539a73"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysXVehicle_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysXVehicle_static_64.pdb",
+      "newSha256": "e99e907ad1ee0f5be78486a2dfb7eefac34c1c364c96713010206557342f729c",
+      "existed": true,
+      "previousSha256": "7a67827aaa691e7582606ca95febf8e8fd8286d11e8f507c603662edb583f159"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.dll",
+      "newSha256": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "existed": true,
+      "previousSha256": "b14b3ec6c92e24a5312303aaf3fd3d00b993d75f8c1f734c3c747acbeeacdc12"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.exp",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.exp",
+      "newSha256": "42c30159355a9efa84d5ce2f57b44ab1de8c28189bd1c58642b6cb2a31312ad7",
+      "existed": true,
+      "previousSha256": "4da200ae897b7742d681ff2f13a16a7ae2edee099b98d4b4aed9cab14564e849"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.lib",
+      "newSha256": "e1c37656b6657620f40217d0edaa384f1fd5e6088bda64249c5d48f5034912c8",
+      "existed": true,
+      "previousSha256": "e1c37656b6657620f40217d0edaa384f1fd5e6088bda64249c5d48f5034912c8"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.map",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.map",
+      "newSha256": "ae37291a15660d2d777211f49ee4140ad5fee181b5938d080c8f66b38639df5e",
+      "existed": true,
+      "previousSha256": "76923543815e2d251a9e4881bd1f1c8d086c42c9f24769c81766781addba7fa2"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.pdb",
+      "newSha256": "5496e21e5156749e980d46c1203497fd9d3b912f7e11b9be928352ab3d888f33",
+      "existed": true,
+      "previousSha256": "8f5c40bf5271c540bcc328287013b32d67ee9492a6fc879b87d8b9063e8e3888"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.dll",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.dll",
+      "newSha256": "7749c474a1e8e452c3a7f3a8c435b1609ec70a0654e567cfb5e4d3d8a7fa7910",
+      "existed": true,
+      "previousSha256": "7ddfbbf60377fbeb0552c9bee1a517a1f85188642cebba73081987b6423f0237"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.exp",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.exp",
+      "newSha256": "b72986b3ef7ad92e383f18a1baab12a9f3f1755fbba75882d67ada2a2b1a5964",
+      "existed": true,
+      "previousSha256": "493b08f3ef0360521c4e1408d7c743c09fae4e7a4475f53a5e42204fe77160d0"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.lib",
+      "newSha256": "e4ce61a94b2c961a956bb5fd5ddbc7467279c0e6419fa1cb9112ff3da3e80051",
+      "existed": true,
+      "previousSha256": "e4ce61a94b2c961a956bb5fd5ddbc7467279c0e6419fa1cb9112ff3da3e80051"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\PVDRuntime_64.pdb",
+      "newSha256": "a43f31a022a2b10f77e636864d879903b06fc0f61d66a5e7788138511651549d",
+      "existed": true,
+      "previousSha256": "928e502cacb78c0814bf7402bbd8fac463ab1433eefd52d0862cea82e61e9c7f"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SceneQuery_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SceneQuery_static_64.lib",
+      "newSha256": "1c295e7804427ed46e9c9ea2018d771c9feeeca25ab03a75a802f2e989dad2c2",
+      "existed": true,
+      "previousSha256": "2085bc5a1dbda1f5b56d74ff040f60d70cbdd9f23282d82a4cc1e5c15baff99e"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SceneQuery_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SceneQuery_static_64.pdb",
+      "newSha256": "d1a5f8943268f33da805b45e2e2610ac1f8e92874ae776b8d6109c738dd9e56a",
+      "existed": true,
+      "previousSha256": "2add10921945fe92b310fbadef72c2e8bbd122018c338968e3c2c3bda5cd63f9"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SimulationController_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SimulationController_static_64.lib",
+      "newSha256": "d4b725a72949321e43f4daccab43c867764e61db242ac925cb91feffa2f66172",
+      "existed": true,
+      "previousSha256": "e3eafeb90a78d2ac180c95118b8d9d2b3bd814a11c4b223794f005fd5b4af4d8"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SimulationController_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SimulationController_static_64.pdb",
+      "newSha256": "bfc4d797452dace47dcd2c7b41641b31f82faab84a5c3a0075b71c6731580903",
+      "existed": true,
+      "previousSha256": "730a53ed18b8b2c86808d7eb4a28029b51567950ced073b4e90e9c4ade5ca245"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetArticulationRC_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetArticulationRC_64.exe",
+      "newSha256": "4cde6e0762f9345dc4f32cbd9a140e1aa5bbc6df44eda5580e45e537473103b0",
+      "existed": true,
+      "previousSha256": "11a158233132629f38cce4f5595c3fca35fa51731a6390e52ee629607fbc1db7"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetArticulationRC_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetArticulationRC_64.pdb",
+      "newSha256": "eb570554f1cd91cc03b16f45a186f0d480b23ae693194eb5db5f97c3c9491803",
+      "existed": true,
+      "previousSha256": "e3712964de0bceaa0ac016092bcdcb5770fbab6cf3efc2e56afeb1f43c9a7388"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+      "newSha256": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "existed": true,
+      "previousSha256": "b7c8a295c468fe2943a2d0908d2eb6bddad973c37d14295354396007766c3c39"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.pdb",
+      "newSha256": "312535fa4c82a62f2b2e34f9034231afaf700ddcebeb762bbf85f04dba64f6cf",
+      "existed": true,
+      "previousSha256": "dfda146aed3a1c2307a307d5e0d4a1ad950297880b6de65cbff07e8832161065"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+      "newSha256": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "existed": true,
+      "previousSha256": "8a5c11e3a10aa8a320a49dbef0dae45b8160831c1364583782702e4d0dbf4d00"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.pdb",
+      "newSha256": "990b45bb3e33833f83ca1a4bd964947d02087d7feb7f5c157c8be79abe4ec5cc",
+      "existed": true,
+      "previousSha256": "cd9b2b44ff1e40bc7170d3ba929a6ce78dff1a5fd3609f7592b59a42b3ad977d"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetHelloWorld_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetHelloWorld_64.exe",
+      "newSha256": "5dbbeb61a30038a32f9a8092ceb388db38ef995e562695eb659a2675291dba3e",
+      "existed": true,
+      "previousSha256": "b4d95129bf9f984c0f6bfc884eb800056b1c6ec47980a3889c4c1a1f3f462683"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetHelloWorld_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetHelloWorld_64.pdb",
+      "newSha256": "c3a885b171a50b121911162ec72d385eb52ca0fca80c7978acb226df6553cdf1",
+      "existed": true,
+      "previousSha256": "c1b40a4656aab30728ec9fc73d4377477e87d7cf0c3b517980cdf68b07394de7"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.exe",
+      "newSha256": "8a3ea52a5f94b3101a716909c53a25fc0ce25db69bca6066360d5150bc140322",
+      "existed": true,
+      "previousSha256": "9b536ff0c61185999334bc69e59ea45b8a5e615da219582720a77c9568f2aa1e"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.pdb",
+      "newSha256": "1758dc5eb30e76a540e2e86d342f8d33a00cbd44c7dae2314ef71f886939dc00",
+      "existed": true,
+      "previousSha256": "00357c9943d318b12db9f2fa211655f9d080b5cf893b927134dc9637ab8a1c51"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetJoint_64.exe",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJoint_64.exe",
+      "newSha256": "1ef1e0a5c0f0248cde96de29c9622621af96ba7e6f44fa428e927458c668ebcc",
+      "existed": true,
+      "previousSha256": "7c07c0662d168e0ab36788381b8d1cfd33dc5fd9f931ffc0419e907e76ad7077"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetJoint_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJoint_64.pdb",
+      "newSha256": "e2c2ef78285a51aa53fb1aa7fa51e94b3e7773c7b65349913c37a3dca602a46e",
+      "existed": true,
+      "previousSha256": "b571e9ac30bb9bb90ec37095870751a404b160722479aa7980d62b6afa1fc800"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static_64.lib",
+      "newSha256": "fb59ac10b36c3da970d3d6cb7d0cb584f5cbbf458e786b9c1567f80b959fed84",
+      "existed": true,
+      "previousSha256": "2101f3c75f9478f429867c6476d699ddc6c275208e9882ff155903ec1b689f65"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static_64.pdb",
+      "newSha256": "ea60c5a78d8757f6929843d1c0c069fe847a670317d58e1218c83a71bb77f50c",
+      "existed": true,
+      "previousSha256": "ff231758ddeb2c06ec8c837f4f8612700b9b083b6c49dd8755f423cbed1839de"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static__64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetRender_static__64.pdb",
+      "newSha256": "ea60c5a78d8757f6929843d1c0c069fe847a670317d58e1218c83a71bb77f50c",
+      "existed": true,
+      "previousSha256": "ff231758ddeb2c06ec8c837f4f8612700b9b083b6c49dd8755f423cbed1839de"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static_64.lib",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static_64.lib",
+      "newSha256": "2fd1adc92b2c4837380efd52bfb30dc3a35364894d8e87f952116b04073798f9",
+      "existed": true,
+      "previousSha256": "e7d09b321ae032a43c979c2d9d529a7b9b012ba823829d1ffd815efd10c20680"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static_64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static_64.pdb",
+      "newSha256": "da8f10f538021c1e23946b06872013d78405c1ac9fb1f00453dc353e839fb58c",
+      "existed": true,
+      "previousSha256": "e0af7c8c75551ae327048661fa6b8258b181a854cd3b1df010db0e678cc1e6ea"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static__64.pdb",
+      "target": "physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetUtils_static__64.pdb",
+      "newSha256": "da8f10f538021c1e23946b06872013d78405c1ac9fb1f00453dc353e839fb58c",
+      "existed": true,
+      "previousSha256": "e0af7c8c75551ae327048661fa6b8258b181a854cd3b1df010db0e678cc1e6ea"
+    },
+    {
+      "source": "tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\avbd_smoke.exe",
+      "target": "tools\\avbd_smoke.exe",
+      "newSha256": "3d4ba4fcbea261b805b856425b3f83cd0cefc8d339326c4ee4911f16a311751c",
+      "existed": true,
+      "previousSha256": "c957b85ff9eae266198c3b06a76ea90e95802edd151f9053a8cbe104f6879c40"
+    }
+  ]
+}

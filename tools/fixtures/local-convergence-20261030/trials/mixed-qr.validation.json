@@ -1,0 +1,18 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\mixed-qr.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "grouped augmented primal/dual",
+  "reason": "local_response_capture",
+  "materialProducts": 14,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 2.114991311540939e-11,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

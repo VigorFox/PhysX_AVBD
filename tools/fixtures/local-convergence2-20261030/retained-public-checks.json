@@ -1,0 +1,127 @@
+[
+  {
+    "name": "hello_world-avbd",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 11.1978139
+  },
+  {
+    "name": "joint-avbd",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 1.0001824
+  },
+  {
+    "name": "articulation_rc-avbd",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 16.975518
+  },
+  {
+    "name": "hello_world-pgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 1.9472640000000006
+  },
+  {
+    "name": "joint-pgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 0.8087456999999993
+  },
+  {
+    "name": "articulation_rc-pgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 1.0999034000000023
+  },
+  {
+    "name": "hello_world-tgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 2.136141099999996
+  },
+  {
+    "name": "joint-tgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 0.9645959000000062
+  },
+  {
+    "name": "articulation_rc-tgs",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0,
+    "seconds": 1.3488068999999996
+  },
+  {
+    "name": "smoke",
+    "command": [
+      "D:\\projects\\PhysX_AVBD_3\\tools\\avbd_smoke.exe"
+    ],
+    "exit": 0,
+    "seconds": 12.513285599999996
+  }
+]

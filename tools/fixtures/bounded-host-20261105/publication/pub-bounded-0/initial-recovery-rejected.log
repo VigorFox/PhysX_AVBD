@@ -1,0 +1,8 @@
+D:\projects\PhysX_AVBD_3\physx\source\lowleveldynamics\src\avbd\DyAvbdDynamics.cpp (6681) : invalid operation : AVBD could not verify the local contact/material domain; step not published.
+
+[COMMON_BDF] linearError=0.22360681
+[COMMON_PHYSICAL] overlap=1 depth=0.0199999809 driveForce=0
+[COMMON_PROGRAM_SCENE] mode=0 fetchedFinite=FAIL
+[AVBD_COMMON_STEP] stage=capability reason=np_geometry_or_initial_recovery_uncompiled status=FAIL
+[AVBD_COMMON_FRAME] status=REJECTED poseForcePublications=0 bdf=0
+[AVBD_BOUNDED_SCHEDULE] waves=0 batches=0 sweeps=0 tasks=0 peakTasks=0 workers=0 batchLimit=32

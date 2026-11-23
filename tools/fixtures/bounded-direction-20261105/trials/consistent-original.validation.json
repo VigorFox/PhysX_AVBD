@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-row-20261105\\consistent-original.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 756,
+  "groups": 2880,
+  "activeNormalForces": 32,
+  "maximumForce": 129.27064856915024,
+  "symmetry": 7.275957614183426e-12,
+  "stationarity": 8.782641585519668e-08,
+  "relativeStationarity": 7.52697739585978e-11,
+  "unitStepRoot": 6.020262660845836e-11,
+  "relativeUnitStepRoot": 4.657099447927223e-13,
+  "minimumNormalResidual": -6.020262660845836e-11,
+  "tableIterations": 94,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

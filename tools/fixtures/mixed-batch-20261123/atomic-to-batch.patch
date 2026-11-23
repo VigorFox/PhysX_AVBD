@@ -1,0 +1,46 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -44,7 +44,6 @@
+     struct MixedWave
+     {
+         PxU32 firstTile=0, tiles=0, firstLeaf=0, leaves=0, lanes=0;
+-        volatile PxI32 nextTicket=0;
+         PxArray<AvbdMixedColorLane*> tasks;
+     } mixed;
+     struct ClaimTiming
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -1675,7 +1675,6 @@
+     mixed.firstLeaf=mLocalWork->cursor;
+     mixed.leaves=leaves;
+     mixed.lanes=lanes;
+-    mixed.nextTicket=PxI32(lanes-1);
+     mLocalWork->cursor+=leaves;
+     mStep.tiledJobs+=leaves;
+     mStep.localQueuePeak=PxMax(mStep.localQueuePeak,lanes);
+@@ -1719,8 +1718,14 @@
+     const PxU32 count=mixed.tiles+mixed.leaves, pairs=PxMin(mixed.tiles,mixed.leaves);
+     auto hottest=StepState::HotItem{};
+     PxU64 wait=0;
+-    PxU32 ticket=slot,claimed=0;
+-    while(ticket<count)
++    // Earlier submissions receive any extra item. The caller starts its
++    // inline batch after the submissions, so it takes the final range.
++    const PxU32 rank=slot ? slot-1 : mixed.lanes-1;
++    const PxU32 perLane=count/mixed.lanes, extra=count%mixed.lanes;
++    const PxU32 begin=rank*perLane+PxMin(rank,extra);
++    const PxU32 claimed=perLane+(rank<extra ? 1u : 0u);
++    PX_ASSERT(claimed && claimed<=LocalQueueDepth);
++    for(PxU32 ticket=begin;ticket<begin+claimed;++ticket)
+     {
+         // Interleave the first pairs, then consume the longer span. Each
+         // ticket addresses exactly one original tile or exclusive tree leaf.
+@@ -1739,8 +1744,6 @@
+             }
+             if(mStep.hotItems[slot].ticks>hottest.ticks)hottest=mStep.hotItems[slot];
+         }
+-        if(++claimed==LocalQueueDepth || count==mixed.lanes)break;
+-        ticket=PxU32(PxAtomicIncrement(&mixed.nextTicket));
+     }
+     if(mStep.profile)
+     {

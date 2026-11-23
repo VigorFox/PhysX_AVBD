@@ -1,0 +1,28 @@
+{
+  "file": "tools\\benchmark-results\\local-patches-20261029\\final-certified.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": true,
+  "executionSource": "grouped augmented primal/dual",
+  "dofs": 24,
+  "groups": 90,
+  "activeNormalForces": 2,
+  "maximumForce": 2165.2450377619007,
+  "symmetry": 7.105427357601002e-15,
+  "stationarity": 0.006709404576440647,
+  "relativeStationarity": 1.4857835994564948e-06,
+  "unitStepRoot": 2.445131030981429e-08,
+  "relativeUnitStepRoot": 1.1292629648553919e-11,
+  "minimumNormalResidual": -2.4451268284135486e-08,
+  "tableIterations": 181,
+  "materialProducts": 99,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 0.6956993119055239,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

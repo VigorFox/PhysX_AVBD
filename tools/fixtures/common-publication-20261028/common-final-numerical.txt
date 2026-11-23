@@ -1,0 +1,10 @@
+Common program /fp:precise
+[COMMON_NONLINEAR_METRIC] zeroStepRejected=1 poseForceResidual=1 actualNormalDisk=1 forceCap=1 failed=0
+[COMMON_NEAR_PARALLEL] cases=24 maxIterations=1 failed=0
+[COMMON_INERTIA] cases=2000 legacyAsymmetric=1948 relativeError=1.9722431194740361e-07
+[COMMON_PROGRAM_OPERATOR] mixed3x6=120 threads=4 rejected=480 error=8.8817841970012523e-16 solveError=7.527797385442625e-09 rootError=5.573019823401637e-11 stationError=1.9081958235744878e-15 failed=0 status=PASS
+Common program /fp:fast
+[COMMON_NONLINEAR_METRIC] zeroStepRejected=1 poseForceResidual=1 actualNormalDisk=1 forceCap=1 failed=0
+[COMMON_NEAR_PARALLEL] cases=24 maxIterations=2 failed=0
+[COMMON_INERTIA] cases=2000 legacyAsymmetric=1943 relativeError=2.0091476952640073e-07
+[COMMON_PROGRAM_OPERATOR] mixed3x6=120 threads=4 rejected=480 error=4.4408920985006262e-16 solveError=1.0533464100959122e-09 rootError=7.9495299232235084e-12 stationError=2.1614654510671016e-15 failed=0 status=PASS

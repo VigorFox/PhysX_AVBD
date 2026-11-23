@@ -1,0 +1,3206 @@
+{
+  "reaction-final": {
+    "responses": {
+      "0": 364,
+      "2": 364,
+      "5": 4
+    },
+    "sweeps": {
+      "0": 15081,
+      "2": 10948,
+      "5": 92
+    },
+    "status": {
+      "converged": 728,
+      "budget_exhausted": 4
+    },
+    "frames": [
+      {
+        "frame": 1,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 2,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 3,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 4,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 5,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 6,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 7,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 8,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 9,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 10,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 11,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 12,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 13,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 14,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 15,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 16,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 17,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 18,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 19,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 20,
+        "responses": {
+          "0": 2,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2"
+      },
+      {
+        "frame": 21,
+        "responses": {
+          "0": 2,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2"
+      },
+      {
+        "frame": 22,
+        "responses": {
+          "0": 2,
+          "5": 2,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2"
+      },
+      {
+        "frame": 23,
+        "responses": {
+          "0": 2,
+          "5": 2,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2"
+      },
+      {
+        "frame": 24,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 25,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 26,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 27,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 28,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 29,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 30,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 31,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 32,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 33,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 34,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 35,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 36,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 37,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 38,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 39,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 40,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 41,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 42,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 43,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 44,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 45,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 46,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 47,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 48,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 49,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 50,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 51,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 52,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 53,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 54,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 55,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 56,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 57,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 58,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 59,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 60,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 61,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 62,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 63,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 64,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 65,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 66,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 67,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 68,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 69,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 70,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 71,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 72,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 73,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 74,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 75,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 76,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 77,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 78,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 79,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 80,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 81,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 82,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 83,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 84,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 85,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 86,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 87,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 88,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 89,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 90,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 91,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 92,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 93,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 94,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 95,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 96,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 97,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 98,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 99,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 100,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 101,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 102,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 103,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 104,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 105,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 106,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 107,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 108,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 109,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 110,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 111,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 112,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 113,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 114,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 115,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 116,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 117,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 118,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 119,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 120,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 121,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 122,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 123,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 124,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 125,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 126,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 127,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 128,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 129,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 130,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 131,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 132,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 133,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 134,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 135,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 136,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 137,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 138,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 139,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 140,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 141,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 142,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 143,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 144,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 145,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 146,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 147,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 148,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 149,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 150,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 151,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 152,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 153,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 154,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 155,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 156,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 157,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 158,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 159,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 160,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 161,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 162,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 163,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 164,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 165,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 166,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 167,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 168,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 169,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 170,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 171,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 172,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 173,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 174,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 175,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 176,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 177,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 178,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 179,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 180,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 181,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 182,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 183,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 184,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 185,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 186,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 187,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 188,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 189,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 190,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 191,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 192,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 193,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 194,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 195,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 196,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 197,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 198,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 199,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 200,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 201,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 202,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 203,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 204,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 205,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 206,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 207,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 208,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 209,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 210,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 211,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 212,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 213,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 214,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 215,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 216,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 217,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 218,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 219,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 220,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 221,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 222,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 223,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 224,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 225,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 226,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 227,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 228,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 229,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 230,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 231,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 232,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 233,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 234,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 235,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 236,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 237,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 238,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 239,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 240,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 241,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 242,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 243,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 244,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 245,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 246,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 247,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 248,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 249,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 250,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 251,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 252,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 253,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 254,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 255,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 256,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 257,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 258,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 259,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 260,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 261,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 262,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 263,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 264,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 265,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 266,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 267,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 268,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 269,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 270,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 271,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 272,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 273,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 274,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 275,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 276,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 277,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 278,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 279,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 280,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 281,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 282,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 283,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 284,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 285,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 286,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 287,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 288,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 289,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 290,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 291,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 292,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 293,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 294,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 295,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 296,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 297,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 298,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 299,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 300,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 301,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 302,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 303,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 304,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 305,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 306,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 307,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 308,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 309,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 310,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 311,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 312,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 313,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 314,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 315,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 316,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 317,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 318,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 319,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 320,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 321,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 322,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 323,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 324,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 325,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 326,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 327,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 328,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 329,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 330,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 331,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 332,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 333,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 334,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 335,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 336,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 337,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 338,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 339,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 340,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 341,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 342,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 343,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 344,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 345,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 346,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 347,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 348,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 349,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 350,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 351,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 352,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 353,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 354,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 355,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 356,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 357,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 358,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 359,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 360,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      }
+    ],
+    "unfinishedResponses": {}
+  },
+  "five-qualified": {
+    "responses": {
+      "0": 116,
+      "2": 264,
+      "1": 57,
+      "5": 1
+    },
+    "sweeps": {
+      "0": 10818,
+      "2": 17675,
+      "1": 6883,
+      "5": 18
+    },
+    "status": {
+      "converged": 435,
+      "budget_exhausted": 3
+    },
+    "frames": [
+      {
+        "frame": 1,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 2,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 3,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 4,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 5,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 6,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 7,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 8,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 9,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 10,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 11,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 12,
+        "responses": {
+          "0": 4,
+          "2": 3
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=4"
+      },
+      {
+        "frame": 13,
+        "responses": {
+          "0": 16,
+          "1": 14,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=16"
+      },
+      {
+        "frame": 14,
+        "responses": {
+          "0": 32,
+          "1": 29,
+          "2": 111
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=32"
+      },
+      {
+        "frame": 15,
+        "responses": {
+          "0": 24,
+          "1": 8,
+          "2": 22
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=24"
+      }
+    ],
+    "unfinishedResponses": {
+      "0": 29,
+      "1": 6,
+      "2": 115,
+      "5": 1
+    }
+  },
+  "five-final": {
+    "responses": {
+      "0": 119,
+      "2": 290,
+      "1": 57,
+      "5": 1
+    },
+    "sweeps": {
+      "0": 11137,
+      "2": 19524,
+      "1": 6883,
+      "5": 18
+    },
+    "status": {
+      "converged": 464,
+      "budget_exhausted": 3
+    },
+    "frames": [
+      {
+        "frame": 1,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 2,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 3,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 4,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 5,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 6,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 7,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 8,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 9,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 10,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 11,
+        "responses": {
+          "0": 1,
+          "2": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1"
+      },
+      {
+        "frame": 12,
+        "responses": {
+          "0": 4,
+          "2": 3
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=4"
+      },
+      {
+        "frame": 13,
+        "responses": {
+          "0": 16,
+          "1": 14,
+          "2": 2
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=16"
+      },
+      {
+        "frame": 14,
+        "responses": {
+          "0": 32,
+          "1": 29,
+          "2": 111
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=32"
+      },
+      {
+        "frame": 15,
+        "responses": {
+          "0": 24,
+          "1": 8,
+          "2": 22
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=24"
+      },
+      {
+        "frame": 16,
+        "responses": {
+          "0": 32,
+          "1": 6,
+          "2": 141,
+          "5": 1
+        },
+        "verdict": "[AVBD_COMMON_FRAME] status=REJECTED poseForcePublications=0 bdf=0"
+      }
+    ],
+    "unfinishedResponses": {}
+  }
+}

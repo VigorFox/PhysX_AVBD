@@ -1,0 +1,13 @@
+{
+  "file": "tools\\benchmark-results\\bounded-host-20261105\\reaction-working-set.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "reason": "local_response_capture",
+  "materialProducts": 0,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

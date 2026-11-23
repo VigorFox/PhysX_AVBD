@@ -1,0 +1,80 @@
+{
+  "scope": "Validated SIMD math, physical checks and cloth whole-step improvement; model relative parallel gates remain failed.",
+  "baseline": "7f98029 plus accepted first-stage hinge SIMD. Exact identities frozen in run reports.",
+  "recordSchema": {
+    "endian": "little",
+    "precision": "float32",
+    "prefix": "uint32 lane count (1..4)",
+    "restBytes": 56,
+    "rest": "uint32 kind; float32 shape[3][3]; float32 area,length,restCos,restSin",
+    "membraneRowBytes": 104,
+    "membraneRow": "rest; float32 positions[3][3]; float32 mu,lambda; uint32 corner",
+    "hingeRowBytes": 112,
+    "hingeRow": "rest; float32 positions[4][3]; float32 bending; uint32 corner",
+    "sampling": "Every 2048 packets, complete 360-frame default cloth, single caller. Diagnostic source removed."
+  },
+  "inputs": {
+    "membrane-inputs.bin": {
+      "bytes": 1063060,
+      "sha256": "739cf76763e8da2079b1facec467e0b5d39917701d7034e462342358f48b9c30"
+    },
+    "hinge-inputs.bin": {
+      "bytes": 4438696,
+      "sha256": "0d3fcc376774f8b507761f9503e8c3f98f44c3acff7e9637fd953468f73313c2"
+    }
+  },
+  "roundoff": {
+    "originalCheckerFailures": 96,
+    "cause": "Cubic terms cancel. Normalize coefficient reduction by sum of row term magnitudes, not near-zero resultant.",
+    "physicalThresholdsChanged": false,
+    "originalDiagnostic": "replays.json.gz / membrane-replay-diagnostic.log"
+  },
+  "sourceSha256": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "95a48f6101147ce10414539679fe7e1741d34a855af6fe369b645efb57f66a18",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "34c24fc5de624935f443864fd7a6d769cdc09dcc5e4fef18515cd6ed1147bb95",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdFourLane.h": "2744fa923b0873c84dd98f32c1180478fed7323aa2f64d88d5291f86935b4a32",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdHingeBatch.h": "6e396c8513a063b04166c7ad3b7ba969f37981091c07c91c4b80c59cd8fe5d6d",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdMembraneBatch.h": "a21dfadb9818705809000f094488cab748f2213415df0712829e45026e761b4c",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "1a8cfa21adb96f245e43cc00b109ce989ec5e98a98b8a63c7af2f1d07249cbaa",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "051ade8dd45f518483eb2922f099c44da5d1b34da358bf3cc694b88f37afac25",
+    "tools/avbd_hinge_simd_probe.cpp": "0164c498a44e9f23c0230816dbe954c53e078cbf2814772f10cf0e52e47f4f47",
+    "tools/avbd_membrane_simd_probe.cpp": "0c1a4348c611d6a9e4c2498c4e4235baf7f3ea4f6d6c0a14b1454fd868dc73d9",
+    "tools/run_avbd_hinge_simd_probe.py": "6e9858a3d90c07ed8100d57d9b40259d30573adce61ce92995ffafcd1755945a",
+    "tools/run_avbd_membrane_simd_probe.py": "34c3318237f2cea68fd7d229aa5d3cf293fdf110f2b6068e5f77baf9f0580a70",
+    "tools/verify_particle3_shared_np.py": "d9fa4713481fcc650c477e9b5bf3af67b8d9ee576851cb2b7a81b4e3eae8eeec"
+  },
+  "cpuKernelMetadata": {
+    "AvbdHingeBatchKernel": {
+      "instructions": {
+        "mulps": 100,
+        "addps": 38,
+        "sqrtps": 3,
+        "divps": 5,
+        "shufps": 23
+      },
+      "localStackBytes": 768,
+      "note": "CPU local frame only; excludes saved registers and caller arguments. GPU unmeasured."
+    },
+    "AvbdMembraneBatchKernel": {
+      "instructions": {
+        "mulps": 120,
+        "addps": 80,
+        "sqrtps": 0,
+        "divps": 0,
+        "shufps": 36
+      },
+      "localStackBytes": 712,
+      "note": "CPU local frame only; excludes saved registers and caller arguments. GPU unmeasured."
+    }
+  },
+  "qualification": {
+    "physicalChecks": 108,
+    "physicalPassed": true,
+    "timingRuns": 84,
+    "allTimingRunsPassed": true,
+    "timingQualityIdentical": true,
+    "defaultModelsPassed": false,
+    "matchedModelsPassed": false,
+    "GPU": "not implemented or qualified"
+  }
+}

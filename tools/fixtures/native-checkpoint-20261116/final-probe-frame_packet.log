@@ -1,0 +1,6 @@
+Frame packet /fp:precise
+[FRAME_PACKET_LANES] lanes=8 scratchBytes=11496 terms=27 destinations=8 laneSlots=288 ownedPairs=228
+[FRAME_PACKET] cases=368 parallelJobs=4 negativeControls=8 maxError=2.84217094e-14 failures=0 packetBytes=1112 itemBytes=8
+Frame packet /fp:fast
+[FRAME_PACKET_LANES] lanes=8 scratchBytes=11496 terms=27 destinations=8 laneSlots=288 ownedPairs=228
+[FRAME_PACKET] cases=368 parallelJobs=4 negativeControls=8 maxError=2.84217094e-14 failures=0 packetBytes=1112 itemBytes=8

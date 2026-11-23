@@ -1,0 +1,12 @@
+{
+  "geometry": "PASS",
+  "headlessFrames": 360,
+  "headless": "PASS",
+  "files": {
+    "physx/snippets/snippetdeformablevolumeavbd/SnippetDeformableVolumeAVBDCommon.h": "297f2071557f58e4a2ff4e8524ef7e730d0eec22a9eee3ffaab19781f151fd82",
+    "docs/ITERATION.md": "fe8487608227d481452903be1e0676f4a9496f233f60bd6f63a3a22d498b4c90",
+    "physx/bin/win.x86_64.vc143.md/checked/SnippetDeformableVolumeAVBD_64.exe": "dad743efc4812b9454b0dbe9251df657000071c6abb0dd9660621daeeb9224a2",
+    "physx/bin/win.x86_64.vc143.md/checked/SnippetJointSoftBody_64.exe": "9b536ff0c61185999334bc69e59ea45b8a5e615da219582720a77c9568f2aa1e",
+    "physx/bin/win.x86_64.vc143.md/checked/PhysX_64.dll": "6071b4809e9dbcf4d369e1bf4a93fd685f1949e53f2fa1b78f49c86be202e2a7"
+  }
+}

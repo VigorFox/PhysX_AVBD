@@ -1,0 +1,53 @@
+[
+  {
+    "name": "retained240",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools\\fixtures\\local-patches-20261029\\certificate-failure.json.gz",
+      "--grouped",
+      "--engineering",
+      "--report",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained240.json"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "retained280",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools\\benchmark-results\\local-convergence-20261030\\mixed-scene-failure.json",
+      "--grouped",
+      "--engineering",
+      "--report",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained280.json"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "retained135",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained-scene-failure.json",
+      "--grouped",
+      "--engineering",
+      "--report",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained135.json"
+    ],
+    "exit": 1
+  },
+  {
+    "name": "retained135-strict",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained-scene-failure.json",
+      "--strict",
+      "--report",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained135-strict.json"
+    ],
+    "exit": 0
+  }
+]

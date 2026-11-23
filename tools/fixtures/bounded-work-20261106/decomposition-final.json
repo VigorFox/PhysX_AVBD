@@ -1,0 +1,58 @@
+{
+  "energy": {
+    "ratio": 2.4754072182933236,
+    "body": 7,
+    "coordinate": 5,
+    "atWorst": -2.4754072182933236
+  },
+  "contact": {
+    "ratio": 0.0,
+    "body": 0,
+    "coordinate": 0,
+    "atWorst": -0.0
+  },
+  "frozen": {
+    "ratio": 9.91625366834233e-06,
+    "body": 165,
+    "coordinate": 4,
+    "atWorst": -7.484186668447363e-06
+  },
+  "rounding": {
+    "ratio": 0.0009449253889299635,
+    "body": 7,
+    "coordinate": 4,
+    "atWorst": 0.0007689038303035813
+  },
+  "rayleighEnergy": 7.118370412991436e-08,
+  "rayleighContact": 0.0,
+  "stepMetric": 1.2977334777097844e-07,
+  "actualStepMetric": 3.00101445050964e-14,
+  "actualRayleighEnergy": 0.7155157134169087,
+  "actualEnergyModelCorrection": 2.474510710062328,
+  "worstStep": {
+    "proposed": -5.0196135374593925e-05,
+    "actual": -5.018717138130044e-05,
+    "tolerance": 9.999999747378752e-06
+  },
+  "force1.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 5.684341886080802e-14
+  },
+  "force1.5": {
+    "boundViolation": 0.0,
+    "coneViolation": 1.7008057000111876e-05
+  },
+  "force2.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 3.401611405706717e-05
+  },
+  "force4.0": {
+    "boundViolation": 0.0,
+    "coneViolation": 0.00010204834268279228
+  },
+  "secant": {
+    "slope0": -1.7776474409037956e-14,
+    "slope1": 3.696255546270619e-15,
+    "alpha": 0.8278628030081095
+  }
+}

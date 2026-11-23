@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-20261030\\retained-five-t4.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 4728,
+  "groups": 136,
+  "activeNormalForces": 4,
+  "maximumForce": 645.1362319187436,
+  "symmetry": 2.9103830456733704e-11,
+  "stationarity": 3.428975432484549e-07,
+  "relativeStationarity": 9.46223647635401e-11,
+  "unitStepRoot": 9.947598300641403e-13,
+  "relativeUnitStepRoot": 1.5419376262677997e-15,
+  "minimumNormalResidual": -9.920259058660008e-13,
+  "tableIterations": 103,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

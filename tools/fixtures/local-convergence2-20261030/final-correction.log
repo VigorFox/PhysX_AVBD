@@ -1,0 +1,4 @@
+Mixed correction /fp:precise
+[LOCAL_CORRECTION] rootCases=120 rayCases=4 aggregate=1 reactionError=1.11022302e-16 derivativeError=1.10393428e-09 adjointError=1.73472348e-18 operatorError=2.43083803e-10 status=PASS
+Mixed correction /fp:fast
+[LOCAL_CORRECTION] rootCases=120 rayCases=4 aggregate=1 reactionError=1.11022302e-16 derivativeError=1.10393428e-09 adjointError=1.73472348e-18 operatorError=2.43083803e-10 status=PASS

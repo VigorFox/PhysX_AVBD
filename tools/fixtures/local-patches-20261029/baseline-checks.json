@@ -1,0 +1,62 @@
+[
+  {
+    "name": "reaction",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_scene.py",
+      "--mode",
+      "old",
+      "--case",
+      "reaction",
+      "--frames",
+      "360",
+      "--timeout",
+      "600",
+      "--log",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-patches-20261029\\baseline-reaction.txt"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 12.5237563
+  },
+  {
+    "name": "compression-recovery",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_scene.py",
+      "--mode",
+      "old",
+      "--case",
+      "compression-recovery",
+      "--frames",
+      "360",
+      "--timeout",
+      "600",
+      "--log",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-patches-20261029\\baseline-compression-recovery.txt"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 38.791189700000004
+  },
+  {
+    "name": "visual-showcase",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_scene.py",
+      "--mode",
+      "old",
+      "--case",
+      "visual-showcase",
+      "--frames",
+      "360",
+      "--timeout",
+      "600",
+      "--log",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-patches-20261029\\baseline-visual-showcase.txt"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 262.101299
+  }
+]

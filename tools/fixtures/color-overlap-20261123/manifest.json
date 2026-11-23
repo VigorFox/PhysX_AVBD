@@ -1,0 +1,27 @@
+{
+  "baselineParent": "7f98029 + qualified working-tree SIMD changes",
+  "runtime": {
+    "baseline": "6b3badbf3c6de581705b22fa9a00ca9d35d01e33d255f2d990327ece30005e27",
+    "candidate": "034e1388958a72ef0bf966a0a53cb333a4568597fb2e7c5c80b3fa194f8c4823"
+  },
+  "baselineSource": {
+    "DyAvbdColorTasks.h": "0397b5fdc3d0cefa375c5f8fc4c8d66e3024c2b9f9a18e07d2edf177c171c88e",
+    "DyAvbdDynamics.cpp": "7887c7fb8db2afb144f195b1f09dd43d758b9d661fe5488eea667cc5245fca97",
+    "DyAvbdDynamics.h": "92d8b8bea731e126e9b7fa884ab08feff8d515754990554c59c804e44e7d7767"
+  },
+  "records": 369,
+  "qualityChecks": 109,
+  "qualityPass": 109,
+  "qualityFailed": [],
+  "qualityBinariesStable": true,
+  "dataChecksums": {
+    "analysis.json": "ea20adf4aeed6a9aa6718a78691aedea40b1ddcf8675a333da8b4d589aae43f6",
+    "candidate.patch": "f0a44a8700fea287b2fc4a426ab42d40963a67d6f3dd211801e6443e64350a61",
+    "cloth-confirmation.json": "808cb3baca2f568e8c728b8bbbf625df35e87cf01ea99b9637d2c75ae1ca5270",
+    "five-confirmation.json": "e0ab9f937ef7d05a73d0fb8a52748efb663faa26264a98969bf7d95b94688103",
+    "overlap-by-frame.json.gz": "ae8d5e69a5f9e54e2d5f0e902dce8322846b647fdfe152ef233f6358bec1fe8c",
+    "registration.json": "d578f571788aaf79dd653ad76ae97022b7d106a2c6ccf1dc41a151e2e98293f0",
+    "runs.json.gz": "a41515c2de8e82bd60ea38d6374d2df5c8d8876bcebba1ca32b5884445eb8a1a",
+    "summarize.py": "09fe7a7f103a70e8d86d677ccaae4d3462ec86201215c3745bf24bd3437058e0"
+  }
+}

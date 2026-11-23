@@ -1,0 +1,2301 @@
+{
+  "scope": "Assembled native-frame curvature K, original PSD metric M, local nonpositive-mode protection; complete implicit normal-domain query is mechanism-only",
+  "baseline": "tools/fixtures/bounded-work-20261106/manifest.json",
+  "finalDllSha256": "d83dfff78f68ccca09858c408473bdc166d95f68bffdfdb7c753f3427eced860",
+  "finalDllRuns": [
+    "final18-t4",
+    "reaction-final"
+  ],
+  "longRunProvenance": "local: build-local.log, before lazy metric allocation and diagnostic cleanup; not assigned the final DLL hash",
+  "defaultChanged": false,
+  "numericalBudgetsChanged": false,
+  "tolerancesChanged": false,
+  "fullFiveQualified": false,
+  "gpuQualified": false,
+  "productionImplicitDomain": false,
+  "result": {
+    "finalFive18Accepted": 18,
+    "finalFive18Nonstationary": 0,
+    "longFiveAccepted": 37,
+    "longFiveNonstationary": 5,
+    "longFiveTimedOut": true,
+    "reaction360Passed": true
+  },
+  "coreDelta": [
+    {
+      "file": "DyAvbdElasticFrame.h",
+      "added": 2,
+      "removed": 1
+    },
+    {
+      "file": "DyAvbdCommonProgram.h",
+      "added": 17,
+      "removed": 2
+    },
+    {
+      "file": "DyAvbdCommonResidual.h",
+      "added": 1,
+      "removed": 1
+    },
+    {
+      "file": "DyAvbdBoundedResponse.h",
+      "added": 2,
+      "removed": 2
+    },
+    {
+      "file": "DyAvbdCurvatureMetric.h",
+      "added": 57,
+      "removed": 0
+    },
+    {
+      "file": "DyAvbdDynamics.h",
+      "added": 1,
+      "removed": 1
+    },
+    {
+      "file": "DyAvbdSolve.cpp",
+      "added": 55,
+      "removed": 8
+    },
+    {
+      "file": "DyAvbdContactPrep.cpp",
+      "added": 10,
+      "removed": 0
+    }
+  ],
+  "entries": [
+    {
+      "file": "add_capture.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/add_capture.py",
+      "bytes": 2434,
+      "sha256": "880134f71f29c05398d23062c1ba4ae7edafea501e03642c4695d4e2804b38ef",
+      "storedSha256": "880134f71f29c05398d23062c1ba4ae7edafea501e03642c4695d4e2804b38ef"
+    },
+    {
+      "file": "add_cardinality.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/add_cardinality.py",
+      "bytes": 980,
+      "sha256": "b08eee5053d016762a503b9e76942f56ab98b913b978f3a277fe1e1fa182fc6d",
+      "storedSha256": "b08eee5053d016762a503b9e76942f56ab98b913b978f3a277fe1e1fa182fc6d"
+    },
+    {
+      "file": "analysis.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/analysis.json",
+      "bytes": 3055,
+      "sha256": "736c1a983291c75264998b27763cd9fc176ad4a6041feb636829dda5e2f8392e",
+      "storedSha256": "736c1a983291c75264998b27763cd9fc176ad4a6041feb636829dda5e2f8392e"
+    },
+    {
+      "file": "analyze.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/analyze.py",
+      "bytes": 2786,
+      "sha256": "9b608625d31af1ff9e5575725042b541ec48754cceb6a4eb9749729e28657e9a",
+      "storedSha256": "9b608625d31af1ff9e5575725042b541ec48754cceb6a4eb9749729e28657e9a"
+    },
+    {
+      "file": "analyze_split.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/analyze_split.py",
+      "bytes": 2076,
+      "sha256": "77153d9470fde25427af0b32e36979f10dd708943423f988e98cd958f7db02c8",
+      "storedSha256": "77153d9470fde25427af0b32e36979f10dd708943423f988e98cd958f7db02c8"
+    },
+    {
+      "file": "archive.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/archive.py",
+      "bytes": 4497,
+      "sha256": "62b2637c00d42560eb714f016f5194271ed701d1b058e3a8bd890f8fa2c692e6",
+      "storedSha256": "62b2637c00d42560eb714f016f5194271ed701d1b058e3a8bd890f8fa2c692e6"
+    },
+    {
+      "file": "bounded.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/bounded.log",
+      "bytes": 4286,
+      "sha256": "bb754de42aa3c5bb2dfd48bd2d0dcdbb905e40332cd96c8b7ab6bf6cd345045a",
+      "storedSha256": "d2918ef88d1d544898d2668f7f6739042320d327bdf36763276e7e91d00f08c2"
+    },
+    {
+      "file": "build-capture.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/build-capture.log",
+      "bytes": 2764,
+      "sha256": "0fcca70be71a93be61a0d30bac265451c846f4fe3edde2bc4786b62fe41d45a0",
+      "storedSha256": "e2e6ef6485298657786c8dd712d70c02cfeb18b5ddc2c13ad9af816400de9b8a"
+    },
+    {
+      "file": "build-final.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/build-final.log",
+      "bytes": 2776,
+      "sha256": "dc3c846aa22a4246d04c45291863954306de2a50834ad12230cf5b34646b9355",
+      "storedSha256": "9a39931288ce7533cccc3c288a57f313ba75d4ae871841c30db7b89002a9e318"
+    },
+    {
+      "file": "build-local.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/build-local.log",
+      "bytes": 2764,
+      "sha256": "b3467d0908088714558b8f3c3a0834b857d98dac97a8f2e7f5d9f692eea96983",
+      "storedSha256": "c26278c7f905d382579bb64b95c850fa8e87d50bcd36a4d6d7fe4e6d13425889"
+    },
+    {
+      "file": "build-split.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/build-split.log",
+      "bytes": 2946,
+      "sha256": "af743471a2fa10623313dcf342f857e32c41a4b05003052e7f16441b59e8896e",
+      "storedSha256": "32c8958c812d548dd71c559b72c1631de4419ee483643d172710331a917a5fd0"
+    },
+    {
+      "file": "cleanup.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/cleanup.py",
+      "bytes": 2418,
+      "sha256": "94b40a7e701a2a778c36da5421a8bd22f69dc0dd9d6f5407624ce64463320256",
+      "storedSha256": "94b40a7e701a2a778c36da5421a8bd22f69dc0dd9d6f5407624ce64463320256"
+    },
+    {
+      "file": "curvature-mechanism.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/curvature-mechanism.log",
+      "bytes": 308,
+      "sha256": "87af6b7c4505c4d9efa70f616073df776602a186130213deefa38e4aad45fe2a",
+      "storedSha256": "2cbc3b12a6b3efff104b9b459ec13975ccfd79137039bbac397263fc167bef0f"
+    },
+    {
+      "file": "curvature.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/curvature.log",
+      "bytes": 361,
+      "sha256": "79285b3d877cea4f2db367cc5499e5ca8c1753573d06c6fb7244cfe7af5aa720",
+      "storedSha256": "835e2fef8e88fea646efa87092ae4bc4acafb9ac6bc8d36372bfefad6b7a44a3"
+    },
+    {
+      "file": "DyAvbdBoundedResponse.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdBoundedResponse.h.before",
+      "bytes": 30137,
+      "sha256": "45d79b7d2d74dc46aec4417b3dc76ba529555e305b69d7dc6c0e165628190244",
+      "storedSha256": "f721941f742e8fafc5625cfed7a0442761e7e90a8e7dcfc3a6e061bac008f178"
+    },
+    {
+      "file": "DyAvbdBoundedResponse.h.split.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdBoundedResponse.h.split",
+      "bytes": 30180,
+      "sha256": "e54bc0f82909ded6fbe2a5a5bb00e9bd9616a661e7579d7cea8ae5175113181d",
+      "storedSha256": "c97e912e04b0ccc78865efe9498d6d7cc066812d69c29227dc02d229c4951804"
+    },
+    {
+      "file": "DyAvbdCommonProgram.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCommonProgram.h.before",
+      "bytes": 11618,
+      "sha256": "874f1154bc7c8ad37583da70d9e9802799fb93ba0df40aeb2b29a0664a377dfa",
+      "storedSha256": "d8abc1483ac8863d6768fd731694ddb6183c795f2372c790e624e4d2f4fa16e4"
+    },
+    {
+      "file": "DyAvbdCommonProgram.h.split.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCommonProgram.h.split",
+      "bytes": 12376,
+      "sha256": "c9a9ad32f69493cb65acbe2fca59805568edf52f41b0699052e9860582be288a",
+      "storedSha256": "f7ae5140aca1c74258a2cc65ce411dfef29b24259aebbbc442a74eb31871e35f"
+    },
+    {
+      "file": "DyAvbdCommonResidual.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCommonResidual.h.before",
+      "bytes": 4942,
+      "sha256": "f511af432b9cf676dd3247cbe3361c79cd2f939845f0f14df639e19be4c132ac",
+      "storedSha256": "f49ddf7483ac9a16a03c00e8c7c13e825b2136c14d844d748cd239dab2a2af84"
+    },
+    {
+      "file": "DyAvbdContactPrep.cpp.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdContactPrep.cpp.before",
+      "bytes": 39715,
+      "sha256": "86aa393edc11bb2db4e420aaadb004b61f5b44027b3875c27cf1fecae1f21aa5",
+      "storedSha256": "39210916186e28efb67a8453d789af5cf9e17d15c571445094f77d9a32cd77c8"
+    },
+    {
+      "file": "DyAvbdDynamics.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdDynamics.h.before",
+      "bytes": 28762,
+      "sha256": "dd71158b0f2d3481c9fd6fac7698c09f26c940c161fc442690054825a727bd01",
+      "storedSha256": "79175d6fb14cb120205d39d320404e21e89360ad73c6326bf2b155ed3eadc9ec"
+    },
+    {
+      "file": "DyAvbdElasticFrame.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdElasticFrame.h.before",
+      "bytes": 5406,
+      "sha256": "9b7267670eb47b014853d06e22ed3bf945c355f54ced7651ebb7d1f4a2469620",
+      "storedSha256": "851243bc5080621453eb6273494866113a7e74c2691326db1c711cadd862fbdf"
+    },
+    {
+      "file": "DyAvbdElasticFrameCurvature.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdElasticFrameCurvature.h.before",
+      "bytes": 4182,
+      "sha256": "a2bb3a44aef332a90fd061256bf3ca0326a56a465d7c4ac10987fbe193b08419",
+      "storedSha256": "d115bc0c70b6479cd84161538fc8053ee3e747c61cd2cc05ea09b4d59285b9d9"
+    },
+    {
+      "file": "DyAvbdMaterialAssembly.h.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdMaterialAssembly.h.before",
+      "bytes": 4057,
+      "sha256": "da1d6061297dd0931f5751c8efc368f7f290d847ba5cc5a9fca0ab2e892f7b7e",
+      "storedSha256": "b41e0a90d58c89ebbd665c80472030cdfcd5515910dfe63d36fb21514588a9e0"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.before.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdSolve.cpp.before",
+      "bytes": 147268,
+      "sha256": "7dad0532cfea4ab1ecb9d75facc02866e1c215ac47a2070a40596e90b1219f2e",
+      "storedSha256": "1b78f590403d3aa24e875b66449323ccafb7ff8466f22605a1f363f5bb4e36d5"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.capture.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdSolve.cpp.capture",
+      "bytes": 149387,
+      "sha256": "09c1c60ebadceb343d59699f7de3652befde485ebdf4c2b32b3a902d5a21c9f0",
+      "storedSha256": "2bf2e6e5c09c76b71de821197b8353ecfab8f01636ed7e75652a47649b01e7ad"
+    },
+    {
+      "file": "DyAvbdSolve.cpp.split.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdSolve.cpp.split",
+      "bytes": 150480,
+      "sha256": "7bfe7886fc1c3cd39bb511a631ed6e9f24a7e0ed0195d3d1e1647f7860e50f2d",
+      "storedSha256": "048f5a2374b3b9a96b34217c38eb2db863dbaa554fe3dd0f3157cef525c1dfb7"
+    },
+    {
+      "file": "elastic-material.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/elastic-material.log",
+      "bytes": 165,
+      "sha256": "65117082cbbb1809dad1a1aadca2a3f0cb37808f57e36307bf99b7222473ac77",
+      "storedSha256": "d42431ba6455faf2f48c0e2897e3ec953412c155ff71fd892c869ec7bce5de7f"
+    },
+    {
+      "file": "factorization.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/factorization.log",
+      "bytes": 291,
+      "sha256": "a39b37ccc8294c633383e12b4ab1d1899b946a42a11c0fe47919ccadbc2748b7",
+      "storedSha256": "a231758cd15afb35e599dac7aad12651df27b1b2c30ae23c9792005c6e04a0df"
+    },
+    {
+      "file": "final18-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/final18-t4.json",
+      "bytes": 1756,
+      "sha256": "1bab9b6e8dfa642af6bdf02b850f5f835b4b81c70b8ea4ecca500fd623582ddf",
+      "storedSha256": "1bab9b6e8dfa642af6bdf02b850f5f835b4b81c70b8ea4ecca500fd623582ddf"
+    },
+    {
+      "file": "final18-t4.txt.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/final18-t4.txt",
+      "bytes": 50121,
+      "sha256": "fa92a1972a59ea6923b51ebcdc38e903e1ce6b30116b3786a515afb3eedc7502",
+      "storedSha256": "3bba7bfe7998800e9228e83e29f132affb5d990319f299967842ab1ee012f832"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm0-t1.json",
+      "bytes": 1849,
+      "sha256": "aef714622920062d0cdaf0ba8c26397948dd928601800f0a63d4862b25f003d2",
+      "storedSha256": "aef714622920062d0cdaf0ba8c26397948dd928601800f0a63d4862b25f003d2"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm0-t1.validation.json",
+      "bytes": 844,
+      "sha256": "f783de673a0e315ed95a9d95073e65028260ed4b572c93b0c751e4b3cd6b94b7",
+      "storedSha256": "f783de673a0e315ed95a9d95073e65028260ed4b572c93b0c751e4b3cd6b94b7"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm0-t4.json",
+      "bytes": 1851,
+      "sha256": "2c35dec2bd1f1b45ddcabdf9a0508e21bdf8778915990cca05dd3fa2d2508b4c",
+      "storedSha256": "2c35dec2bd1f1b45ddcabdf9a0508e21bdf8778915990cca05dd3fa2d2508b4c"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm0-t4.validation.json",
+      "bytes": 845,
+      "sha256": "88e9a1f02f9bf7b6a6c836b43c11ced7feef4f885142bf3f6d2cf35ed0db9862",
+      "storedSha256": "88e9a1f02f9bf7b6a6c836b43c11ced7feef4f885142bf3f6d2cf35ed0db9862"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm1-t1.json",
+      "bytes": 1849,
+      "sha256": "ad85510fa1fdc7608bcbe34a7239b1fab561e22dddf89c08d448a09c8b221e66",
+      "storedSha256": "ad85510fa1fdc7608bcbe34a7239b1fab561e22dddf89c08d448a09c8b221e66"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm1-t1.validation.json",
+      "bytes": 844,
+      "sha256": "1bb87e3ee007861fe79dec6952180286242f11899f4497b8d6c025725509a6f0",
+      "storedSha256": "1bb87e3ee007861fe79dec6952180286242f11899f4497b8d6c025725509a6f0"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm1-t4.json",
+      "bytes": 1851,
+      "sha256": "53585fb31b2d209a94b52f558b2b25640b505594a6364702fa6a776ee7e654f8",
+      "storedSha256": "53585fb31b2d209a94b52f558b2b25640b505594a6364702fa6a776ee7e654f8"
+    },
+    {
+      "file": "frozen/fast-135-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm0-warm1-t4.validation.json",
+      "bytes": 845,
+      "sha256": "c86fe9827562213d88b23a8cf52d0dfef8fb7c79b49a96525e0c0b722be6ab71",
+      "storedSha256": "c86fe9827562213d88b23a8cf52d0dfef8fb7c79b49a96525e0c0b722be6ab71"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm0-t1.json",
+      "bytes": 1848,
+      "sha256": "8c264228604465ff64cbda31229186b244bdfb19b97d9e322c1d9e277f71d410",
+      "storedSha256": "8c264228604465ff64cbda31229186b244bdfb19b97d9e322c1d9e277f71d410"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm0-t1.validation.json",
+      "bytes": 843,
+      "sha256": "aae91dd191723d0e59d23438bb5982d0c5ecf4877c28301ac1bbf6614013f5bb",
+      "storedSha256": "aae91dd191723d0e59d23438bb5982d0c5ecf4877c28301ac1bbf6614013f5bb"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm0-t4.json",
+      "bytes": 1850,
+      "sha256": "92c119e83b8e3df7da9ce513b0f1014603491d0b5149df8ab62b3759c45f9568",
+      "storedSha256": "92c119e83b8e3df7da9ce513b0f1014603491d0b5149df8ab62b3759c45f9568"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm0-t4.validation.json",
+      "bytes": 844,
+      "sha256": "62b2778c9758a5ab4585f45cab2026478c0faf3576a7d7817608d9b51a9b8e4e",
+      "storedSha256": "62b2778c9758a5ab4585f45cab2026478c0faf3576a7d7817608d9b51a9b8e4e"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm1-t1.json",
+      "bytes": 1848,
+      "sha256": "68e164b420bb1d2f36c744bc6c13e6d51e14739ca3e49eee1a8d9cd8f1a9b31c",
+      "storedSha256": "68e164b420bb1d2f36c744bc6c13e6d51e14739ca3e49eee1a8d9cd8f1a9b31c"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm1-t1.validation.json",
+      "bytes": 843,
+      "sha256": "0ae3f6f19e8eacf8e670076f789d070a016a88f5040e7aee9bb4461bcfbac819",
+      "storedSha256": "0ae3f6f19e8eacf8e670076f789d070a016a88f5040e7aee9bb4461bcfbac819"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm1-t4.json",
+      "bytes": 1850,
+      "sha256": "af6f2b2f0a876cdc9e53f28195a159a8c783f2b7a128cfdca1f1ab533bb3c0a2",
+      "storedSha256": "af6f2b2f0a876cdc9e53f28195a159a8c783f2b7a128cfdca1f1ab533bb3c0a2"
+    },
+    {
+      "file": "frozen/fast-135-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-135-perm1-warm1-t4.validation.json",
+      "bytes": 844,
+      "sha256": "33e1ecfd7b9bd56483f277f1ea9f0593d90a7b6a316b418df3c0bd29ffda7b96",
+      "storedSha256": "33e1ecfd7b9bd56483f277f1ea9f0593d90a7b6a316b418df3c0bd29ffda7b96"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm0-t1.json",
+      "bytes": 2527,
+      "sha256": "4d83fdf096f63be5b02d233b6bfdb58db27c90ec1e8f7f543f364f25c131522c",
+      "storedSha256": "4d83fdf096f63be5b02d233b6bfdb58db27c90ec1e8f7f543f364f25c131522c"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm0-t1.validation.json",
+      "bytes": 841,
+      "sha256": "75041de03b75fac13da3b4d7911c63e384ba07a80f3556179b9c29fcf672af3e",
+      "storedSha256": "75041de03b75fac13da3b4d7911c63e384ba07a80f3556179b9c29fcf672af3e"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm0-t4.json",
+      "bytes": 2527,
+      "sha256": "649e43309a6add432d9260edb1b1ac79dcb2c49abee375fac5e5a74393209243",
+      "storedSha256": "649e43309a6add432d9260edb1b1ac79dcb2c49abee375fac5e5a74393209243"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm0-t4.validation.json",
+      "bytes": 841,
+      "sha256": "b20d530b44ebb27d993dc1f11b3e40f023f288cffe55984af84d19c44d6eaf46",
+      "storedSha256": "b20d530b44ebb27d993dc1f11b3e40f023f288cffe55984af84d19c44d6eaf46"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm1-t1.json",
+      "bytes": 2527,
+      "sha256": "a237d10ff82ba88170bcda918c15d1ae9673ca9a0c0d537c17b7083c84b0a760",
+      "storedSha256": "a237d10ff82ba88170bcda918c15d1ae9673ca9a0c0d537c17b7083c84b0a760"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm1-t1.validation.json",
+      "bytes": 841,
+      "sha256": "b400fc8e44382e8232ab07b7dc6992d7749d4de6ecbb26f8e0a740a17e07e464",
+      "storedSha256": "b400fc8e44382e8232ab07b7dc6992d7749d4de6ecbb26f8e0a740a17e07e464"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm1-t4.json",
+      "bytes": 2527,
+      "sha256": "91b4bfb05cfa6cc79b2ed60e91723779c0f2f4916ff6984914e062aa930d654b",
+      "storedSha256": "91b4bfb05cfa6cc79b2ed60e91723779c0f2f4916ff6984914e062aa930d654b"
+    },
+    {
+      "file": "frozen/fast-240-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm0-warm1-t4.validation.json",
+      "bytes": 841,
+      "sha256": "48b2ef96c104e3eed51686330ea95438988155af9335290fe5a48eba551feb9f",
+      "storedSha256": "48b2ef96c104e3eed51686330ea95438988155af9335290fe5a48eba551feb9f"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm0-t1.json",
+      "bytes": 2522,
+      "sha256": "c4be47aecb8ddaa15f9a24e3250d08111b5484b7a78e88b4c2cd36f18ea4f822",
+      "storedSha256": "c4be47aecb8ddaa15f9a24e3250d08111b5484b7a78e88b4c2cd36f18ea4f822"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm0-t1.validation.json",
+      "bytes": 840,
+      "sha256": "c215fa1f1861004fd25b529b7d7106fdb2bca49b5005f2f50f7af4ac4f304b9c",
+      "storedSha256": "c215fa1f1861004fd25b529b7d7106fdb2bca49b5005f2f50f7af4ac4f304b9c"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm0-t4.json",
+      "bytes": 2520,
+      "sha256": "09e2cf331e228e9a068b4955f314c8d0dc7e7603a83c35866ef1af4f687eb9f6",
+      "storedSha256": "09e2cf331e228e9a068b4955f314c8d0dc7e7603a83c35866ef1af4f687eb9f6"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm0-t4.validation.json",
+      "bytes": 839,
+      "sha256": "002c4aefc2e918b2c60f2fc61bd2d8ee634418090b9f2729aa30e4f32f090a99",
+      "storedSha256": "002c4aefc2e918b2c60f2fc61bd2d8ee634418090b9f2729aa30e4f32f090a99"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm1-t1.json",
+      "bytes": 2522,
+      "sha256": "a353dc4d4699f86cf30e285d12bbbc66428e881e8d94deffa1db8ed84b94318c",
+      "storedSha256": "a353dc4d4699f86cf30e285d12bbbc66428e881e8d94deffa1db8ed84b94318c"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm1-t1.validation.json",
+      "bytes": 840,
+      "sha256": "22d5300a04d5ccf78071750d6bfde40202acb3a0f3baec680c71a271074ea4cf",
+      "storedSha256": "22d5300a04d5ccf78071750d6bfde40202acb3a0f3baec680c71a271074ea4cf"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm1-t4.json",
+      "bytes": 2522,
+      "sha256": "b673da1e035ee126eb7eb89dbe481661ec57a79e5e98f235dffc40351b0973cb",
+      "storedSha256": "b673da1e035ee126eb7eb89dbe481661ec57a79e5e98f235dffc40351b0973cb"
+    },
+    {
+      "file": "frozen/fast-240-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-240-perm1-warm1-t4.validation.json",
+      "bytes": 840,
+      "sha256": "e0b77b32d03d4d3416be56b47e4907807bd13c3146dff55aec279de8cb771288",
+      "storedSha256": "e0b77b32d03d4d3416be56b47e4907807bd13c3146dff55aec279de8cb771288"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm0-t1.json",
+      "bytes": 2827,
+      "sha256": "64e41152aeaef7a011d1fdf6b08b4cf6a337720270512a701e5c45fcaf556456",
+      "storedSha256": "64e41152aeaef7a011d1fdf6b08b4cf6a337720270512a701e5c45fcaf556456"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm0-t1.validation.json",
+      "bytes": 823,
+      "sha256": "8cb3893e66a9f02ccb6522ad0a41926883e9d65ec51a0f3931748300a8d4332a",
+      "storedSha256": "8cb3893e66a9f02ccb6522ad0a41926883e9d65ec51a0f3931748300a8d4332a"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm0-t4.json",
+      "bytes": 2829,
+      "sha256": "9690dff2b52229c627af3237459e766a7c16b881e1398326dff59d5db898fd6f",
+      "storedSha256": "9690dff2b52229c627af3237459e766a7c16b881e1398326dff59d5db898fd6f"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm0-t4.validation.json",
+      "bytes": 824,
+      "sha256": "048d20c6c97915007e88858b48302d14192b0d82ff59c5708bf8e6a59ae8bf27",
+      "storedSha256": "048d20c6c97915007e88858b48302d14192b0d82ff59c5708bf8e6a59ae8bf27"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm1-t1.json",
+      "bytes": 2820,
+      "sha256": "e56d9f9255be37a4ac84bdbb34b679aba2fb1ae6192d6b17d19af13e5e58d943",
+      "storedSha256": "e56d9f9255be37a4ac84bdbb34b679aba2fb1ae6192d6b17d19af13e5e58d943"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm1-t1.validation.json",
+      "bytes": 823,
+      "sha256": "661701d2419f23c0bbeedbfea0bef65a3fd7265b522da5f8d5a5bd8e2d509bcc",
+      "storedSha256": "661701d2419f23c0bbeedbfea0bef65a3fd7265b522da5f8d5a5bd8e2d509bcc"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm1-t4.json",
+      "bytes": 2820,
+      "sha256": "abf096133f5a0d8eeb1fc282d1683c6b6f71d7ed718e1d068b104668ab3d996c",
+      "storedSha256": "abf096133f5a0d8eeb1fc282d1683c6b6f71d7ed718e1d068b104668ab3d996c"
+    },
+    {
+      "file": "frozen/fast-280-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm0-warm1-t4.validation.json",
+      "bytes": 823,
+      "sha256": "065e9b8f84435ff56ac0bf9c47bb23f8ecf6a72ee8c008660cd9a5043d6292ef",
+      "storedSha256": "065e9b8f84435ff56ac0bf9c47bb23f8ecf6a72ee8c008660cd9a5043d6292ef"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm0-t1.json",
+      "bytes": 2825,
+      "sha256": "df33ea054d9ab3808658909ce7fec02896013a6e605e2a7c238cfbebf971236f",
+      "storedSha256": "df33ea054d9ab3808658909ce7fec02896013a6e605e2a7c238cfbebf971236f"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm0-t1.validation.json",
+      "bytes": 823,
+      "sha256": "f314baa5f536df85a98d927bc8cdc5fb64c9b87f7624a2f72117a5b27e389248",
+      "storedSha256": "f314baa5f536df85a98d927bc8cdc5fb64c9b87f7624a2f72117a5b27e389248"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm0-t4.json",
+      "bytes": 2827,
+      "sha256": "9027908fb661691f9511cb45863360929d98cbc6c11cdd4d93f88e4a90ddaba9",
+      "storedSha256": "9027908fb661691f9511cb45863360929d98cbc6c11cdd4d93f88e4a90ddaba9"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm0-t4.validation.json",
+      "bytes": 824,
+      "sha256": "d65196e4f5b6b596797e6aaa5159b4f9e34ff4908692821514e7f70b5863b7cc",
+      "storedSha256": "d65196e4f5b6b596797e6aaa5159b4f9e34ff4908692821514e7f70b5863b7cc"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm1-t1.json",
+      "bytes": 2826,
+      "sha256": "ad0e8b6baa0fcdbcb60a98e626a5635730ba0fd22233774a085ef81410eaa82e",
+      "storedSha256": "ad0e8b6baa0fcdbcb60a98e626a5635730ba0fd22233774a085ef81410eaa82e"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm1-t1.validation.json",
+      "bytes": 823,
+      "sha256": "768be1d1391cba4923a89df56e0055c32ff4d53be387cb5ddb87d41a830f8acf",
+      "storedSha256": "768be1d1391cba4923a89df56e0055c32ff4d53be387cb5ddb87d41a830f8acf"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm1-t4.json",
+      "bytes": 2828,
+      "sha256": "a0c7bc8d93a5fe58bedb160f946b24201e0fb4908ca6b1d6ee58e84e2297ca17",
+      "storedSha256": "a0c7bc8d93a5fe58bedb160f946b24201e0fb4908ca6b1d6ee58e84e2297ca17"
+    },
+    {
+      "file": "frozen/fast-280-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-280-perm1-warm1-t4.validation.json",
+      "bytes": 824,
+      "sha256": "1f12fabe97fe8dbe8d10e49831fea217d98f732f1ec20d00c51a634a0b8ad906",
+      "storedSha256": "1f12fabe97fe8dbe8d10e49831fea217d98f732f1ec20d00c51a634a0b8ad906"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm0-t1.json",
+      "bytes": 2768,
+      "sha256": "391cabcd784708ca86ffbb0dc6c5a395b6257bbbd82723f2ae12172706161598",
+      "storedSha256": "391cabcd784708ca86ffbb0dc6c5a395b6257bbbd82723f2ae12172706161598"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm0-t1.validation.json",
+      "bytes": 851,
+      "sha256": "afd7a250489cd997299967632c5edd526aeefaaea800009608bbe0c7a241f591",
+      "storedSha256": "afd7a250489cd997299967632c5edd526aeefaaea800009608bbe0c7a241f591"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm0-t4.json",
+      "bytes": 2774,
+      "sha256": "910c69740e4c9afea23d9ba6c7aa11c1a9b3c63f38914cda4fa6b7e34b016778",
+      "storedSha256": "910c69740e4c9afea23d9ba6c7aa11c1a9b3c63f38914cda4fa6b7e34b016778"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm0-t4.validation.json",
+      "bytes": 854,
+      "sha256": "735ae44730d9300332ed9820bc558de905b8e276e4b5544ef306680117d00115",
+      "storedSha256": "735ae44730d9300332ed9820bc558de905b8e276e4b5544ef306680117d00115"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm1-t1.json",
+      "bytes": 2772,
+      "sha256": "c408af5282a5f8c58f2eeeef6d8bca53870b52ae0b485b75b0e5dac3f0dadb62",
+      "storedSha256": "c408af5282a5f8c58f2eeeef6d8bca53870b52ae0b485b75b0e5dac3f0dadb62"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm1-t1.validation.json",
+      "bytes": 853,
+      "sha256": "feba2efd734bcb3b8170e1acd7335f6babfb197ba5117534e06efaa88d1c5b34",
+      "storedSha256": "feba2efd734bcb3b8170e1acd7335f6babfb197ba5117534e06efaa88d1c5b34"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm1-t4.json",
+      "bytes": 2774,
+      "sha256": "44eeea7a1725962073bc2dd8a4c477aede308189a06323adcb9225fbc1233b9a",
+      "storedSha256": "44eeea7a1725962073bc2dd8a4c477aede308189a06323adcb9225fbc1233b9a"
+    },
+    {
+      "file": "frozen/fast-extra280-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm0-warm1-t4.validation.json",
+      "bytes": 854,
+      "sha256": "de4d1206bf6ae08ef837d36faad80b31ef91adcbe818b9c050fb34e9c1e230a0",
+      "storedSha256": "de4d1206bf6ae08ef837d36faad80b31ef91adcbe818b9c050fb34e9c1e230a0"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm0-t1.json",
+      "bytes": 2768,
+      "sha256": "868b5b04c4aa79e7661ec8c5057b2b71be69d51d6e311c324f8924780b054280",
+      "storedSha256": "868b5b04c4aa79e7661ec8c5057b2b71be69d51d6e311c324f8924780b054280"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm0-t1.validation.json",
+      "bytes": 852,
+      "sha256": "444f13ba74755dae153bbba48f809d7a25875906d2eec9dbc21ed697f00ae5a4",
+      "storedSha256": "444f13ba74755dae153bbba48f809d7a25875906d2eec9dbc21ed697f00ae5a4"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm0-t4.json",
+      "bytes": 2770,
+      "sha256": "04a2691523987a36569d55b3c88e4451e56d763fda4bdd8683617dd5ab263bdb",
+      "storedSha256": "04a2691523987a36569d55b3c88e4451e56d763fda4bdd8683617dd5ab263bdb"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm0-t4.validation.json",
+      "bytes": 853,
+      "sha256": "8de797401e4df21ef4cdebdc9eb0b4acf54acb151970bdea6bf5fb879937a273",
+      "storedSha256": "8de797401e4df21ef4cdebdc9eb0b4acf54acb151970bdea6bf5fb879937a273"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm1-t1.json",
+      "bytes": 2768,
+      "sha256": "75c84e5a5c8e4f00d25a8ee639a7555a884018ff56432730f034d68ff1b9e894",
+      "storedSha256": "75c84e5a5c8e4f00d25a8ee639a7555a884018ff56432730f034d68ff1b9e894"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm1-t1.validation.json",
+      "bytes": 852,
+      "sha256": "81ed9bcd568c8118cfa7256143667a6f4116ecd5d6ce249061a3c427982e8dae",
+      "storedSha256": "81ed9bcd568c8118cfa7256143667a6f4116ecd5d6ce249061a3c427982e8dae"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm1-t4.json",
+      "bytes": 2770,
+      "sha256": "8424522a88b32295d5f576f4595844978940954cf5e80e0e9ac3cf4407195594",
+      "storedSha256": "8424522a88b32295d5f576f4595844978940954cf5e80e0e9ac3cf4407195594"
+    },
+    {
+      "file": "frozen/fast-extra280-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-extra280-perm1-warm1-t4.validation.json",
+      "bytes": 853,
+      "sha256": "33c0722faf84428c84df63d1dc1183b5f5b355172a4ffed6866f1d17c159caef",
+      "storedSha256": "33c0722faf84428c84df63d1dc1183b5f5b355172a4ffed6866f1d17c159caef"
+    },
+    {
+      "file": "frozen/fast-five-perm0-warm0-t1.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm0-warm0-t1.json",
+      "bytes": 111752,
+      "sha256": "c7c0fadc56e176fa08ea1536195de88e70aac2e2a6a0498f065219998a027077",
+      "storedSha256": "8a70fd59d65d3436f333f94ffc281f062ce0149c04a718d869e063e75d8ff0c3"
+    },
+    {
+      "file": "frozen/fast-five-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm0-warm0-t1.validation.json",
+      "bytes": 848,
+      "sha256": "0074ce3ea764c6664b772bda211b732f204fe45e4ef27674fb403af75c5e37e6",
+      "storedSha256": "0074ce3ea764c6664b772bda211b732f204fe45e4ef27674fb403af75c5e37e6"
+    },
+    {
+      "file": "frozen/fast-five-perm0-warm0-t4.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm0-warm0-t4.json",
+      "bytes": 111754,
+      "sha256": "e4557cc5d64085b2bb2642282da256ad7439a9f7f75fa065ccd9ba278448787c",
+      "storedSha256": "df4e563fbee6f41d063057f4ddde05711b93c9c8d99c143d7f250d03c6edd8e1"
+    },
+    {
+      "file": "frozen/fast-five-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm0-warm0-t4.validation.json",
+      "bytes": 849,
+      "sha256": "7ee704e4b9a0c535cf4418c221e40fbc8b6683508dab7322f6b76c83b9dd0e78",
+      "storedSha256": "7ee704e4b9a0c535cf4418c221e40fbc8b6683508dab7322f6b76c83b9dd0e78"
+    },
+    {
+      "file": "frozen/fast-five-perm1-warm0-t1.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm1-warm0-t1.json",
+      "bytes": 111719,
+      "sha256": "d47e53d3b6577ba4b8752e68d43bc9e2d3827009988fb09849934258ef5ebc67",
+      "storedSha256": "310aec9df8f59b5e53b1de44624259143163d6d3195772019e6b316426a3706c"
+    },
+    {
+      "file": "frozen/fast-five-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm1-warm0-t1.validation.json",
+      "bytes": 847,
+      "sha256": "bd75d14523190819586327e4cb5e8a6ded533ac64e2a7e75b17020335907f0b3",
+      "storedSha256": "bd75d14523190819586327e4cb5e8a6ded533ac64e2a7e75b17020335907f0b3"
+    },
+    {
+      "file": "frozen/fast-five-perm1-warm0-t4.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm1-warm0-t4.json",
+      "bytes": 111721,
+      "sha256": "3b1ff9188b675887d52dd0deb41326a92ccee8b6d2530f234a018390fe6e7a93",
+      "storedSha256": "0197f780eaf4f43608fbd0603968056b46a7986f48684c83c7a868cfe9b1e188"
+    },
+    {
+      "file": "frozen/fast-five-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-five-perm1-warm0-t4.validation.json",
+      "bytes": 848,
+      "sha256": "4f8bb1bc8c78a869e5d8cb3d5e5526910fd78466f9e0e5bccf3dc9fb0330d8c9",
+      "storedSha256": "4f8bb1bc8c78a869e5d8cb3d5e5526910fd78466f9e0e5bccf3dc9fb0330d8c9"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm0-t1.json",
+      "bytes": 36845,
+      "sha256": "8edd57449e9eebc8cf498b3cb878c283d3a177bf4cde692d8fa45628c9d86037",
+      "storedSha256": "8edd57449e9eebc8cf498b3cb878c283d3a177bf4cde692d8fa45628c9d86037"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm0-t1.validation.json",
+      "bytes": 857,
+      "sha256": "01554d4f5639371b60f148a71fc6caaa4fa7d9132de200c3d3d0ce9477e9f856",
+      "storedSha256": "01554d4f5639371b60f148a71fc6caaa4fa7d9132de200c3d3d0ce9477e9f856"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm0-t4.json",
+      "bytes": 36847,
+      "sha256": "ddb1e5e740a9d63114c40ba3dc10e0a8ffa6a4119e2354140a18de5db32e09d1",
+      "storedSha256": "ddb1e5e740a9d63114c40ba3dc10e0a8ffa6a4119e2354140a18de5db32e09d1"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm0-t4.validation.json",
+      "bytes": 858,
+      "sha256": "6729ea23faa1038e0e6cddf9d2ea71dc2a11baa7def0f5c4e9738b30f8cd626f",
+      "storedSha256": "6729ea23faa1038e0e6cddf9d2ea71dc2a11baa7def0f5c4e9738b30f8cd626f"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm1-t1.json",
+      "bytes": 36849,
+      "sha256": "e780e7ce54fd9eb6f9a15a0a4c67bc642e3f997054c61d1fa32cf343c8ebab32",
+      "storedSha256": "e780e7ce54fd9eb6f9a15a0a4c67bc642e3f997054c61d1fa32cf343c8ebab32"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm1-t1.validation.json",
+      "bytes": 856,
+      "sha256": "e8edc0e38cb7983130fe74e70fd0a0feb128c454b0545f6ee47189e5ad6061dd",
+      "storedSha256": "e8edc0e38cb7983130fe74e70fd0a0feb128c454b0545f6ee47189e5ad6061dd"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm1-t4.json",
+      "bytes": 36851,
+      "sha256": "2404af706962e96c4b34b4c75990ce32c0fd63699e2f8b0117ea89bb08a63dd9",
+      "storedSha256": "2404af706962e96c4b34b4c75990ce32c0fd63699e2f8b0117ea89bb08a63dd9"
+    },
+    {
+      "file": "frozen/fast-reaction-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm0-warm1-t4.validation.json",
+      "bytes": 857,
+      "sha256": "5db2b53d357f2ea2740bf197ce6f4bf5e41a37a026c2ed9857d8259ea9a395ea",
+      "storedSha256": "5db2b53d357f2ea2740bf197ce6f4bf5e41a37a026c2ed9857d8259ea9a395ea"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm0-t1.json",
+      "bytes": 36865,
+      "sha256": "4ee577fb200a3ece5840807d3e020bc3fb29aae2a03884933219fee273de3f06",
+      "storedSha256": "4ee577fb200a3ece5840807d3e020bc3fb29aae2a03884933219fee273de3f06"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm0-t1.validation.json",
+      "bytes": 857,
+      "sha256": "af8e8b8ca3e572986cfea5f5533ec86317241875861edf0d219c1e130acd785d",
+      "storedSha256": "af8e8b8ca3e572986cfea5f5533ec86317241875861edf0d219c1e130acd785d"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm0-t4.json",
+      "bytes": 36867,
+      "sha256": "6f52549610857cdbc4e5c7feb76799243c6e697ac5424cabd9beb61368595f5d",
+      "storedSha256": "6f52549610857cdbc4e5c7feb76799243c6e697ac5424cabd9beb61368595f5d"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm0-t4.validation.json",
+      "bytes": 858,
+      "sha256": "ff0d56151119d3a5b7d472db3dd3ebe524a14fd26d8d9114428f11a3d6a32c6a",
+      "storedSha256": "ff0d56151119d3a5b7d472db3dd3ebe524a14fd26d8d9114428f11a3d6a32c6a"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm1-t1.json",
+      "bytes": 36853,
+      "sha256": "b5ebae0a66ccaad48fdcc9cdeb04c6e56d918a04f90944f8c8902f27d6708194",
+      "storedSha256": "b5ebae0a66ccaad48fdcc9cdeb04c6e56d918a04f90944f8c8902f27d6708194"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm1-t1.validation.json",
+      "bytes": 854,
+      "sha256": "e5df5f60acd804b01107789f821135ed9e125cad98c34fb69356b7edad171e99",
+      "storedSha256": "e5df5f60acd804b01107789f821135ed9e125cad98c34fb69356b7edad171e99"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm1-t4.json",
+      "bytes": 36855,
+      "sha256": "85dca6e88e9df818402240a1da76e91e1eb3ef5f7a7945c695012c97cbae57c6",
+      "storedSha256": "85dca6e88e9df818402240a1da76e91e1eb3ef5f7a7945c695012c97cbae57c6"
+    },
+    {
+      "file": "frozen/fast-reaction-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/fast-reaction-perm1-warm1-t4.validation.json",
+      "bytes": 855,
+      "sha256": "fcb6eb37c94a71b272f9cddddd976908435adf5ce1e2e2e31b24fb66d9d8a882",
+      "storedSha256": "fcb6eb37c94a71b272f9cddddd976908435adf5ce1e2e2e31b24fb66d9d8a882"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm0-t1.json",
+      "bytes": 1846,
+      "sha256": "e6a2bc8c1d7dd7fae145039ff52f9accb98b8741c6d19d337a2775cd915c1b9a",
+      "storedSha256": "e6a2bc8c1d7dd7fae145039ff52f9accb98b8741c6d19d337a2775cd915c1b9a"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm0-t1.validation.json",
+      "bytes": 849,
+      "sha256": "965d2ae3d6ddfb4b8917c6a77fa69b395a66493a89ff6904d4eea40a9acca1fa",
+      "storedSha256": "965d2ae3d6ddfb4b8917c6a77fa69b395a66493a89ff6904d4eea40a9acca1fa"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm0-t4.json",
+      "bytes": 1848,
+      "sha256": "6263c6f4f497de070f30dd1b9334f365031d05bb12e9ce9883bd6b6dc6d3267e",
+      "storedSha256": "6263c6f4f497de070f30dd1b9334f365031d05bb12e9ce9883bd6b6dc6d3267e"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm0-t4.validation.json",
+      "bytes": 850,
+      "sha256": "0929b22e14d4eb589e4ef4b052254548a1e9ed69d436d46ab90dc309f66cf91d",
+      "storedSha256": "0929b22e14d4eb589e4ef4b052254548a1e9ed69d436d46ab90dc309f66cf91d"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm1-t1.json",
+      "bytes": 1846,
+      "sha256": "6e99049a18608572d96947121fb74ded8ba93fdce99954e3640dcb7860d8a64e",
+      "storedSha256": "6e99049a18608572d96947121fb74ded8ba93fdce99954e3640dcb7860d8a64e"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm1-t1.validation.json",
+      "bytes": 849,
+      "sha256": "00543d35bc6d272a0e03f7c501f23f7efe63f511e8afa27f4c27df3cc027ea8b",
+      "storedSha256": "00543d35bc6d272a0e03f7c501f23f7efe63f511e8afa27f4c27df3cc027ea8b"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm1-t4.json",
+      "bytes": 1848,
+      "sha256": "154eed6ecfda2e6ad4d75b708732553a4d127cd86141ff0bdc7dcc9535c8bb01",
+      "storedSha256": "154eed6ecfda2e6ad4d75b708732553a4d127cd86141ff0bdc7dcc9535c8bb01"
+    },
+    {
+      "file": "frozen/precise-135-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm0-warm1-t4.validation.json",
+      "bytes": 850,
+      "sha256": "7907b765b1a6cea1c0f2de811e7da02fcee1358542e4ca596bdf2783566064ce",
+      "storedSha256": "7907b765b1a6cea1c0f2de811e7da02fcee1358542e4ca596bdf2783566064ce"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm0-t1.json",
+      "bytes": 1849,
+      "sha256": "0fe1091464462c7358718762d2b10e8a3c279f378a4483bf1306dc91c2fc6308",
+      "storedSha256": "0fe1091464462c7358718762d2b10e8a3c279f378a4483bf1306dc91c2fc6308"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm0-t1.validation.json",
+      "bytes": 848,
+      "sha256": "517e3acfcee86dc202adb651c14d53dc208aed42fa635638939ae2ec6e82404f",
+      "storedSha256": "517e3acfcee86dc202adb651c14d53dc208aed42fa635638939ae2ec6e82404f"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm0-t4.json",
+      "bytes": 1851,
+      "sha256": "c98d3485b2e001c81386abd646b6332f4e7d12127974280325e061ce0a82c1d7",
+      "storedSha256": "c98d3485b2e001c81386abd646b6332f4e7d12127974280325e061ce0a82c1d7"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm0-t4.validation.json",
+      "bytes": 849,
+      "sha256": "e61d6cafd602aea9ab98723f3e02cfd7f2a627d2bc6401695b34efc8f4274169",
+      "storedSha256": "e61d6cafd602aea9ab98723f3e02cfd7f2a627d2bc6401695b34efc8f4274169"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm1-t1.json",
+      "bytes": 1849,
+      "sha256": "3b32932ca6af2abd3aa290a63066f11445178b0d4b3f3ae974ac1bcde28d0d20",
+      "storedSha256": "3b32932ca6af2abd3aa290a63066f11445178b0d4b3f3ae974ac1bcde28d0d20"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm1-t1.validation.json",
+      "bytes": 848,
+      "sha256": "1578de8ba910d3e61a09bc166fdd7b2ce1729411b1d7eaa6472bbae2e39ba8df",
+      "storedSha256": "1578de8ba910d3e61a09bc166fdd7b2ce1729411b1d7eaa6472bbae2e39ba8df"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm1-t4.json",
+      "bytes": 1851,
+      "sha256": "3b5ed1a92cf0bf3b7b062a0ff8980c63f1779087db3b54c98b432baafa52b11c",
+      "storedSha256": "3b5ed1a92cf0bf3b7b062a0ff8980c63f1779087db3b54c98b432baafa52b11c"
+    },
+    {
+      "file": "frozen/precise-135-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-135-perm1-warm1-t4.validation.json",
+      "bytes": 849,
+      "sha256": "b1faceb45af983d1737cc1027dba498ba4aa461a1d6136417dc5348fb00968ae",
+      "storedSha256": "b1faceb45af983d1737cc1027dba498ba4aa461a1d6136417dc5348fb00968ae"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm0-t1.json",
+      "bytes": 2524,
+      "sha256": "831a5d90f130ddf71f0b4fd06a84a3a695058f516d7fad35eed408844d7837ea",
+      "storedSha256": "831a5d90f130ddf71f0b4fd06a84a3a695058f516d7fad35eed408844d7837ea"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm0-t1.validation.json",
+      "bytes": 849,
+      "sha256": "961d033dd19d59650b1fa26fed624c2da2031bbc939efa593a217dc807586a9a",
+      "storedSha256": "961d033dd19d59650b1fa26fed624c2da2031bbc939efa593a217dc807586a9a"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm0-t4.json",
+      "bytes": 2526,
+      "sha256": "6f8770a9436227b5cb09f42746ca55ae6287468e9422f3c5dbc174ddcd68dea6",
+      "storedSha256": "6f8770a9436227b5cb09f42746ca55ae6287468e9422f3c5dbc174ddcd68dea6"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm0-t4.validation.json",
+      "bytes": 850,
+      "sha256": "6c7aab6ba179664e1d66fa944fcc7eeae80b7536e961b85b7ce40be476ddceff",
+      "storedSha256": "6c7aab6ba179664e1d66fa944fcc7eeae80b7536e961b85b7ce40be476ddceff"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm1-t1.json",
+      "bytes": 2524,
+      "sha256": "6a9beafa72dd529e1ee975ddf7e83bc38683755004f68d617a1a5c86796cc16e",
+      "storedSha256": "6a9beafa72dd529e1ee975ddf7e83bc38683755004f68d617a1a5c86796cc16e"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm1-t1.validation.json",
+      "bytes": 849,
+      "sha256": "6b9e007c6a5966d50bc5dca21429edc69e35f315715637646972c6f00583049e",
+      "storedSha256": "6b9e007c6a5966d50bc5dca21429edc69e35f315715637646972c6f00583049e"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm1-t4.json",
+      "bytes": 2526,
+      "sha256": "d4d50a84fb5d6b89fcba338a3e8dbe2225c0e31f272d9f3dbed9fe7144354fe8",
+      "storedSha256": "d4d50a84fb5d6b89fcba338a3e8dbe2225c0e31f272d9f3dbed9fe7144354fe8"
+    },
+    {
+      "file": "frozen/precise-240-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm0-warm1-t4.validation.json",
+      "bytes": 850,
+      "sha256": "0b6ada350b01104173dafb22aa43f77939a9664e5785edc67e42c5648810f383",
+      "storedSha256": "0b6ada350b01104173dafb22aa43f77939a9664e5785edc67e42c5648810f383"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm0-t1.json",
+      "bytes": 2523,
+      "sha256": "4396b3bc0d7d80cf37d570a1718d69a0ec90365094d01c0e607095441caff832",
+      "storedSha256": "4396b3bc0d7d80cf37d570a1718d69a0ec90365094d01c0e607095441caff832"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm0-t1.validation.json",
+      "bytes": 848,
+      "sha256": "c3da41492bb6e170d4f8541f8473b4cbb6e83ad1a27cc644c9d6cebc65b65536",
+      "storedSha256": "c3da41492bb6e170d4f8541f8473b4cbb6e83ad1a27cc644c9d6cebc65b65536"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm0-t4.json",
+      "bytes": 2523,
+      "sha256": "7b31d4ee4eb02a7fb3f8793214acb1942a9f42421ee810eb283c3387825964e1",
+      "storedSha256": "7b31d4ee4eb02a7fb3f8793214acb1942a9f42421ee810eb283c3387825964e1"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm0-t4.validation.json",
+      "bytes": 848,
+      "sha256": "15432b8f7cd116073b86332f5ce740ed233e04a3ee02c2066ada727412be9a98",
+      "storedSha256": "15432b8f7cd116073b86332f5ce740ed233e04a3ee02c2066ada727412be9a98"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm1-t1.json",
+      "bytes": 2523,
+      "sha256": "a708656d83355da3c8c258e945d8aa44861f781b165fdb6b91ff7d8a58add2ad",
+      "storedSha256": "a708656d83355da3c8c258e945d8aa44861f781b165fdb6b91ff7d8a58add2ad"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm1-t1.validation.json",
+      "bytes": 848,
+      "sha256": "2c1cecb001405121abbd68888bd61c7f883a9eaff9359100f53f3fcf59e59782",
+      "storedSha256": "2c1cecb001405121abbd68888bd61c7f883a9eaff9359100f53f3fcf59e59782"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm1-t4.json",
+      "bytes": 2525,
+      "sha256": "ae88e100ac495dac99cc2f2c0707b78666671876275b29e952334b426f7d95b0",
+      "storedSha256": "ae88e100ac495dac99cc2f2c0707b78666671876275b29e952334b426f7d95b0"
+    },
+    {
+      "file": "frozen/precise-240-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-240-perm1-warm1-t4.validation.json",
+      "bytes": 849,
+      "sha256": "8210aeda6e43e58a38fef8ac70811c3d84603491ae9fc586bc1b9ba58ea05547",
+      "storedSha256": "8210aeda6e43e58a38fef8ac70811c3d84603491ae9fc586bc1b9ba58ea05547"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm0-t1.json",
+      "bytes": 2826,
+      "sha256": "dcf28b67fae2f4eb448f075a65bf3200297299f0d0969780affdea23833c480e",
+      "storedSha256": "dcf28b67fae2f4eb448f075a65bf3200297299f0d0969780affdea23833c480e"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm0-t1.validation.json",
+      "bytes": 848,
+      "sha256": "75021be80ef1cb674b164afdaa01aa3b81ff8f4752a26458a14ff7612586f0b5",
+      "storedSha256": "75021be80ef1cb674b164afdaa01aa3b81ff8f4752a26458a14ff7612586f0b5"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm0-t4.json",
+      "bytes": 2828,
+      "sha256": "e23d7fb8cad6c41ff7e075e7fd8242aac52c2fe49851b09185fbb678ff93cc14",
+      "storedSha256": "e23d7fb8cad6c41ff7e075e7fd8242aac52c2fe49851b09185fbb678ff93cc14"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm0-t4.validation.json",
+      "bytes": 849,
+      "sha256": "03aec5f2ac9c00e463ad6d314b3e18bcd9a3c4c230a570eeaaece757498482b7",
+      "storedSha256": "03aec5f2ac9c00e463ad6d314b3e18bcd9a3c4c230a570eeaaece757498482b7"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm1-t1.json",
+      "bytes": 2822,
+      "sha256": "93d248daedc3759d8ede4807ec50c983d6eb956bc267320ae078f342c44067e2",
+      "storedSha256": "93d248daedc3759d8ede4807ec50c983d6eb956bc267320ae078f342c44067e2"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm1-t1.validation.json",
+      "bytes": 830,
+      "sha256": "d284670a6acd6abe72bda79f608712d2cccdb10f9698b8ada24489e3b0e03ea3",
+      "storedSha256": "d284670a6acd6abe72bda79f608712d2cccdb10f9698b8ada24489e3b0e03ea3"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm1-t4.json",
+      "bytes": 2824,
+      "sha256": "d3cb9e755ca0b2a013bb35c7a4ac0d3110560cbdaf84f290a445b22e7032f548",
+      "storedSha256": "d3cb9e755ca0b2a013bb35c7a4ac0d3110560cbdaf84f290a445b22e7032f548"
+    },
+    {
+      "file": "frozen/precise-280-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm0-warm1-t4.validation.json",
+      "bytes": 831,
+      "sha256": "76976482b4cc704320bc73590d72701729accde9dd4128fe46ab9bbda5bfe5e5",
+      "storedSha256": "76976482b4cc704320bc73590d72701729accde9dd4128fe46ab9bbda5bfe5e5"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm0-t1.json",
+      "bytes": 2826,
+      "sha256": "5c77661e95230a0c8d6cb1e7b29f010b65bc7d2ef514a3808cbb0985e1ebee6d",
+      "storedSha256": "5c77661e95230a0c8d6cb1e7b29f010b65bc7d2ef514a3808cbb0985e1ebee6d"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm0-t1.validation.json",
+      "bytes": 847,
+      "sha256": "61ac8139debc2bd2c10d35c1c6535a405bfc74467365a068b8f166b9005aca16",
+      "storedSha256": "61ac8139debc2bd2c10d35c1c6535a405bfc74467365a068b8f166b9005aca16"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm0-t4.json",
+      "bytes": 2828,
+      "sha256": "00b7925083befafc60494c7eb23501d62651704481158fab5de86b072b7b9bfd",
+      "storedSha256": "00b7925083befafc60494c7eb23501d62651704481158fab5de86b072b7b9bfd"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm0-t4.validation.json",
+      "bytes": 848,
+      "sha256": "c421c814ec869a7810f85059d08ae885bd63bd6ce5203dcf01ce124738a2729d",
+      "storedSha256": "c421c814ec869a7810f85059d08ae885bd63bd6ce5203dcf01ce124738a2729d"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm1-t1.json",
+      "bytes": 2825,
+      "sha256": "ef49ef24d9df7833bc029e50c46535ced95981cf8843a803be3cb65c0f537066",
+      "storedSha256": "ef49ef24d9df7833bc029e50c46535ced95981cf8843a803be3cb65c0f537066"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm1-t1.validation.json",
+      "bytes": 829,
+      "sha256": "71878d6c80101fcd2640eaa3e0cfb813a77f72ba57927aee13254af500872957",
+      "storedSha256": "71878d6c80101fcd2640eaa3e0cfb813a77f72ba57927aee13254af500872957"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm1-t4.json",
+      "bytes": 2827,
+      "sha256": "61f5db7e8c533759a1e6c0048e50488eca8a4883ffe426c3f13d5e5e95446d1f",
+      "storedSha256": "61f5db7e8c533759a1e6c0048e50488eca8a4883ffe426c3f13d5e5e95446d1f"
+    },
+    {
+      "file": "frozen/precise-280-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-280-perm1-warm1-t4.validation.json",
+      "bytes": 830,
+      "sha256": "e136435d4f219f635d57dd77e1a86634154d1455ab3084365388172088b18cb6",
+      "storedSha256": "e136435d4f219f635d57dd77e1a86634154d1455ab3084365388172088b18cb6"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm0-t1.json",
+      "bytes": 2765,
+      "sha256": "1a49cf430ce4f9064bd59aa8fc1c0e15b87b2f07da25f6e0a45c6ea422712262",
+      "storedSha256": "1a49cf430ce4f9064bd59aa8fc1c0e15b87b2f07da25f6e0a45c6ea422712262"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm0-t1.validation.json",
+      "bytes": 858,
+      "sha256": "c43c2f7f73cb9bd139b744ce03f6efb8d544a6aa522efc967031904a2b607a6d",
+      "storedSha256": "c43c2f7f73cb9bd139b744ce03f6efb8d544a6aa522efc967031904a2b607a6d"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm0-t4.json",
+      "bytes": 2769,
+      "sha256": "661dd68ca7dbd71620edec0987e99097300355ba9d570fd43357c4e39573e8ae",
+      "storedSha256": "661dd68ca7dbd71620edec0987e99097300355ba9d570fd43357c4e39573e8ae"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm0-t4.validation.json",
+      "bytes": 860,
+      "sha256": "77807d4580abdb4616cf395b61487ee0956c4d5a951dc507afdffa47d937e449",
+      "storedSha256": "77807d4580abdb4616cf395b61487ee0956c4d5a951dc507afdffa47d937e449"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm1-t1.json",
+      "bytes": 2767,
+      "sha256": "ad0b2a712026dfb2538572d203a44411ce1d02d1f285c1cb13a816c3b9d178a7",
+      "storedSha256": "ad0b2a712026dfb2538572d203a44411ce1d02d1f285c1cb13a816c3b9d178a7"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm1-t1.validation.json",
+      "bytes": 859,
+      "sha256": "adb5e53c1a59ce6c7233e6ac38f3c2a7041980a9a7b5c66dddc24e47ffc78102",
+      "storedSha256": "adb5e53c1a59ce6c7233e6ac38f3c2a7041980a9a7b5c66dddc24e47ffc78102"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm1-t4.json",
+      "bytes": 2769,
+      "sha256": "5c95c823790971aadb3dce0cb12f16e3b4171f6ca5fd01e0e63bad31b0e74aa6",
+      "storedSha256": "5c95c823790971aadb3dce0cb12f16e3b4171f6ca5fd01e0e63bad31b0e74aa6"
+    },
+    {
+      "file": "frozen/precise-extra280-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm0-warm1-t4.validation.json",
+      "bytes": 860,
+      "sha256": "6ae2ce6d84a6d7f7b71413129ea8426425da13aeb41ab114e23c20016c5c1468",
+      "storedSha256": "6ae2ce6d84a6d7f7b71413129ea8426425da13aeb41ab114e23c20016c5c1468"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm0-t1.json",
+      "bytes": 2770,
+      "sha256": "4ebc02bfb61efaebfe03111831d46e34d6337c5f2cf1402abd0a8bb76ae2eec6",
+      "storedSha256": "4ebc02bfb61efaebfe03111831d46e34d6337c5f2cf1402abd0a8bb76ae2eec6"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm0-t1.validation.json",
+      "bytes": 858,
+      "sha256": "c4273f9be3bb7c101bff1893b5b38eebe755e0f5595c27b60aabc43735caa64d",
+      "storedSha256": "c4273f9be3bb7c101bff1893b5b38eebe755e0f5595c27b60aabc43735caa64d"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm0-t4.json",
+      "bytes": 2772,
+      "sha256": "c8dad5a5de76176a4368b0207d896aad84c67dd584ccc7a3df582c0e2d09e430",
+      "storedSha256": "c8dad5a5de76176a4368b0207d896aad84c67dd584ccc7a3df582c0e2d09e430"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm0-t4.validation.json",
+      "bytes": 859,
+      "sha256": "7f13f5dcb5044b62df3fb21da24888a53550bbd6a5abe0be581fd88fc7c8f948",
+      "storedSha256": "7f13f5dcb5044b62df3fb21da24888a53550bbd6a5abe0be581fd88fc7c8f948"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm1-t1.json",
+      "bytes": 2770,
+      "sha256": "3bf877028cb08d08847a652653a4f6f10e54207e25413a23c8a199ffec257df6",
+      "storedSha256": "3bf877028cb08d08847a652653a4f6f10e54207e25413a23c8a199ffec257df6"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm1-t1.validation.json",
+      "bytes": 858,
+      "sha256": "51f4048fdb2b34a2124d353c72fceb01d4257469e007834be7ac5fd1750655cd",
+      "storedSha256": "51f4048fdb2b34a2124d353c72fceb01d4257469e007834be7ac5fd1750655cd"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm1-t4.json",
+      "bytes": 2770,
+      "sha256": "0c10d6fd22b00405e995385b56f1a61ae16632bdfcd06c41c0758b002f548e58",
+      "storedSha256": "0c10d6fd22b00405e995385b56f1a61ae16632bdfcd06c41c0758b002f548e58"
+    },
+    {
+      "file": "frozen/precise-extra280-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-extra280-perm1-warm1-t4.validation.json",
+      "bytes": 858,
+      "sha256": "0373b98e51d634834de98c58068a5db3367a56bf974c8484ec11cc610b360406",
+      "storedSha256": "0373b98e51d634834de98c58068a5db3367a56bf974c8484ec11cc610b360406"
+    },
+    {
+      "file": "frozen/precise-five-perm0-warm0-t1.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm0-warm0-t1.json",
+      "bytes": 111716,
+      "sha256": "5ce9ef8218ee98744e7ea1dca5652fbacbcee1511fecb9e1571df3e050ad8706",
+      "storedSha256": "e663afd25f68da3865884eadce99cb06ffd83d9f797d06595a523589f5edb58b"
+    },
+    {
+      "file": "frozen/precise-five-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm0-warm0-t1.validation.json",
+      "bytes": 851,
+      "sha256": "084478afab63f848674ba35842507ca74b5c3033c7a32857c435640561382e29",
+      "storedSha256": "084478afab63f848674ba35842507ca74b5c3033c7a32857c435640561382e29"
+    },
+    {
+      "file": "frozen/precise-five-perm0-warm0-t4.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm0-warm0-t4.json",
+      "bytes": 111718,
+      "sha256": "93f228e5f632eeb66a4a40bc29f89f280d637c13f2e4c89a868ccd611802f902",
+      "storedSha256": "13568057563b5b3bba8e626ee1d1a9143259e98ae538e095ca66b196a14f8699"
+    },
+    {
+      "file": "frozen/precise-five-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm0-warm0-t4.validation.json",
+      "bytes": 852,
+      "sha256": "50baca710e3e052859af61ea6786acda863d5c0a37b6c0d31eac4006c8ad48fc",
+      "storedSha256": "50baca710e3e052859af61ea6786acda863d5c0a37b6c0d31eac4006c8ad48fc"
+    },
+    {
+      "file": "frozen/precise-five-perm1-warm0-t1.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm1-warm0-t1.json",
+      "bytes": 111767,
+      "sha256": "9b96925e2c14fe0451f92dbd2242105349fef18b73b8cfc3dace593084d6dd92",
+      "storedSha256": "d2c34e80e81297ed2d28ff4a339fac87c17f0533e50f897f4c1b50819d497a34"
+    },
+    {
+      "file": "frozen/precise-five-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm1-warm0-t1.validation.json",
+      "bytes": 853,
+      "sha256": "8359067ecce0e686511bcaa66e3145e1763d57ad1eaa8c2cced47fce0a89956a",
+      "storedSha256": "8359067ecce0e686511bcaa66e3145e1763d57ad1eaa8c2cced47fce0a89956a"
+    },
+    {
+      "file": "frozen/precise-five-perm1-warm0-t4.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm1-warm0-t4.json",
+      "bytes": 111765,
+      "sha256": "b36cc10efc98229185151309ef7ae53a7606634fe5c5812a12ae28c649a926bb",
+      "storedSha256": "cfe0c4cb49f4c0ea0ae1c056872e53b254a5aa37e67703d2b3b6a7c1e30a74e9"
+    },
+    {
+      "file": "frozen/precise-five-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-five-perm1-warm0-t4.validation.json",
+      "bytes": 852,
+      "sha256": "41a48a1ee4237151754054f0ca2c3ae989b66bdc21ba2ffbf909d2fe63bee496",
+      "storedSha256": "41a48a1ee4237151754054f0ca2c3ae989b66bdc21ba2ffbf909d2fe63bee496"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm0-t1.json",
+      "bytes": 36849,
+      "sha256": "796decb1ab0594bb900aa57919b663fb7a3e56c2a28136e84a0424d54d0c47bf",
+      "storedSha256": "796decb1ab0594bb900aa57919b663fb7a3e56c2a28136e84a0424d54d0c47bf"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm0-t1.validation.json",
+      "bytes": 864,
+      "sha256": "b4e20b98fed952a7f1bada7e368db2f9fe363d45e583cee6a29f37f72d0b1496",
+      "storedSha256": "b4e20b98fed952a7f1bada7e368db2f9fe363d45e583cee6a29f37f72d0b1496"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm0-t4.json",
+      "bytes": 36851,
+      "sha256": "f8f11a22fb4558b5d3278f837e7659ecf750f1e7b99f9a01ca12a6f0fc3df6da",
+      "storedSha256": "f8f11a22fb4558b5d3278f837e7659ecf750f1e7b99f9a01ca12a6f0fc3df6da"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm0-t4.validation.json",
+      "bytes": 865,
+      "sha256": "105cb4daeac1884479338e2b7ab3d23874d4caceae63610fa8939975be4070ab",
+      "storedSha256": "105cb4daeac1884479338e2b7ab3d23874d4caceae63610fa8939975be4070ab"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm1-t1.json",
+      "bytes": 36852,
+      "sha256": "23ea6b84fff4484031d9d69e602c6fcba552ce26f445054dd34197fcedb7c587",
+      "storedSha256": "23ea6b84fff4484031d9d69e602c6fcba552ce26f445054dd34197fcedb7c587"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm1-t1.validation.json",
+      "bytes": 862,
+      "sha256": "7d70a117eeed7fdb4f28659e518bb2ee725e3e153345939a3980767d0c603b5b",
+      "storedSha256": "7d70a117eeed7fdb4f28659e518bb2ee725e3e153345939a3980767d0c603b5b"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm1-t4.json",
+      "bytes": 36852,
+      "sha256": "4f62f4e7c4dd9731640ee820b8c86e1d2ba4953a9f979c7cfbd6f1c21d6659f6",
+      "storedSha256": "4f62f4e7c4dd9731640ee820b8c86e1d2ba4953a9f979c7cfbd6f1c21d6659f6"
+    },
+    {
+      "file": "frozen/precise-reaction-perm0-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm0-warm1-t4.validation.json",
+      "bytes": 862,
+      "sha256": "00334851dc5f656d3745e9652a2f1466fbf4621dd0203528e14a5861ff2cb1c2",
+      "storedSha256": "00334851dc5f656d3745e9652a2f1466fbf4621dd0203528e14a5861ff2cb1c2"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm0-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm0-t1.json",
+      "bytes": 36831,
+      "sha256": "a01add4af4a7a3f7083b0f6752b50da207ba666d06a69d7653a6a24dea9de1e4",
+      "storedSha256": "a01add4af4a7a3f7083b0f6752b50da207ba666d06a69d7653a6a24dea9de1e4"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm0-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm0-t1.validation.json",
+      "bytes": 866,
+      "sha256": "2e7bc0630659a4a41a764e85a7e652e7ae595359cfaf55655f8f39cd36227332",
+      "storedSha256": "2e7bc0630659a4a41a764e85a7e652e7ae595359cfaf55655f8f39cd36227332"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm0-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm0-t4.json",
+      "bytes": 36833,
+      "sha256": "5bf2573392debecf34e79f9c11e295a8978a2067e55e5d8bee5b8540eb739690",
+      "storedSha256": "5bf2573392debecf34e79f9c11e295a8978a2067e55e5d8bee5b8540eb739690"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm0-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm0-t4.validation.json",
+      "bytes": 867,
+      "sha256": "ed412ffefc127b6e7fd6ef2dcf715744e21027e3a0fa38c28f02a81f4169e213",
+      "storedSha256": "ed412ffefc127b6e7fd6ef2dcf715744e21027e3a0fa38c28f02a81f4169e213"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm1-t1.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm1-t1.json",
+      "bytes": 36852,
+      "sha256": "af4e3b7b7aec1a84101faaac906b1b06466ea2296bc311e1518bd8dc4739d0b5",
+      "storedSha256": "af4e3b7b7aec1a84101faaac906b1b06466ea2296bc311e1518bd8dc4739d0b5"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm1-t1.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm1-t1.validation.json",
+      "bytes": 860,
+      "sha256": "b63f1ad80fc0726c819e13c3bca2ce20cc69fd952dae703c2ad916ee7617d9f3",
+      "storedSha256": "b63f1ad80fc0726c819e13c3bca2ce20cc69fd952dae703c2ad916ee7617d9f3"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm1-t4.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm1-t4.json",
+      "bytes": 36854,
+      "sha256": "bc77a25e796c3f10de740e0fae48fb5a21200b13d696ca5eca4dedf87a523bca",
+      "storedSha256": "bc77a25e796c3f10de740e0fae48fb5a21200b13d696ca5eca4dedf87a523bca"
+    },
+    {
+      "file": "frozen/precise-reaction-perm1-warm1-t4.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/precise-reaction-perm1-warm1-t4.validation.json",
+      "bytes": 861,
+      "sha256": "8d78099af0edcc6ec39ce174ffbc5354b2433d66f3e51252dc8fa8c278ad3a97",
+      "storedSha256": "8d78099af0edcc6ec39ce174ffbc5354b2433d66f3e51252dc8fa8c278ad3a97"
+    },
+    {
+      "file": "frozen/summary.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen/summary.json",
+      "bytes": 83376,
+      "sha256": "21b2073a53eb256e52cb9f0ab6f93f4e114f66cd5a9d0a112070208ec0fdb823",
+      "storedSha256": "21b2073a53eb256e52cb9f0ab6f93f4e114f66cd5a9d0a112070208ec0fdb823"
+    },
+    {
+      "file": "frozen.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/frozen.log",
+      "bytes": 18689,
+      "sha256": "e4b64f00d5a0f6c18a13ee61b72ec10b02c35299fd277beb3dc92a59c6c2f08e",
+      "storedSha256": "81e8630daece553e7dc7fd958f39fcca9644145b0586767e45853347575721c6"
+    },
+    {
+      "file": "local-candidate.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local-candidate.json",
+      "bytes": 2716485,
+      "sha256": "66160000b84b175734e4526f2113447aa0cd9d8b840c80584e2f2bf188c57697",
+      "storedSha256": "d034e91aafc131abcecd13355918c30c3a59716f4aea401fdfc0ebad30044fab"
+    },
+    {
+      "file": "local-candidate.json.curvature.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local-candidate.json.curvature.json",
+      "bytes": 1513600,
+      "sha256": "db48a58be2cdb597b8e325fbc333349fb148d79a4389325251157c39fdade80b",
+      "storedSha256": "48b5b5f2eb2f4fee8e867819e9e4fab0f89e4a9ca90ccca7666f33fe89d290e6"
+    },
+    {
+      "file": "local-candidate.json.trial.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local-candidate.json.trial.json",
+      "bytes": 660188,
+      "sha256": "f780c4771db97d8cc37d3c4d92172c8937aaff1c4d9ba3640e9b97693b8e0e13",
+      "storedSha256": "d8ae341f9dd5f4223561fb77f88f670d763e46ebd5f502e006820c8d1ae63b1a"
+    },
+    {
+      "file": "local-failure.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local-failure.json",
+      "bytes": 2721937,
+      "sha256": "60713d31bc15425cd206bc2491ca46166813f42593800116f158cedb0ccd666b",
+      "storedSha256": "9d7560a8a09d98ff3c94b7d8f85fc584d5bb54ee8956cbc1d584fab75efdd5f8"
+    },
+    {
+      "file": "local.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local.json",
+      "bytes": 601,
+      "sha256": "9f2c52ab93a7ea336bdcf9fb6f524bfabd529a1c3c679b59b0fbd7f35a05a758",
+      "storedSha256": "9f2c52ab93a7ea336bdcf9fb6f524bfabd529a1c3c679b59b0fbd7f35a05a758"
+    },
+    {
+      "file": "local.txt.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local.txt",
+      "bytes": 178432,
+      "sha256": "71e71f35a362a92198416d5eb6636d36ce60412490143cb140992acfeae452d3",
+      "storedSha256": "c46b22394ac6f16c2d5f31ce38f4633e7e1e7e1aebc574ab140a5a8f29353051"
+    },
+    {
+      "file": "local_regularize.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/local_regularize.py",
+      "bytes": 675,
+      "sha256": "a313ce4402368b2026096445258094f1e8da038d6fb8b3ef81027aae1bc1b842",
+      "storedSha256": "a313ce4402368b2026096445258094f1e8da038d6fb8b3ef81027aae1bc1b842"
+    },
+    {
+      "file": "material-assembly.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/material-assembly.log",
+      "bytes": 395,
+      "sha256": "1a6e035b2935404fd6e0da274ae9e09c452f6541a46f1e13586e8e03b20b45af",
+      "storedSha256": "7c81e21d0ed65c9b791401e4fffd53e043fb6a047cf0c08f0a6e1a176599e36a"
+    },
+    {
+      "file": "mechanism.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/mechanism.log",
+      "bytes": 8574,
+      "sha256": "50621befd3a52ad7a1f85cfee0d9b9be80ba64289b20bc20c7b1b871908e2e98",
+      "storedSha256": "59fadd13b91b9b058929750523fe7900a37e66f506b9a968f49fb3b875ac3ae4"
+    },
+    {
+      "file": "np-factorization.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/np-factorization.log",
+      "bytes": 222,
+      "sha256": "59e1eed4fe49412679692b8e5d4d97c69d8b73099a137bb626645595a1c2a088",
+      "storedSha256": "13ab9ce988fff808273913a42dfdfd762c48931b874a0f474ff67c0ec30c6569"
+    },
+    {
+      "file": "np-final.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/np-final.log",
+      "bytes": 16389,
+      "sha256": "e86c2cc82e1fab7c02a4c7b5492f03cc38e82c65ad3d8135d112bd32ec521a9a",
+      "storedSha256": "187454b0ef38f9de76de5a3f9c5093b0f3b1e1e7564639dba9e1fdd050bca4e1"
+    },
+    {
+      "file": "operators.npz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/operators.npz",
+      "bytes": 1523723,
+      "sha256": "52258be1e55efc89f0153e0322a76e73c2c8bef995f9b6500a18009e72370e8b",
+      "storedSha256": "52258be1e55efc89f0153e0322a76e73c2c8bef995f9b6500a18009e72370e8b"
+    },
+    {
+      "file": "original-candidate.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original-candidate.json",
+      "bytes": 1659621,
+      "sha256": "3f708a6720557bbc44b8331ac2494e9aa473b0f93f83cd6ca64fc81249e552da",
+      "storedSha256": "a791aaf667c6eb7b70f1f39442b7fd5d093c4bd636a3c8c76b0566292148c4fe"
+    },
+    {
+      "file": "original-candidate.json.curvature.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original-candidate.json.curvature.json",
+      "bytes": 1521466,
+      "sha256": "e63cd8b474009f2cc152e8a6efb64df6cf4750b7c71546485124497122c83201",
+      "storedSha256": "06e5ca4e62f666d5a7a6e256056599737b13c8c1c60dc63e0c53fd0c67fb6ac6"
+    },
+    {
+      "file": "original-candidate.json.trial.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original-candidate.json.trial.json",
+      "bytes": 660255,
+      "sha256": "2a776f65441b6daddae2c80956173b29a942d7d248fa6130fc6029f208202223",
+      "storedSha256": "c29479a286834a7a6ab79b8646c8127c824f3a6d8b7e657c46293a20c4764f71"
+    },
+    {
+      "file": "original.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original.json",
+      "bytes": 1749,
+      "sha256": "d9d6fbb9432d51f536cb3c0a6e837a0267c84b39b6e9d4a95bb3525804c66967",
+      "storedSha256": "d9d6fbb9432d51f536cb3c0a6e837a0267c84b39b6e9d4a95bb3525804c66967"
+    },
+    {
+      "file": "original.txt.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/original.txt",
+      "bytes": 66296,
+      "sha256": "851159365a29ae69e783fb6528c1b5b81af026efef48eb43d1994ed9ed4ff9b1",
+      "storedSha256": "e6ddf418c0ac6da2cedb27c1cad5e05a56b6ecb84114c7021163e859288f37f3"
+    },
+    {
+      "file": "positive-frame-program.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-frame-program.json",
+      "bytes": 2933111,
+      "sha256": "0532e621d539abc7c35012551fe73bb3a3de1e14e60b09b018fae3da523e9a43",
+      "storedSha256": "e6b0d876297b2424522d7b22d6dcd8b616a71568e37678f3f0802c35b49f7104"
+    },
+    {
+      "file": "positive-replay.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-replay.json",
+      "bytes": 36241,
+      "sha256": "753f3fe9dd7b9e057f70b8d02cf562479a5f369aff9be298b8b7b4bea9bb603c",
+      "storedSha256": "753f3fe9dd7b9e057f70b8d02cf562479a5f369aff9be298b8b7b4bea9bb603c"
+    },
+    {
+      "file": "positive-replay.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-replay.log",
+      "bytes": 1990,
+      "sha256": "3931fba0211bef9a1385321a2eb320e7089e99b644981f4917d0322fa6447451",
+      "storedSha256": "82c4fb85573d6286f0725fc66f698a33a7f40b9ac621387463b989a909d5c375"
+    },
+    {
+      "file": "positive-replay.program.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-replay.program.json",
+      "bytes": 2973796,
+      "sha256": "6930773accc46e0e3fc1fe7232d343decabe1afdeea030accf0a1772be6d6187",
+      "storedSha256": "bbdacb7e6406ba3e34248c0e8626efb583082a91bb889784c37422f0d0a3447d"
+    },
+    {
+      "file": "positive-replay.validation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive-replay.validation.json",
+      "bytes": 777,
+      "sha256": "d72c5a1eba4bde38db3cb48a308a5614d37394fcb1bcf342c748f72fbea93a1f",
+      "storedSha256": "d72c5a1eba4bde38db3cb48a308a5614d37394fcb1bcf342c748f72fbea93a1f"
+    },
+    {
+      "file": "positive_capture.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/positive_capture.py",
+      "bytes": 348,
+      "sha256": "50e989ee727f9cefe923e7fd8fc7794ee3b01608ac01a674ab2e8e1d8b0b653b",
+      "storedSha256": "50e989ee727f9cefe923e7fd8fc7794ee3b01608ac01a674ab2e8e1d8b0b653b"
+    },
+    {
+      "file": "prepare_validation.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/prepare_validation.py",
+      "bytes": 756,
+      "sha256": "b41671f062c4bbfd757ba7da6e7e2befad27daad66adc4f0386234b16220afe9",
+      "storedSha256": "b41671f062c4bbfd757ba7da6e7e2befad27daad66adc4f0386234b16220afe9"
+    },
+    {
+      "file": "public-articulation_rc-avbd.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-articulation_rc-avbd.log",
+      "bytes": 13331,
+      "sha256": "722a9bd128c8062ff6dea5df6d8f1b9e52684c51d2bc6afc5281876e2b0f888f",
+      "storedSha256": "52a40053104ffc81d72e5821be3c1863bb6a80d49c17763e7d9bea8b69880ca9"
+    },
+    {
+      "file": "public-articulation_rc-pgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-articulation_rc-pgs.log",
+      "bytes": 13260,
+      "sha256": "26ab8cee94c523c037ffa0700dd4e70439075f469b49776a2d90ff2ef758f006",
+      "storedSha256": "a1f179ddbc6c8b18b2e079797ff32fe79eaf8c736b1632cb0f0a4f6d548e1395"
+    },
+    {
+      "file": "public-articulation_rc-tgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-articulation_rc-tgs.log",
+      "bytes": 13298,
+      "sha256": "f61edcbbe6dc6915bf004e2296ecf39f8273488c78ba8316af234bf02a01c06c",
+      "storedSha256": "38e90145e3852683e4dad22a665a1b0c948617a743a3495b9fcd27f4fecb2f97"
+    },
+    {
+      "file": "public-hello_world-avbd.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-hello_world-avbd.log",
+      "bytes": 12348,
+      "sha256": "e81c24b4fc4dc523b3751f60f95273575fb0e2b4104d595b7f8c3c283cb3a6c5",
+      "storedSha256": "78e6d62c40bef3530f4767ec25cfe212b795893fe3113e09c22cd5032f654237"
+    },
+    {
+      "file": "public-hello_world-pgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-hello_world-pgs.log",
+      "bytes": 12254,
+      "sha256": "cfeb3812a72e709618c7d550c4003869fa9870451143648d83f5dc8cd4d3082b",
+      "storedSha256": "8b6f7eebc5c61d52074a762b47b47acc1e013a3f1cfb12c35887664728533e99"
+    },
+    {
+      "file": "public-hello_world-tgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-hello_world-tgs.log",
+      "bytes": 12249,
+      "sha256": "b121bf4bb6239ecad8166300e8f66bd1be784c6c963089af6e8858e25798a0cf",
+      "storedSha256": "da28341930f7bc2211512ad6f3dbeff5c7997f2e71d66915a0cc0d325478154d"
+    },
+    {
+      "file": "public-joint-avbd.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-joint-avbd.log",
+      "bytes": 4378,
+      "sha256": "726a1bf150573287ef3f0632d3f432a51cce8e052c76afe0362c78b83c7d8749",
+      "storedSha256": "f5978e6a1e8f7ffb160f4a6d4981d99c8372388d39e321eaf9fc4bed11b374a9"
+    },
+    {
+      "file": "public-joint-pgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-joint-pgs.log",
+      "bytes": 4339,
+      "sha256": "9a0e62a84edd06fa6fb1a431379dde4c3f443a27d1e2c22a09386b0afb3a445c",
+      "storedSha256": "5165742bc8a8568b0c52e124e61f2ccfc32691d2019036a72a1e4506ea68bb0e"
+    },
+    {
+      "file": "public-joint-tgs.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/public-joint-tgs.log",
+      "bytes": 4338,
+      "sha256": "ec37195f19bee8c64807fa8e2f258911ac61e76e1d55075ae652e1d6ca5e5d04",
+      "storedSha256": "cf3c6dc4c5460ca4cdab74e50bd0b799c41c660909290659203780d8712c81ad"
+    },
+    {
+      "file": "publication-t0/conflicting-anchors-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/conflicting-anchors-rejected.log",
+      "bytes": 734,
+      "sha256": "f60a252410de01bd2943413928a9445f4dd8d211a6c25bd48e283eb426f91f5e",
+      "storedSha256": "05d706f721eeb87768a6f797b500f05387c1f1d02932e2c061ab5e4ab08f3486"
+    },
+    {
+      "file": "publication-t0/initial-recovery-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/initial-recovery-rejected.log",
+      "bytes": 685,
+      "sha256": "1ca7e6777ebd1bacf93e9351ea7772249a47f54cfc81561a8ad6e67ff4a68743",
+      "storedSha256": "faf81127c1b8a45ee8aec5c3686871cb890887e93dadbc2cc76bceadc5f59acd"
+    },
+    {
+      "file": "publication-t0/mode0.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode0.log",
+      "bytes": 1129,
+      "sha256": "a11d37930a4d9c48594ffb6707f8da11468c13d4b0cdfdb9c9fe4b7e9a181f4f",
+      "storedSha256": "3bacbe6c57ec3b2bc91daf0cb74e06263f60a9f33dc25da78c9eafbb36f083db"
+    },
+    {
+      "file": "publication-t0/mode1.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode1.log",
+      "bytes": 1150,
+      "sha256": "764e27bc672d6396a7e13dcd4ceaef2382d91dc72fcb6e44df5fc63ee53a78eb",
+      "storedSha256": "6dd7e3d314af2b9155fc15454fe4a2c78698b323bba6b99dd541ebd48f7adad6"
+    },
+    {
+      "file": "publication-t0/mode2.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode2.log",
+      "bytes": 1128,
+      "sha256": "03cf3f42c8e85eacd7ee15ba3dcf3ac59c1a26187bfd74be54bc28408fac6296",
+      "storedSha256": "adabdcb75b38546b61685edee67c38f06baefcca3e39f739b25a808ae5c853ed"
+    },
+    {
+      "file": "publication-t0/mode3.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode3.log",
+      "bytes": 1126,
+      "sha256": "9a943f3a48d68c2dea2a74d395c5d7c58a65b567cbf130a826fcbfd68ae54622",
+      "storedSha256": "a823a347784b9507d45036a265073217c0f80ba5af8fa791b86a41a5731ed97b"
+    },
+    {
+      "file": "publication-t0/mode4.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode4.log",
+      "bytes": 1126,
+      "sha256": "7bf8c8fb0044eee5a647ab94b04f81b0828f21091fd4694b0ac918f1724cd1d0",
+      "storedSha256": "97dfd8626021da8abe5e36473f16c5d96c6a92205689a8a0926dbe239e70d8c9"
+    },
+    {
+      "file": "publication-t0/mode5.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode5.log",
+      "bytes": 1130,
+      "sha256": "621c253548614b0ab94055b5c5f0dd783f42a3889fb34e664cd6406aa95c8e07",
+      "storedSha256": "5efe2fe15e0cd7bc076ad471aa065e428a1e25e291a9e470b17a62532a7bc3d3"
+    },
+    {
+      "file": "publication-t0/mode6.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode6.log",
+      "bytes": 1162,
+      "sha256": "6a0e5efd00c8d6545f4596658ac637d4792c0336f99961086d5df77afa549f9b",
+      "storedSha256": "7a3c65e7153b58b3db682886f22c1e5594bb8b7c30266a9cb8fb48b28a7bcc57"
+    },
+    {
+      "file": "publication-t0/mode8.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0/mode8.log",
+      "bytes": 1810,
+      "sha256": "e3db93b66af768f714686f5e0d071d9523dfc925deb3829617dad434a075ca98",
+      "storedSha256": "48a0eea39fa52e8e3e25120d9d45be3116d71966827ce35ce4ee80c75f65d42b"
+    },
+    {
+      "file": "publication-t0.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t0.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "publication-t1/conflicting-anchors-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/conflicting-anchors-rejected.log",
+      "bytes": 734,
+      "sha256": "f9d4d2a0a317b2ecfca4d249e7eafb29e3190a0c482671f8892d59e5b7b21b3e",
+      "storedSha256": "06ea3638e206e972535c0dbf95f3a15913e3a4db35f451e736a80b06e8d06f9f"
+    },
+    {
+      "file": "publication-t1/initial-recovery-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/initial-recovery-rejected.log",
+      "bytes": 685,
+      "sha256": "b340c9b575c1c302a30bc4ed127561f2b77e80ec0a44913864a8cc52fa7b084e",
+      "storedSha256": "04d1f8f87fd1fd8665d9b917cd92e01600accc143f8a0085dfed7b3251956fd3"
+    },
+    {
+      "file": "publication-t1/mode0.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode0.log",
+      "bytes": 1129,
+      "sha256": "092ae73feed859cb60b62c9353e80b6921690e4d3685bc3b9bb0514c5bb6200c",
+      "storedSha256": "26884a7aad0100edaed6ea87b57c486acea3bfde75473d0cbc26bb75e5e9b942"
+    },
+    {
+      "file": "publication-t1/mode1.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode1.log",
+      "bytes": 1150,
+      "sha256": "b502cd251beede4bc31bc60a4e07410232d7a5b648552ffb98d392f71ede8927",
+      "storedSha256": "436f97b0ab8785380016dcbc697ac410445844fa8ed0c443c10fdaa3973381a6"
+    },
+    {
+      "file": "publication-t1/mode2.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode2.log",
+      "bytes": 1128,
+      "sha256": "6256d15baa6fba061beb933af9c1206811897eef9bb1285671cc2c3dab620810",
+      "storedSha256": "512f8010ec961bbe38d4f37b1347d255173f76b557e2c3071ad8f7eabaeff08d"
+    },
+    {
+      "file": "publication-t1/mode3.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode3.log",
+      "bytes": 1126,
+      "sha256": "d2b4617ad65e7269bfcc0ce254c27c2c8dc8886253883d97625d85ebd7916048",
+      "storedSha256": "99f25932ad89e5beb7df8cf0e5036f1ab767916778387ff6ae265bf02ab6cc61"
+    },
+    {
+      "file": "publication-t1/mode4.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode4.log",
+      "bytes": 1126,
+      "sha256": "530b217e7405cda500a1d15764fdac7d854140246f318e46da212fe40e8e176c",
+      "storedSha256": "9933e77db56419697c4adcf449cac6452c792d97fd26d909f003fc20255c7dc1"
+    },
+    {
+      "file": "publication-t1/mode5.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode5.log",
+      "bytes": 1130,
+      "sha256": "99a5312743a5e1769c7821d78eff0bb949f3abb84f32ecd16ce9a6160ed7d08a",
+      "storedSha256": "6d26a1f10c21f06589b17aa19eb2fcf7b24144ebb9b022521bea67689fffd1cb"
+    },
+    {
+      "file": "publication-t1/mode6.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode6.log",
+      "bytes": 1162,
+      "sha256": "ddf474e7d62ea387a68b662bfdf568fd6ac0c8106ba8fab51414a17c3b246c29",
+      "storedSha256": "1aa4cc58092e911c01fcb555d35cd9261f18b96f56615d9f1ab2f941e7f6290c"
+    },
+    {
+      "file": "publication-t1/mode8.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1/mode8.log",
+      "bytes": 1810,
+      "sha256": "fc5fa4382179606a0d91eb437b9f6b2e5de34972d1bd7bfae4e486060a26bf4d",
+      "storedSha256": "fd6b1a16e629a7052299f43e6fd4740cc778c8d39dea65921b6002701cd045e2"
+    },
+    {
+      "file": "publication-t1.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t1.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "publication-t4/conflicting-anchors-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/conflicting-anchors-rejected.log",
+      "bytes": 734,
+      "sha256": "c1b5b76ea903bbfcbf8dededa0ee31dfd22bc89687989afb718d48ab50c20bac",
+      "storedSha256": "c7a97534feb686365b4536d01361984e6e5f2927c329ad86150824990e4b1f35"
+    },
+    {
+      "file": "publication-t4/initial-recovery-rejected.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/initial-recovery-rejected.log",
+      "bytes": 685,
+      "sha256": "24c1d9e2a053d295f048223d24224fc360264fa908570658a974439816ac6807",
+      "storedSha256": "61709770e79a724a29db37e72d296b6900047c539dfecbd48dd906879b48bfd5"
+    },
+    {
+      "file": "publication-t4/mode0.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode0.log",
+      "bytes": 1129,
+      "sha256": "7f9570d8569f49e8547c36d17a4883908543513b8412c7385c0be0ce169f4955",
+      "storedSha256": "be301b70c8b4e17b8ca244ddc07472e08964c5c7d304724d447e643776f62d43"
+    },
+    {
+      "file": "publication-t4/mode1.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode1.log",
+      "bytes": 1150,
+      "sha256": "ba68135a20aa4e47424a1413825cc50d6600944b377da0022771bbd3a6dbbcba",
+      "storedSha256": "b64c6aad6a871d40dc9da05a7befed2301682e3db5dba83486e57c4014a823be"
+    },
+    {
+      "file": "publication-t4/mode2.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode2.log",
+      "bytes": 1128,
+      "sha256": "7cb384f7c9be8019b201d377f1938dab423780d53ecf447d28314eb573f1c778",
+      "storedSha256": "d52730c6acb0e1a03a7bbfc1b1f73f4bbefae6bf5b2f44b3fff2d4cb6382e21c"
+    },
+    {
+      "file": "publication-t4/mode3.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode3.log",
+      "bytes": 1126,
+      "sha256": "dc287c427d8aab909f27e33eda0b0593f7ad668c303d877297e7aa70776459b9",
+      "storedSha256": "f9c06d06d9e46ad2d89af773302eac5a2cad430f3ede6adcc5d82042bdad357c"
+    },
+    {
+      "file": "publication-t4/mode4.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode4.log",
+      "bytes": 1126,
+      "sha256": "5a17d659ab7d0ed087c1b39c344a4727affa573b4312b7a28a423f884d095e25",
+      "storedSha256": "46a90b1c500802be563493f6e67c50a683a4729467fa28d471c0ca55240985ec"
+    },
+    {
+      "file": "publication-t4/mode5.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode5.log",
+      "bytes": 1130,
+      "sha256": "7bcaffc737215fb0da8b73d7f1031ed61149891e8e8e55af3eb7b95cd0373309",
+      "storedSha256": "3e81f171080bb041cb1cd888b40c6e91142d9bf07b4f0972ecf4efd23d4e76a3"
+    },
+    {
+      "file": "publication-t4/mode6.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode6.log",
+      "bytes": 1164,
+      "sha256": "c46b8e4b61c517a0df5ea518e6161946de88f62a3118b6ccc71058d7a30e7a50",
+      "storedSha256": "5351fbc665f3f18587d934595ce8479727c62c0f91b9f7ec241450632d083cd9"
+    },
+    {
+      "file": "publication-t4/mode8.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4/mode8.log",
+      "bytes": 1810,
+      "sha256": "6a3bf79eaaa7ce509ab50cdd64b347bc4cb79772133ecbb2bc9dba3f7ca1d3a5",
+      "storedSha256": "52109de5b0c58f97bf1eca91483c7278137d4e192598e0e589cbcbf080b45fd5"
+    },
+    {
+      "file": "publication-t4.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/publication-t4.log",
+      "bytes": 473,
+      "sha256": "74ee8256ae6de91e280ac23ec88173ba222e7d4c5f258eb3549a5279d451a2e3",
+      "storedSha256": "533ce5c85910c821651b6b8f674a638b33ca9e031e45e07528cae41e3282afa6"
+    },
+    {
+      "file": "reaction-final.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/reaction-final.json",
+      "bytes": 1779,
+      "sha256": "0f906409ef5a102ffa726ad3fc2bc0110fc99384940ab6cf42aea42e6e7c88ce",
+      "storedSha256": "0f906409ef5a102ffa726ad3fc2bc0110fc99384940ab6cf42aea42e6e7c88ce"
+    },
+    {
+      "file": "reaction-final.txt.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/reaction-final.txt",
+      "bytes": 259108,
+      "sha256": "5f28501e6a6daeb4368cfbdf94eb1487997c57e511e75441aad9007b987c9e70",
+      "storedSha256": "f408f0e61da43bba34e01d802b333c601b2e11100eeaa5b5a3becb0feb174fd7"
+    },
+    {
+      "file": "regressions.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/regressions.json",
+      "bytes": 1681,
+      "sha256": "ffdfec8e63d4f42e0d91983a16fc7b7ea330c696f4cf2f6c7a494cf316e78df5",
+      "storedSha256": "ffdfec8e63d4f42e0d91983a16fc7b7ea330c696f4cf2f6c7a494cf316e78df5"
+    },
+    {
+      "file": "smoke-final.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/smoke-final.log",
+      "bytes": 2357,
+      "sha256": "9a8bfd8be5acf51cc0cfd3d2a41d963fd6dec34b95ddad4bc5a36df8e5352281",
+      "storedSha256": "c7a08e88060266164327495c97273e9188cdfd916917527404294434e88fc08f"
+    },
+    {
+      "file": "split-analysis.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-analysis.json",
+      "bytes": 487,
+      "sha256": "3145ce0b0a7bfe1a474714088a048bcb05b45e03a027206afaa33703498c7805",
+      "storedSha256": "3145ce0b0a7bfe1a474714088a048bcb05b45e03a027206afaa33703498c7805"
+    },
+    {
+      "file": "split-candidate.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-candidate.json",
+      "bytes": 2708810,
+      "sha256": "c9aa79b10420494e57d8c456e20f44035bd898217e782e8e7c15aa3e2e274ee9",
+      "storedSha256": "e4a29b05910bf724d93667b4e7b66e5892f3356c09ee35a7ddd08c1a3387d8a6"
+    },
+    {
+      "file": "split-candidate.json.curvature.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-candidate.json.curvature.json",
+      "bytes": 1512661,
+      "sha256": "5bad93db5fbfaeecde2c5748b7c1a8ae042ea91fd9f9da6c3d23359948ee2ec6",
+      "storedSha256": "df8967cf494c8bd3836017c0f9fd976309f11f4f6b344a46f8aa101e6dfc6054"
+    },
+    {
+      "file": "split-candidate.json.trial.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-candidate.json.trial.json",
+      "bytes": 661681,
+      "sha256": "582787d70784b3296f994c1c2245aa6bbea29acc049398d19f74c42270d550c4",
+      "storedSha256": "87c4424bf37ccf7386f66cfe692898e410ac584bc47f708e463bf7468414fb71"
+    },
+    {
+      "file": "split-failure.json.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-failure.json",
+      "bytes": 2707170,
+      "sha256": "22e5ed77cacdb5bdf5f520939fceb0397a2ca397caeea9c20e742bbd4c93632b",
+      "storedSha256": "62949cd2cb66090864a653d2df169fb05f2533b31073fd5f64b0cbf6fde4a393"
+    },
+    {
+      "file": "split-mode.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split-mode.json",
+      "bytes": 931,
+      "sha256": "e58e1ddc139d175a858a5b73127a8dff7e5e77b432fdede2ab19babc0485cc5e",
+      "storedSha256": "e58e1ddc139d175a858a5b73127a8dff7e5e77b432fdede2ab19babc0485cc5e"
+    },
+    {
+      "file": "split.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split.json",
+      "bytes": 593,
+      "sha256": "1dc7e577948301798f6239ca169b48cb84764b8269ca0ca3275d555d77afca1a",
+      "storedSha256": "1dc7e577948301798f6239ca169b48cb84764b8269ca0ca3275d555d77afca1a"
+    },
+    {
+      "file": "split.txt.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split.txt",
+      "bytes": 80900,
+      "sha256": "b85f663fd1bcdc5087f6960aa8c63ac61c05cd667b3bb0ce9bca50bf4fc539ec",
+      "storedSha256": "6bb860fae0853dc47645986c37817698958c333a12f573a0f7b9ae527331d97f"
+    },
+    {
+      "file": "split_model.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/split_model.py",
+      "bytes": 4788,
+      "sha256": "1956695d615ea072a814480cd92a452d528546a40ed4269938eb2ca247b826ed",
+      "storedSha256": "1956695d615ea072a814480cd92a452d528546a40ed4269938eb2ca247b826ed"
+    },
+    {
+      "file": "stagnation.json",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/stagnation.json",
+      "bytes": 7263,
+      "sha256": "8c5cd1a3f656211724fbe524da3048b48122800a9dbf8245cfa3337d48b59432",
+      "storedSha256": "8c5cd1a3f656211724fbe524da3048b48122800a9dbf8245cfa3337d48b59432"
+    },
+    {
+      "file": "stagnation.log.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/stagnation.log",
+      "bytes": 3843,
+      "sha256": "9bb15677722518ef000e25d9aaa30ac0f7e73d0e0a9d5f75a5c36b36c5c2287b",
+      "storedSha256": "47313a4ddb11378dfbefaf40eb63d29ae245ef372314fd820d2ecaad7b88ed44"
+    },
+    {
+      "file": "validate.py",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/validate.py",
+      "bytes": 2090,
+      "sha256": "55cfc30869ec0beba3011b944ddc483b082061917ca3d0cd0094cf55866ffd9d",
+      "storedSha256": "55cfc30869ec0beba3011b944ddc483b082061917ca3d0cd0094cf55866ffd9d"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdElasticFrame.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrame.h",
+      "bytes": 5477,
+      "sha256": "ad1bd2c3d39c0552b088ce5610c8f8149d14523987398bc9fdd5e74f770d2602",
+      "storedSha256": "8ca6ae978a4e68f7c5d677efe45c40cc1f87456af0dc797c5707e6872340aecb"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdCommonProgram.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h",
+      "bytes": 12376,
+      "sha256": "c9a9ad32f69493cb65acbe2fca59805568edf52f41b0699052e9860582be288a",
+      "storedSha256": "f7ae5140aca1c74258a2cc65ce411dfef29b24259aebbbc442a74eb31871e35f"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdCommonResidual.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h",
+      "bytes": 4970,
+      "sha256": "90aa973f10b6387da28cf49b21821b60f1c6381c6a82faaa78e28e86dced19c0",
+      "storedSha256": "90a2ce7e3de4b664993126e5afc46380acdb1f2339a8b938259abd72fe4392db"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdBoundedResponse.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdBoundedResponse.h",
+      "bytes": 30180,
+      "sha256": "e54bc0f82909ded6fbe2a5a5bb00e9bd9616a661e7579d7cea8ae5175113181d",
+      "storedSha256": "c97e912e04b0ccc78865efe9498d6d7cc066812d69c29227dc02d229c4951804"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdCurvatureMetric.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdCurvatureMetric.h",
+      "bytes": 2654,
+      "sha256": "7459695d66e6145154112e07c53f8d08a1fdb04b8202884095d4636afe0c6b36",
+      "storedSha256": "2cb017c4718461bc706288625b0f5b993badd00898c8c583187fde4dbd8f2fd6"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdDynamics.h.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h",
+      "bytes": 28791,
+      "sha256": "a92237d6cbbcd5b9a4419bd599ada93a471997664a672839e2dfdd8e0fdadc60",
+      "storedSha256": "77bb816cdb42fff168a8bdf86c41420176d35f9c87a5a69aee950e09355187ba"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdSolve.cpp.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp",
+      "bytes": 150369,
+      "sha256": "d9c7b2efcd48625399c181e36973f26d40025b885470fb7aa51bdda472b524e2",
+      "storedSha256": "cfbdedc1610eb421a88ee3eca50b2c3d25428ec6d4c40a65ed98561d700ab0ce"
+    },
+    {
+      "file": "sources/physx__source__lowleveldynamics__src__avbd__DyAvbdContactPrep.cpp.gz",
+      "source": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp",
+      "bytes": 40365,
+      "sha256": "c8622d3b3cc19b365fbb6e129b7dcbd1bcf2a2e7260bacec58ecccf3de7f3ee7",
+      "storedSha256": "2cb75dd2f84f5b7a274267d9ae1a1570026b7e61b3211b2216ae32fb29e820ab"
+    },
+    {
+      "file": "sources/tools__run_avbd_local_response_probe.py.gz",
+      "source": "tools/run_avbd_local_response_probe.py",
+      "bytes": 5314,
+      "sha256": "a482dd1d960bff397ec34225ea8312fdff7a0ced12d71d8f0516290c688b8bab",
+      "storedSha256": "d5c0bed5ca80355b98f41e3622b8b5503492d2358593ff0cf876aac15673d42f"
+    },
+    {
+      "file": "sources/tools__avbd_local_response_probe.cpp.gz",
+      "source": "tools/avbd_local_response_probe.cpp",
+      "bytes": 7374,
+      "sha256": "f9140197ed5779b9802ccfc2595b7e8a2f32cedd375bb558d8c2adb7628504b0",
+      "storedSha256": "4e4a686f863b0ba31d85064be1c7acf3d6b6a347364ee42880cfbe276179307e"
+    },
+    {
+      "file": "sources/tools__avbd_frame_curvature_probe.cpp.gz",
+      "source": "tools/avbd_frame_curvature_probe.cpp",
+      "bytes": 4932,
+      "sha256": "b2df03254f4d8850f2152da56dc372d0402166550d57f31417fe2f1db68878c6",
+      "storedSha256": "50fe68c59cfa02d47f627a76f9ec3d66ca1a8d25cddc25d6a04af7cdc0d9c715"
+    },
+    {
+      "file": "sources/tools__run_avbd_frame_curvature_probe.py.gz",
+      "source": "tools/run_avbd_frame_curvature_probe.py",
+      "bytes": 421,
+      "sha256": "9b74732e7d708f9c3409b7396ebe64e050c96f3e4fdd6c8c09edecda51246bb8",
+      "storedSha256": "3dd262674fa54b79905bbc37bba1a6bc47feee5f0e80c4fed5dde54cc23411d9"
+    },
+    {
+      "file": "sources/tools__avbd_bounded_response_probe.cpp.gz",
+      "source": "tools/avbd_bounded_response_probe.cpp",
+      "bytes": 20590,
+      "sha256": "49cd495a232bbedcf461b01011070515a18efd363ca60d02ca2a33d9925598f7",
+      "storedSha256": "5b76c548454f875c9830932b6d12586302880cb2c11c9b4c8a86914e3e0f37b5"
+    },
+    {
+      "file": "sources/tools__avbd_np_factorization_probe.cpp.gz",
+      "source": "tools/avbd_np_factorization_probe.cpp",
+      "bytes": 2995,
+      "sha256": "6a5aff4483b668a1839ed6f401f1434e1499a6721fe02cb561a65f3b6f58fe78",
+      "storedSha256": "0a9f7091578fe03001aafbc0b1b9f8f5e9e54ed185713dbc18b0ccade8e9aec1"
+    },
+    {
+      "file": "sources/tools__run_avbd_np_factorization_probe.py.gz",
+      "source": "tools/run_avbd_np_factorization_probe.py",
+      "bytes": 434,
+      "sha256": "108b39288f9b742266379d6ec1e0d231abd9fbc6512ce46f8c4d24126b86c5b4",
+      "storedSha256": "18eb71d9f489254de0dad096c852b6066ee32f00d717cf68d178fea6e777a375"
+    },
+    {
+      "file": "sources/docs__ASSEMBLED_CURVATURE_20261106.md.gz",
+      "source": "docs/ASSEMBLED_CURVATURE_20261106.md",
+      "bytes": 9072,
+      "sha256": "8694ed6822b0f83cb5c188ce5f5ecbeae7b5c9e18f46295fc4e7376ae370a26e",
+      "storedSha256": "60a9e15307691dbc69c7f832f8e8d368b27efeba98fe2f18353dc62cb0952d4c"
+    },
+    {
+      "file": "sources/docs__REFACTOR_OUTLINE.md.gz",
+      "source": "docs/REFACTOR_OUTLINE.md",
+      "bytes": 192031,
+      "sha256": "7aca68b7be2ce4bcc03c6975bfdb0576d91429e41b79cf47e38bde75bd30613e",
+      "storedSha256": "1a2a267574beac7b41689df1121d1ea104082385c9afb24dc2d6e7e3611b6aaf"
+    },
+    {
+      "file": "sources/docs__ITERATION.md.gz",
+      "source": "docs/ITERATION.md",
+      "bytes": 353024,
+      "sha256": "12a4be3ed7a02c5c6ced284beda6eca25334300858dd46e0003f157da64fd9a3",
+      "storedSha256": "3c978d3569ee97697ab81ded9a4813642a5e08c8d09b740eb67000c0d8b59e47"
+    },
+    {
+      "file": "sources/.cursor__skills__avbd-whole-step__layers.md.gz",
+      "source": ".cursor/skills/avbd-whole-step/layers.md",
+      "bytes": 46036,
+      "sha256": "3b0b80a7c948b9972601b67747793dd2be82906b944632ac8a3db932536ef4c5",
+      "storedSha256": "fed0842217b555c63f6816b2a8cafa872641ed00d0392ec16ae74f769501cb23"
+    },
+    {
+      "file": "sources/.cursor__skills__avbd-whole-step__dead-paths.md.gz",
+      "source": ".cursor/skills/avbd-whole-step/dead-paths.md",
+      "bytes": 156297,
+      "sha256": "eb7b024a6a5f41b77f0d55be26c929ad4136095efbe074454afff54d19752765",
+      "storedSha256": "3c8568753763cb137fed22f07785712becc5e0cb0beae95363458d3b912d12ee"
+    },
+    {
+      "file": "diffs/DyAvbdElasticFrame.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdElasticFrame.h.turn.diff",
+      "bytes": 762,
+      "sha256": "eb4c933fff26e778b9362160566b0e769d03b466b5cdfda97215370723d0df09",
+      "storedSha256": "91df62f6f1a948dd1961cf10964a8c253a6e356ce239829c67548ea4bb77231e"
+    },
+    {
+      "file": "diffs/DyAvbdCommonProgram.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCommonProgram.h.turn.diff",
+      "bytes": 2395,
+      "sha256": "f5fc92b2ca667fead9bfa809f8e8382fa33f516dc51783a88446854e61c15df4",
+      "storedSha256": "4c029a6db938c3e99160f77b9990f5c434b217e9632f697ce21d781561c793f1"
+    },
+    {
+      "file": "diffs/DyAvbdCommonResidual.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCommonResidual.h.turn.diff",
+      "bytes": 667,
+      "sha256": "62008b92c0c4381f55f565892c3583ee1a9e650a3c99447143bd3519518e9791",
+      "storedSha256": "b5de3db6f6cddadb3503ecdbe8f92693f707563f65c643e1f9c1a343428ec4f9"
+    },
+    {
+      "file": "diffs/DyAvbdBoundedResponse.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdBoundedResponse.h.turn.diff",
+      "bytes": 1090,
+      "sha256": "b7b61e74154d090fe0003d598ede528ddd593194939cce7642552d8a57256fa4",
+      "storedSha256": "e2355712bcc69a0cee27fc5ef48560090287f6f86388cd4ce11721e3711ba347"
+    },
+    {
+      "file": "diffs/DyAvbdCurvatureMetric.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdCurvatureMetric.h.turn.diff",
+      "bytes": 2864,
+      "sha256": "e73db238cf8278579ee63526eaa660376f144d40eb235f65c2b31cb708729621",
+      "storedSha256": "c2f9c320bb5bbb95cf8be6ffd0d510e81f48ef0797e9fd888d19d51b61f55ea8"
+    },
+    {
+      "file": "diffs/DyAvbdDynamics.h.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdDynamics.h.turn.diff",
+      "bytes": 731,
+      "sha256": "39e0f61c71125da94664d9cf17232223fd472cf26306330d34909c21a3c681b2",
+      "storedSha256": "8e7d73b9fec308e056fbc7a21cc248127ed6f107512faabec35d85b37a9198fc"
+    },
+    {
+      "file": "diffs/DyAvbdSolve.cpp.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdSolve.cpp.turn.diff",
+      "bytes": 7877,
+      "sha256": "9aa9c7b3ccbb5f663c9c057a1cba730ffdf57e4cb05e46d2efb4697fcd5d54dc",
+      "storedSha256": "2878c14d5d875b87eacc47bb06fb4ac67dfbba330bf75988b01febbfd0cc1519"
+    },
+    {
+      "file": "diffs/DyAvbdContactPrep.cpp.turn.diff.gz",
+      "source": "tools/benchmark-results/bounded-curvature-model-20261106/DyAvbdContactPrep.cpp.turn.diff",
+      "bytes": 867,
+      "sha256": "ade87dfabd9116e353fb858ab63cd2e8aab8872beb145e65c94dd24af3bead5f",
+      "storedSha256": "05ca29dd1560e6059b20a74a308acf3c0447d453c96ea48122bda724655d3601"
+    }
+  ]
+}

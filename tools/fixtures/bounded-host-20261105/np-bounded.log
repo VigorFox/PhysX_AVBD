@@ -1,0 +1,261 @@
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.58284015e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.43682193e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.83704857e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=4.27146387e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.40831783e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.13511794e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.29920697e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.63899907e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=6.03933045e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.64697796e-23 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.51911974e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=3.17637355e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=7.47125775e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.38777878e-17 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=10
+[AVBD_BOUNDED_SCHEDULE] waves=1880 batches=2190 sweeps=54 tasks=310 peakTasks=2 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=310 peakTasks=2 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=40 joints=0 bodyBytes=1008 rowBytes=10880 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=40 uniqueSupports=40 blockRefs=40 bytes=500
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=40 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=7.89491999e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=3.17305466e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=3.23165379e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.77555756e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=4.85644285e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.73472348e-18 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=1.61919374e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.16840434e-19 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=5
+[AVBD_BOUNDED_SCHEDULE] waves=460 batches=460 sweeps=18 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=5 joints=0 bodyBytes=1008 rowBytes=1360 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=5 uniqueSupports=5 blockRefs=5 bytes=80
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=5 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=1.57898399e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=3.38796406e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=8.14408067e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.64697796e-23 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=7.77225086e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.38777878e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=2.03776289e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.11758237e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=1.22974379e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.11758237e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=3.89906465e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=6.77626358e-21 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=7
+[AVBD_BOUNDED_SCHEDULE] waves=719 batches=719 sweeps=26 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=10 joints=0 bodyBytes=1008 rowBytes=2720 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=10 uniqueSupports=10 blockRefs=10 bytes=140
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=10 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.52341147e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.62340249e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.8357074e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=5.34288459e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.13717592e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.82795779e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.52285286e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=2.46981926e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.11758237e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=8.3832248e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=4.23516474e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=8.39126688e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=1 blocks=1 rows=40 colors=1 sweeps=5 error=3.84224931e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.69406589e-21 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.00721412e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=6.77626358e-21 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=10
+[AVBD_BOUNDED_SCHEDULE] waves=2077 batches=2418 sweeps=60 tasks=341 peakTasks=2 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=341 peakTasks=2 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=40 joints=0 bodyBytes=1008 rowBytes=10880 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=40 uniqueSupports=40 blockRefs=40 bytes=500
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=40 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.03164927e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.43682193e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.67409714e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.28143916e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=8.92037115e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=2.83779485e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=2.96902772e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.63899907e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=7.54916306e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.64697796e-23 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.03823947e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=6.77626358e-21 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.49425156e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.38777878e-17 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=10
+[AVBD_BOUNDED_SCHEDULE] waves=1880 batches=2190 sweeps=54 tasks=310 peakTasks=2 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=310 peakTasks=2 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=40 joints=0 bodyBytes=1008 rowBytes=10880 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=40 uniqueSupports=40 blockRefs=40 bytes=500
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=40 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=1.51582464e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=4.75958199e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=3.95415873e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.77555756e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=3.23762857e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=3.46944695e-18 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=5 colors=1 sweeps=3 error=1.99567393e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.11758237e-22 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=5
+[AVBD_BOUNDED_SCHEDULE] waves=460 batches=460 sweeps=18 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=5 joints=0 bodyBytes=1008 rowBytes=1360 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=5 uniqueSupports=5 blockRefs=5 bytes=80
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=5 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=5.92866933e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=1.6113585e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=1.91042402e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.69406589e-21 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=7.16700066e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=6.9388939e-18 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=9.56507329e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=9.56665554e-17 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=8.67361738e-19 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=10 colors=1 sweeps=3 error=3.89906465e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=6.77626358e-21 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=7
+[AVBD_BOUNDED_SCHEDULE] waves=719 batches=719 sweeps=26 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=10 joints=0 bodyBytes=1008 rowBytes=2720 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=10 uniqueSupports=10 blockRefs=10 bytes=140
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=10 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.51582464e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.84458905e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=2 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=7.83552914e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=3 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=5.34288459e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=4 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.14360988e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.29816817e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=5 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.52285286e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=4.76283164e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=6 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=2.11758237e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.35328992e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=7 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=4.23516474e-22 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=1.00695203e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=1 blocks=1 rows=40 colors=1 sweeps=5 error=3.84224931e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=8 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=3.46944695e-18 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=0 blocks=1 rows=40 colors=1 sweeps=5 error=3.3573804e-16 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=9 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=1.73472348e-18 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=0 iterations=10
+[AVBD_BOUNDED_SCHEDULE] waves=2077 batches=2418 sweeps=60 tasks=341 peakTasks=2 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=341 peakTasks=2 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=40 joints=0 bodyBytes=1008 rowBytes=10880 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=40 uniqueSupports=40 blockRefs=40 bytes=500
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=40 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=1 rows=0 colors=1 sweeps=1 error=0 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=30 batches=30 sweeps=2 tasks=0 peakTasks=1 workers=2 batchLimit=32
+[AVBD_SCHEDULE] blocks=1 colors=1 maxWidth=1 tasks=0 peakTasks=1 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=1 rows=0 joints=0 bodyBytes=1008 rowBytes=0 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=0 uniqueSupports=0 blockRefs=0 bytes=20
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=0 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=0 npUnsupported=0 npPolicyExcluded=1 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[NP_GEOMETRY_SCENE] kind=0 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.613732219 status=PASS
+[NP_GEOMETRY_SCENE] kind=1 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.64083463 status=PASS
+[NP_GEOMETRY_SCENE] kind=2 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.654071927 status=PASS
+[NP_GEOMETRY_VERTEX_ORACLE] minimumY=2.98023224e-08 queryDepth=0
+[NP_GEOMETRY_SCENE] kind=3 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.629063666 status=PASS
+[NP_GEOMETRY_SCENE] kind=0 convexTarget=0 disabled=1 overlap=1 depth=0.372626424 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=1 convexTarget=0 disabled=1 overlap=1 depth=0.213466421 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=2 convexTarget=0 disabled=1 overlap=1 depth=0.233322859 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=3 convexTarget=0 disabled=1 overlap=1 depth=0.405851483 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=0 convexTarget=1 disabled=0 overlap=1 depth=0 moved=0.613732219 status=PASS
+[NP_GEOMETRY_SCENE] kind=1 convexTarget=1 disabled=0 overlap=0 depth=0 moved=0.64083463 status=PASS
+[NP_GEOMETRY_SCENE] kind=2 convexTarget=1 disabled=0 overlap=0 depth=0 moved=0.654071927 status=PASS
+[NP_GEOMETRY_SCENE] kind=3 convexTarget=1 disabled=0 overlap=1 depth=2.98023224e-08 moved=0.629063666 status=PASS
+[NP_GEOMETRY_SCENE] kind=0 convexTarget=1 disabled=1 overlap=1 depth=0.372626394 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=1 convexTarget=1 disabled=1 overlap=1 depth=0.213466421 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=2 convexTarget=1 disabled=1 overlap=1 depth=0.233322829 moved=0.833333373 status=PASS
+[NP_GEOMETRY_SCENE] kind=3 convexTarget=1 disabled=1 overlap=1 depth=0.405851424 moved=0.833333373 status=PASS

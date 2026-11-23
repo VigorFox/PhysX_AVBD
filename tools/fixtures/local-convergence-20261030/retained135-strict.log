@@ -1,0 +1,24 @@
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=0 sweeps=63 residual=5.70465903e-11 ms=1.2016 status=PASS
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\retained135-strict.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "strict full response",
+  "dofs": 24,
+  "groups": 135,
+  "activeNormalForces": 3,
+  "maximumForce": 1344.7507604375696,
+  "symmetry": 7.275957614183426e-12,
+  "stationarity": 5.684341886080802e-14,
+  "relativeStationarity": 3.3478234367465535e-17,
+  "unitStepRoot": 2.0179413695586845e-12,
+  "relativeUnitStepRoot": 1.5006062304824908e-15,
+  "minimumNormalResidual": -2.1908346707693643e-17,
+  "tableIterations": 63,
+  "materialProducts": 122,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

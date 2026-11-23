@@ -1,0 +1,8 @@
+Contact bundle /fp:precise
+[NORMAL_BUNDLE] cases=120 valueError=1.06581410364e-14 wrenchError=1.25873705539e-15 production=0
+[SHARED_TANGENT_ROOT] cases=90 rootError=3.33066907388e-16 wrenchError=4.4408920985e-16 coordinates=15->7 production=0
+[MERGE_COUNTEREXAMPLES] alDifference=0.2 lostTorque=2 failures=0
+Contact bundle /fp:fast
+[NORMAL_BUNDLE] cases=120 valueError=1.84214270383e-14 wrenchError=9.2350658503e-16 production=0
+[SHARED_TANGENT_ROOT] cases=90 rootError=2.22044604925e-16 wrenchError=4.4408920985e-16 coordinates=15->7 production=0
+[MERGE_COUNTEREXAMPLES] alDifference=0.2 lostTorque=2 failures=0

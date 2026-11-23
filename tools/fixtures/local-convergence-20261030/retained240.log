@@ -1,0 +1,29 @@
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=141 residual=5.8963007e-08 ms=47.1574 status=PASS
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\retained240.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": true,
+  "executionSource": "grouped augmented primal/dual",
+  "dofs": 24,
+  "groups": 240,
+  "activeNormalForces": 8,
+  "maximumForce": 8272.219864075003,
+  "symmetry": 1.4551915228366852e-11,
+  "stationarity": 0.0024960580394690624,
+  "relativeStationarity": 1.9569756100400674e-07,
+  "unitStepRoot": 5.896254151593894e-08,
+  "relativeUnitStepRoot": 7.127777366267103e-12,
+  "minimumNormalResidual": -3.6794127365991074e-08,
+  "tableIterations": 141,
+  "materialProducts": 28,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 0.038834280761919755,
+    "passed": true,
+    "scope": "full-H correction only"
+  }
+}

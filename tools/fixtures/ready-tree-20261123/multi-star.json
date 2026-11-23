@@ -1,0 +1,82 @@
+[
+  {
+    "arm": "base",
+    "w": 0,
+    "inline": false,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=0 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 0,
+    "inline": false,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=0 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "base",
+    "w": 2,
+    "inline": false,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=2 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 2,
+    "inline": false,
+    "multiCohorts": 48,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=2 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "base",
+    "w": 4,
+    "inline": false,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=4 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 4,
+    "inline": false,
+    "multiCohorts": 48,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=4 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "base",
+    "w": 8,
+    "inline": false,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=8 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 8,
+    "inline": false,
+    "multiCohorts": 48,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=8 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "base",
+    "w": 8,
+    "inline": true,
+    "multiCohorts": 0,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=8 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 8,
+    "inline": true,
+    "multiCohorts": 48,
+    "maxRows": 2594,
+    "gate": "[WIDE_STAR] material=bending workers=8 faces=2098 frames=12 best=9.77516e-05 peak=0.00871583 pinError=0 status=PASS"
+  }
+]

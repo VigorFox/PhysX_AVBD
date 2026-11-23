@@ -1,0 +1,110 @@
+[
+  {
+    "name": "avbd-hello_world",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "avbd-joint",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "avbd-articulation_rc",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "avbd",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "pgs-hello_world",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "pgs-joint",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "pgs-articulation_rc",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "pgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "tgs-hello_world",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_hello_world_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "tgs-joint",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_joint_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "tgs-articulation_rc",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_snippet_articulation_rc_headless.py",
+      "--solver",
+      "tgs",
+      "--cases",
+      "gated"
+    ],
+    "exit": 0
+  }
+]

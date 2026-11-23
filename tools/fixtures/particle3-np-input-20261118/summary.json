@@ -1,0 +1,65 @@
+{
+  "scope": "Shared NP borrowed input and sparse candidate mechanism; no contact response or production qualification",
+  "head": "626af54f1229fb5ce098daa016ce0df5fdaa6faf",
+  "iterations": 4,
+  "productionSwitched": false,
+  "sharedNpGeometryInputIntegrated": true,
+  "candidateKernelQualified": true,
+  "candidateProductionScheduleIntegrated": false,
+  "particleContactRowsIntegrated": false,
+  "sharedReactionQualified": false,
+  "volumeMaterialStepIntegrated": true,
+  "materialReleaseQualified": false,
+  "wholeStepCostQualified": false,
+  "parallelScalingQualified": false,
+  "gpuQualified": false,
+  "checksPassed": 20,
+  "testQualification": "NP input/geometry mechanisms only; contact response UNCOMPILED",
+  "defaultProducts": [
+    {
+      "file": "PhysX_64.dll",
+      "sha256": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXCommon_64.dll",
+      "sha256": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXFoundation_64.dll",
+      "sha256": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableSurfaceAVBD_64.exe",
+      "sha256": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableVolumeAVBD_64.exe",
+      "sha256": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "unchanged": true
+    }
+  ],
+  "testedSdk": {
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PhysX_64.dll": "cc17200ff9cf38c134201f1402346b820e0747f9b5fc5adc60c6451b7ce3979e",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a8b3d896a9dd32ceb79b49a9b8cfa03d32aaaa74fb6a2887aa3328eafb10b7c9",
+    "SnippetDeformableVolumeAVBD_64.exe": "e998ffda3a896466ec4c5cff5983f295b87e721a0344b6e9db9c4c56d0c1cc18",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088"
+  },
+  "sourceFiles": 45,
+  "sourceArchiveSha256": "c66c8685d9333fda089ed26d0f15b885d89b7b5422560925bf3d4d6beabd45d3",
+  "evidenceArchiveSha256": "112a4c59ca4a6dc11fc94c07fa42959a78eb84baa74502c2fdcdba24c537bcbb",
+  "fixtureCorrection": "Surface box probe initially supplied zero Y/Z half extents; corrected all three dimensions and reran that input case. Original error log and attempt retained.",
+  "knownPhysicsFailures": {
+    "clothReleaseMomentumRelativeError": 0.0201493442,
+    "volumeReleaseMomentumRelativeError": 0.00701116972,
+    "evidence": "particle3-volume-step-20261117; material math unchanged this turn"
+  }
+}

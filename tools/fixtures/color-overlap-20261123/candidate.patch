@@ -1,0 +1,212 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -33,6 +33,14 @@
+     // suffice even when the actual material or contact row IDs have changed.
+     PxArray<PxU32> incidenceOffsets,incidenceShape;
+     PxU32 workers=0,firstTile=0,lanes=0;
++
++    // Per-wave mapping to the same color's Assemble leaf indices.
++    PxU32 firstWideJob=0,wideJobs=0;
++    struct OverlapTrace
++    {
++        PxU64 both=0,wide=0,ordinary=0;
++        PxU32 waves=0,leaves=0;
++    } overlap;
+     void clear()
+     {
+         offsets.clear();wideOffsets.clear();wideBlocks.clear();tiles.clear();waves.clear();splits.clear();nodal.clear();rigid.clear();
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
+@@ -413,6 +413,7 @@
+     void assembleNodalRows(PxU32 block,PxU32 begin,PxU32 end,AvbdNodalAssembly& out);
+     void finishNodalAssembly(PxU32 block,const AvbdNodalAssembly& rows);
+     PxReal finishRigidAssembly(AvbdLocalBlockState& state,AvbdLocalPartial& partial);
++    void prepareLocalWork();
+     bool dispatchLocalWork();
+     void beginNodalTrial(PxU32 block,const AvbdNodalAssembly& rows,AvbdNodalTrial& trial);
+     void makeNodalCandidate(AvbdNodalTrial& trial);
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -1329,14 +1329,15 @@
+     {
+         // Collect after fan-in; never log between waves and keep workers awake
+         // accidentally. Queued idle capacity is distinct from insufficient width.
+-        struct Event { PxU64 time;PxI32 ready,active; } events[3*LocalTaskLimit];
++        struct Event { PxU64 time;PxI32 ready,active,wide; } events[3*LocalTaskLimit];
+         const PxU64 loss=span>lpt?span-lpt:0;
+         for(PxU32 i=0;i<mStep.localWaveTaskCount;++i)
+         {
+             const PxU64 ready=mStep.localWaveTaskReady[i]-mStep.localWaveStart;
+             const PxU64 start=mStep.localWaveTaskStarts[i]-mStep.localWaveStart;
+             const PxU64 end=start+mStep.localWaveTaskTicks[i];
+-            events[3*i]={ready,1,0};events[3*i+1]={start,-1,1};events[3*i+2]={end,0,-1};
++            const PxI32 wide=stage==0 && mColorTasks && i<mColorTasks->wideJobs ? 1 : 0;
++            events[3*i]={ready,1,0,0};events[3*i+1]={start,-1,1,wide};events[3*i+2]={end,0,-1,-wide};
+             if(loss>=mStep.localTraceLoss)
+             {mStep.localTrace[i][0]=ready;mStep.localTrace[i][1]=start;mStep.localTrace[i][2]=end;
+                 mStep.localTrace[i][3]=mStep.localWaveTaskThreads[i];}
+@@ -1346,13 +1347,23 @@
+             mStep.localTraceStage=stage;mStep.localTraceJobs=mStep.localWaveTaskCount;mStep.localTraceLanes=mStep.localWaveJobs;}
+         const PxU32 count=3*mStep.localWaveTaskCount;
+         std::sort(events,events+count,[](const Event& a,const Event& b){return a.time<b.time;});
+-        PxI32 ready=0,active=0;PxU64 previous=0;
++        const bool mixed=stage==0 && mColorTasks && mColorTasks->wideJobs;
++        if(mixed){++mColorTasks->overlap.waves;mColorTasks->overlap.leaves+=mColorTasks->wideJobs;}
++        PxI32 ready=0,active=0,wideActive=0;PxU64 previous=0;
+         for(PxU32 i=0;i<count;++i)
+         {
+             const PxI32 idle=PxMax(0,PxI32(mStep.localWaveJobs)-active);
+             mStep.localReadyIdleTicks[stage]+=(events[i].time-previous)*PxMin(ready,idle);
+             mStep.localWidthIdleTicks[stage]+=(events[i].time-previous)*PxMax(0,idle-ready);
+-            ready+=events[i].ready;active+=events[i].active;previous=events[i].time;
++            if(mixed)
++            {
++                const PxU64 dt=events[i].time-previous;
++                auto& trace=mColorTasks->overlap;
++                if(wideActive)trace.wide+=dt;
++                if(active>wideActive)trace.ordinary+=dt;
++                if(wideActive && active>wideActive)trace.both+=dt;
++            }
++            ready+=events[i].ready;active+=events[i].active;wideActive+=events[i].wide;previous=events[i].time;
+         }
+         mStep.localWidthIdleTicks[stage]+=(span-previous)*mStep.localWaveJobs;
+     }
+@@ -1538,7 +1549,24 @@
+         mStep.splitPrimalBlocks+=w.splitBlocks;mStep.splitRowLeaves+=w.leaves;
+         mStep.localPrimalMaxBlocks=PxMax(mStep.localPrimalMaxBlocks,w.maxBlocks);
+         mStep.localPrimalMaxRows=PxMax(mStep.localPrimalMaxRows,w.maxRows);
+-        return submitLocalWave(stage,w.count,NULL,NULL,w.first);
++        auto& plan=*mColorTasks;
++        plan.wideJobs=0;
++        const PxU32 color=mStep.nextColor;
++        const PxU32 capacity=plan.workers*LocalQueueDepth;
++        if(plan.workers>1 && w.count<capacity && plan.wideOffsets[color]!=plan.wideOffsets[color+1])
++        {
++            // Color membership already covers the full read/write supports.
++            // Reserve each Assemble job before release, so the later tree
++            // resumes at the exact first unissued leaf after the wave joins.
++            if(!mLocalWork)prepareLocalWork();
++            auto& work=*mLocalWork;
++            PX_ASSERT(work.phase==AvbdLocalWork::Assemble);
++            plan.firstWideJob=work.cursor;
++            plan.wideJobs=PxMin(work.leaves.size()-work.cursor,capacity-w.count);
++            work.cursor+=plan.wideJobs;
++            mStep.tiledJobs+=plan.wideJobs;
++        }
++        return submitLocalWave(stage,w.count+plan.wideJobs,NULL,NULL,w.first);
+     }
+     PxU32& cursor=stage==NodalImpactStage?mStep.impactCursor:stage==IncidenceHistoryStage?mStep.historyCursor:stage==NodalLoadStage?mStep.loadCursor:stage==NodalMatchStage?mStep.nominationCursor:stage==3?mLocalWork->cursor:stage==2?mStep.queryCursor:stage==1?mStep.dualCursor:mStep.localCursor;
+     const PxU32 end=stage==NodalImpactStage?mNodalImpactRows.size():stage==IncidenceHistoryStage?incidenceHistoryEnd(cursor>=incidenceHistoryEnd(false)):stage==NodalLoadStage?mNodalContacts.size():stage==NodalMatchStage?nominationJobs():stage==3?mLocalWork->jobs():stage==2?mContactRowCount+mNodalContacts.size():stage==1?localDualRows():localColorStart(mStep.nextColor+1);
+@@ -1637,7 +1665,20 @@
+         if(mStep.localTimeline)mStep.localWaveTaskReady[child]=PxTime::getCurrentCounterValue();
+         mColorLanes[child-1]->submit(*mColorContinuation);
+     }
+-    const PxU32 tile=mColorTasks->firstTile+slot;
++    const PxU32 wide=mColorTasks->wideJobs;
++    if(slot<wide)
++    {
++        const PxU32 job=mColorTasks->firstWideJob+slot;
++        solveLocalBatch(job,job+1,3,slot);
++        if(mStep.profile)
++        {
++            const auto& node=mLocalWork->nodes[mLocalWork->leaves[job]];
++            const auto& state=mLocalWork->states[node.state];
++            mStep.hotItems[slot]={mStep.localWaveTaskTicks[slot],state.body<mBodies.size()?0u:1u,node.end-node.begin};
++        }
++        return;
++    }
++    const PxU32 tile=mColorTasks->firstTile+(slot-wide);
+     solveLocalBatch(tile,tile+1,0,slot);
+ }
+ 
+@@ -1680,37 +1721,41 @@
+     solveLocalBatch(starts?starts[0]:firstTile,stops?stops[0]:firstTile+1,stage,0);finishLocalProfileWave();return true;
+ }
+ 
++void AvbdDynamicsContext::prepareLocalWork()
++{
++    const bool baked=mColorTasks && !mColorTasks->offsets.empty();
++    const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
++    const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
++    bool hasNodes=false,hasRigids=false;
++    for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
++    {
++        const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
++        const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
++        if(end-begin<=AvbdLocalWork::RowLimit)continue;
++        if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
++        mLocalWork->add(b,begin,end);
++        if(b<mBodies.size())
++        {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
++        else hasNodes=true;
++        ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
++    }
++    if(!mLocalWork)return;
++    if(hasNodes)
++    {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
++    if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
++    mStep.tiledLeaves+=mLocalWork->leaves.size();
++    mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
++        sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
++        PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
++        PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
++}
++
+ bool AvbdDynamicsContext::dispatchLocalWork()
+ {
+     const bool baked=mColorTasks && !mColorTasks->offsets.empty();
+     if(baked && mColorTasks->wideOffsets[mStep.nextColor]==mColorTasks->wideOffsets[mStep.nextColor+1])return true;
+-    if(!mLocalWork)
+-    {
+-        const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
+-        const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
+-        bool hasNodes=false,hasRigids=false;
+-        for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
+-        {
+-            const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
+-            const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
+-            if(end-begin<=AvbdLocalWork::RowLimit)continue;
+-            if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
+-            mLocalWork->add(b,begin,end);
+-            if(b<mBodies.size())
+-            {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
+-            else hasNodes=true;
+-            ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
+-        }
+-        if(!mLocalWork)return true;
+-        if(hasNodes)
+-        {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
+-        if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
+-        mStep.tiledLeaves+=mLocalWork->leaves.size();
+-        mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
+-            sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
+-            PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
+-            PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
+-    }
++    if(!mLocalWork)prepareLocalWork();
++    if(!mLocalWork)return true;
+     auto& work=*mLocalWork;
+     while(!mLocalDomainFailed)
+     {
+@@ -3065,6 +3110,7 @@
+ 	const PxVec3& gravity, Cm::PinnableBitMap& /*changedHandleMap*/)
+ {
+ 	mStep=StepState();
++    if(mColorTasks)mColorTasks->overlap={};
+     mFixedReactions.clear();
+     mReleasedRigidBodies.clear();
+     mAttachmentRows.clear();
+@@ -3746,6 +3792,13 @@
+         const double ms=double(frequency.mNumerator)/double(frequency.mDenominator)*1.e-5;
+         if(mStep.localBudget)
+         {
++            if(mStep.localTimeline && mColorTasks)
++            {
++                const auto& trace=mColorTasks->overlap;
++                std::fprintf(stderr,"[AVBD_COLOR_OVERLAP] bothMs=%.7f wideMs=%.7f ordinaryMs=%.7f waves=%u issued=%u totalLeaves=%llu\n",
++                    trace.both*ms,trace.wide*ms,trace.ordinary*ms,trace.waves,trace.leaves,
++                    static_cast<unsigned long long>(mStep.tiledLeaves));
++            }
+             if(mStep.localTimeline)
+             {
+                 std::fprintf(stderr,"[AVBD_LOCAL_TIMELINE] stage=%u jobs=%u lanes=%u spanMs=%.6f lptMs=%.6f selection=worstGapPerStep\n",

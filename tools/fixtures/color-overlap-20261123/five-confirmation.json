@@ -1,0 +1,4 @@
+{
+  "reason": "First 7 volume8 P95 pairs all favor candidate, but the three A/A pairs have median ratio 0.9533. Confirm size versus temporal noise.",
+  "rule": "Seven new 4/8 five-body pairs with binary labels reversed in the existing benchmark to counterbalance starting order. Report both batches and all 14 oriented to experimental/reference. No sample exclusion."
+}

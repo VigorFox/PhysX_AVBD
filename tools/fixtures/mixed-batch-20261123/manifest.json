@@ -1,0 +1,48 @@
+{
+  "runtime": {
+    "base": "6b3badbf3c6de581705b22fa9a00ca9d35d01e33d255f2d990327ece30005e27",
+    "atomic": "f09b8b35df6187934b89699b57f344cc26e7209dd35959146bd5db1b8d748ac4",
+    "batch": "97b6394b9a53018cc4c4d45d55e22207e8ee5430cee0234ab7287d7c366fc998",
+    "atomic-tail": "0f5d69f7c2b2c801ec442112929a7e684ba06a3797d82fb1977737f32f306457",
+    "batch-tail": "e91060493a34967b2def59819ca9b7914f51d25e6e714bae091ef763ac3cbebc",
+    "reserved-tail": "e540a8af70d8bf297ac4f8e4c8977cf6e2a4a43e24f9dd90e14b0e923c5cec9c",
+    "cpuWindowExe": "d71c8f82fa9021f82378e5adf10ddc0f7d36270f8933d8d7073269b3bd5c7e0d"
+  },
+  "baseSource": {
+    "DyAvbdColorTasks.h": "0397b5fdc3d0cefa375c5f8fc4c8d66e3024c2b9f9a18e07d2edf177c171c88e",
+    "DyAvbdDynamics.cpp": "7887c7fb8db2afb144f195b1f09dd43d758b9d661fe5488eea667cc5245fca97",
+    "DyAvbdDynamics.h": "92d8b8bea731e126e9b7fa884ab08feff8d515754990554c59c804e44e7d7767"
+  },
+  "runs": {
+    "timing": 144,
+    "cpu": 36,
+    "tail": 12
+  },
+  "physics": 109,
+  "additionalScreenRuns": 12,
+  "screenPassed": false,
+  "rawFiles": 483,
+  "sha256": {
+    "analysis.json": "e6e83e7d80571d2c66b591086d84471f144989442650f267fa99c78c65e1cc5f",
+    "analyze.py": "36d69bc36a1e8ec621e67cef2433b6e809c47a5de222eae629719458ad932a81",
+    "atomic-to-batch.patch": "d45b83f469f98df9e9f091ccbcacaa9b1a8d9a7b296edf950c938668ee0ea755",
+    "batch-to-reserved.patch": "c9fb1acf000cce0ac719ada11abb91e21f35344409e2763ac6c2852a63481da8",
+    "build.py": "559a5267c54cbf1bcd638f8d9d29e91e29c024815467044d92e118f18a9f06d7",
+    "build_cpu.py": "7c3e8008e8d2fc4f82ad3bea76250f3c5a946eb360dbf99f617e1b5ca80cc9ee",
+    "build_tail.py": "79c331872aaf2b5d137e371eb0f79c79fac12e6f32abddb3712dcfd4d03e13cd",
+    "candidate.patch": "743adbed36078a6d2684ff5083c7495ff28aa6ca220891a14e31818bf1f8e025",
+    "prepare_reserve.py": "1163014b222dafb4b06715585c79ad042053d1c3dbe799c242485ed54e4e164e",
+    "ranges.json": "d2bd397f601a58a5bb0bbb9dc4c1359d81cd711b0eba6bacbec48b2c634c03d1",
+    "raw.json.gz": "dc2b05a3089006f35b9eb18ab531cac7a75daa99462e24e4deb78e548656b54a",
+    "README.md": "a0251e534614b024c5ab6c88200bf35351ebb213b6b8765ecc923c5171692a62",
+    "registration.json": "5fa547322490000605f76586a4222949c9a51a691ef057476481fbe7936d845c",
+    "replay.py": "c16648906a51e7afae703f472aed9f0056da0a074a90b65bc9d1d3cd5538c4d2",
+    "reserve-summary.json": "a5dae5614ced227bd6c9492b9c3e5e49e9e5fc9431997aeb2bfc2583d8bcb4a3",
+    "reserve_registration.json": "c7abbf81a57e833e13740abf471663363d64b410669f288b5da3b4f9c2344a11",
+    "screen.py": "1d7965976a1c5d53345ec26e129b57893e85e3e1060d5e742c89f02653631021",
+    "study.json.gz": "a1dca4214e3efba102ef471798e675d9efaa6ec3228fae29e2f8dd065d0e3dba",
+    "study.py": "a50d0fac82fa97795576714cb91e85aadf276e9a76ff24503d3ca90f4933c1c9",
+    "tail-probes.json.gz": "5e24bbb8f97beb3b35e03913fec7ba9798e3e02fbd71d099f4c25521992a62ec",
+    "test_ranges.py": "23a70ad72213671af3984a79fc8020c0565069c3039e14666cff379730ff7e9a"
+  }
+}

@@ -1,0 +1,15 @@
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.04489564e-08 stationRelative=3.2277353e-08 result=budget_exhausted
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=1024 residual=3.2277353e-08 ms=93.2748 status=FAIL
+{
+  "file": "tools\\benchmark-results\\bounded-convergence-20261030\\priority-extra280.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "reason": "local_response_capture",
+  "materialProducts": 0,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

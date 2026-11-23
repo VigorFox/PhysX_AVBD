@@ -1,0 +1,94 @@
+[
+  {
+    "name": "strict-4",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "strict",
+      "--threads",
+      "4",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\pub-strict-4"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "patch-4",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "patch",
+      "--threads",
+      "4",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\pub-patch-4"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "bounded-0",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "bounded",
+      "--threads",
+      "0",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\pub-bounded-0",
+      "--chain-bodies",
+      "129"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "bounded-1",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "bounded",
+      "--threads",
+      "1",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\pub-bounded-1",
+      "--chain-bodies",
+      "129"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "bounded-4",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "bounded",
+      "--threads",
+      "4",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\pub-bounded-4",
+      "--chain-bodies",
+      "129"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "np-bounded",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "np-patch",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py"
+    ],
+    "exit": 0
+  }
+]

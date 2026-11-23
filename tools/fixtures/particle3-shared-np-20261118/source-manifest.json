@@ -1,0 +1,322 @@
+[
+  {
+    "path": "docs/ITERATION.md",
+    "bytes": 428631,
+    "sha256": "ea58d0c7b4096cca330507f74823bfa686f743637dd559811f7582cfcd2e69cd"
+  },
+  {
+    "path": "docs/PARTICLE3_DEFAULT_SWITCH_20261117.md",
+    "bytes": 6115,
+    "sha256": "6d85f868fa638b6a849b4274b6a6efad32d28adc9cb5105363de551ad296a340"
+  },
+  {
+    "path": "docs/PARTICLE3_NATIVE_RESTART_20261117.md",
+    "bytes": 8139,
+    "sha256": "6d2201775b6dfc6c388db3a90278023587caf902ea3850bc9d69e6ad828a7cf6"
+  },
+  {
+    "path": "docs/PARTICLE3_NP_INPUT_20261118.md",
+    "bytes": 6057,
+    "sha256": "eb2c07703f6bf4ce0fa91892144593434787f1f4936ccfa864330820747c4626"
+  },
+  {
+    "path": "docs/PARTICLE3_SHARED_NP_20261118.md",
+    "bytes": 10675,
+    "sha256": "007ec809dd8f379a27ca7baede38d3cb8d73cd45032e1177f19205abfd3b683b"
+  },
+  {
+    "path": "docs/PARTICLE3_VOLUME_STEP_20261117.md",
+    "bytes": 5456,
+    "sha256": "c7344a96557a22c29a2b660eb15eae85d6de77c23e9ceb5d94a675acb650868b"
+  },
+  {
+    "path": "physx/snippets/snippetcommon/SnippetHeadless.h",
+    "bytes": 12322,
+    "sha256": "c4081738023fb61af89451fd426bd0609b5912728a450f7e9624469bcda2ce8d"
+  },
+  {
+    "path": "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBD.cpp",
+    "bytes": 4969,
+    "sha256": "f898fc02e39be990b55f60cf5d7f272c809c835a287e0f7edbb0a70871afacf0"
+  },
+  {
+    "path": "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBDCommon.h",
+    "bytes": 10098,
+    "sha256": "71668be723c3745fac25024df4c495c36b9f601ea16d03ae853e7d2c698c67b1"
+  },
+  {
+    "path": "physx/snippets/snippetdeformablesurfaceavbd/SnippetDeformableSurfaceAVBDHeadless.cpp",
+    "bytes": 24338,
+    "sha256": "2bc577d6e50f34c8e609dbbc74e4d2c99e8cb4203cc74de09c8c6acc4e69f863"
+  },
+  {
+    "path": "physx/source/lowlevel/common/include/pipeline/PxcNpWorkUnit.h",
+    "bytes": 7125,
+    "sha256": "d476bc3c183bf13074e34bd254a0c3f9405f38ff187ddee28f6af445a77bb00c"
+  },
+  {
+    "path": "physx/source/lowlevel/common/include/pipeline/PxsDeformableGeometry.h",
+    "bytes": 4719,
+    "sha256": "1bb3c373c4cba7da54251326025fcdd113d3d23e39ad921444e70c1500de9dac"
+  },
+  {
+    "path": "physx/source/lowlevel/common/include/pipeline/PxsDeformableMesh.h",
+    "bytes": 7864,
+    "sha256": "8bef1e52fccf95658a39b2f618e06a3c5669084d281c274703210dff510b1118"
+  },
+  {
+    "path": "physx/source/lowlevel/software/include/PxsContactGeometry.h",
+    "bytes": 2176,
+    "sha256": "20d74d3b598afa742b99c35b565e9126d8ba7cfb07e75715cafb382eb24b1ca2"
+  },
+  {
+    "path": "physx/source/lowlevel/software/include/PxsContext.h",
+    "bytes": 11571,
+    "sha256": "f8a340c54045af214f2f1c183ec8886590f9ef0c2cd74afef2be893d5a060f33"
+  },
+  {
+    "path": "physx/source/lowlevel/software/include/PxsDeformableContact.h",
+    "bytes": 1724,
+    "sha256": "5b7bdac789450e5ad82ae4f0288ace5cd4c821e08e9623e3191b8b01a339df2d"
+  },
+  {
+    "path": "physx/source/lowlevel/software/src/PxsContactManager.cpp",
+    "bytes": 2940,
+    "sha256": "f051c10becf9fcde49d248ec2d87b6c9300fe3482ca861931857c9b3d68766b9"
+  },
+  {
+    "path": "physx/source/lowlevel/software/src/PxsDeformableNarrowPhase.h",
+    "bytes": 24299,
+    "sha256": "ea74b864bb6766b2ffea78af83ee1fd53aa032850099481d156e002db39b4a6c"
+  },
+  {
+    "path": "physx/source/lowlevel/software/src/PxsNphaseImplementationContext.cpp",
+    "bytes": 48582,
+    "sha256": "6c2a84ffed8bbed76d71281bfc75de34733a8d6a08bdb192efbafb2d8ed3f939"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/include/DyDeformableBodyCore.h",
+    "bytes": 3259,
+    "sha256": "3248b55f82b87c5fdfed8a5b5dde9ca894f97fb0ee5097196ab1685f6c41f41f"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp",
+    "bytes": 52666,
+    "sha256": "ada814fb6debeb8e146f0584ad6529312fe7afd162d5dddc2c1d662bcfa72414"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp",
+    "bytes": 356095,
+    "sha256": "120e10ff058bc3b4b2879a04d9992216d3f279ff0640afca0b326887490ef32f"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h",
+    "bytes": 30363,
+    "sha256": "d0a9ad418d0e2e8839cf1ab2b047055e54add5dab1076983512c5eaac7be3b10"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h",
+    "bytes": 48890,
+    "sha256": "f13dc738ac0ac17b7874d6f42c1086e609680554ab6acca25072312f674ab0d8"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp",
+    "bytes": 29875,
+    "sha256": "fff1e627e57322e38a0e43676f508c9f05b42f3b299a780f98e9810bd9808f4a"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalContact.h",
+    "bytes": 5731,
+    "sha256": "17c0e6fe520737a9c4399fe1950818bec7a07f8241c2f970290190c0ff71f574"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalShell.h",
+    "bytes": 6529,
+    "sha256": "38b0a21ada9f53ff1732c5bdd42f51c211ac68648c1fd239bd9ff68a68aff421"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalVolume.h",
+    "bytes": 3771,
+    "sha256": "a0b866d66418262a7cfafc376b1975c8815abb1a66a9968e14a5c0682ff208d9"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdRows.h",
+    "bytes": 9375,
+    "sha256": "e4f2bb274e2b980fbb91b00501e6b360abf36429f53a197b2e61dcdd91c3b0a6"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp",
+    "bytes": 205593,
+    "sha256": "f2016989837fac3fe6f89bfca8e00cec3aafe7f613e0b4984de5d1a51dac487a"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp",
+    "bytes": 8867,
+    "sha256": "eee35b95ef9244359a238e2585d275efd651b8d61dc9eae22c72ad455cfe6ab4"
+  },
+  {
+    "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h",
+    "bytes": 5878,
+    "sha256": "b4b1fc387bf57ffd41c78be19330b6b903213dd93964d50102fd1cffbfde9b81"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScDeformableSurfaceSim.cpp",
+    "bytes": 5651,
+    "sha256": "f00052c496679c53e330fccf6e91b1e9e6578ccb8ae3105cf6581bffc380d809"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScDeformableSurfaceSim.h",
+    "bytes": 3084,
+    "sha256": "c0042d98b1767f237660b1fd72559f2027eeb6d0c9234bc1511b7cad604f4f89"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScDeformableVolumeSim.cpp",
+    "bytes": 9404,
+    "sha256": "9665c6fa601c5971cf3b0973f7849b85c1b35e10edad684e9d24cb232d1dcb21"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScDeformableVolumeSim.h",
+    "bytes": 3529,
+    "sha256": "b2084aa2c25c8dc2e8451828fcfe77fd8252db23fcfca451ebbda780189e7c43"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScPipeline.cpp",
+    "bytes": 105623,
+    "sha256": "20569fc7140a84c7cb2103463eec834515c9615a47450eabc96ca570f99bbcb5"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScScene.cpp",
+    "bytes": 151871,
+    "sha256": "28eaded3c054174929d5e054fe195666b640d2e090350c6def5a40fe487312e6"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScShapeInteraction.cpp",
+    "bytes": 44565,
+    "sha256": "f4eefb8dc92ea908eb47bbcc1be2f5b8c54866e4921c8a1c8978412c6c575a90"
+  },
+  {
+    "path": "physx/source/simulationcontroller/src/ScShapeInteraction.h",
+    "bytes": 16310,
+    "sha256": "5da6461bd291937abd01beba45f3378ae0207c45955d437889cdd239afe38af4"
+  },
+  {
+    "path": "tools/avbd_mixed_reaction_probe.cpp",
+    "bytes": 7307,
+    "sha256": "fcad857d6d32de26cf184f46afeac7450e9a5187323bbdd494546da76cadd733"
+  },
+  {
+    "path": "tools/avbd_nodal_cloth_contact_probe.cpp",
+    "bytes": 6423,
+    "sha256": "e227ef302dcf19265798ac67f569f6cbec8a81e03a6f0744cebd5cd36c540380"
+  },
+  {
+    "path": "tools/avbd_nodal_contact_domain_probe.cpp",
+    "bytes": 2861,
+    "sha256": "232f212b23a3fa4f523dae6402494402d09014f75c9875b936af6e2dc0a5b5b6"
+  },
+  {
+    "path": "tools/avbd_nodal_release_probe.cpp",
+    "bytes": 4566,
+    "sha256": "654484175ea4c56fcb5318aac4271dc005664daa8cee3217e3e60587f4d899ce"
+  },
+  {
+    "path": "tools/avbd_nodal_shell_probe.cpp",
+    "bytes": 3869,
+    "sha256": "6b1130847a1d4438234f024f43afc42395cc3ca34cf66269230e9e8177967230"
+  },
+  {
+    "path": "tools/avbd_nodal_soft_contact_probe.cpp",
+    "bytes": 4722,
+    "sha256": "bc7c82856b79f7698046a839efd4d34ae0349f3349479ad54e806546efb34854"
+  },
+  {
+    "path": "tools/avbd_nodal_volume_probe.cpp",
+    "bytes": 6475,
+    "sha256": "7bf85120a60de942bbdb2004a7db1f0dde594544f51a4ceb8dc239f6eebb7b23"
+  },
+  {
+    "path": "tools/avbd_nodal_volume_step_probe.cpp",
+    "bytes": 9347,
+    "sha256": "9b28b38c5dd932bb3c1f2a5d9d700938bcfefcd689a2c80e3aed987e52ca4e42"
+  },
+  {
+    "path": "tools/benchmark_avbd_mixed_reaction.py",
+    "bytes": 2747,
+    "sha256": "44975f02264db68e458895411ce403ab31cd7b369f1bba9e76aeaff92a272b53"
+  },
+  {
+    "path": "tools/benchmark_particle3_flight.py",
+    "bytes": 6801,
+    "sha256": "86ead5b877879daac8fc3a1ed23208c3e4a147ab442c1da3b91e939608656403"
+  },
+  {
+    "path": "tools/np_deformable_mesh_probe.cpp",
+    "bytes": 9225,
+    "sha256": "778179012aaaf2823aab0ab241f6df426de6e88c08a2edb64195f676c739b14a"
+  },
+  {
+    "path": "tools/np_deformable_surface_input_probe.cpp",
+    "bytes": 1951,
+    "sha256": "d29c8b80cab4e67ab75650cbb5a385a6afd378ec8c02803988a3d7d7575a81d1"
+  },
+  {
+    "path": "tools/run_avbd_mixed_reaction_probe.py",
+    "bytes": 428,
+    "sha256": "8ca298044451e5eb6ae307f71fda42b07327fc2cadd4345cdb4b5c018afc1b61"
+  },
+  {
+    "path": "tools/run_avbd_nodal_cloth_contact_probe.py",
+    "bytes": 436,
+    "sha256": "f97b31517681ab2a7966e689e78f67ff92662014a9b2552be8d273eb3e96e016"
+  },
+  {
+    "path": "tools/run_avbd_nodal_contact_domain_probe.py",
+    "bytes": 641,
+    "sha256": "a22afe670f161835173b68a1bda441b07908a384731674add5a8256c2a048a94"
+  },
+  {
+    "path": "tools/run_avbd_nodal_release_probe.py",
+    "bytes": 473,
+    "sha256": "93f78f512c61a4f3d26cf3301132cf53c9816d87734d1fb926143ca49d6eca4c"
+  },
+  {
+    "path": "tools/run_avbd_nodal_shell_probe.py",
+    "bytes": 519,
+    "sha256": "2fa570de829d9a85e775f3496bf649444399bb689b0b2d15ec04f06ef173f50d"
+  },
+  {
+    "path": "tools/run_avbd_nodal_soft_contact_probe.py",
+    "bytes": 427,
+    "sha256": "3530bde010e64aa96c0a0ef857ff57f897f1de9d84bf1969593a0a8990b46903"
+  },
+  {
+    "path": "tools/run_avbd_nodal_volume_probe.py",
+    "bytes": 588,
+    "sha256": "0da3dd8e73770637aedf8d2697a9d14571404d9c6d763d9ccb0afb6548db521c"
+  },
+  {
+    "path": "tools/run_avbd_nodal_volume_step_probe.py",
+    "bytes": 482,
+    "sha256": "bd454ca9cae26be396e20001806b0133fed8aef46ff681e464e2e5fc0f150eec"
+  },
+  {
+    "path": "tools/run_np_deformable_mesh_probe.py",
+    "bytes": 755,
+    "sha256": "50845e4f1cca0c5373a69c3e8c8497adc6b9a96d5dda88c127a0dc6f71e0085d"
+  },
+  {
+    "path": "tools/run_np_deformable_surface_input_probe.py",
+    "bytes": 448,
+    "sha256": "39de3ae1c37cb5e3e1f1f44f7988af3dfcfe13872fbc2b2e1667c4928e985eac"
+  },
+  {
+    "path": "tools/verify_particle3_np_input.py",
+    "bytes": 4536,
+    "sha256": "16ed225d98ea17e29ced156bc533b35b3b2d0db034fdc57ed0e76c84c7b5af38"
+  },
+  {
+    "path": "tools/verify_particle3_shared_np.py",
+    "bytes": 5343,
+    "sha256": "8173d602ba352522884840ea81b31aa7d5952a88c6a93f8923b164bd433a46bf"
+  }
+]

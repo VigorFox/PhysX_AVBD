@@ -1,0 +1,14 @@
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=1024 residual=2.96831084e-06 ms=264.065 status=FAIL
+{
+  "file": "tools\\benchmark-results\\bounded-20261030\\retained-135-t4.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "reason": "local_response_capture",
+  "materialProducts": 0,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

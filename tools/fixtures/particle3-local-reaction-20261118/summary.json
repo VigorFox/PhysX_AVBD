@@ -1,0 +1,320 @@
+{
+  "head": "626af54f1229fb5ce098daa016ce0df5fdaa6faf",
+  "sdk": "Checked",
+  "dllSha256": "e56b6a7cf51f5daae66b9e26ec6fcab0d9a33069507f36fdbb9e11034f6bdf4c",
+  "timestep": "1/60",
+  "primalIterations": 4,
+  "velocityPublications": 1,
+  "workers": [
+    0,
+    4,
+    8
+  ],
+  "productionSwitched": false,
+  "gpuTested": false,
+  "matrix": {
+    "total": 63,
+    "passed": 58,
+    "failures": [
+      "cloth-impact-particle3-0",
+      "cloth-impact-particle3-4",
+      "cloth-impact-particle3-8",
+      "cloth-release",
+      "particle3-authored-surface"
+    ]
+  },
+  "reactionGates": {
+    "maxLinearMomentumRelative": 0.005,
+    "maxBallisticErrorMeters": 0.001,
+    "maxKineticPlusElasticRatio": 1.05
+  },
+  "smallVolumeReactionPassed": true,
+  "clothReactionPassed": false,
+  "fullFiveBodyParticle3Qualified": false,
+  "productionCostQualified": false,
+  "mixed": {
+    "medians": {
+      "rigid6-0": {
+        "meanMs": 0.392203,
+        "p95Ms": 0.7675,
+        "cpuMs": 0.434028,
+        "maxMomentumError": 8.56760085e-05,
+        "maxComError": 0.000112907301
+      },
+      "particle3-0": {
+        "meanMs": 0.100883,
+        "p95Ms": 0.1835,
+        "cpuMs": 0.086806,
+        "maxMomentumError": 0.000801786775,
+        "maxComError": 0.000135408435
+      },
+      "rigid6-4": {
+        "meanMs": 0.547856,
+        "p95Ms": 0.7697,
+        "cpuMs": 0.868056,
+        "maxMomentumError": 8.56760085e-05,
+        "maxComError": 0.000112907301
+      },
+      "particle3-4": {
+        "meanMs": 0.24398,
+        "p95Ms": 0.4062,
+        "cpuMs": 0.347222,
+        "maxMomentumError": 0.000801786775,
+        "maxComError": 0.000135408435
+      },
+      "rigid6-8": {
+        "meanMs": 0.591347,
+        "p95Ms": 0.8693,
+        "cpuMs": 0.78125,
+        "maxMomentumError": 8.56760085e-05,
+        "maxComError": 0.000112907301
+      },
+      "particle3-8": {
+        "meanMs": 0.259591,
+        "p95Ms": 0.43,
+        "cpuMs": 0.78125,
+        "maxMomentumError": 0.000801786775,
+        "maxComError": 0.000135408435
+      }
+    },
+    "relativeScaling": {
+      "4": 0.5775894773808371,
+      "8": 0.5859490354931296
+    },
+    "withinWholeStepCost": true,
+    "allPhysicalGatesPassed": true,
+    "scalingPassed": false
+  },
+  "softPair": {
+    "medians": {
+      "rigid6-0": {
+        "meanMs": 0.593697,
+        "p95Ms": 0.9877,
+        "cpuMs": 0.520833,
+        "maxMomentumError": 5.69477839e-05,
+        "maxComError": 5.13787453e-05
+      },
+      "particle3-0": {
+        "meanMs": 0.109374,
+        "p95Ms": 0.284,
+        "cpuMs": 0.086806,
+        "maxMomentumError": 0.000115144427,
+        "maxComError": 0.000122582318
+      },
+      "rigid6-4": {
+        "meanMs": 0.792388,
+        "p95Ms": 1.5392,
+        "cpuMs": 1.041667,
+        "maxMomentumError": 5.69477839e-05,
+        "maxComError": 5.13787453e-05
+      },
+      "particle3-4": {
+        "meanMs": 0.268316,
+        "p95Ms": 0.5682,
+        "cpuMs": 0.434028,
+        "maxMomentumError": 0.000115144427,
+        "maxComError": 0.000122582318
+      },
+      "rigid6-8": {
+        "meanMs": 0.834067,
+        "p95Ms": 1.6725,
+        "cpuMs": 1.475694,
+        "maxMomentumError": 5.69477839e-05,
+        "maxComError": 5.13787453e-05
+      },
+      "particle3-8": {
+        "meanMs": 0.277317,
+        "p95Ms": 0.5836,
+        "cpuMs": 0.260417,
+        "maxMomentumError": 0.000115144427,
+        "maxComError": 0.000122582318
+      }
+    },
+    "relativeScaling": {
+      "4": 0.5440521863288652,
+      "8": 0.554081546204244
+    },
+    "withinWholeStepCost": true,
+    "allPhysicalGatesPassed": true,
+    "scalingPassed": false
+  },
+  "sheetFlight": {
+    "summary": {
+      "0": {
+        "rigid6": {
+          "meanMs": 21.6348139,
+          "p95Ms": 30.5213,
+          "cpuMsPerFrame": 20.833333333333332
+        },
+        "particle3": {
+          "meanMs": 4.66224444,
+          "p95Ms": 5.7769,
+          "cpuMsPerFrame": 4.774305555555555
+        },
+        "meanRatio": 0.21549732119489134,
+        "p95Ratio": 0.18927437559999083
+      },
+      "4": {
+        "rigid6": {
+          "meanMs": 9.68441333,
+          "p95Ms": 11.0997,
+          "cpuMsPerFrame": 24.305555555555557
+        },
+        "particle3": {
+          "meanMs": 2.88199833,
+          "p95Ms": 3.498,
+          "cpuMsPerFrame": 6.510416666666667
+        },
+        "meanRatio": 0.29759142157555973,
+        "p95Ratio": 0.3151436525311495
+      },
+      "8": {
+        "rigid6": {
+          "meanMs": 8.42040667,
+          "p95Ms": 9.7769,
+          "cpuMsPerFrame": 28.211805555555557
+        },
+        "particle3": {
+          "meanMs": 2.43406,
+          "p95Ms": 3.0886,
+          "cpuMsPerFrame": 9.895833333333334
+        },
+        "meanRatio": 0.2890667987179294,
+        "p95Ratio": 0.31590790536877744
+      }
+    },
+    "relativeScaling": {
+      "4": 0.7241382162629835,
+      "8": 0.7454931598878398
+    },
+    "environmentClean": true,
+    "physicalPassed": true,
+    "measuredCostWithinBaseline": true,
+    "performanceQualified": false
+  },
+  "sheetImpact": {
+    "0": {
+      "mode": "impact",
+      "workers": "0",
+      "nodes": "625",
+      "iterations": "4",
+      "frames": "180",
+      "maxMomentumError": "0.333145792",
+      "maxBallisticError": "0.0439007495",
+      "initialEnergy": "40",
+      "peakEnergy": "40",
+      "peakSheetSpeed": "0.0843143893",
+      "meanMs": "2.230793",
+      "p95Ms": "3.244900",
+      "cpuMs": "2.083333",
+      "status": "FAIL"
+    },
+    "4": {
+      "mode": "impact",
+      "workers": "4",
+      "nodes": "625",
+      "iterations": "4",
+      "frames": "180",
+      "maxMomentumError": "0.333145792",
+      "maxBallisticError": "0.0439007495",
+      "initialEnergy": "40",
+      "peakEnergy": "40",
+      "peakSheetSpeed": "0.0843143893",
+      "meanMs": "1.634518",
+      "p95Ms": "2.273300",
+      "cpuMs": "2.951389",
+      "status": "FAIL"
+    },
+    "8": {
+      "mode": "impact",
+      "workers": "8",
+      "nodes": "625",
+      "iterations": "4",
+      "frames": "180",
+      "maxMomentumError": "0.333145792",
+      "maxBallisticError": "0.0439007495",
+      "initialEnergy": "40",
+      "peakEnergy": "40",
+      "peakSheetSpeed": "0.0843143893",
+      "meanMs": "1.573786",
+      "p95Ms": "2.289500",
+      "cpuMs": "3.559028",
+      "status": "FAIL"
+    }
+  },
+  "sheetImpactFrictionless": {
+    "mode": "impact-frictionless",
+    "workers": "4",
+    "nodes": "625",
+    "iterations": "4",
+    "frames": "180",
+    "maxMomentumError": "0.332979911",
+    "maxBallisticError": "0.0436963426",
+    "initialEnergy": "40",
+    "peakEnergy": "40",
+    "peakSheetSpeed": "0.0842791389",
+    "meanMs": "2.308230",
+    "p95Ms": "3.283700",
+    "cpuMs": "4.079861",
+    "status": "FAIL"
+  },
+  "sheetRelease": {
+    "mode": "release",
+    "workers": "4",
+    "nodes": "625",
+    "iterations": "4",
+    "frames": "180",
+    "maxMomentumError": "0.0223331862",
+    "maxBallisticError": "0.0130497465",
+    "initialEnergy": "940.519051",
+    "peakEnergy": "940.519051",
+    "peakSheetSpeed": "0.60427968",
+    "meanMs": "1.236835",
+    "p95Ms": "1.638500",
+    "cpuMs": "1.909722",
+    "status": "FAIL"
+  },
+  "volumeRelease": {
+    "mode": "strain",
+    "workers": "4",
+    "nodes": "8",
+    "frames": "180",
+    "iterations": "4",
+    "maxShapeMotion": "0.158569274",
+    "maxComError": "8.42346524e-05",
+    "maxMomentumError": "0.000163317651",
+    "minJ": "0.92984018",
+    "initialEnergy": "964.962802",
+    "peakEnergy": "964.962802",
+    "status": "PASS"
+  },
+  "evidenceArchiveSha256": "d3ca1625509564f55c383c0c9394996d458862180008c91182543edb2897cb96",
+  "observedSourceSha256": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp": "9e18274fcf2a783783c52ff2cfb52047488403a8efe9f2703b7ec8c2ef7cf4b2",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "ef9bb9169668f4de1ae9ea0aebe53747105d1c528c74963c608865efc8b16913",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "276adf12763cac115ae8f49a30a2ceb07ddc647af133480e2c330b3a292d1dea",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h": "f13dc738ac0ac17b7874d6f42c1086e609680554ab6acca25072312f674ab0d8",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalContact.h": "d9c677b2a7f1802f65e28441648fddcb11d6b16c1cf818d9de3870b713b0b21d",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalShell.h": "b3f0725517c76a77195fb2c66baf2c1541cd29c445be52dfaa85926bce3e3627",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalVolume.h": "a0b866d66418262a7cfafc376b1975c8815abb1a66a9968e14a5c0682ff208d9",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcActivation.h": "18878e11d05a12ad13a3a936f077ef4a88b1d3eda8f67b7d8375cf3574fb65f7",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdRows.h": "e4f2bb274e2b980fbb91b00501e6b360abf36429f53a197b2e61dcdd91c3b0a6",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "b5158877eff9a0c7b5a3f0fcc413ad2a51c0943644eee22ee63b24098cb885c7",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "7e625f49108cee801911c1b6d1185417e2cd397b2c2f848f870f52235ca7acdf",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "b4b1fc387bf57ffd41c78be19330b6b903213dd93964d50102fd1cffbfde9b81",
+    "physx/source/lowlevel/software/src/PxsDeformableNarrowPhase.h": "438de37dd84d8bf68990f2e36a615af84ea5df07d2e3640a732eb550343572eb",
+    "physx/source/lowlevel/software/src/PxsNphaseImplementationContext.cpp": "6c2a84ffed8bbed76d71281bfc75de34733a8d6a08bdb192efbafb2d8ed3f939",
+    "tools/avbd_probe_step_timer.h": "4f4fe604222ce5d62a1679842ad6053b7df845f05e7803ae744ffb630bde4520",
+    "tools/avbd_probe_volume_energy.h": "39e1d10cb150961e387b1f4ada7fdcccb5c5617fc6f9db3a27a8a71b2d355215",
+    "tools/avbd_probe_sheet_energy.h": "8fc9927dee1c118da8f3a505732451ae7f6906de61303df467eaa801b5ad7b74",
+    "tools/verify_particle3_shared_np.py": "c284ac5b4fe9f6df3004ae97c81c47349f1155e2b1185804093ba9b5c804ecbe",
+    "tools/avbd_nodal_release_probe.cpp": "da0f0bc125bee3f931cb90418121cb20f5235c054c0f8754f8d96a9e7bc95e82",
+    "tools/avbd_nodal_cloth_contact_probe.cpp": "e227ef302dcf19265798ac67f569f6cbec8a81e03a6f0744cebd5cd36c540380",
+    "tools/avbd_mixed_reaction_probe.cpp": "7f316b88dae8089b4dec67fa824cc557665814926c971bfd37054ac46f8fc723",
+    "tools/avbd_nodal_soft_contact_probe.cpp": "979fe8e485405cecf9833d008cd74e82d40fe2a9886691254f28e1b211bc2834",
+    "tools/avbd_nodal_volume_step_probe.cpp": "f5eff87752b85e1973634305d434b5085e75d18888477c506eda240ccdd7e6f9",
+    "tools/avbd_nodal_shell_probe.cpp": "10b3b10c6b602fe60ed2544135911f5cbf5b63b48e51d2ef3a5f28d4bd0d689f",
+    "tools/benchmark_avbd_mixed_reaction.py": "f1e7ee5b26573a1767a184e81f0813ed3b9f20fc4a1fc4c854666e10a8890755",
+    "tools/benchmark_particle3_flight.py": "cda05463642e1b9b35805d3e7af5e7befa8414ed19959a0a917f3ef45d1c80e3"
+  }
+}

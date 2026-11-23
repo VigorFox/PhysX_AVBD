@@ -1,0 +1,15 @@
+{
+  "spectrum": {
+    "minimum": -0.0787503798381396,
+    "negative": 1,
+    "maximum": 1.0000000734622945
+  },
+  "requestedMetric": 1.5347680353793537e-07,
+  "requestedCurvature": 1.5133367732778276e-07,
+  "requestedSlope": -1.5133363023395924e-07,
+  "stepMax": 0.009062712738043713,
+  "fullFrozenResidual": 1.2494118698078323e-06,
+  "actualCorrection": 80.08566296304699,
+  "contactGradientChange": 4.547473508864641e-13,
+  "maxStoredDifference": 1.6391277313232422e-07
+}

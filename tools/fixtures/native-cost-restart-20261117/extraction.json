@@ -1,0 +1,283 @@
+{
+  "archiveCommit": "b51642f3897b82632e9ff0a023d47f4600757153",
+  "base": "f9abbe0cd869136d20cba6462551bbb141a75cd0",
+  "archiveBranch": "codex/archive-particle3-20261117",
+  "sourceFilesVerified": 1198,
+  "originalChangedTracked": 85,
+  "originalUntracked": 1113,
+  "evidenceFiles": 332,
+  "byteArchiveSha256": "46ea6dde9f149170e347ddb4b051969904ff19278c5b1492f63abca561516525",
+  "operatorZipSha256": "d538920311ffd9a0ff902c3c8e180eff38d050715dce02179a82af0e53d672ef",
+  "operatorCandidates": [
+    {
+      "path": "docs/PARTICLE3_LOCAL_EXECUTION_20261117.md",
+      "size": 9889,
+      "sha256": "1bd6f0debe2720ec696d8c91072dc5a8e149cf85e363c54a6eed21bb79653cad",
+      "tracked": false
+    },
+    {
+      "path": "docs/REALTIME_ACCEPTANCE_PRECISION_20261117.md",
+      "size": 8526,
+      "sha256": "852d5c4bef1a01b48431181060d7382395e6986277a95aaca4a4c292b8d6c748",
+      "tracked": false
+    },
+    {
+      "path": "docs/RUNTIME_EFFICIENCY_AUDIT_20261117.md",
+      "size": 9978,
+      "sha256": "d4ea441f1d85e869e0c15abd51973128d94f3632f9f3ed7cad3a81a781e23348",
+      "tracked": false
+    },
+    {
+      "path": "docs/data/TEST_SCOPE_20261117.json",
+      "size": 406154,
+      "sha256": "981113a869192019426a161322b283dc4ab44d29e2f04be161eaf7a7cd590538",
+      "tracked": false
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalAssembly.h",
+      "size": 11611,
+      "sha256": "fdbab15df1cd8a7a55f6aeb768228fe371fe7b5d9c4154490c5216a3fec081cf",
+      "tracked": false
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalShell.h",
+      "size": 13679,
+      "sha256": "7162c22cb03d6df6d4491c283b17bd950f0d0a657a57714366d7c36e7746ba19",
+      "tracked": false
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalTet.h",
+      "size": 6087,
+      "sha256": "8c45f3573cfc6d9af2b422af51e6268c25ac65ccd30e9d926a8f508bc8bec12e",
+      "tracked": false
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdNonlinearGroup.h",
+      "size": 12492,
+      "sha256": "30e3948735099dc96d340839324fb55a32b74ca154b7f2e9db83d097f57ba9ea",
+      "tracked": true
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdPointJacobian.h",
+      "size": 790,
+      "sha256": "68bcd94d6bb2bda9a21956fb1cd21d412034cc198d26b6db164c6bcfafe42e77",
+      "tracked": false
+    },
+    {
+      "path": "tools/audit_avbd_test_scope.py",
+      "size": 7686,
+      "sha256": "4b8faf017d6def03b309f1ec0ba019759b171d0eaf220d78c7570c3422e078b3",
+      "tracked": false
+    },
+    {
+      "path": "tools/avbd_nodal_assembly_probe.cpp",
+      "size": 8199,
+      "sha256": "c138ab826737016cd32eb999beb639c77cb136fc2589db38c413218b39697e66",
+      "tracked": false
+    },
+    {
+      "path": "tools/avbd_nodal_shell_fixture.h",
+      "size": 6429,
+      "sha256": "1fd0316a268375db335f0b3aef9af50469a380101f6a518fd5d1ef18622905ef",
+      "tracked": false
+    },
+    {
+      "path": "tools/avbd_nodal_shell_probe.cpp",
+      "size": 7175,
+      "sha256": "8f32a8fbea5a7a116e8ae48bf1c4f9e4a18e9f55e2f48c66dd6fe1ff4f45f312",
+      "tracked": false
+    },
+    {
+      "path": "tools/avbd_nodal_shell_scene_probe.cpp",
+      "size": 12642,
+      "sha256": "fcd12158de258346112dcecfbdd798e9d04c4a9061f7bdd6d4134f5e49b51fa7",
+      "tracked": false
+    },
+    {
+      "path": "tools/avbd_nodal_tet_probe.cpp",
+      "size": 9068,
+      "sha256": "5cc53559aad92d2595c025b84d55e72f27fd3a4dc3f2555c2c5aff749b343c91",
+      "tracked": false
+    },
+    {
+      "path": "tools/run_avbd_nodal_assembly_probe.py",
+      "size": 551,
+      "sha256": "e922668fbabb2eefbecf145a6e4a57a00491fe7985c18b29e8238334b88fc607",
+      "tracked": false
+    },
+    {
+      "path": "tools/run_avbd_nodal_shell_probe.py",
+      "size": 517,
+      "sha256": "8e3fe7d677a3aa21e601f8208d24a0c953196b9d01d9854aee7a1b5eeeb0552f",
+      "tracked": false
+    },
+    {
+      "path": "tools/run_avbd_nodal_shell_scene_probe.py",
+      "size": 411,
+      "sha256": "44deef101d45014c7850bfd8c1641e06d5a45e8b14bfd7daed3c3812a919c121",
+      "tracked": false
+    },
+    {
+      "path": "tools/run_avbd_nodal_tet_probe.py",
+      "size": 545,
+      "sha256": "c6e8da9aac06a149bcc34fd4218c07a9c70ad0125307fda558c28ac97033cc32",
+      "tracked": false
+    },
+    {
+      "path": "tools/test_avbd_test_scope.py",
+      "size": 2190,
+      "sha256": "e1427fbd86d98e866d938c0d24c36f962d6905d0dde4fdc4e36c0ad771a4d698",
+      "tracked": false
+    }
+  ],
+  "archiveArtifacts": {
+    "latest-evidence.zip": {
+      "size": 3235053,
+      "sha256": "e3afbf0f63440b2fdb65690ae8e6718d109d91bae0aae6c38c082177788da8c6"
+    },
+    "operator-candidates.zip": {
+      "size": 128205,
+      "sha256": "d538920311ffd9a0ff902c3c8e180eff38d050715dce02179a82af0e53d672ef"
+    },
+    "original-status.txt": {
+      "size": 12882,
+      "sha256": "cc748dd55b4cb11363a81f5534065bb98c7d5ba462598844de6b1084e84000e9"
+    },
+    "README.md": {
+      "size": 2408,
+      "sha256": "4df2ebbdf505a3ee3d8ee052d0c1c026548593b97698e74b02c77a4258adb7cb"
+    },
+    "tracked.patch": {
+      "size": 1254770,
+      "sha256": "8a62987896dfe270d3ecc44ce2a05b5967cb8a791f866dfda2ec30fdb4833dba"
+    },
+    "uncommitted-bytes.zip": {
+      "size": 22750854,
+      "sha256": "46ea6dde9f149170e347ddb4b051969904ff19278c5b1492f63abca561516525"
+    }
+  },
+  "qualification": "Research extraction only; no experimental runtime imported",
+  "validationAndCounterexamples": [
+    {
+      "path": "tools/avbd_checkpoint_commands.json",
+      "sha256": "aa5d7b0bed4a09278d58c8a9a5b0c0589f219db0012c44b262998bec58ea8513",
+      "size": 10387
+    },
+    {
+      "path": "tools/avbd_convex_material_point_probe.cpp",
+      "sha256": "8607ec0b25a5a2321c66300cb3c41e58e5679c4699a9996beb7f5083bbe3ab95",
+      "size": 2657
+    },
+    {
+      "path": "tools/avbd_nodal_contact_scene_probe.cpp",
+      "sha256": "dfd14dd757167ddf5843c151b2dd3b236dcd7f4e90813bb597aa1dd19ac358ac",
+      "size": 17638
+    },
+    {
+      "path": "tools/avbd_nodal_star_asset.h",
+      "sha256": "b60fe404073cc4609e67d4f9a6316e100e9e352499fe7e4c6034cccebffe0e21",
+      "size": 4337
+    },
+    {
+      "path": "tools/avbd_nodal_tiled_scene_probe.cpp",
+      "sha256": "9aacd21745e81eb6f3636219b59bc36954453e7db9d5063f72ca4df643d5215a",
+      "size": 7944
+    },
+    {
+      "path": "tools/avbd_particle3_coupling_probe.cpp",
+      "sha256": "08c568571e59ec67c91075c0235b20a91ee2a6e6d9331aa18f75595ab503faf2",
+      "size": 4659
+    },
+    {
+      "path": "tools/avbd_particle3_group_probe.cpp",
+      "sha256": "f6dd4b7397800f2dbbf7a7e5b7225253ead5e391ea71e44f7795a6b23346ad15",
+      "size": 6683
+    },
+    {
+      "path": "tools/avbd_precision_scene_probe.cpp",
+      "sha256": "3a18567756085bb8e6e6486bcc542e829f77b9d941fe0029dd856389e176fb80",
+      "size": 5637
+    },
+    {
+      "path": "tools/avbd_shell_lifecycle_scene_probe.cpp",
+      "sha256": "c1ac469e93347cb38d28cdab7c93ad212364911373657836cd2fe860e714b695",
+      "size": 7002
+    },
+    {
+      "path": "tools/avbd_work_native_capacity_scene_probe.cpp",
+      "sha256": "21d20b15fcb91c03882359e0bc8151f8c86af36d0d7d7c0873c34ae6a710f77f",
+      "size": 2615
+    },
+    {
+      "path": "tools/benchmark_particle3_execution.py",
+      "sha256": "28af24e63b620c8badd41eaa4df6a131d55793bbf7e7eb5df2c98862da4b0236",
+      "size": 3737
+    },
+    {
+      "path": "tools/run_avbd_convex_material_point_probe.py",
+      "sha256": "35e0094a4b7562a356e58581b983bc95eb820fed98ea99c313218dcccfd90ec7",
+      "size": 430
+    },
+    {
+      "path": "tools/run_avbd_nodal_contact_scene_probe.py",
+      "sha256": "b5553f641ea0d9806144cd0856d0b1e83a5d45731dca3a78828805b7670f022e",
+      "size": 412
+    },
+    {
+      "path": "tools/run_avbd_nodal_tiled_scene_probe.py",
+      "sha256": "5f0874747742040839c2bbe83f1b3f302a36f837eb5299afbf880731f5f40887",
+      "size": 417
+    },
+    {
+      "path": "tools/run_avbd_particle3_coupling_probe.py",
+      "sha256": "17ce6d2338e979b60e677bc524e5c9ed65a8556a5d2a7dbc8aea3da8a38fa788",
+      "size": 549
+    },
+    {
+      "path": "tools/run_avbd_particle3_group_probe.py",
+      "sha256": "54b6c759bdb60d9e09b2fd2133bd88ed5320f55593d754cbeff96d1cf2850be0",
+      "size": 546
+    },
+    {
+      "path": "tools/run_avbd_precision_scene_probe.py",
+      "sha256": "0b5f2ce19c9f0618e95c8ac143f0e3f9f81d1a1e0290fa8526f2f3d6a314177d",
+      "size": 772
+    },
+    {
+      "path": "tools/run_avbd_shell_lifecycle_scene_probe.py",
+      "sha256": "0a6bb804347010510242e0a652aba4e7aa89477c1c44de490fc3883c57852237",
+      "size": 413
+    },
+    {
+      "path": "tools/run_avbd_work_native_capacity_scene_probe.py",
+      "sha256": "e13f7e693bf70cedc0ec1de5e8ad6ab62f79f5342a157668106169c49515397d",
+      "size": 418
+    },
+    {
+      "path": "tools/run_avbd_work_plane_scene_probe.py",
+      "sha256": "582b88c24322d31667a9af40f5015105f92672c4cd443779ca723758384b3055",
+      "size": 446
+    },
+    {
+      "path": "tools/benchmark-results/particle3-local-execution-20261117/accepted-analysis.json",
+      "sha256": "dc1e8041619b405380d6e052f41c62eb24bea47fa69cb66336ded5c7332b1d71",
+      "size": 6663
+    },
+    {
+      "path": "tools/benchmark-results/particle3-local-execution-20261117/accepted-regression/validation.json",
+      "sha256": "0b790c30756794138fd8737e7e8de461050d84fe3fa6ac3ee627da50eae5fee7",
+      "size": 6281194
+    },
+    {
+      "path": "tools/benchmark-results/particle3-local-execution-20261117/drape-work-audit.json",
+      "sha256": "8d918c6cee91015efb18dead4dfc5f230a7469e3828c3b119183944ff0b32a0d",
+      "size": 950
+    },
+    {
+      "path": "tools/benchmark-results/acceptance-precision-20261117/summary.json",
+      "sha256": "d7fa9f08f46da6a21bdf4a6348dd57c6af4cc1a7e1eeaa59ba289289f48754cc",
+      "size": 7546
+    }
+  ],
+  "validationZipSha256": "b780d8a85232c0fb0f3442833ccadbae255155ba0bc6d12cc6d5cb3bcb71ab35"
+}

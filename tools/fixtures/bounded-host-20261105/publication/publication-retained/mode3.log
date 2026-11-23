@@ -1,0 +1,10 @@
+[COMMON_BDF] linearError=1.19209517e-07
+[COMMON_PHYSICAL] overlap=1 depth=0 driveForce=0
+[COMMON_PROGRAM_SCENE] mode=3 fetchedFinite=PASS
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=2 rows=6 colors=2 sweeps=11 error=2.89849602e-11 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=2 rows=0 colors=2 sweeps=5 error=1.08420217e-19 status=converged
+[AVBD_COMMON_TRIAL] iteration=0 search=0 fraction=1 initial=1.2134839902203978 residual=1.9262653162321424e-10 work=-0.72221450848157842 slope=-1.4444319641862291 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=0.0190704304 body=0 coordinate=5
+[AVBD_COMMON_STEP] iteration=0 blocks=2 groups=6 fraction=1 requested=1900.00241 initial=1.21348399 residual=1.92626532e-10 activeGroups=2 materialProducts=0 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=412 batches=412 sweeps=16 tasks=0 peakTasks=1 workers=4 batchLimit=32

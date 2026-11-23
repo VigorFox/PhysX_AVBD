@@ -1,0 +1,14 @@
+{
+  "pairs": 6,
+  "scenes": [
+    "cloth",
+    "volume"
+  ],
+  "workers": [
+    4,
+    8
+  ],
+  "order": "swap benchmark binary labels; use runtime identities to map candidate/reference",
+  "reason": "Four same-binary A/A pairs showed large per-run changes, including a 1.60 cost ratio on cloth. Fixed before first A/B batch completed; retain all 14 pairs, no sample exclusions or threshold changes.",
+  "conditions": "run serially, outside correctness and diagnostic runs"
+}

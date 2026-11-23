@@ -1,0 +1,22 @@
+{
+  "file": "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\compression-strict-final.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "strict full response",
+  "dofs": 750,
+  "groups": 100,
+  "activeNormalForces": 75,
+  "maximumForce": 66.36828622813908,
+  "symmetry": 2.1827872842550278e-11,
+  "stationarity": 5.684341886080801e-13,
+  "relativeStationarity": 4.282430952649952e-15,
+  "unitStepRoot": 1.2497381601805913e-14,
+  "relativeUnitStepRoot": 1.8830351530920237e-16,
+  "minimumNormalResidual": -1.2497381601805913e-14,
+  "tableIterations": 13,
+  "materialProducts": 2428,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false
+}

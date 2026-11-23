@@ -1,0 +1,500 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -126,6 +126,59 @@
+     void runInternal() PX_OVERRIDE { mContext.runColorLane(mSlot); }
+     const char* getName() const PX_OVERRIDE { return "AVBD.colorBlocks"; }
+ };
++// One task per active leaf slot. A block can reuse its slots only after
++// every release in its own window, independently of other same-color blocks.
++class AvbdReadyLeafTask : public Cm::Task, public PxUserAllocated
++{
++    AvbdDynamicsContext& mContext;
++public:
++    PxU32 owner=0, leaf=0;
++    AvbdReadyLeafTask(AvbdDynamicsContext& context,PxU64 id):Cm::Task(id),mContext(context) {}
++    void runInternal() PX_OVERRIDE { mContext.runReadyLeaf(owner,leaf); }
++    void submit(PxTaskManager& manager)
++    {
++        mTm=&manager;
++        manager.getCpuDispatcher()->submitTask(*this);
++    }
++    void release() PX_OVERRIDE;
++    const char* getName() const PX_OVERRIDE { return "AVBD.localTreeLeaf"; }
++};
++
++struct AvbdReadyWork : PxUserAllocated
++{
++    struct Block
++    {
++        AvbdLocalBlockState state;
++        AvbdNodalTrial nodalTrial;
++        PxU32 begin=0,end=0,count=0,rootStride=0,scratch=0,slot=0,slots=0;
++        PxU32 next=0,inlineLeaf=0,attempt=0,windows=0,external=0;
++        PxU64 jobs=0;
++        volatile PxI32 remaining=0;
++    };
++    PxArray<Block> blocks;
++    PxArray<AvbdReadyLeafTask*> tasks;
++    PxArray<PxI32> pending;
++    PxArray<AvbdNodalAssembly> nodal;
++    PxArray<AvbdNodalEnergy> energy;
++    PxArray<AvbdLocalPartial> rigid;
++    PxU32 cursor=PX_MAX_U32;
++    PxU64 start=0,cohorts=0,multiBlockCohorts=0;
++    ~AvbdReadyWork() { for(auto* task:tasks)PX_DELETE(task); }
++};
++
++void AvbdReadyLeafTask::release()
++{
++    const PxU32 block=owner;
++    auto& state=mContext.mLocalWork->blocks[block];
++    if(PxAtomicDecrement(&state.remaining)==0)
++    {
++        PX_SIMD_GUARD;
++        if(mContext.advanceReadyBlock(block))
++            mContext.mColorContinuation->removeReference();
++    }
++}
++
++
+ } // namespace Dy
+ } // namespace physx
+ 
+@@ -1261,7 +1314,6 @@
+     else if(stage==IncidenceHistoryStage)for(PxU32 i=begin;i<end;++i)prepareIncidenceHistory(i);
+     else if(stage==NodalLoadStage)for(PxU32 i=begin;i<end;++i)conditionNodalLoad(i);
+     else if(stage==NodalMatchStage)for(PxU32 i=begin;i<end;++i)nominateNodalPartner(i);
+-    else if(stage==3)for(PxU32 i=begin;i<end;++i)solveLocalWorkJob(i);
+     else if(stage==2)for(PxU32 i=begin;i<end;++i)
+         validateLocalRow(i<mContactRowCount?i:mNativeMaterialEnd-mNodalContacts.size()+i-mContactRowCount);
+     else if(stage==1)applyDualRange(begin,end);
+@@ -1540,14 +1592,13 @@
+         mStep.localPrimalMaxRows=PxMax(mStep.localPrimalMaxRows,w.maxRows);
+         return submitLocalWave(stage,w.count,NULL,NULL,w.first);
+     }
+-    PxU32& cursor=stage==NodalImpactStage?mStep.impactCursor:stage==IncidenceHistoryStage?mStep.historyCursor:stage==NodalLoadStage?mStep.loadCursor:stage==NodalMatchStage?mStep.nominationCursor:stage==3?mLocalWork->cursor:stage==2?mStep.queryCursor:stage==1?mStep.dualCursor:mStep.localCursor;
+-    const PxU32 end=stage==NodalImpactStage?mNodalImpactRows.size():stage==IncidenceHistoryStage?incidenceHistoryEnd(cursor>=incidenceHistoryEnd(false)):stage==NodalLoadStage?mNodalContacts.size():stage==NodalMatchStage?nominationJobs():stage==3?mLocalWork->jobs():stage==2?mContactRowCount+mNodalContacts.size():stage==1?localDualRows():localColorStart(mStep.nextColor+1);
+-    if(stage==3)++mStep.tiledWaves;
++    PxU32& cursor=stage==NodalImpactStage?mStep.impactCursor:stage==IncidenceHistoryStage?mStep.historyCursor:stage==NodalLoadStage?mStep.loadCursor:stage==NodalMatchStage?mStep.nominationCursor:stage==2?mStep.queryCursor:stage==1?mStep.dualCursor:mStep.localCursor;
++    const PxU32 end=stage==NodalImpactStage?mNodalImpactRows.size():stage==IncidenceHistoryStage?incidenceHistoryEnd(cursor>=incidenceHistoryEnd(false)):stage==NodalLoadStage?mNodalContacts.size():stage==NodalMatchStage?nominationJobs():stage==2?mContactRowCount+mNodalContacts.size():stage==1?localDualRows():localColorStart(mStep.nextColor+1);
+     const PxU32 workers=mStep.continuation?PxMax(1u,PxMin(32u,mStep.workers)):1u;
+     // Every phase queues bounded independent jobs, with one fan-in before
+     // changing the color, dual epoch or high-degree reduction level.
+     const PxU32 taskLimit=workers>1?workers*LocalQueueDepth:1;
+-    const PxU32 itemLimit=stage==3?1u:stage==1?PxU32(LocalDualBatchLimit):32u;
++    const PxU32 itemLimit=stage==1?PxU32(LocalDualBatchLimit):32u;
+     if(stage==0 && cursor==mColorOffsets[mStep.nextColor])
+     {
+         // One linear cost scan per color, with no persistent topology cache.
+@@ -1577,16 +1628,6 @@
+             starts[count]=first;stops[count]=first+size;cursor+=size;++count;
+             mStep.localDualMaxRows=PxMax(mStep.localDualMaxRows,size);mStep.localRows+=size;
+             continue;
+-        }
+-        if(stage==3)
+-        {
+-            const auto& work=*mLocalWork;
+-            const PxU32 state=work.phase==AvbdLocalWork::Direction || work.phase==AvbdLocalWork::Accept?cursor:
+-                work.nodes[(work.phase==AvbdLocalWork::Assemble || work.phase==AvbdLocalWork::Trial)?
+-                    work.leaves[cursor]:work.levels[work.level][cursor]].state;
+-            // The leaf kernel already returns for a completed local search.
+-            // Avoid submitting its no-op jobs in later bounded search rounds.
+-            if(work.states[state].done){++cursor;continue;}
+         }
+         starts[count]=cursor;PxU32 references=0,physicalBlocks=0;
+         while(cursor<end && cursor-starts[count]<itemLimit)
+@@ -1620,7 +1661,6 @@
+         else if(stage==2)mStep.localQueryMaxRows=PxMax(mStep.localQueryMaxRows,cursor-starts[count]);
+         else if(stage==NodalMatchStage)mStep.nominationMaxRows=PxMax(mStep.nominationMaxRows,references);
+         if(stage==1)mStep.localRows+=cursor-starts[count];
+-        else if(stage==3)mStep.tiledJobs+=cursor-starts[count];
+         else if(stage==0)mStep.localBlocks+=physicalBlocks;
+         ++count;
+     }
+@@ -1680,61 +1720,225 @@
+     solveLocalBatch(starts?starts[0]:firstTile,stops?stops[0]:firstTile+1,stage,0);finishLocalProfileWave();return true;
+ }
+ 
++void AvbdDynamicsContext::mergeReadyChildren(PxU32 owner,PxU32 a,PxU32 b)
++{
++    auto& work=*mLocalWork;
++    const auto& block=work.blocks[owner];
++    const bool nodal=block.state.body>=mBodies.size(),trial=block.attempt!=0;
++    if(!nodal)
++    {
++        AvbdLocalReductionArgs args={&work.rigid[a],&work.rigid[b],&work.rigid[a],trial};
++        mKernels.launch(AVBD_LOCAL_REDUCTION,&args);
++    }
++    else if(trial)
++    {
++        work.energy[a].energy+=work.energy[b].energy;
++        work.energy[a].valid&=work.energy[b].valid;
++    }
++    else work.nodal[a].add(work.nodal[b]);
++}
++
++// The right child's first leaf uniquely identifies each binary join. Odd
++// tails advance without allocating or copying a unary partial. Only the last
++// child writes the parent, and the next trial starts after every leaf release.
++void AvbdDynamicsContext::runReadyLeaf(PxU32 owner,PxU32 leaf)
++{
++    auto& work=*mLocalWork;
++    const auto& block=work.blocks[owner];
++    const auto& state=block.state;
++    const bool nodal=state.body>=mBodies.size(),trial=block.attempt!=0;
++    const PxU32 begin=block.begin+leaf*AvbdLocalWork::RowLimit;
++    const PxU32 end=begin+PxMin(PxU32(AvbdLocalWork::RowLimit),block.end-begin);
++    const PxU32 slot=block.scratch+leaf;
++    const PxU64 start=mStep.profile?PxTime::getCurrentCounterValue():0;
++    if(mStep.countNodalSolves)PxAtomicMax(&mPeakPrimalTasks,PxAtomicIncrement(&mActivePrimalTasks));
++    if(!nodal)sampleLocalBlock(state,begin,end,work.rigid[slot],trial);
++    else if(trial)sampleNodalTrial(state.body,begin,end,block.nodalTrial,work.energy[slot]);
++    else
++    {
++        work.nodal[slot]=AvbdNodalAssembly();
++        assembleNodalRows(state.body,begin,end,work.nodal[slot]);
++    }
++    for(PxU32 stride=1;stride<block.rootStride;stride*=2)
++    {
++        const PxU32 left=leaf & ~(2*stride-1),right=left+stride;
++        if(right>=block.count)continue;
++        const PxU32 a=block.scratch+left,b=block.scratch+right;
++        if(PxAtomicDecrement(&work.pending[b]))break;
++        mergeReadyChildren(owner,a,b);
++        work.pending[b]=2;
++    }
++    if(mStep.countNodalSolves)PxAtomicDecrement(&mActivePrimalTasks);
++    if(mStep.profile)PxAtomicAdd(&mStep.localTaskTicks[3],PxI64(PxTime::getCurrentCounterValue()-start));
++}
++
++void AvbdDynamicsContext::issueReadyWindow(PxU32 owner)
++{
++    auto& work=*mLocalWork;
++    auto& block=work.blocks[owner];
++    const PxU32 first=block.next,count=PxMin(block.slots,block.count-first);
++    block.next+=count;
++    block.inlineLeaf=first;
++    block.remaining=PxI32(count); // caller's leaf holds the window open during submission
++    ++block.windows;
++    block.jobs+=count;
++    block.external+=count-1;
++    for(PxU32 i=1;i<count;++i)
++    {
++        auto* task=work.tasks[block.slot+i-1];
++        task->owner=owner;task->leaf=first+i;
++        task->submit(*mStep.continuation->getTaskManager());
++    }
++}
++
++bool AvbdDynamicsContext::advanceReadyBlock(PxU32 owner)
++{
++    auto& work=*mLocalWork;
++    auto& block=work.blocks[owner];
++    auto& state=block.state;
++    while(!mLocalDomainFailed)
++    {
++        if(block.next==block.count)
++        {
++            const PxU64 start=mStep.profile?PxTime::getCurrentCounterValue():0;
++            // count-1 binary merges and one direction/accept for a full pass.
++            block.jobs+=block.count;
++            // The last leaf release already joined both root subtrees.
++            mergeReadyChildren(owner,block.scratch,block.scratch+block.rootStride);
++            if(state.body<mBodies.size())
++            {
++                if(block.attempt)finishLocalBlockTrial(state,work.rigid[block.scratch]);
++                else directLocalBlock(state,work.rigid[block.scratch]);
++            }
++            else
++            {
++                auto& trial=block.nodalTrial;
++                const auto& rows=work.nodal[block.scratch];
++                if(block.attempt)acceptNodalTrial(state.body,rows,trial,work.energy[block.scratch]);
++                else beginNodalTrial(state.body,rows,trial);
++                state.done=trial.done;
++            }
++            if(mStep.profile)PxAtomicAdd(&mStep.localTaskTicks[3],PxI64(PxTime::getCurrentCounterValue()-start));
++            if(state.done || mLocalDomainFailed || block.attempt==AvbdLocalWork::SearchLimit)
++            {
++                state.done=true;
++                break;
++            }
++            ++block.attempt;
++            block.next=0;
++        }
++        // An oversized star or a difficult search can be resumed after
++        // this group drains. Bound work even when submitTask runs inline.
++        if(block.windows==LocalQueueDepth)return true;
++        issueReadyWindow(owner);
++        runReadyLeaf(owner,block.inlineLeaf);
++        if(PxAtomicDecrement(&block.remaining))return false;
++    }
++    return true;
++}
++
++bool AvbdDynamicsContext::prepareReadyGroup(const PxArray<PxU32>& blocks,PxU32 end,PxU32 limit)
++{
++    auto& work=*mLocalWork;
++    PxU32 leaves=0,slots=0;
++    bool nodes=false,rigids=false;
++    while(work.cursor<end && slots<limit && !mLocalDomainFailed)
++    {
++        const PxU32 b=blocks[work.cursor];
++        if(b>=mBlocks.size()){++work.cursor;continue;}
++        const PxU32 lo=mRowProgram.blockOffsets[b],hi=mRowProgram.blockOffsets[b+1];
++        const PxU32 rows=hi-lo;
++        if(rows<=AvbdLocalWork::RowLimit){++work.cursor;continue;}
++        if(limit>1 && limit-slots==1)break;
++        ++work.cursor;
++        auto& block=*work.blocks.insert();
++        block.state.body=b;
++        if(b<mBodies.size()){block.state.original=PxTransform(mBodies[b].p,mBodies[b].q);rigids=true;}
++        else nodes=true;
++        block.begin=lo;block.end=hi;block.count=1+(rows-1)/AvbdLocalWork::RowLimit;
++        block.rootStride=1u<<PxHighestSetBit(block.count-1);
++        block.scratch=leaves;leaves+=block.count;
++        block.slot=slots;block.slots=PxMin(block.count,limit-slots);slots+=block.slots;
++        ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledLeaves+=block.count;
++        mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,rows);
++    }
++    if(work.blocks.empty())return false;
++    work.pending.clear();work.pending.resize(leaves,2);
++    if(nodes){work.nodal.resize(leaves);work.energy.resize(leaves);}
++    if(rigids)work.rigid.resize(leaves);
++    while(work.tasks.size()+1<slots)
++        work.tasks.pushBack(PX_NEW(AvbdReadyLeafTask)(*this,mContextID));
++    const PxU64 bytes=PxU64(work.blocks.capacity())*sizeof(AvbdReadyWork::Block)+
++        PxU64(work.pending.capacity())*sizeof(PxI32)+PxU64(work.nodal.capacity())*sizeof(AvbdNodalAssembly)+
++        PxU64(work.energy.capacity())*sizeof(AvbdNodalEnergy)+PxU64(work.rigid.capacity())*sizeof(AvbdLocalPartial)+
++        PxU64(work.tasks.capacity())*sizeof(AvbdReadyLeafTask*)+PxU64(work.tasks.size())*sizeof(AvbdReadyLeafTask);
++    mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,bytes);
++    mStep.localQueuePeak=PxMax(mStep.localQueuePeak,slots);
++    return true;
++}
++
+ bool AvbdDynamicsContext::dispatchLocalWork()
+ {
+     const bool baked=mColorTasks && !mColorTasks->offsets.empty();
+-    if(baked && mColorTasks->wideOffsets[mStep.nextColor]==mColorTasks->wideOffsets[mStep.nextColor+1])return true;
+-    if(!mLocalWork)
+-    {
+-        const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
+-        const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
+-        bool hasNodes=false,hasRigids=false;
+-        for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
+-        {
+-            const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
+-            const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
+-            if(end-begin<=AvbdLocalWork::RowLimit)continue;
+-            if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
+-            mLocalWork->add(b,begin,end);
+-            if(b<mBodies.size())
+-            {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
+-            else hasNodes=true;
+-            ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
+-        }
+-        if(!mLocalWork)return true;
+-        if(hasNodes)
+-        {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
+-        if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
+-        mStep.tiledLeaves+=mLocalWork->leaves.size();
+-        mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
+-            sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
+-            PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
+-            PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
+-    }
++    const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
++    const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
++    const PxU32 first=offsets[mStep.nextColor],end=offsets[mStep.nextColor+1];
++    if(first==end)return true;
++    if(!mLocalWork)mLocalWork=PX_NEW(AvbdReadyWork)();
+     auto& work=*mLocalWork;
+-    while(!mLocalDomainFailed)
+-    {
+-        if(work.cursor<work.jobs())
+-        {if(!dispatchLocalBatch(3))return false;continue;}
+-        work.cursor=0;
+-        switch(work.phase)
+-        {
+-        case AvbdLocalWork::Assemble:work.phase=AvbdLocalWork::ReduceAssembly;work.level=0;break;
+-        case AvbdLocalWork::ReduceAssembly:
+-            if(++work.level==work.levels.size())work.phase=AvbdLocalWork::Direction;break;
+-        case AvbdLocalWork::Direction:work.phase=AvbdLocalWork::Trial;break;
+-        case AvbdLocalWork::Trial:work.phase=AvbdLocalWork::ReduceTrial;work.level=0;break;
+-        case AvbdLocalWork::ReduceTrial:
+-            if(++work.level==work.levels.size())work.phase=AvbdLocalWork::Accept;break;
+-        case AvbdLocalWork::Accept:
+-            bool done=true;for(const auto& state:work.states)done &= state.done;
+-            if(done){PX_DELETE(mLocalWork);mLocalWork=NULL;return true;}
+-            if(++work.search>=AvbdLocalWork::SearchLimit){PxAtomicExchange(&mLocalDomainFailed,1);break;}
+-            work.phase=AvbdLocalWork::Trial;break;
+-        }
+-    }
+-    PX_DELETE(mLocalWork);mLocalWork=NULL;return true;
+-}
++    const PxU32 workers=mStep.continuation?PxClamp(mStep.workers,1u,32u):1u;
++    const PxU32 limit=workers==1?1u:workers*LocalQueueDepth;
++    if(work.cursor==PX_MAX_U32)work.cursor=first;
++    do
++    {
++        // The color continuation and its caller reservation have drained.
++        if(!work.blocks.empty())
++        {
++            bool unfinished=false;
++            for(auto& b:work.blocks)
++            {
++                mStep.submittedTasks+=b.external;
++                mStep.tiledWaves+=b.windows;
++                mStep.tiledJobs+=b.jobs;
++                b.windows=0;b.jobs=0;b.external=0;
++                unfinished|=!b.state.done;
++            }
++            if(mStep.profile)
++            {
++                const auto span=PxTime::getCurrentCounterValue()-work.start;
++                mStep.localWaveTicks[3]+=span;
++                mStep.localCapacityTicks[3]+=span*workers;
++                ++mStep.localWaves[3];
++            }
++            if(!unfinished || mLocalDomainFailed)work.blocks.clear();
++        }
++        if(work.blocks.empty() && !prepareReadyGroup(blocks,end,limit))
++        {work.cursor=PX_MAX_U32;return true;}
++        PxU32 active=0;
++        for(const auto& block:work.blocks)if(!block.state.done)++active;
++        PX_ASSERT(active);
++        ++work.cohorts;
++        if(active>1)++work.multiBlockCohorts;
++        if(mStep.profile)work.start=PxTime::getCurrentCounterValue();
++        if(workers>1)
++        {
++            if(!mColorContinuation)mColorContinuation=PX_NEW(AvbdAdvanceTask)(*this,mContextID);
++            mColorContinuation->reserveWave(*mStep.continuation->getTaskManager(),active+1);
++        }
++        // Offer every independent block before consuming its caller leaf.
++        for(PxU32 i=0;i<work.blocks.size();++i)if(!work.blocks[i].state.done)issueReadyWindow(i);
++        for(PxU32 i=0;i<work.blocks.size();++i)
++        {
++            auto& block=work.blocks[i];
++            if(block.state.done)continue;
++            runReadyLeaf(i,block.inlineLeaf);
++            if(!PxAtomicDecrement(&block.remaining) && advanceReadyBlock(i) && workers>1)
++                mColorContinuation->removeReference();
++        }
++        if(workers>1 && !mColorContinuation->completeInline())return false;
++    } while(true);
++}
++
+ 
+ void AvbdDynamicsContext::compileNodalSurfaceRows()
+ {
+@@ -3699,6 +3903,11 @@
+ 		std::fprintf(stderr,"[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=%u iterations=%u\n",
+ 			unsigned(mStep.lastCoupledDomainStationary),mStep.iteration);
+ complete:
++    if(mStep.localBudget && std::getenv("PHYSX_AVBD_COMMON_STATS"))
++        std::fprintf(stderr,"[AVBD_READY_TREE] cohorts=%llu multiBlockCohorts=%llu leafWindows=%llu\n",
++            static_cast<unsigned long long>(mLocalWork?mLocalWork->cohorts:0),
++            static_cast<unsigned long long>(mLocalWork?mLocalWork->multiBlockCohorts:0),
++            static_cast<unsigned long long>(mStep.tiledWaves));
+     PX_DELETE(mLocalWork);mLocalWork=NULL;
+     const PxU64 profileEnd=mStep.profile?PxTime::getCurrentCounterValue():0;
+     if(mStep.localBudget && std::getenv("PHYSX_AVBD_COMMON_STATS"))
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
+@@ -42,7 +42,8 @@
+ struct AvbdCommonProgram;
+ struct AvbdCommonPublication;
+ struct AvbdBoundedResponse;
+-struct AvbdLocalWork;
++class AvbdReadyLeafTask;
++struct AvbdReadyWork;
+ struct AvbdLocalBlockState;
+ struct AvbdLocalPartial;
+ struct AvbdColorTasks;
+@@ -394,6 +395,7 @@
+ private:
+ 	friend class AvbdBlockSolveTask;
+     friend class AvbdColorLane;
++    friend class AvbdReadyLeafTask;
+ 	friend class AvbdAdvanceTask;
+ 	void compileBlockColors();
+ 	void advancePrimal();
+@@ -420,7 +422,11 @@
+         PxU32 peer=PX_MAX_U32,const PxVec3* peerCandidate=NULL);
+     void sampleNodalTrial(PxU32 block,PxU32 begin,PxU32 end,const AvbdNodalTrial& trial,AvbdNodalEnergy& out);
+     void acceptNodalTrial(PxU32 block,const AvbdNodalAssembly& rows,AvbdNodalTrial& trial,const AvbdNodalEnergy& sample);
+-    void solveLocalWorkJob(PxU32 job);
++    bool prepareReadyGroup(const PxArray<PxU32>& blocks,PxU32 end,PxU32 limit);
++    void mergeReadyChildren(PxU32 owner,PxU32 a,PxU32 b);
++    void runReadyLeaf(PxU32 owner,PxU32 leaf);
++    void issueReadyWindow(PxU32 owner);
++    bool advanceReadyBlock(PxU32 owner);
+     void sampleLocalBlock(const AvbdLocalBlockState& state,PxU32 begin,PxU32 end,AvbdLocalPartial& partial,bool trial);
+     void directLocalBlock(AvbdLocalBlockState& state,const AvbdLocalPartial& partial);
+     void finishLocalBlockTrial(AvbdLocalBlockState& state,const AvbdLocalPartial& partial);
+@@ -690,7 +696,7 @@
+     PxArray<AvbdColorLane*> mColorLanes;
+     AvbdCommonPublication* mCommonPublication=NULL;
+     AvbdBoundedResponse* mBoundedResponse=NULL;
+-    AvbdLocalWork* mLocalWork=NULL;
++    AvbdReadyWork* mLocalWork=NULL;
+     PxU32 mBoundedCursor=0;
+ 	PxArray<PxU32> mColorOffsets,mColorBlocks;
+ 	volatile PxI32 mColorCursor=0;
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp
+@@ -2251,53 +2251,6 @@
+     for(PxU32 search=0;search<AvbdLocalWork::SearchLimit && !state.done && !mLocalDomainFailed;++search)
+     {sampleLocalBlock(state,begin,end,partial,true);finishLocalBlockTrial(state,partial);}
+     return state.result;
+-}
+-
+-void AvbdDynamicsContext::solveLocalWorkJob(PxU32 job)
+-{
+-    auto& work=*mLocalWork;
+-    if(work.phase==AvbdLocalWork::Direction || work.phase==AvbdLocalWork::Accept)
+-    {
+-        auto& state=work.states[job];if(state.done)return;
+-        if(state.body>=mBodies.size())
+-        {
+-            auto& trial=work.nodalTrials[job];auto& rows=work.nodal[state.root];
+-            if(work.phase==AvbdLocalWork::Direction)beginNodalTrial(state.body,rows,trial);
+-            else
+-            {
+-                acceptNodalTrial(state.body,rows,trial,work.nodalEnergy[state.root]);
+-            }
+-            state.done=trial.done || (work.phase==AvbdLocalWork::Accept && work.search+1==AvbdLocalWork::SearchLimit);
+-            return;
+-        }
+-        if(work.phase==AvbdLocalWork::Direction)directLocalBlock(state,work.partials[state.root]);
+-        else finishLocalBlockTrial(state,work.partials[state.root]);
+-        return;
+-    }
+-    const bool leaf=work.phase==AvbdLocalWork::Assemble || work.phase==AvbdLocalWork::Trial;
+-    const PxU32 id=leaf?work.leaves[job]:work.levels[work.level][job];const auto& node=work.nodes[id];
+-    const auto& state=work.states[node.state];if(state.done)return;
+-    if(state.body>=mBodies.size())
+-    {
+-        if(work.phase==AvbdLocalWork::Assemble){assembleNodalRows(state.body,node.begin,node.end,work.nodal[id]);return;}
+-        if(work.phase==AvbdLocalWork::ReduceAssembly)
+-        {work.nodal[id]=work.nodal[node.left];work.nodal[id].add(work.nodal[node.right]);return;}
+-        if(work.phase==AvbdLocalWork::Trial)
+-        {
+-            sampleNodalTrial(state.body,node.begin,node.end,work.nodalTrials[node.state],work.nodalEnergy[id]);return;
+-        }
+-        if(work.phase==AvbdLocalWork::ReduceTrial)
+-        {
+-            const auto& a=work.nodalEnergy[node.left];const auto& b=work.nodalEnergy[node.right];
+-            work.nodalEnergy[id]={a.energy+b.energy,a.valid && b.valid};return;
+-        }
+-    }
+-    if(leaf)sampleLocalBlock(state,node.begin,node.end,work.partials[id],work.phase==AvbdLocalWork::Trial);
+-    else
+-    {
+-        AvbdLocalReductionArgs args={&work.partials[node.left],&work.partials[node.right],&work.partials[id],work.phase==AvbdLocalWork::ReduceTrial};
+-        mKernels.launch(AVBD_LOCAL_REDUCTION,&args);
+-    }
+ }
+ 
+ void AvbdDynamicsContext::solvePrimalBody(PxU32 i, PxReal invH2,

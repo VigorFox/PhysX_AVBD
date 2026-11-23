@@ -1,0 +1,147 @@
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51535108e-11 stationRelative=9.53981204e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53981204e-11 ms=12.4093 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51535108e-11 stationRelative=9.53981204e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53981204e-11 ms=73.6092 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51535108e-11 stationRelative=9.53981204e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53981204e-11 ms=15.1339 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51535108e-11 stationRelative=9.53981204e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53981204e-11 ms=76.7599 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51499109e-11 stationRelative=9.53928977e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53928977e-11 ms=11.8084 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51499109e-11 stationRelative=9.53928977e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53928977e-11 ms=79.0225 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51499109e-11 stationRelative=9.53928977e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53928977e-11 ms=12.9121 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51499109e-11 stationRelative=9.53928977e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.53928977e-11 ms=62.8522 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009454e-11 stationRelative=6.57623208e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623208e-11 ms=5.8179 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009454e-11 stationRelative=6.57623208e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623208e-11 ms=21.2151 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009454e-11 stationRelative=6.57623208e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623208e-11 ms=6.1754 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009454e-11 stationRelative=6.57623208e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623208e-11 ms=35.499 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009553e-11 stationRelative=6.57623386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623386e-11 ms=5.1577 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009553e-11 stationRelative=6.57623386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623386e-11 ms=39.8756 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009553e-11 stationRelative=6.57623386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623386e-11 ms=5.2353 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009553e-11 stationRelative=6.57623386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623386e-11 ms=22.4941 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=2.74421528e-11 stationRelative=9.12640525e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=60 residual=9.12640525e-11 ms=13.3774 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=2.74421528e-11 stationRelative=9.12640525e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=60 residual=9.12640525e-11 ms=52.7435 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37945867e-12 stationRelative=9.77403212e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.77403212e-11 ms=7.3334 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37945867e-12 stationRelative=9.77403212e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.77403212e-11 ms=27.1104 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=1.16508256e-11 stationRelative=8.90762991e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=59 residual=8.90762991e-11 ms=7.5605 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=1.16508256e-11 stationRelative=8.90762991e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=59 residual=8.90762991e-11 ms=38.0619 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37949693e-12 stationRelative=9.77414386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.77414386e-11 ms=5.9229 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37949693e-12 stationRelative=9.77414386e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.77414386e-11 ms=32.7867 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48145901e-12 stationRelative=6.18803865e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18803865e-11 ms=9.3133 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48145901e-12 stationRelative=6.18803865e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18803865e-11 ms=46.5068 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48145901e-12 stationRelative=6.18803865e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18803865e-11 ms=10.3302 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48145901e-12 stationRelative=6.18803865e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18803865e-11 ms=49.5079 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48143952e-12 stationRelative=6.18795324e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18795324e-11 ms=11.0476 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48143952e-12 stationRelative=6.18795324e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18795324e-11 ms=83.5706 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48143952e-12 stationRelative=6.18795324e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18795324e-11 ms=11.2076 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48143952e-12 stationRelative=6.18795324e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18795324e-11 ms=62.4985 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39413811e-11 stationRelative=9.42869785e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.42869785e-11 ms=336.037 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39413811e-11 stationRelative=9.42869785e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.42869785e-11 ms=1207.97 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39476215e-11 stationRelative=9.32026432e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.32026432e-11 ms=618.41 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39476215e-11 stationRelative=9.32026432e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.32026432e-11 ms=497.564 status=PASS
+[LOCAL_RESPONSE_BATCH] cases=36 failed=0
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51382663e-11 stationRelative=9.54015184e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54015184e-11 ms=11.3246 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51382663e-11 stationRelative=9.54015184e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54015184e-11 ms=50.1045 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51382663e-11 stationRelative=9.54015184e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54015184e-11 ms=9.1316 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51382663e-11 stationRelative=9.54015184e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54015184e-11 ms=50.3252 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51478518e-11 stationRelative=9.54553849e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54553849e-11 ms=12.5007 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51478518e-11 stationRelative=9.54553849e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54553849e-11 ms=49.939 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51478518e-11 stationRelative=9.54553849e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54553849e-11 ms=12.3458 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=2.51478518e-11 stationRelative=9.54553849e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=172 residual=9.54553849e-11 ms=86.9654 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009549e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=6.0082 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009549e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=15.7377 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009549e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=4.3625 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009549e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=14.401 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009498e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=3.802 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009498e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=13.4702 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009498e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=5.2858 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.32009498e-11 stationRelative=6.57623119e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=240 colors=2 sweeps=46 residual=6.57623119e-11 ms=14.4309 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=2.74421634e-11 stationRelative=9.12640525e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=60 residual=9.12640525e-11 ms=6.0486 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=2.74421634e-11 stationRelative=9.12640525e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=60 residual=9.12640525e-11 ms=28.5942 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37951719e-12 stationRelative=9.7742077e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.7742077e-11 ms=5.7219 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=3.37951719e-12 stationRelative=9.7742077e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=41 residual=9.7742077e-11 ms=24.2176 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=1.16508292e-11 stationRelative=8.90761395e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=59 residual=8.90761395e-11 ms=5.6293 status=PASS
+[BOUNDED_DETAIL] activeRows=8 activeDefect=1.16508292e-11 stationRelative=8.90761395e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=59 residual=8.90761395e-11 ms=27.8966 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=1.55871988e-12 stationRelative=4.49183577e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=39 residual=4.49183577e-11 ms=4.7854 status=PASS
+[BOUNDED_DETAIL] activeRows=11 activeDefect=1.55871988e-12 stationRelative=4.49183577e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=39 residual=4.49183577e-11 ms=19.4387 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48144256e-12 stationRelative=6.18797459e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18797459e-11 ms=10.5072 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48144256e-12 stationRelative=6.18797459e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18797459e-11 ms=36.5026 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48144256e-12 stationRelative=6.18797459e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18797459e-11 ms=11.1816 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48144256e-12 stationRelative=6.18797459e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18797459e-11 ms=39.5454 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48146972e-12 stationRelative=6.18820946e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18820946e-11 ms=8.2458 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48146972e-12 stationRelative=6.18820946e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18820946e-11 ms=39.3348 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48146972e-12 stationRelative=6.18820946e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18820946e-11 ms=8.8672 status=PASS
+[BOUNDED_DETAIL] activeRows=7 activeDefect=2.48146972e-12 stationRelative=6.18820946e-11 result=converged
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=74 residual=6.18820946e-11 ms=42.3422 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.38648011e-11 stationRelative=9.5557286e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.5557286e-11 ms=172.837 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.38648011e-11 stationRelative=9.5557286e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.5557286e-11 ms=451.572 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39216896e-11 stationRelative=9.44955383e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.44955383e-11 ms=207.654 status=PASS
+[BOUNDED_DETAIL] activeRows=6 activeDefect=1.39216896e-11 stationRelative=9.44955383e-11 result=converged
+[LOCAL_RESPONSE] blocks=788 groups=136 colors=8 sweeps=76 residual=9.44955383e-11 ms=569.616 status=PASS
+[LOCAL_RESPONSE_BATCH] cases=36 failed=0
+{"cases": 72, "failed": 0}

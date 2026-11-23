@@ -1,0 +1,22 @@
+{
+  "command": [
+    "D:\\projects\\PhysX_AVBD_3\\physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetJointSoftBody_64.exe",
+    "--headless",
+    "--case=visual-showcase",
+    "--solver=avbd",
+    "--frames=360",
+    "--grid=5",
+    "--dispatcher-threads=4",
+    "--volume-material"
+  ],
+  "mode": "patch",
+  "elapsed": 97.0399472,
+  "exit": 1,
+  "timedOut": false,
+  "stoppedOnRejection": true,
+  "accepted": 28,
+  "rejected": 1,
+  "nonstationary": 28,
+  "inexact": 0,
+  "gate": []
+}

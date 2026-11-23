@@ -1,0 +1,323 @@
+{
+  "base": "f9abbe0cd869136d20cba6462551bbb141a75cd0",
+  "candidate": "v3",
+  "branch": "codex/native-cooked-material-stage1-20261117",
+  "validationPassed": true,
+  "validationJobs": 43,
+  "identityStable": true,
+  "budgetAudit": true,
+  "performanceQualified": false,
+  "performanceStatus": "COMPLETE_NOT_QUALIFIED: each controlled six-pair configuration failed at least one scene; no mixed-configuration selection",
+  "defaultProducts": "unchanged f9abbe0 baseline",
+  "particle3Migration": false,
+  "evidenceFiles": 432,
+  "evidenceSha256": "5bc5d1621535207a0de9c2d2f55f6009e7da3020c3dab9ead0ad43729511ffc0",
+  "candidateCommit": "ed6896f8f2db0fbe9c78fa2d6e05aec5b43eca54",
+  "completedPerformanceRuns": 144,
+  "completedPerformanceFrames": 51840,
+  "allPerformancePhysicsPassed": true,
+  "fixedCpuSummary": {
+    "surface": {
+      "physical": true,
+      "cost": false,
+      "parallel": false,
+      "pairs": {
+        "0": {
+          "meanRatio": 0.9867735036396835,
+          "p95Ratio": 1.0025527391803308,
+          "cpuRatio": 0.9873915293368363,
+          "scalingRatio": 1.0
+        },
+        "4": {
+          "meanRatio": 0.975027969594864,
+          "p95Ratio": 1.0047466169436858,
+          "cpuRatio": 1.0276027124052654,
+          "scalingRatio": 1.01242605342672
+        },
+        "8": {
+          "meanRatio": 0.9917529774321221,
+          "p95Ratio": 1.019371660190644,
+          "cpuRatio": 0.9610411079681129,
+          "scalingRatio": 0.9921633020316589
+        }
+      },
+      "statistics": {
+        "baseline": {
+          "0": {
+            "mean": 13.253135400000001,
+            "p95": 34.63825,
+            "occupiedCores": 0.965728462567804,
+            "cpuMsPerFrame": 13.8671875,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 5.86789014,
+            "p95": 15.69895,
+            "occupiedCores": 2.055807839565757,
+            "cpuMsPerFrame": 14.301215277777779,
+            "speedup": 2.258586150012686
+          },
+          "8": {
+            "mean": 4.84447431,
+            "p95": 13.4626,
+            "occupiedCores": 2.4685104150864365,
+            "cpuMsPerFrame": 14.67013888888889,
+            "speedup": 2.7357220932398754
+          }
+        },
+        "candidate": {
+          "0": {
+            "mean": 13.0863507,
+            "p95": 34.61125,
+            "occupiedCores": 0.9680496341578211,
+            "cpuMsPerFrame": 13.628472222222221,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 5.722931945,
+            "p95": 15.625399999999999,
+            "occupiedCores": 2.1454976617444728,
+            "cpuMsPerFrame": 14.67013888888889,
+            "speedup": 2.2866514621815934
+          },
+          "8": {
+            "mean": 4.8212918049999995,
+            "p95": 13.217749999999999,
+            "occupiedCores": 2.4019534808567773,
+            "cpuMsPerFrame": 13.975694444444445,
+            "speedup": 2.7142830654698367
+          }
+        }
+      }
+    },
+    "volume": {
+      "physical": true,
+      "cost": true,
+      "parallel": true,
+      "pairs": {
+        "0": {
+          "meanRatio": 0.9785732292262814,
+          "p95Ratio": 0.9587619000849883,
+          "cpuRatio": 0.9804046030385166,
+          "scalingRatio": 1.0
+        },
+        "4": {
+          "meanRatio": 0.9708671276040732,
+          "p95Ratio": 0.9756190747461602,
+          "cpuRatio": 1.0010257200792116,
+          "scalingRatio": 1.015353589536279
+        },
+        "8": {
+          "meanRatio": 0.9707340374622861,
+          "p95Ratio": 0.9702773613715834,
+          "cpuRatio": 0.9860234320393197,
+          "scalingRatio": 1.000122962342387
+        }
+      },
+      "statistics": {
+        "baseline": {
+          "0": {
+            "mean": 39.7154303,
+            "p95": 115.89975000000001,
+            "occupiedCores": 0.9746691860652696,
+            "cpuMsPerFrame": 41.9921875,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 18.06015945,
+            "p95": 54.342200000000005,
+            "occupiedCores": 2.0190271964802404,
+            "cpuMsPerFrame": 42.83854166666667,
+            "speedup": 2.199063104063569
+          },
+          "8": {
+            "mean": 15.94937515,
+            "p95": 49.2269,
+            "occupiedCores": 2.366447605029648,
+            "cpuMsPerFrame": 44.7265625,
+            "speedup": 2.490093180860443
+          }
+        },
+        "candidate": {
+          "0": {
+            "mean": 38.7189414,
+            "p95": 110.5344,
+            "occupiedCores": 0.9801323465453278,
+            "cpuMsPerFrame": 41.015625,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 17.340773849999998,
+            "p95": 52.97555,
+            "occupiedCores": 2.083026412162923,
+            "cpuMsPerFrame": 42.578125,
+            "speedup": 2.232826616327737
+          },
+          "8": {
+            "mean": 15.54728205,
+            "p95": 47.56345,
+            "occupiedCores": 2.290654001673247,
+            "cpuMsPerFrame": 42.64322916666667,
+            "speedup": 2.4903993685507237
+          }
+        }
+      }
+    }
+  },
+  "defaultCpuSummary": {
+    "surface": {
+      "physical": true,
+      "cost": true,
+      "parallel": true,
+      "pairs": {
+        "0": {
+          "meanRatio": 0.9767752423939231,
+          "p95Ratio": 0.9907866191535872,
+          "cpuRatio": 0.9737314859053989,
+          "scalingRatio": 1.0
+        },
+        "4": {
+          "meanRatio": 0.9688287941079221,
+          "p95Ratio": 0.9771881769663624,
+          "cpuRatio": 0.9048389964880044,
+          "scalingRatio": 1.0094646351169922
+        },
+        "8": {
+          "meanRatio": 0.9684499075455356,
+          "p95Ratio": 0.979100791130487,
+          "cpuRatio": 0.9518549280177186,
+          "scalingRatio": 1.0171240066683342
+        }
+      },
+      "statistics": {
+        "baseline": {
+          "0": {
+            "mean": 13.245595699999999,
+            "p95": 34.87595,
+            "occupiedCores": 0.9798181745329183,
+            "cpuMsPerFrame": 14.04079861111111,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 5.974643609999999,
+            "p95": 16.18065,
+            "occupiedCores": 2.1818474237923757,
+            "cpuMsPerFrame": 15.473090277777779,
+            "speedup": 2.2169683356226164
+          },
+          "8": {
+            "mean": 5.331336665,
+            "p95": 13.600950000000001,
+            "occupiedCores": 2.8228165086382906,
+            "cpuMsPerFrame": 18.294270833333336,
+            "speedup": 2.4844793214723757
+          }
+        },
+        "candidate": {
+          "0": {
+            "mean": 12.9688432,
+            "p95": 34.281499999999994,
+            "occupiedCores": 0.974405248929213,
+            "cpuMsPerFrame": 13.715277777777779,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 5.79496264,
+            "p95": 15.651399999999999,
+            "occupiedCores": 2.1372181335293945,
+            "cpuMsPerFrame": 14.496527777777779,
+            "speedup": 2.23795113198521
+          },
+          "8": {
+            "mean": 5.1320626350000005,
+            "p95": 13.23285,
+            "occupiedCores": 2.7760836440855363,
+            "cpuMsPerFrame": 17.122395833333336,
+            "speedup": 2.527023561940607
+          }
+        }
+      }
+    },
+    "volume": {
+      "physical": true,
+      "cost": false,
+      "parallel": false,
+      "pairs": {
+        "0": {
+          "meanRatio": 0.9736600440181733,
+          "p95Ratio": 0.9730969448947233,
+          "cpuRatio": 0.9649858015096964,
+          "scalingRatio": 1.0
+        },
+        "4": {
+          "meanRatio": 0.9819490466401137,
+          "p95Ratio": 1.0297316965552121,
+          "cpuRatio": 0.9781489809899293,
+          "scalingRatio": 0.9529661743626997
+        },
+        "8": {
+          "meanRatio": 0.9853748782017939,
+          "p95Ratio": 1.002581234730841,
+          "cpuRatio": 1.0375119034210176,
+          "scalingRatio": 1.0043648984595888
+        }
+      },
+      "statistics": {
+        "baseline": {
+          "0": {
+            "mean": 39.066622499999994,
+            "p95": 119.03885,
+            "occupiedCores": 0.9808812911110552,
+            "cpuMsPerFrame": 41.51475694444444,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 18.1201107,
+            "p95": 52.27265,
+            "occupiedCores": 2.046911636251708,
+            "cpuMsPerFrame": 43.83680555555556,
+            "speedup": 2.1559814477292343
+          },
+          "8": {
+            "mean": 17.27175445,
+            "p95": 54.4918,
+            "occupiedCores": 2.4842170775953782,
+            "cpuMsPerFrame": 51.974826388888886,
+            "speedup": 2.2618792209612497
+          }
+        },
+        "candidate": {
+          "0": {
+            "mean": 38.2316772,
+            "p95": 115.49199999999999,
+            "occupiedCores": 0.9780194233705186,
+            "cpuMsPerFrame": 40.58159722222223,
+            "speedup": 1.0
+          },
+          "4": {
+            "mean": 18.6080492,
+            "p95": 56.01565,
+            "occupiedCores": 2.0887798176374335,
+            "cpuMsPerFrame": 46.24565972222222,
+            "speedup": 2.054577392239483
+          },
+          "8": {
+            "mean": 16.829159,
+            "p95": 51.29525,
+            "occupiedCores": 2.5990340217937375,
+            "cpuMsPerFrame": 54.318576388888886,
+            "speedup": 2.2717520940885993
+          }
+        }
+      }
+    }
+  },
+  "finalEvidenceSha256": "fe55e40191709cd547bf687221a88b2a4c1ba90900510746f7703f5c24c361f8",
+  "finalEvidenceFiles": 191,
+  "implementationDelta": {
+    "added": 207,
+    "deleted": 35,
+    "net": 172
+  },
+  "disposition": "Candidate archived on independent branch; restart branch retains f9abbe0 physics and executables"
+}

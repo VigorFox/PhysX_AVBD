@@ -1,0 +1,122 @@
+[
+  {
+    "workers": 2,
+    "synchronous": false,
+    "groups": 96,
+    "trialBeforePeerAssembly": 4,
+    "example": [
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ]
+  },
+  {
+    "workers": 4,
+    "synchronous": false,
+    "groups": 48,
+    "trialBeforePeerAssembly": 41,
+    "example": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        2,
+        1
+      ]
+    ]
+  },
+  {
+    "workers": 8,
+    "synchronous": false,
+    "groups": 48,
+    "trialBeforePeerAssembly": 41,
+    "example": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        1
+      ]
+    ]
+  },
+  {
+    "workers": 8,
+    "synchronous": true,
+    "groups": 48,
+    "trialBeforePeerAssembly": 48,
+    "example": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        2,
+        1
+      ]
+    ]
+  }
+]

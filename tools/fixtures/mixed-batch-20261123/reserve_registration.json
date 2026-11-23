@@ -1,0 +1,26 @@
+{
+  "purpose": "Check whether isolating the first full leaf can outperform the prior atomic fan-in, rather than moving its critical path to another lane.",
+  "policy": "One independent constrained leaf of 256 rows on the caller when all remaining items fit into <=4 per other lane; otherwise contiguous batches. No additional tasks or tickets.",
+  "waveScreen": "Three fresh matched atomic/reserved trace pairs per worker; use same 18 frames. Advance only if reserved has less cumulative final gap per fixed frame than atomic in both workers, at least twice out of three per worker, and no physical or work-bound failure. If screen fails, keep the main three-way cost experiment as the formal comparison and mark this diagnostic-only follow-up unqualified.",
+  "order": "alternate policies and worker order between repeats; compile and run after main series completes",
+  "frozen": [
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    163,
+    164,
+    165,
+    166,
+    167,
+    274,
+    275,
+    276,
+    277,
+    278,
+    279
+  ]
+}

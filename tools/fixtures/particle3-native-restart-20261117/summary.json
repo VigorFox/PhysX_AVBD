@@ -1,0 +1,96 @@
+{
+  "base": "f9abbe0cd869136d20cba6462551bbb141a75cd0",
+  "branch": "codex/particle3-native-restart-20261117",
+  "realParticle3": true,
+  "rigidBlocks": 0,
+  "particleBlocks": 625,
+  "physicalDof": 1875,
+  "iterations": 4,
+  "actual3x3UpdatesPerFrame": 2500,
+  "productionDefaultChanged": false,
+  "productionQualified": false,
+  "stagePassed": false,
+  "publicPassed": true,
+  "publicChecks": 43,
+  "publicIdentityStable": true,
+  "basicMaterialCasesPassed": 9,
+  "materialWorkers": [
+    0,
+    4,
+    8
+  ],
+  "kernelPrecisions": [
+    "f32",
+    "f64"
+  ],
+  "kernelCompilerModes": [
+    "precise",
+    "fast"
+  ],
+  "contactSupported": false,
+  "volumeSupported": false,
+  "warpedReleasePassed": false,
+  "maxRelativeMomentumError": 0.0201493442,
+  "maxBallisticErrorMetres": 0.0185792905,
+  "freshFlightSummary": {
+    "0": {
+      "rigid6": {
+        "meanMs": 16.425325,
+        "p95Ms": 24.9447,
+        "cpuMsPerFrame": 16.57986111111111
+      },
+      "particle3": {
+        "meanMs": 4.06019167,
+        "p95Ms": 4.5449,
+        "cpuMsPerFrame": 4.079861111111111
+      },
+      "meanRatio": 0.24719094873313008,
+      "p95Ratio": 0.18219902424162246
+    },
+    "4": {
+      "rigid6": {
+        "meanMs": 6.93960667,
+        "p95Ms": 8.2684,
+        "cpuMsPerFrame": 17.447916666666668
+      },
+      "particle3": {
+        "meanMs": 1.990725,
+        "p95Ms": 2.4795,
+        "cpuMsPerFrame": 5.208333333333333
+      },
+      "meanRatio": 0.28686424096713253,
+      "p95Ratio": 0.29987663876929027
+    },
+    "8": {
+      "rigid6": {
+        "meanMs": 6.27794778,
+        "p95Ms": 7.0713,
+        "cpuMsPerFrame": 24.65277777777778
+      },
+      "particle3": {
+        "meanMs": 2.04633111,
+        "p95Ms": 2.4887,
+        "cpuMsPerFrame": 7.638888888888889
+      },
+      "meanRatio": 0.3259554207378259,
+      "p95Ratio": 0.3519437727150595
+    }
+  },
+  "freshFlightEnvironmentClean": true,
+  "freshFlightIdentityStable": true,
+  "freshFlightPhysicalPassed": true,
+  "freshFlightMeasuredCostWithinBaseline": true,
+  "relativeScaling": {
+    "4": 0.8617001125680631,
+    "8": 0.7583581465637043
+  },
+  "performanceQualified": false,
+  "earlierPairStatus": "external SHJ compilation observed; retained, excluded from acceptance",
+  "cpuMeaning": "process CPU includes initialization/observer/teardown; step mean/P95 covers simulate+fetch",
+  "unsupportedContactWitness": "contact-unsupported-180.log: candidate appeared after 40 completed frames, publication rejected",
+  "nextBlockingMechanism": "four-iteration local material blocks: momentum preservation and parallel scaling; no global post-correction",
+  "archives": {
+    "source.zip": "857e9b8941b1d12d75794339baa22b6e4dcdf811dc56dba500db670c5b9fe97e",
+    "evidence.zip": "d1abf31f1a5790eb1667772261adc22c6b5c7074ef8936eaa33eb6f8ca6758f5"
+  }
+}

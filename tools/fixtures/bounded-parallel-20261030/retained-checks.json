@@ -1,0 +1,52 @@
+[
+  {
+    "name": "retained-local",
+    "exit": 0,
+    "seconds": 13.3906206
+  },
+  {
+    "name": "retained-mechanisms",
+    "exit": 0,
+    "seconds": 9.9703555
+  },
+  {
+    "name": "retained-135-t1",
+    "exit": 1,
+    "seconds": 5.912596400000002
+  },
+  {
+    "name": "retained-135-t4",
+    "exit": 1,
+    "seconds": 5.517276299999995
+  },
+  {
+    "name": "retained-240-t1",
+    "exit": 1,
+    "seconds": 5.115618500000004
+  },
+  {
+    "name": "retained-240-t4",
+    "exit": 1,
+    "seconds": 6.006741699999999
+  },
+  {
+    "name": "retained-280-t1",
+    "exit": 1,
+    "seconds": 5.7719819
+  },
+  {
+    "name": "retained-280-t4",
+    "exit": 1,
+    "seconds": 6.386634300000004
+  },
+  {
+    "name": "retained-five-t1",
+    "exit": 0,
+    "seconds": 5.835890300000003
+  },
+  {
+    "name": "retained-five-t4",
+    "exit": 0,
+    "seconds": 6.233486899999988
+  }
+]

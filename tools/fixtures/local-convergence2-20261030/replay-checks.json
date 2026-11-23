@@ -1,0 +1,83 @@
+[
+  {
+    "name": "final-135-engineering",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-convergence-20261030/remaining-135.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-135-engineering.json",
+      "--engineering"
+    ],
+    "exit": 0,
+    "seconds": 4.326770099999999
+  },
+  {
+    "name": "final-135-strict",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-convergence-20261030/remaining-135.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-135-strict.json"
+    ],
+    "exit": 0,
+    "seconds": 4.0837072999999995
+  },
+  {
+    "name": "final-240-engineering",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-patches-20261029/certificate-failure.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-240-engineering.json",
+      "--engineering"
+    ],
+    "exit": 0,
+    "seconds": 4.1449052
+  },
+  {
+    "name": "final-240-strict",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-patches-20261029/certificate-failure.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-240-strict.json"
+    ],
+    "exit": 0,
+    "seconds": 3.994220300000002
+  },
+  {
+    "name": "final-280-engineering",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-convergence-20261030/projected-stagnation-280.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-280-engineering.json",
+      "--engineering"
+    ],
+    "exit": 0,
+    "seconds": 3.4607484999999976
+  },
+  {
+    "name": "final-280-strict",
+    "command": [
+      "python",
+      "tools/run_avbd_local_response_probe.py",
+      "tools/fixtures/local-convergence-20261030/projected-stagnation-280.json.gz",
+      "--grouped",
+      "--report",
+      "tools\\benchmark-results\\local-convergence2-20261030\\final-280-strict.json"
+    ],
+    "exit": 0,
+    "seconds": 3.3994929999999997
+  }
+]

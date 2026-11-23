@@ -1,0 +1,52 @@
+{
+  "scope": "Rejected P2 contact projection experiments; retained first-stage SIMD code is the baseline.",
+  "baselineCommit": "7f9802960e0bfea06478b343d540e556a7571f5d",
+  "source": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": {
+      "baselineSha256": "6efca42c06d3329e7daf3627c0ef9dc19ee1016b7062eec4cfcd7cdb9ecc8355",
+      "candidateSha256": "5571694b947a01b7ea061eacb2e4027cce88b4037f690b9bd57e11534d1cca89"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": {
+      "baselineSha256": "92048884347743fb162c3153bd57edb295418d43b3ab43686899f5291188d68d",
+      "candidateSha256": "8bd34b953dfa95a4341c502084867c40dd39e40204d4f4390024ed07f5463f8b"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp": {
+      "baselineSha256": "707849c021d1d1a47644f8dea30b896f8f6daebf89bfe370aa2c1379a48f4cb5",
+      "candidateSha256": "b46c44c1ee78eddf1822967a34546f98bd2e1d7ec64e2c6fb18c735935b3d135"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNodalContact.h": {
+      "baselineSha256": "483d0eb3230a5bf3f14f8f1bcd2e1c9d4d1a76124054d34263308faf9bfa6a97",
+      "candidateSha256": "1684277171629fe1a57e1dbcd94d05c2fe67ef2939bfede3492c7265618cee88"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": {
+      "baselineSha256": "764734416aed55ff728fe8e4b85eeb45f222f9e7350551e5df47d2cd82aeb469",
+      "candidateSha256": "6ebb2a298a2350169bf3e26f484385d288862aac7735c89951d12b5fd77fc35f"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": {
+      "baselineSha256": "ed1bfa473d6787cef1031fe5bc7d8692ddfbdcd4fed1d761d5c7f6aa15ccc208",
+      "candidateSha256": "12e3557911af58e179b0d3eb38fa35fd8950d4febbcd1ea1908547682f5859d8"
+    },
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdTetProjection.h": {
+      "baselineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateSha256": "454a3b9f3972001bd9723cc93b84605058e435371f15fbdc04c2269a3fe2c351"
+    },
+    "tools/avbd_tet_projection_simd_probe.cpp": {
+      "baselineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateSha256": "cd15f31c7e395f485f1a3f9cb7c372be39fce0b3b22c6a66b8ba04977191581b"
+    },
+    "tools/run_avbd_tet_projection_simd_probe.py": {
+      "baselineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateSha256": "7eda7e7bdc464f699e7905ea87b3fba0903ea9ea33671b18d87c51478ea278a8"
+    }
+  },
+  "capturedQueries": 10128,
+  "recordBytes": 124,
+  "captureScalar": "float",
+  "captureWindowFrames": 360,
+  "captureStride": 512,
+  "validation": "12,000 projection boundary cases; 12,000 embedded cases each in f32/f64; precise and fast builds passed. Authored 360-frame comparisons passed. The complete physical matrix was not run for these rejected operators.",
+  "rejection": "Seven-pair complete-step gains did not meet 5% mean or 10% contact P95 targets. Eager preparation observed 799,480 live bytes. Its 1,507,328 reserved-byte bound is derived from SDK doubling for 8,690 slots. Lazy preparation regresses.",
+  "retainedRuntime": "P1 four-lane hinge operator. No contact projection cache is installed.",
+  "samplesDirectory": "tools/benchmark-results/simd-p2-20261120",
+  "baselineSources": "baseline-sources.json.gz preserves the exact P1 byte streams used to form the experimental patch, including their original line endings."
+}

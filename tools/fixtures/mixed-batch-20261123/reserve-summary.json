@@ -1,0 +1,118 @@
+{
+  "rangeCases": 170004,
+  "workers": {
+    "4": {
+      "atomic": [
+        {
+          "waves": 280,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6031111111111104,
+          "serviceUs": 85.62035714285715,
+          "queueUs": 6.005357142857143,
+          "ordinaryHottest": 0.5857142857142857
+        },
+        {
+          "waves": 280,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6604111111111111,
+          "serviceUs": 90.08892857142857,
+          "queueUs": 5.1153571428571425,
+          "ordinaryHottest": 0.5964285714285714
+        },
+        {
+          "waves": 280,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6634666666666666,
+          "serviceUs": 90.7925,
+          "queueUs": 4.356428571428571,
+          "ordinaryHottest": 0.5642857142857143
+        }
+      ],
+      "reserved": [
+        {
+          "waves": 280,
+          "reservedWaves": 268,
+          "gapMsPerFixedFrame": 0.6416388888888893,
+          "serviceUs": 91.84964285714285,
+          "queueUs": 8.287142857142857,
+          "ordinaryHottest": 0.5642857142857143
+        },
+        {
+          "waves": 280,
+          "reservedWaves": 268,
+          "gapMsPerFixedFrame": 0.611377777777778,
+          "serviceUs": 88.455,
+          "queueUs": 7.471785714285715,
+          "ordinaryHottest": 0.5678571428571428
+        },
+        {
+          "waves": 280,
+          "reservedWaves": 268,
+          "gapMsPerFixedFrame": 0.6115777777777781,
+          "serviceUs": 89.47964285714286,
+          "queueUs": 7.725357142857143,
+          "ordinaryHottest": 0.5821428571428572
+        }
+      ],
+      "favorablePairs": 2,
+      "medianDeltaMs": -0.04903333333333304
+    },
+    "8": {
+      "atomic": [
+        {
+          "waves": 400,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6432666666666667,
+          "serviceUs": 74.40775,
+          "queueUs": 7.52475,
+          "ordinaryHottest": 0.4
+        },
+        {
+          "waves": 400,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6479111111111113,
+          "serviceUs": 73.5825,
+          "queueUs": 10.2965,
+          "ordinaryHottest": 0.45
+        },
+        {
+          "waves": 400,
+          "reservedWaves": 0,
+          "gapMsPerFixedFrame": 0.6743500000000003,
+          "serviceUs": 71.87,
+          "queueUs": 16.902,
+          "ordinaryHottest": 0.44
+        }
+      ],
+      "reserved": [
+        {
+          "waves": 400,
+          "reservedWaves": 400,
+          "gapMsPerFixedFrame": 0.6955222222222212,
+          "serviceUs": 76.989,
+          "queueUs": 9.80075,
+          "ordinaryHottest": 0.3525
+        },
+        {
+          "waves": 400,
+          "reservedWaves": 400,
+          "gapMsPerFixedFrame": 0.6484833333333339,
+          "serviceUs": 75.57375,
+          "queueUs": 8.48075,
+          "ordinaryHottest": 0.315
+        },
+        {
+          "waves": 400,
+          "reservedWaves": 400,
+          "gapMsPerFixedFrame": 0.6650666666666672,
+          "serviceUs": 76.32925,
+          "queueUs": 9.39925,
+          "ordinaryHottest": 0.3
+        }
+      ],
+      "favorablePairs": 1,
+      "medianDeltaMs": 0.0005722222222225293
+    }
+  },
+  "passed": false
+}

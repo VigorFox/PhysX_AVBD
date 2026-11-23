@@ -1,0 +1,880 @@
+{
+  "build": "Checked / MSVC / CPU / unified AVBD 4 iterations",
+  "binaryHashes": {
+    "avbd_smoke.exe": "a9357739c544ced616fc6e01e1758a1883ee9244a2e28eb5354c93b712ec8826",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PhysX_64.dll": "c74b56e3696d444b855132d66ef63739b40d83927ee24e14ddad2ea917cfa3c4",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetArticulationRC_64.exe": "8f7e5826dcda48b008bc51cce599bc44d8045e999d7af824d1bec5fa07a8042b",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a350b1b64242524793a33d545f0b5016b75f72fbe54eac2dd21e2cb6f57c6d88",
+    "SnippetDeformableVolumeAVBD_64.exe": "fb7f5362f71c499575aff17c825d953940f1cfb8a6a58806bcaa05101c33a867",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088",
+    "SnippetJoint_64.exe": "1e48b09ef700831d0ff8735e32cce637e5eeffaa1130bc472a32a4fe9ac933f3"
+  },
+  "jointSwitchPassed": false,
+  "stableBinaries": true,
+  "pairedRuns": 72,
+  "regressionCount": 82,
+  "regressionsPassed": true,
+  "failedRegressions": [],
+  "cases": {
+    "cloth": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 19.7531153,
+          "p95Ms": 44.5156
+        },
+        "particle3-0": {
+          "meanMs": 8.67757833,
+          "p95Ms": 12.0229
+        },
+        "rigid6-4": {
+          "meanMs": 8.01129444,
+          "p95Ms": 21.2865
+        },
+        "particle3-4": {
+          "meanMs": 4.19401472,
+          "p95Ms": 5.2224
+        },
+        "rigid6-8": {
+          "meanMs": 6.72393583,
+          "p95Ms": 16.817
+        },
+        "particle3-8": {
+          "meanMs": 3.61893056,
+          "p95Ms": 4.4592
+        }
+      },
+      "correct": true,
+      "costPassed": true,
+      "relativeScaling": {
+        "4": 0.8391424417162592,
+        "8": 0.8162181616296443
+      },
+      "passed": false,
+      "particle4to8": 1.1589099736691273
+    },
+    "volume": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 60.8319467,
+          "p95Ms": 204.852
+        },
+        "particle3-0": {
+          "meanMs": 11.831251,
+          "p95Ms": 19.1039
+        },
+        "rigid6-4": {
+          "meanMs": 30.6915739,
+          "p95Ms": 92.4908
+        },
+        "particle3-4": {
+          "meanMs": 5.410015,
+          "p95Ms": 7.1398
+        },
+        "rigid6-8": {
+          "meanMs": 20.1831147,
+          "p95Ms": 57.405
+        },
+        "particle3-8": {
+          "meanMs": 5.235728,
+          "p95Ms": 7.0221
+        }
+      },
+      "correct": true,
+      "costPassed": true,
+      "relativeScaling": {
+        "4": 1.1033661196784892,
+        "8": 0.7497389352594559
+      },
+      "passed": false,
+      "particle4to8": 1.0332880164897793
+    },
+    "impact": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 19.1547372,
+          "p95Ms": 23.592,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.337266,
+          "p95Ms": 1.9662,
+          "cpuMs": 1.302083,
+          "maxMomentumError": 0.000416634134,
+          "maxComError": 4.92701219e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.61322722,
+          "p95Ms": 10.2309,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-4": {
+          "meanMs": 1.110314,
+          "p95Ms": 1.5238,
+          "cpuMs": 1.996528,
+          "maxMomentumError": 0.000416634134,
+          "maxComError": 4.92701219e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.88846889,
+          "p95Ms": 9.1096,
+          "maxMomentumError": 0.000150493783,
+          "maxComError": 2.10955041e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.235268,
+          "p95Ms": 1.5431,
+          "cpuMs": 3.645833,
+          "maxMomentumError": 0.000416634134,
+          "maxComError": 4.92701219e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.5415788468708581,
+        "8": 0.4458339441670715
+      },
+      "correct": true,
+      "costPassed": true,
+      "passed": false,
+      "particle4to8": 0.8988446231910808
+    },
+    "release": {
+      "medians": {
+        "rigid6-0": {
+          "meanMs": 18.3445433,
+          "p95Ms": 23.3045,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-0": {
+          "meanMs": 1.108118,
+          "p95Ms": 1.696,
+          "cpuMs": 1.128472,
+          "maxMomentumError": 1.70685521e-05,
+          "maxComError": 1.05487973e-05
+        },
+        "rigid6-4": {
+          "meanMs": 8.14908778,
+          "p95Ms": 9.5658,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-4": {
+          "meanMs": 0.970552,
+          "p95Ms": 1.2755,
+          "cpuMs": 2.083333,
+          "maxMomentumError": 1.70685521e-05,
+          "maxComError": 1.05487973e-05
+        },
+        "rigid6-8": {
+          "meanMs": 7.29983333,
+          "p95Ms": 8.2442,
+          "maxMomentumError": 1.47571564e-05,
+          "maxComError": 1.22758074e-05
+        },
+        "particle3-8": {
+          "meanMs": 1.044016,
+          "p95Ms": 1.3272,
+          "cpuMs": 2.604167,
+          "maxMomentumError": 1.70685521e-05,
+          "maxComError": 1.05487973e-05
+        }
+      },
+      "relativeScaling": {
+        "4": 0.5071883769411268,
+        "8": 0.4223620559842567
+      },
+      "correct": true,
+      "costPassed": true,
+      "passed": false,
+      "particle4to8": 0.9296332623254815
+    }
+  },
+  "otherCpuPercentMinMedianMax": {
+    "cloth": [
+      11.4,
+      37.64,
+      47.62
+    ],
+    "volume": [
+      23.77,
+      41.49,
+      76.17
+    ],
+    "impact": [
+      31.7,
+      36.39,
+      47.83
+    ],
+    "release": [
+      25.83,
+      36.13,
+      49.11
+    ]
+  },
+  "audits": {
+    "five-audit": {
+      "frames": 360,
+      "iterations": [
+        4
+      ],
+      "workers": 8,
+      "peakTasks": 8,
+      "maxBlocks": 32,
+      "maxLeafRows": 187,
+      "maxIncidentRows": 0,
+      "largeStarFrames": 0,
+      "slicedBlocks": 19880,
+      "leafJobs": 66888,
+      "builds": 360,
+      "crossEpochReuses": 0,
+      "maxPacketFaces": 0,
+      "maxPacketColors": 0,
+      "maxParallelFaces": 0,
+      "physics": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableVolumeAVBD",
+          "solver": "avbd",
+          "case": "visual-showcase",
+          "execution": "parallel",
+          "frames": "360",
+          "completedFrames": "360",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "SUPPORTED",
+          "validation": "GATED",
+          "simVertices": "685",
+          "simulationTets": "1755",
+          "trajectoryHash": "976685c7a7b3abc2",
+          "firstVolumeRatioFailFrame": "4294967295",
+          "firstBody4VolumeRatioFailFrame": "4294967295",
+          "minDetF": "0.741606653",
+          "minVolumeRatio": "0.943330884",
+          "maxVolumeRatio": "1.0104146",
+          "peakEdgeStrain": "0.247301355",
+          "finalEdgeStrain": "0.13869375",
+          "body0MinDetF": "0.958074927",
+          "body1MinDetF": "0.926956773",
+          "body2MinDetF": "0.886204302",
+          "body3MinDetF": "0.741606653",
+          "body4MinDetF": "0.779310644",
+          "body0MinVolumeRatio": "0.998064935",
+          "body1MinVolumeRatio": "0.994999945",
+          "body2MinVolumeRatio": "0.991245687",
+          "body3MinVolumeRatio": "0.943330884",
+          "body4MinVolumeRatio": "0.951931596",
+          "body0PeakEdgeStrain": "0.0796323791",
+          "body1PeakEdgeStrain": "0.13869375",
+          "body2PeakEdgeStrain": "0.180930167",
+          "body3PeakEdgeStrain": "0.247003078",
+          "body4PeakEdgeStrain": "0.247301355",
+          "body0FinalEdgeStrain": "0.027963398",
+          "body1FinalEdgeStrain": "0.13869375",
+          "body2FinalEdgeStrain": "0.122169137",
+          "body3FinalEdgeStrain": "0.0320166834",
+          "body4FinalEdgeStrain": "0.0837458",
+          "averageStepMs": "6.99200306",
+          "maxStepMs": "12.4097",
+          "nonFinite": "0",
+          "fatalErrors": "0",
+          "embeddingMaxVertexError": "0",
+          "embeddingMaxErrorRatio": "0",
+          "embeddingSamples": "269667",
+          "embeddingInvalid": "0",
+          "embeddingOracleValidated": "1",
+          "embeddingRestError": "2.52881091e-07",
+          "embeddingRestErrorRatio": "0.156393378",
+          "embeddingPartitionError": "2.06476546e-07",
+          "embeddingPartitionErrorRatio": "0.124999985"
+        }
+      ],
+      "externalGeometry": [
+        {
+          "ground": "0",
+          "rigid": "1.6462696e-07",
+          "between": "0",
+          "self": "0",
+          "limit": "0.002"
+        }
+      ]
+    },
+    "five-inline-audit": {
+      "frames": 360,
+      "iterations": [
+        4
+      ],
+      "workers": 0,
+      "peakTasks": 1,
+      "maxBlocks": 32,
+      "maxLeafRows": 256,
+      "maxIncidentRows": 0,
+      "largeStarFrames": 0,
+      "slicedBlocks": 0,
+      "leafJobs": 0,
+      "builds": 360,
+      "crossEpochReuses": 0,
+      "maxPacketFaces": 0,
+      "maxPacketColors": 0,
+      "maxParallelFaces": 0,
+      "physics": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableVolumeAVBD",
+          "solver": "avbd",
+          "case": "visual-showcase",
+          "execution": "parallel",
+          "frames": "360",
+          "completedFrames": "360",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "SUPPORTED",
+          "validation": "GATED",
+          "simVertices": "685",
+          "simulationTets": "1755",
+          "trajectoryHash": "711d3c68bd1ad539",
+          "firstVolumeRatioFailFrame": "4294967295",
+          "firstBody4VolumeRatioFailFrame": "4294967295",
+          "minDetF": "0.741606653",
+          "minVolumeRatio": "0.943330884",
+          "maxVolumeRatio": "1.0104146",
+          "peakEdgeStrain": "0.247301534",
+          "finalEdgeStrain": "0.138609797",
+          "body0MinDetF": "0.958074391",
+          "body1MinDetF": "0.92684412",
+          "body2MinDetF": "0.886204302",
+          "body3MinDetF": "0.741606653",
+          "body4MinDetF": "0.779310167",
+          "body0MinVolumeRatio": "0.998064876",
+          "body1MinVolumeRatio": "0.995000482",
+          "body2MinVolumeRatio": "0.991245687",
+          "body3MinVolumeRatio": "0.943330884",
+          "body4MinVolumeRatio": "0.951931655",
+          "body0PeakEdgeStrain": "0.0796323791",
+          "body1PeakEdgeStrain": "0.138609797",
+          "body2PeakEdgeStrain": "0.180930167",
+          "body3PeakEdgeStrain": "0.247003078",
+          "body4PeakEdgeStrain": "0.247301534",
+          "body0FinalEdgeStrain": "0.0279670656",
+          "body1FinalEdgeStrain": "0.138609797",
+          "body2FinalEdgeStrain": "0.122169137",
+          "body3FinalEdgeStrain": "0.0307821892",
+          "body4FinalEdgeStrain": "0.130480304",
+          "averageStepMs": "12.0904089",
+          "maxStepMs": "21.5981",
+          "nonFinite": "0",
+          "fatalErrors": "0",
+          "embeddingMaxVertexError": "0",
+          "embeddingMaxErrorRatio": "0",
+          "embeddingSamples": "269667",
+          "embeddingInvalid": "0",
+          "embeddingOracleValidated": "1",
+          "embeddingRestError": "2.52881091e-07",
+          "embeddingRestErrorRatio": "0.156393378",
+          "embeddingPartitionError": "2.06476546e-07",
+          "embeddingPartitionErrorRatio": "0.124999985"
+        }
+      ],
+      "externalGeometry": [
+        {
+          "ground": "0",
+          "rigid": "1.97252283e-07",
+          "between": "0",
+          "self": "0",
+          "limit": "0.002"
+        }
+      ]
+    },
+    "drape-audit": {
+      "frames": 360,
+      "iterations": [
+        4
+      ],
+      "workers": 8,
+      "peakTasks": 8,
+      "maxBlocks": 29,
+      "maxLeafRows": 256,
+      "maxIncidentRows": 0,
+      "largeStarFrames": 0,
+      "slicedBlocks": 8,
+      "leafJobs": 16,
+      "builds": 360,
+      "crossEpochReuses": 0,
+      "maxPacketFaces": 0,
+      "maxPacketColors": 0,
+      "maxParallelFaces": 0,
+      "physics": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableSurfaceAVBD",
+          "solver": "avbd",
+          "case": "static-box",
+          "execution": "parallel",
+          "frames": "360",
+          "completedFrames": "360",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "SUPPORTED",
+          "validation": "GATED",
+          "centerY": "2.0589838",
+          "minY": "0.0590603091",
+          "averageY": "1.39661789",
+          "minBoxSdf": "0.058577776",
+          "minBoxX": "0.0787982196",
+          "minBoxY": "2.05857778",
+          "minBoxZ": "-0.151046917",
+          "maxBoxCoreEdgeHits": "0",
+          "maxBoxCoreTriangleHits": "0",
+          "firstBoxCoreEdgeHitFrame": "4294967295",
+          "firstBoxCoreTriangleHitFrame": "4294967295",
+          "pinError": "0",
+          "maxStretch": "1.13994181",
+          "maxPlanarityError": "4.29153442e-06",
+          "mutationReadback": "1",
+          "nonFinite": "0",
+          "fatalErrors": "0"
+        }
+      ],
+      "externalGeometry": []
+    },
+    "cloth-impact-audit": {
+      "frames": 180,
+      "iterations": [
+        4
+      ],
+      "workers": 8,
+      "peakTasks": 8,
+      "maxBlocks": 32,
+      "maxLeafRows": 96,
+      "maxIncidentRows": 0,
+      "largeStarFrames": 0,
+      "slicedBlocks": 0,
+      "leafJobs": 0,
+      "builds": 21,
+      "crossEpochReuses": 159,
+      "maxPacketFaces": 32,
+      "maxPacketColors": 8,
+      "maxParallelFaces": 6,
+      "physics": [
+        {
+          "mode": "impact",
+          "workers": "8",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "0.000416634134",
+          "maxBallisticError": "4.92701219e-05",
+          "initialEnergy": "40",
+          "peakEnergy": "40",
+          "initialStrainEnergy": "0",
+          "minStrainEnergy": "0",
+          "peakSheetSpeed": "0.0661989415",
+          "meanMs": "1.968428",
+          "p95Ms": "2.348300",
+          "cpuMs": "4.600694",
+          "status": "PASS"
+        }
+      ],
+      "externalGeometry": []
+    },
+    "wide-star-bending": {
+      "frames": 12,
+      "iterations": [
+        4
+      ],
+      "workers": 8,
+      "peakTasks": 3,
+      "maxBlocks": 0,
+      "maxLeafRows": 0,
+      "maxIncidentRows": 576,
+      "largeStarFrames": 12,
+      "slicedBlocks": 0,
+      "leafJobs": 0,
+      "builds": 12,
+      "crossEpochReuses": 0,
+      "maxPacketFaces": 0,
+      "maxPacketColors": 0,
+      "maxParallelFaces": 0,
+      "physics": [
+        {
+          "material": "bending",
+          "workers": "8",
+          "faces": "288",
+          "frames": "12",
+          "best": "9.75816e-05",
+          "peak": "0.00871583",
+          "pinError": "0",
+          "status": "PASS"
+        }
+      ],
+      "externalGeometry": []
+    },
+    "wide-star-membrane": {
+      "frames": 12,
+      "iterations": [
+        4
+      ],
+      "workers": 8,
+      "peakTasks": 8,
+      "maxBlocks": 13,
+      "maxLeafRows": 27,
+      "maxIncidentRows": 0,
+      "largeStarFrames": 0,
+      "slicedBlocks": 0,
+      "leafJobs": 0,
+      "builds": 1,
+      "crossEpochReuses": 11,
+      "maxPacketFaces": 9,
+      "maxPacketColors": 9,
+      "maxParallelFaces": 1,
+      "physics": [
+        {
+          "material": "membrane",
+          "workers": "8",
+          "faces": "288",
+          "frames": "12",
+          "best": "0.000121767",
+          "peak": "0.00897955",
+          "pinError": "0",
+          "status": "PASS"
+        }
+      ],
+      "externalGeometry": []
+    }
+  },
+  "profiles": {
+    "final-profile-release-0": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "0",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "2.235146",
+          "p95Ms": "3.121600",
+          "cpuMs": "1.996528",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.87673,
+      "primalWorkMs": 0.87108,
+      "primalWaves": 144.0,
+      "idealLowerMs": 0.87108,
+      "longestMs": 0.87108,
+      "startupMs": 0.00206,
+      "backendMs": 1.30202,
+      "packMs": 0.19454,
+      "warmMs": 0.07869,
+      "colorMs": 0.0
+    },
+    "final-profile-release-4": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "4",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "2.582436",
+          "p95Ms": "2.968200",
+          "cpuMs": "4.079861",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.63807,
+      "primalWorkMs": 1.35495,
+      "primalWaves": 20.0,
+      "idealLowerMs": 0.34756,
+      "longestMs": 0.25619,
+      "startupMs": 0.109,
+      "backendMs": 1.1484,
+      "packMs": 0.26766,
+      "warmMs": 0.10482,
+      "colorMs": 0.0
+    },
+    "final-profile-release-8": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "8",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "2.547985",
+          "p95Ms": "2.860000",
+          "cpuMs": "4.687500",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.6477,
+      "primalWorkMs": 1.55649,
+      "primalWaves": 20.0,
+      "idealLowerMs": 0.2696,
+      "longestMs": 0.2696,
+      "startupMs": 0.17482,
+      "backendMs": 1.12046,
+      "packMs": 0.27708,
+      "warmMs": 0.10683,
+      "colorMs": 0.0
+    },
+    "final-profile-Surface-8": {
+      "frames": 360,
+      "whole": [],
+      "primalMs": 2.24703,
+      "primalWorkMs": 9.727,
+      "primalWaves": 29.67778,
+      "idealLowerMs": 1.4746,
+      "longestMs": 1.47418,
+      "startupMs": 0.26393,
+      "backendMs": 3.39423,
+      "packMs": 0.62619,
+      "warmMs": 0.2935,
+      "colorMs": 0.13
+    },
+    "final-profile-Volume-8": {
+      "frames": 360,
+      "whole": [],
+      "primalMs": 3.50849,
+      "primalWorkMs": 9.08642,
+      "primalWaves": 78.45556,
+      "idealLowerMs": 2.24953,
+      "longestMs": 2.24941,
+      "startupMs": 0.64005,
+      "backendMs": 4.97022,
+      "packMs": 0.65495,
+      "warmMs": 0.3321,
+      "colorMs": 0.29639
+    }
+  },
+  "intermediateProfiles": {
+    "lanes-prof-release-0": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "0",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.78296579e-05",
+          "maxBallisticError": "9.01513909e-06",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.20043598",
+          "peakSheetSpeed": "0.593720465",
+          "meanMs": "3.976157",
+          "p95Ms": "7.411200",
+          "cpuMs": "3.472222",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 1.53089,
+      "primalWorkMs": 1.5193,
+      "primalWaves": 216.0,
+      "idealLowerMs": 1.5193,
+      "longestMs": 1.5193,
+      "startupMs": 0.00384,
+      "backendMs": 2.20455,
+      "packMs": 0.32518,
+      "warmMs": 0.1296,
+      "colorMs": 0.0
+    },
+    "lanes-prof-release-4": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "4",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.78296579e-05",
+          "maxBallisticError": "9.01513909e-06",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.20043598",
+          "peakSheetSpeed": "0.593720465",
+          "meanMs": "3.209566",
+          "p95Ms": "4.277900",
+          "cpuMs": "4.600694",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.76498,
+      "primalWorkMs": 1.71035,
+      "primalWaves": 28.0,
+      "idealLowerMs": 0.4413,
+      "longestMs": 0.24039,
+      "startupMs": 0.14404,
+      "backendMs": 1.38686,
+      "packMs": 0.37476,
+      "warmMs": 0.13471,
+      "colorMs": 0.0
+    },
+    "lanes-prof-release-8": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "8",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.78296579e-05",
+          "maxBallisticError": "9.01513909e-06",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.20043598",
+          "peakSheetSpeed": "0.593720465",
+          "meanMs": "3.266258",
+          "p95Ms": "3.136000",
+          "cpuMs": "4.079861",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.66112,
+      "primalWorkMs": 1.76477,
+      "primalWaves": 28.0,
+      "idealLowerMs": 0.2534,
+      "longestMs": 0.22282,
+      "startupMs": 0.19909,
+      "backendMs": 1.22683,
+      "packMs": 0.34126,
+      "warmMs": 0.13162,
+      "colorMs": 0.0
+    },
+    "patch32-prof-release-0": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "0",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "1.999912",
+          "p95Ms": "2.609700",
+          "cpuMs": "1.909722",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.79414,
+      "primalWorkMs": 0.78894,
+      "primalWaves": 144.0,
+      "idealLowerMs": 0.78894,
+      "longestMs": 0.78894,
+      "startupMs": 0.00189,
+      "backendMs": 1.06937,
+      "packMs": 0.16888,
+      "warmMs": 0.06983,
+      "colorMs": 0.0
+    },
+    "patch32-prof-release-4": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "4",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "2.200908",
+          "p95Ms": "2.615700",
+          "cpuMs": "3.385417",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.51785,
+      "primalWorkMs": 1.102,
+      "primalWaves": 20.0,
+      "idealLowerMs": 0.28144,
+      "longestMs": 0.22466,
+      "startupMs": 0.0937,
+      "backendMs": 0.90394,
+      "packMs": 0.22237,
+      "warmMs": 0.08789,
+      "colorMs": 0.0
+    },
+    "patch32-prof-release-8": {
+      "frames": 180,
+      "whole": [
+        {
+          "mode": "release",
+          "workers": "8",
+          "nodes": "625",
+          "iterations": "4",
+          "frames": "180",
+          "maxMomentumError": "1.70685521e-05",
+          "maxBallisticError": "1.05487973e-05",
+          "initialEnergy": "940.519051",
+          "peakEnergy": "940.519051",
+          "initialStrainEnergy": "830.3628",
+          "minStrainEnergy": "2.54829219",
+          "peakSheetSpeed": "0.593719496",
+          "meanMs": "2.093013",
+          "p95Ms": "2.596600",
+          "cpuMs": "4.340278",
+          "status": "PASS"
+        }
+      ],
+      "primalMs": 0.59696,
+      "primalWorkMs": 1.37939,
+      "primalWaves": 20.0,
+      "idealLowerMs": 0.27511,
+      "longestMs": 0.27511,
+      "startupMs": 0.18203,
+      "backendMs": 0.97188,
+      "packMs": 0.21666,
+      "warmMs": 0.08564,
+      "colorMs": 0.0
+    }
+  }
+}

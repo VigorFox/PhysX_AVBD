@@ -1,0 +1,38 @@
+{
+  "archive-verification.json": {
+    "bytes": 258,
+    "sha256": "fc9119a748b77794e3b3151db0e204fbdc8d38f833c591e3c985bc3b2356a36e"
+  },
+  "baseline-evidence.zip": {
+    "bytes": 1009720,
+    "sha256": "b835f5164222b435f3d7c90716e936200cdf3a58217879eabab19b604bdacbe8"
+  },
+  "baseline-summary.json": {
+    "bytes": 149753,
+    "sha256": "826326fe63e468cc4cac940fc636f5c7b6571a6ea9d4a8a10ceedc13c657075d"
+  },
+  "build-provenance.json": {
+    "bytes": 2862,
+    "sha256": "6f594720238bae2f81d311779c9e9ad644b077e61d39bf3596960b09dfdf8e66"
+  },
+  "extraction.json": {
+    "bytes": 10192,
+    "sha256": "ad89a91ae691e5c95288f7dd15c77ed6b8c630b6939e610b32486e82eba464b1"
+  },
+  "operator-candidates.zip": {
+    "bytes": 128205,
+    "sha256": "d538920311ffd9a0ff902c3c8e180eff38d050715dce02179a82af0e53d672ef"
+  },
+  "publication.json": {
+    "bytes": 28486,
+    "sha256": "77424eec01f3cb403eaeebec302e52c83f5f2250f06a57443178351b1728c838"
+  },
+  "README.md": {
+    "bytes": 1436,
+    "sha256": "bc10dcbb0c8e52e4edcd92f1a9c937c13b0b56e92cdca432fb802728373b8553"
+  },
+  "validation-and-counterexamples.zip": {
+    "bytes": 84228,
+    "sha256": "b780d8a85232c0fb0f3442833ccadbae255155ba0bc6d12cc6d5cb3bcb71ab35"
+  }
+}

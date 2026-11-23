@@ -1,0 +1,69 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -33,6 +33,8 @@
+     // suffice even when the actual material or contact row IDs have changed.
+     PxArray<PxU32> incidenceOffsets,incidenceShape;
+     PxU32 workers=0,firstTile=0,lanes=0;
++    PxU32 windowTiles=0;
++    volatile PxI32 nextWindowTile=0;
+     void clear()
+     {
+         offsets.clear();wideOffsets.clear();wideBlocks.clear();tiles.clear();waves.clear();splits.clear();nodal.clear();rigid.clear();
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -1533,7 +1533,28 @@
+ {
+     if(stage==0 && mColorTasks && !mColorTasks->offsets.empty())
+     {
+-        const auto& w=mColorTasks->waves[mStep.localCursor++];
++        auto& plan=*mColorTasks;
++        const auto& w=plan.waves[mStep.localCursor++];
++        plan.windowTiles=w.count;
++        // A full ordinary color has no dependencies between adjacent queue
++        // windows. Register at most one window of callbacks; each can consume
++        // up to four independent, bounded tiles before its single release.
++        if(w.count==plan.workers*LocalQueueDepth && !w.leaves &&
++            plan.wideOffsets[mStep.nextColor]==plan.wideOffsets[mStep.nextColor+1])
++        {
++            for(PxU32 n=1;n<LocalQueueDepth && mStep.localCursor<plan.offsets[mStep.nextColor+1];++n)
++            {
++                const auto& next=plan.waves[mStep.localCursor];
++                if(next.leaves)break;
++                PX_ASSERT(next.first==w.first+plan.windowTiles);
++                plan.windowTiles+=next.count;
++                mStep.localBlocks+=next.blocks;
++                mStep.localPrimalMaxBlocks=PxMax(mStep.localPrimalMaxBlocks,next.maxBlocks);
++                mStep.localPrimalMaxRows=PxMax(mStep.localPrimalMaxRows,next.maxRows);
++                ++mStep.localCursor;
++            }
++        }
++        plan.nextWindowTile=PxI32(w.count);
+         mStep.localBlocks+=w.blocks;++mStep.bakedColorWaves;
+         mStep.splitPrimalBlocks+=w.splitBlocks;mStep.splitRowLeaves+=w.leaves;
+         mStep.localPrimalMaxBlocks=PxMax(mStep.localPrimalMaxBlocks,w.maxBlocks);
+@@ -1639,6 +1660,25 @@
+     }
+     const PxU32 tile=mColorTasks->firstTile+slot;
+     solveLocalBatch(tile,tile+1,0,slot);
++    if(mColorTasks->windowTiles>lanes)
++    {
++        const PxU64 started=mStep.profile?mStep.localWaveTaskStarts[slot]:0;
++        auto hottest=mStep.hotItems[slot];
++        for(PxU32 n=1;n<LocalQueueDepth;++n)
++        {
++            const PxU32 index=PxU32(PxAtomicIncrement(&mColorTasks->nextWindowTile)-1);
++            if(index>=mColorTasks->windowTiles)break;
++            const PxU32 next=mColorTasks->firstTile+index;
++            solveLocalBatch(next,next+1,0,slot);
++            if(mStep.profile && mStep.hotItems[slot].ticks>hottest.ticks)hottest=mStep.hotItems[slot];
++        }
++        if(mStep.profile)
++        {
++            mStep.hotItems[slot]=hottest;
++            mStep.localWaveTaskStarts[slot]=started;
++            mStep.localWaveTaskTicks[slot]=PxTime::getCurrentCounterValue()-started;
++        }
++    }
+ }
+ 
+ bool AvbdDynamicsContext::submitLocalWave(PxU32 stage,PxU32 count,const PxU32* starts,const PxU32* stops,PxU32 firstTile)

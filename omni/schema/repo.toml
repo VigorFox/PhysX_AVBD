@@ -1,0 +1,100 @@
+[repo]
+logging = "warn"
+
+[repo_build]
+default_build_config = [ "release", "debug",]
+[[repo_build.argument]]
+name = "--devschema"
+help = "Enable schema development. Runs schemagen automatically and uses local schema."
+
+[repo_build.argument.kwargs]
+required = false
+nargs = 0
+[[repo_build.argument]]
+name = "--devphysx"
+help = "Support calling devschema and devphysx together. No effect in the schema project."
+
+[repo_build.argument.kwargs]
+required = false
+const = ""
+nargs = "?"
+[[repo_build.argument]]
+name = "--userphysx"
+help = "Support calling devschema and userphysx together. No effect in the schema project."
+
+[repo_build.argument.kwargs]
+required = false
+const = ""
+nargs = "?"
+
+[repo_usd]
+usd_root = "${root}/_build/target-deps/usd/%{cfg.buildcfg}"
+usd_python_root = "${root}/_build/target-deps/python"
+generate_plugin_buildfiles = false
+plugin_buildfile_format = "premake"
+
+[repo.folders]
+version_file = "${root}/VERSION"
+
+[repo_build.premake]
+linux_x86_64_cxx_abi = true
+
+[repo_build.licensing]
+enabled = false
+
+[repo_build.pre_build]
+commands = [ [ "${root}/tools/packman/python${shell_ext}", "${root}/tools/check_usd_version.py",],]
+
+[repo_build.post_build]
+commands = [ [ "${root}/tools/packman/python${shell_ext}", "${root}/tools/gen_unit_database.py", "${root}/_build/${platform}/${config}/schema/lib/python/PhysicsSchemaTools",],]
+
+[repo_build.msbuild]
+sln_file = "physx-schemas.sln"
+link_host_toolchain = true
+
+[repo_build.fetch]
+packman_target_files_to_pull = [ "${root}/deps/host-deps.packman.xml", "${root}/deps/kit-kernel-deps.packman.xml", "${root}/deps/usd-deps.packman.xml",]
+
+[repo_build.docker]
+enabled = false
+
+[repo.tokens."platform:linux-x86_64"]
+abi = "2.35"
+
+[repo.tokens."platform:linux-aarch64"]
+abi = "2.35"
+
+[repo_usd.plugin.physxSchema]
+schema_file = "${root}/source/physxSchema/schema.usda"
+generate_dir = "${root}/source/physxSchema"
+plugin_dir = "${root}/source/physxSchema"
+install_root = "_build/%{cfg.system}-%{cfg.platform}/%{cfg.buildcfg}/schema/physxSchema"
+build_dir = "_build/physxSchema"
+package_info_file = "${root}/PACKAGE-INFO.yaml"
+library_prefix = "PhysxSchema"
+generate_module_deps_cpp_file = false
+usd_lib_dependencies = [ "usd_arch", "usd_tf", "usd_vt", "usd_sdf", "usd_usd", "usd_Physics", "usd_usdGeom",]
+
+[repo_usd.plugin.physxSchemaAddition]
+schema_file = "${root}/source/physxSchemaAddition/schema.usda"
+generate_dir = "${root}/source/physxSchemaAddition"
+plugin_dir = "${root}/source/physxSchemaAddition"
+install_root = "_build/%{cfg.system}-%{cfg.platform}/%{cfg.buildcfg}/schema/physxSchemaAddition"
+build_dir = "_build/physxSchemaAddition"
+package_info_file = "${root}/PACKAGE-INFO.yaml"
+library_prefix = "PhysxSchemaAddition"
+generate_module_deps_cpp_file = false
+is_codeless = true
+usd_lib_dependencies = [ "usd_arch", "usd_tf", "usd_vt", "usd_sdf", "usd_usd", "usd_Physics", "usd_usdGeom",]
+
+[repo_usd.plugin.omniUsdPhysicsDeformableSchema]
+schema_file = "${root}/source/omniUsdPhysicsDeformableSchema/schema.usda"
+generate_dir = "${root}/source/omniUsdPhysicsDeformableSchema"
+plugin_dir = "${root}/source/omniUsdPhysicsDeformableSchema"
+install_root = "_build/%{cfg.system}-%{cfg.platform}/%{cfg.buildcfg}/schema/omniUsdPhysicsDeformableSchema"
+build_dir = "_build/omniUsdPhysicsDeformableSchema"
+package_info_file = "${root}/PACKAGE-INFO.yaml"
+library_prefix = "OmniUsdPhysicsDeformableSchema"
+generate_module_deps_cpp_file = false
+is_codeless = true
+usd_lib_dependencies = [ "usd_arch", "usd_tf", "usd_vt", "usd_sdf", "usd_usd", "usd_Physics", "usd_usdGeom",]

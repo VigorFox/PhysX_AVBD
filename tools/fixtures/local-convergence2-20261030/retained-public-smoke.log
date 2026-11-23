@@ -1,0 +1,40 @@
+avbd_smoke start
+PASS kernel table device=SCALAR LDLT6 LDLT3
+basic scene created, simulating 3s
+t=1.00 box y=0.500 hang y=3.000 pend=(-4.000,3.500,0.000) slide z=0.800
+t=2.00 box y=0.500 hang y=3.000 pend=(-4.000,3.500,0.000) slide z=0.800
+t=3.00 box y=0.500 hang y=3.000 pend=(-4.000,3.500,0.000) slide z=0.800
+PASS box y=0.4998 hang y=3.0000 pend y=3.5000 slide z=0.8000
+scissor scene created, simulating 10s with drive cycle
+scissor t=2.0 base y=0.249 top y=4.697 drive z=-0.500
+scissor t=4.0 base y=0.250 top y=5.551 drive z=-1.000
+scissor t=6.0 base y=0.253 top y=5.445 drive z=-0.900
+scissor t=8.0 base y=0.250 top y=4.434 drive z=-0.400
+scissor t=10.0 base y=0.356 top y=3.275 drive z=-0.092
+PASS scissor 10s base y=0.3555 top y=3.2753 stroke=3.299
+PASS rigid OGC no-CCD x=0.2800
+soft island VBD volume-ground start
+PASS island volume 3s nodes=1 com y=0.5345 minY=0.0367 volRatio=0.998
+soft island VBD volume-on-static-box start
+PASS island volume on-box 3s com y=1.5445 minY=1.0467 volRatio=0.998
+soft island VBD volume-on-rotated-box start
+PASS island volume on-rotbox 3s com y=0.5345 minY=0.0367 volRatio=0.998
+soft island VBD volume-on-dynamic-box start
+dynbox t=1.00 box y=0.9275
+dynbox t=2.00 box y=0.5000
+dynbox t=3.00 box y=0.5000
+PASS island volume on-dynbox 3s box y=0.5000 com y=1.5445 minY=1.0467 volRatio=0.998
+soft island overlap-sleep start
+PASS overlap-sleep 1s wakeCounter=0.0000 sleeping=0 box y=2.0000
+soft island VBD volume world-pin start
+PASS island volume pin 3s drift=0.0000 y=[2.9955,4.0000] volRatio=1.003 nPin=4
+PASS rigid matrix deep-tilted peakW=0.515459 finalV=0.000011 finalW=0.000006 y=[0.469031,0.493473]
+PASS rigid matrix finite-offcenter checkpointVy=-5.500000954 checkpointW=0.719999969
+PASS rigid matrix restitution-tilted peakUp=2.075651169 peakW=6.896555901 finalW=2.399500370
+PASS rigid matrix tumbling-landing x5=19.098054886 x20=18.233884811 finalV=0.000008804 finalW=0.000009005 maxPoseStep=0.226650089
+PASS rigid matrix high-spin-landing v5=0.000009464 w5=0.000002683 x20=15.051394463 finalV=0.000010159 finalW=0.000002897 maxPoseStep=0.394791007
+PASS restitution e*v_in min y=0.5000 peak y=2.0657
+PASS no-solve polarity y=-9.1589
+PASS modify ignore/maxImpulse0 y=-9.1589
+PASS unsupported contact-targetVelocity y=0.4998
+PASS unsupported mass-inertia scale y=0.4998

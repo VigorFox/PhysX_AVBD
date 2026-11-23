@@ -1,0 +1,307 @@
+{
+  "scope": "Experimental native volume material step; shared Particle3 NP/reaction/default scenarios incomplete",
+  "productionSwitched": false,
+  "volumeMaterialStepIntegrated": true,
+  "volumePhysicalQualified": false,
+  "particleContactsIntegrated": false,
+  "sharedReactionQualified": false,
+  "wholeStepCostQualified": false,
+  "parallelScalingQualified": false,
+  "gpuQualified": false,
+  "iterations": 4,
+  "volumeRuns": [
+    {
+      "log": "verified-volume-rest-0.log",
+      "mode": "rest",
+      "workers": "0",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0",
+      "maxComError": "0",
+      "maxMomentumError": "0",
+      "minJ": "0.999999456",
+      "initialEnergy": "1.3740341e-08",
+      "peakEnergy": "1.3740341e-08",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-flight-0.log",
+      "mode": "flight",
+      "workers": "0",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "4.12935124e-05",
+      "maxComError": "2.79194213e-05",
+      "maxMomentumError": "3.34406571e-05",
+      "minJ": "0.99999788",
+      "initialEnergy": "141.000009",
+      "peakEnergy": "141.001025",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-strain-0.log",
+      "mode": "strain",
+      "workers": "0",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0.158886784",
+      "maxComError": "0.00957190023",
+      "maxMomentumError": "0.00701116972",
+      "minJ": "0.929759686",
+      "initialEnergy": "964.962802",
+      "peakEnergy": "964.962802",
+      "status": "FAIL"
+    },
+    {
+      "log": "verified-volume-rest-4.log",
+      "mode": "rest",
+      "workers": "4",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0",
+      "maxComError": "0",
+      "maxMomentumError": "0",
+      "minJ": "0.999999456",
+      "initialEnergy": "1.3740341e-08",
+      "peakEnergy": "1.3740341e-08",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-flight-4.log",
+      "mode": "flight",
+      "workers": "4",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "4.12935124e-05",
+      "maxComError": "2.79194213e-05",
+      "maxMomentumError": "3.34406571e-05",
+      "minJ": "0.99999788",
+      "initialEnergy": "141.000009",
+      "peakEnergy": "141.001025",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-strain-4.log",
+      "mode": "strain",
+      "workers": "4",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0.158886784",
+      "maxComError": "0.00957190023",
+      "maxMomentumError": "0.00701116972",
+      "minJ": "0.929759686",
+      "initialEnergy": "964.962802",
+      "peakEnergy": "964.962802",
+      "status": "FAIL"
+    },
+    {
+      "log": "verified-volume-rest-8.log",
+      "mode": "rest",
+      "workers": "8",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0",
+      "maxComError": "0",
+      "maxMomentumError": "0",
+      "minJ": "0.999999456",
+      "initialEnergy": "1.3740341e-08",
+      "peakEnergy": "1.3740341e-08",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-flight-8.log",
+      "mode": "flight",
+      "workers": "8",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "4.12935124e-05",
+      "maxComError": "2.79194213e-05",
+      "maxMomentumError": "3.34406571e-05",
+      "minJ": "0.99999788",
+      "initialEnergy": "141.000009",
+      "peakEnergy": "141.001025",
+      "status": "PASS"
+    },
+    {
+      "log": "verified-volume-strain-8.log",
+      "mode": "strain",
+      "workers": "8",
+      "nodes": "8",
+      "frames": "180",
+      "iterations": "4",
+      "maxShapeMotion": "0.158886784",
+      "maxComError": "0.00957190023",
+      "maxMomentumError": "0.00701116972",
+      "minJ": "0.929759686",
+      "initialEnergy": "964.962802",
+      "peakEnergy": "964.962802",
+      "status": "FAIL"
+    }
+  ],
+  "expectedUnsupported": [
+    {
+      "log": "verified-plane-rejection.log",
+      "reason": "host_np_support_uncompiled",
+      "exit": 2,
+      "collisionPass": false
+    },
+    {
+      "log": "verified-sphere-rejection.log",
+      "reason": "host_np_support_uncompiled",
+      "exit": 2,
+      "collisionPass": false
+    },
+    {
+      "log": "verified-self-rejection.log",
+      "reason": "self_np_uncompiled",
+      "exit": 2,
+      "collisionPass": false
+    }
+  ],
+  "regressions": [
+    {
+      "log": "hello-avbd.log",
+      "gates": 7,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "hello-pgs.log",
+      "gates": 7,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "hello-tgs.log",
+      "gates": 7,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "cloth-membrane.log",
+      "gates": 1,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "cloth-bending.log",
+      "gates": 1,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "cloth-free-flight.log",
+      "gates": 1,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "rigid6-cloth-360.log",
+      "gates": 1,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    },
+    {
+      "log": "rigid6-volume-360.log",
+      "gates": 1,
+      "passed": true,
+      "reusedAfterParticleOnlyPackCleanup": true
+    }
+  ],
+  "clothRelease": {
+    "workers": "4",
+    "nodes": "625",
+    "iterations": "4",
+    "frames": "180",
+    "initialStretch": "1.05,0.98",
+    "asymmetricWarp": "0.15",
+    "maxMomentumError": "0.0201493442",
+    "maxBallisticError": "0.0185792905",
+    "initialEnergy": "940.519051",
+    "peakEnergy": "940.519051",
+    "status": "FAIL"
+  },
+  "volumeBudgetAudit": {
+    "frames": 180,
+    "particles": 8,
+    "physicalDof": 24,
+    "solves3x3PerStep": 32,
+    "iterations": 4,
+    "bdfPerStep": 1,
+    "passed": true
+  },
+  "kernelChecks": {
+    "volumeConfigurations": 4,
+    "shellConfigurations": 2,
+    "passed": true,
+    "weightedMaterialCoordinates": true,
+    "warmPathCounterexample": true
+  },
+  "rejectedExperiments": [
+    {
+      "kind": "alternating colored GS",
+      "archive": "relative-coordinate-rejected.zip",
+      "accepted": false
+    },
+    {
+      "kind": "prebaked mass-balanced relative coordinates",
+      "archive": "relative-coordinate-rejected.zip",
+      "accepted": false,
+      "volumeComError": 0.000132131328,
+      "volumeMomentumError": 0.000233957549,
+      "clothMomentumError": 9.44252367e-06,
+      "clothPeakEnergy": 1212.48828,
+      "clothInitialEnergy": 940.519051
+    }
+  ],
+  "defaultProducts": [
+    {
+      "file": "PhysX_64.dll",
+      "sha256": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXCommon_64.dll",
+      "sha256": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXFoundation_64.dll",
+      "sha256": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableSurfaceAVBD_64.exe",
+      "sha256": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableVolumeAVBD_64.exe",
+      "sha256": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "unchanged": true
+    }
+  ],
+  "testedSdk": {
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PhysX_64.dll": "c018afd930a0521b067dc1dbe608646a6b254f25d0a2bfad8821fdf0e3dca345",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a8b3d896a9dd32ceb79b49a9b8cfa03d32aaaa74fb6a2887aa3328eafb10b7c9",
+    "SnippetDeformableVolumeAVBD_64.exe": "e998ffda3a896466ec4c5cff5983f295b87e721a0344b6e9db9c4c56d0c1cc18",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088"
+  },
+  "sourceSnapshotVerified": true,
+  "excludedEvidence": {
+    "compact-volume-flight.log": "Execution overlapped a build; empty output/abnormal exit, invalid for acceptance. All final probes rerun after build completion."
+  }
+}

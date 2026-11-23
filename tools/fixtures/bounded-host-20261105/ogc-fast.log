@@ -1,0 +1,4 @@
+[OGC_CERTIFICATE_TEST] case=rotated_features status=PASS maxViolation=0
+[OGC_CERTIFICATE_TEST] case=plane_intersection status=PASS maxViolation=0
+[OGC_CERTIFICATE_TEST] case=represented_small_rotation status=PASS angle=9.99999975e-05 actualVertexMotion=9.99999975e-05 bound=2.49999994e-05
+[OGC_CERTIFICATE_TEST] case=unbounded_quantized_descent status=PASS energyBefore=3.34617137e-12 energyAfter=6.09872169e-15 finiteBallPreserved=1

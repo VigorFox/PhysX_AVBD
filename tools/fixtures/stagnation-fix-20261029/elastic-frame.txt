@@ -1,0 +1,1 @@
+[ELASTIC_FRAME] checks=3300 failures=0 rootRelativeError=2.53951703174e-15 weakBlockRelativeError=7.91698382673e-16 energyDerivativeRelativeError=1.02077534939e-10

@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.20)
+project(ChainmailReferenceProbe LANGUAGES CXX)
+set(PHYSX_REFERENCE_ROOT "" CACHE PATH "Reference repository with a Checked SDK build")
+get_filename_component(CURRENT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+set(REFERENCE_BIN "${PHYSX_REFERENCE_ROOT}/physx/bin/win.x86_64.vc143.md/checked")
+add_executable(ChainmailReferenceProbe main.cpp
+  "${CURRENT_ROOT}/physx/snippets/snippetchainmail/SnippetChainmailHeadless.cpp")
+target_include_directories(ChainmailReferenceProbe PRIVATE "${PHYSX_REFERENCE_ROOT}/physx/include")
+target_compile_features(ChainmailReferenceProbe PRIVATE cxx_std_14)
+target_compile_definitions(ChainmailReferenceProbe PRIVATE NDEBUG PX_CHECKED=1
+  PX_PUBLIC_RELEASE=1 DISABLE_CUDA_PHYSX _CRT_SECURE_NO_WARNINGS)
+set_property(TARGET ChainmailReferenceProbe PROPERTY MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
+foreach(LIB PhysXExtensions_static_64 PhysXPvdSDK_static_64 PhysXCooking_64 PhysX_64 PhysXCommon_64 PhysXFoundation_64)
+  target_link_libraries(ChainmailReferenceProbe PRIVATE "${REFERENCE_BIN}/${LIB}.lib")
+endforeach()
+file(GLOB REFERENCE_DLLS "${REFERENCE_BIN}/*.dll")
+foreach(DLL IN LISTS REFERENCE_DLLS)
+  add_custom_command(TARGET ChainmailReferenceProbe POST_BUILD COMMAND
+    ${CMAKE_COMMAND} -E copy_if_different "${DLL}" "$<TARGET_FILE_DIR:ChainmailReferenceProbe>")
+endforeach()

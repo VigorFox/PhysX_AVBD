@@ -1,0 +1,15 @@
+{
+  "scope": "final failed frame 16, original full five asset",
+  "localResponseCalls": 32,
+  "localSweeps": 5618,
+  "localNumericalFailures": 2,
+  "acceptedComponentSteps": 19,
+  "minimumFraction": 0.001953125,
+  "fractionBelow1Over1024": 0,
+  "lastReject": "[AVBD_COMMON_STEP] iteration=16 stage=accept reason=nonlinear_work status=FAIL",
+  "lastTrials": [
+    "[AVBD_COMMON_TRIAL] iteration=16 search=13 fraction=0.000244140625 initial=2.3664858997674838e-07 residual=2.3664091520480859e-07 work=-1.8541212402217733e-13 slope=1.5125997115927297e-15 closed=0 descent=0",
+    "[AVBD_COMMON_TRIAL] iteration=16 search=14 fraction=0.000122070312 initial=2.3664858997674838e-07 residual=2.3666850121390491e-07 work=6.1395441681988405e-14 slope=-3.7911723691508167e-16 closed=0 descent=0",
+    "[AVBD_COMMON_TRIAL] iteration=16 search=15 fraction=6.10351562e-05 initial=2.3664858997674838e-07 residual=2.366525521023961e-07 work=6.4653577630524595e-14 slope=-1.8929638084189647e-16 closed=0 descent=0"
+  ]
+}

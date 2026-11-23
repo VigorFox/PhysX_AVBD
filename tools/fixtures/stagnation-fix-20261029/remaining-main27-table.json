@@ -1,0 +1,38 @@
+[
+  {
+    "mode": "precise",
+    "seed": "cold",
+    "converged": false,
+    "iterations": 656,
+    "originalRoot": 0.002717645766073072,
+    "physical": false,
+    "passed": false
+  },
+  {
+    "mode": "precise",
+    "seed": "captured",
+    "converged": false,
+    "iterations": 656,
+    "originalRoot": 0.002709667451721786,
+    "physical": false,
+    "passed": false
+  },
+  {
+    "mode": "fast",
+    "seed": "cold",
+    "converged": false,
+    "iterations": 656,
+    "originalRoot": 0.002613734940491659,
+    "physical": false,
+    "passed": false
+  },
+  {
+    "mode": "fast",
+    "seed": "captured",
+    "converged": false,
+    "iterations": 656,
+    "originalRoot": 0.0026115414889047762,
+    "physical": false,
+    "passed": false
+  }
+]

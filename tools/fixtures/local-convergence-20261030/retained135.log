@@ -1,0 +1,20 @@
+[AVBD_LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=1024 primalProducts=12413 corrections=298 correctionIterations=170240 residual=1.95187085e-06 station=1.72659611e-06 force=1.95187085e-06 status=FAIL
+[LOCAL_RESPONSE] blocks=4 groups=135 colors=3 sweeps=1024 residual=1.95187085e-06 ms=418.639 status=FAIL
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\retained135.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "grouped augmented primal/dual",
+  "reason": "local_response_capture",
+  "materialProducts": 16,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 1.7792518915468636,
+    "passed": false,
+    "scope": "full-H correction only"
+  }
+}

@@ -1,0 +1,39 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -44,6 +44,7 @@
+     struct MixedWave
+     {
+         PxU32 firstTile=0, tiles=0, firstLeaf=0, leaves=0, lanes=0;
++        bool singleFullLeaf=false;
+         PxArray<AvbdMixedColorLane*> tasks;
+     } mixed;
+     struct ClaimTiming
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -1675,6 +1675,10 @@
+     mixed.firstLeaf=mLocalWork->cursor;
+     mixed.leaves=leaves;
+     mixed.lanes=lanes;
++    // The first mixed ticket is the first ready assembly leaf.
++    const auto& first=mLocalWork->nodes[mLocalWork->leaves[mixed.firstLeaf]];
++    mixed.singleFullLeaf=first.end-first.begin==AvbdLocalWork::RowLimit &&
++        tiles+leaves-1<=(lanes-1)*LocalQueueDepth;
+     mLocalWork->cursor+=leaves;
+     mStep.tiledJobs+=leaves;
+     mStep.localQueuePeak=PxMax(mStep.localQueuePeak,lanes);
+@@ -1721,9 +1725,12 @@
+     // Earlier submissions receive any extra item. The caller starts its
+     // inline batch after the submissions, so it takes the final range.
+     const PxU32 rank=slot ? slot-1 : mixed.lanes-1;
+-    const PxU32 perLane=count/mixed.lanes, extra=count%mixed.lanes;
+-    const PxU32 begin=rank*perLane+PxMin(rank,extra);
+-    const PxU32 claimed=perLane+(rank<extra ? 1u : 0u);
++    const PxU32 reserved=mixed.singleFullLeaf ? 1u : 0u;
++    const PxU32 lanes=mixed.lanes-reserved, remaining=count-reserved;
++    const PxU32 perLane=remaining/lanes, extra=remaining%lanes;
++    const bool singleton=reserved && !slot;
++    const PxU32 begin=singleton ? 0u : reserved+rank*perLane+PxMin(rank,extra);
++    const PxU32 claimed=singleton ? 1u : perLane+(rank<extra ? 1u : 0u);
+     PX_ASSERT(claimed && claimed<=LocalQueueDepth);
+     for(PxU32 ticket=begin;ticket<begin+claimed;++ticket)
+     {

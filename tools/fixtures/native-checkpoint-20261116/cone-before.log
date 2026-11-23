@@ -1,0 +1,4 @@
+[CONE_WINDING] segments=32 layers=1 triangles=64 outward=0 inward=64 degenerate=0 signedVolume=-1.9977247715
+[CONE_WINDING] segments=32 layers=3 triangles=192 outward=0 inward=192 degenerate=0 signedVolume=-1.9977245902
+[CONE_WINDING] segments=17 layers=1 triangles=34 outward=0 inward=34 degenerate=0 signedVolume=-1.9651547273
+[CONE_WINDING] segments=17 layers=3 triangles=102 outward=0 inward=102 degenerate=0 signedVolume=-1.9651545609

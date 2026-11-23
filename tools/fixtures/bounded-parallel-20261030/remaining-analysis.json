@@ -1,0 +1,32 @@
+[
+  {
+    "input": "135",
+    "fullHCondition": 6151.1927524765,
+    "maximumStationarity": 2.7269829168119486e-05,
+    "maximumFullHCorrection": 1.6498023350594687e-09,
+    "fullHCorrectionToleranceRatio": 0.0016498023767369822,
+    "unitRoot": 2.9683108367508663e-06,
+    "minimumNormalResidual": -2.9683108367508663e-06,
+    "solved": false
+  },
+  {
+    "input": "240",
+    "fullHCondition": 209.0154304115039,
+    "maximumStationarity": 0.00012929711787990072,
+    "maximumFullHCorrection": 1.0102930627009774e-08,
+    "fullHCorrectionToleranceRatio": 0.010102930882231274,
+    "unitRoot": 1.2378139030676258e-05,
+    "minimumNormalResidual": -1.2378139030676258e-05,
+    "solved": false
+  },
+  {
+    "input": "280",
+    "fullHCondition": 46.84986437814024,
+    "maximumStationarity": 8.590632205596194e-09,
+    "maximumFullHCorrection": 3.705697825014507e-14,
+    "fullHCorrectionToleranceRatio": 3.70569791862831e-08,
+    "unitRoot": 1.6509375200257637e-08,
+    "minimumNormalResidual": -1.650936849961705e-08,
+    "solved": false
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "mode": "precise",
+    "seed": "cold",
+    "converged": true,
+    "iterations": 10,
+    "originalRoot": 2.1190209938648872e-16,
+    "physical": true,
+    "passed": true
+  },
+  {
+    "mode": "precise",
+    "seed": "captured",
+    "converged": true,
+    "iterations": 4,
+    "originalRoot": 1.4126806625765896e-16,
+    "physical": true,
+    "passed": true
+  },
+  {
+    "mode": "fast",
+    "seed": "cold",
+    "converged": true,
+    "iterations": 10,
+    "originalRoot": 1.4126806625765883e-16,
+    "physical": true,
+    "passed": true
+  },
+  {
+    "mode": "fast",
+    "seed": "captured",
+    "converged": true,
+    "iterations": 4,
+    "originalRoot": 2.1190209938648817e-16,
+    "physical": true,
+    "passed": true
+  }
+]

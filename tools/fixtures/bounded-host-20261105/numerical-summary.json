@@ -1,0 +1,28 @@
+[
+  {
+    "name": "bounded-mechanisms",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_bounded_response_probe.py"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "frozen-matrix",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_bounded_convergence_probe.py",
+      "--reports",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\bounded-host-20261105\\frozen-final"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "ogc",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_ogc_certificate_probe.py"
+    ],
+    "exit": 0
+  }
+]

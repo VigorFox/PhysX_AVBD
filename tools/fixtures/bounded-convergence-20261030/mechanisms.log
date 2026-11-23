@@ -1,0 +1,22 @@
+Bounded response /fp:precise
+[BOUNDED_EXCHANGE] cases=12 bodies=64 epsilon=1e-3,1e-6,1e-9 coldWarm=1 finiteForceLimit=1 maxSweeps=28 stepError=6.64414628e-11 failed=0 status=PASS
+[BOUNDED_STICK_EXCHANGE] cases=8 coldWarm=1 boundedNormal=1 maximumWrenchError=3.48216391e-18 maximumCorrection=1.2499999e-07 failed=0 status=PASS
+[BOUNDED_CASE] name=coupled_coulomb blocks=16 rows=15 colors=2 depth=0 sweeps=64 error=8.92386876e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=four_support_row blocks=4 rows=3 colors=4 depth=0 sweeps=27 error=7.46741922e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=high_degree_star blocks=1025 rows=1024 colors=2 depth=3 sweeps=3 error=4.52698816e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=long_chain blocks=1025 rows=1024 colors=2 depth=0 sweeps=6 error=1.26390669e-11 threadDifference=0 status=PASS
+[BOUNDED_HARD_CHAIN] blocks=257 rows=256 sweeps=825 threads=1,4 stepError=2.79529237e-09 fullRoot=9.89293647e-11 status=PASS
+[BOUNDED_CLOSED_CHAIN] sweeps=4 a=0.5 b=0.5 force=1.5 status=PASS
+[BOUNDED_BUDGET] sweeps=1024 status=PASS
+[BOUNDED_RESPONSE] threads=1,4 peak=4 leaf=32 fanIn=8 matrix=6 batch=32 sweepLimit=1024 failed=0 status=PASS
+Bounded response /fp:fast
+[BOUNDED_EXCHANGE] cases=12 bodies=64 epsilon=1e-3,1e-6,1e-9 coldWarm=1 finiteForceLimit=1 maxSweeps=28 stepError=6.6441445e-11 failed=0 status=PASS
+[BOUNDED_STICK_EXCHANGE] cases=8 coldWarm=1 boundedNormal=1 maximumWrenchError=3.48216391e-18 maximumCorrection=1.2499999e-07 failed=0 status=PASS
+[BOUNDED_CASE] name=coupled_coulomb blocks=16 rows=15 colors=2 depth=0 sweeps=64 error=8.92396816e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=four_support_row blocks=4 rows=3 colors=4 depth=0 sweeps=27 error=7.46739146e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=high_degree_star blocks=1025 rows=1024 colors=2 depth=3 sweeps=3 error=4.52698816e-11 threadDifference=0 status=PASS
+[BOUNDED_CASE] name=long_chain blocks=1025 rows=1024 colors=2 depth=0 sweeps=6 error=1.26390669e-11 threadDifference=0 status=PASS
+[BOUNDED_HARD_CHAIN] blocks=257 rows=256 sweeps=825 threads=1,4 stepError=2.79525868e-09 fullRoot=9.89289206e-11 status=PASS
+[BOUNDED_CLOSED_CHAIN] sweeps=4 a=0.5 b=0.5 force=1.5 status=PASS
+[BOUNDED_BUDGET] sweeps=1024 status=PASS
+[BOUNDED_RESPONSE] threads=1,4 peak=4 leaf=32 fanIn=8 matrix=6 batch=32 sweepLimit=1024 failed=0 status=PASS

@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Check production joint-coordinate derivatives, objectivity, and free twist."""
+from run_avbd_ogc_certificate_probe import ROOT, run_probe
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_probe(ROOT / "tools/avbd_joint_geometry_probe.cpp"))

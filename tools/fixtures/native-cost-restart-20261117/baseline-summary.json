@@ -1,0 +1,4000 @@
+{
+  "baseline": "f9abbe0cd869136d20cba6462551bbb141a75cd0",
+  "archiveCommit": "b51642f3897b82632e9ff0a023d47f4600757153",
+  "mainChecks": {
+    "passed": 43,
+    "total": 43,
+    "originalCheckpoint": 40,
+    "additional": 3,
+    "initialDependencyFailures": 26,
+    "retry": 26,
+    "sourceAndExistingProductsIdentical": true
+  },
+  "results": [
+    {
+      "name": "final-Surface-reaction-w4",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 4.3424122,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=reaction model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=4 mass=625.004272 contacts=12208 crossContacts=12208 centerY=3.8526597 minY=3.40560102 peakPrincipalStrain=1.03369665 finalPrincipalStrain=1.01090074 finalAreaRatio=1.00090694 maxPenetration=0 maxSelfPenetration=0 initialEnergy=40.0000003 peakEnergy=40.0000003 maxMomentumError=0.000173791079 maxBallisticError=4.14821661e-05 finalAwake=577 averageStepMs=10.5054425 p95StepMs=12.3944 maxStepMs=13.0321 averageObserverMs=1.02093028 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-reaction-w4",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 2.7269983,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=reaction frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=rigid_cell_joint_volume materialElements=384 sleepEnabled=1 grid=5 nodes=125 joints=300 mass=800.000732 cellSize=0.400000006 dispatcherThreads=4 compressionHoldFrames=60 maxJointAngle=0.0265296437 trajectoryHash=d007a51dd44b97ca minVolumeRatio=0.980562687 minCellDet=0.954540014 finalVolumeRatio=1.00002217 maxShapeError=0.0139480997 finalShapeError=1.40320644e-05 maxGroundPenetration=0 maxExternalPenetration=0 compressionMinimum=1 recoveredFraction=0 contacts=514 firstContactFrame=18 maxPostContactStep=0.0133307604 zeroMotionFrames=0 systemComDrift=2.68911481e-05 maxPostImpactVy=0.6593799 maxMechanicalEstimate=210.009048 finalMechanicalEstimate=21.4157314 averageStepMs=6.92576694 maxStepMs=8.95810032 averageFrameMs=7.22251083 activeFrames=360 activeContactFrames=15 averageActiveStepMs=6.92576694 averageActiveContactMs=6.71136 maxMomentumRelativeError=2.3304412e-05 maxBallisticError=3.45825005 sleepingBeforeWake=0 maxWakeMotion=0.00311733736 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-static-box-w4",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=static-box",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 4.1415941,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=static-box model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=4 mass=625.004272 contacts=534332 crossContacts=0 centerY=1.5051167 minY=0.223877788 peakPrincipalStrain=1.50723207 finalPrincipalStrain=1.29561985 finalAreaRatio=1.02520025 maxPenetration=0 maxSelfPenetration=0 initialEnergy=25751.25 peakEnergy=25751.25 maxMomentumError=3748.56201 maxBallisticError=2.79592991 finalAwake=576 averageStepMs=10.0526872 p95StepMs=24.9561 maxStepMs=50.5275 averageObserverMs=1.13397028 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-visual-showcase-w4",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 15.0660868,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=visual-showcase frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=convex_cell_joint_volume materialElements=2514 grid=5 dispatcherThreads=4 bodies=5 nodes=787 joints=1888 mass=7530.66113 cellSize=0.200000003 trajectoryHash=ef24834b86cd01c8 contacts=1153396 crossContacts=20089 crossMask=8519712 minCellDet=0.691093266 minVolumeRatio=0.941778958 maxVolumeRatio=1.01155102 finalVolumeRatio=0.950342774 maxExternalPenetration=4.71924693e-07 maxSelfPenetration=0 maxJointAnchorError=0.79671073 maxPostContactStep=1.02791965 maxMomentumRelativeError=17.161129 initialMechanicalEstimate=882856.97 maxMechanicalEstimate=882857 finalMechanicalEstimate=137390.873 finalAwake=788 skinRestError=6.03421586e-06 massRelativeError=1.30616327e-05 assetBytes=352636 skinBytes=101156 diagnosticBytes=50280 averageStepMs=36.3714731 p95StepMs=117.3002 maxStepMs=197.5216 activeContactFrames=355 averageActiveContactMs=36.5153682 averageSkinMs=0.0808758333 averageObserverMs=4.77887917 averageFrameMs=36.4523489 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-reaction-w0",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=0"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 10.1856616,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=reaction model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=0 mass=625.004272 contacts=12208 crossContacts=12208 centerY=3.8526597 minY=3.40560102 peakPrincipalStrain=1.03369665 finalPrincipalStrain=1.01090074 finalAreaRatio=1.00090694 maxPenetration=0 maxSelfPenetration=0 initialEnergy=40.0000003 peakEnergy=40.0000003 maxMomentumError=0.000173791079 maxBallisticError=4.14821661e-05 finalAwake=577 averageStepMs=26.6960467 p95StepMs=33.7721 maxStepMs=47.5041 averageObserverMs=1.22406056 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-reaction-w0",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=0"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 2.6849169999999987,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=reaction frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=rigid_cell_joint_volume materialElements=384 sleepEnabled=1 grid=5 nodes=125 joints=300 mass=800.000732 cellSize=0.400000006 dispatcherThreads=0 compressionHoldFrames=60 maxJointAngle=0.0265296437 trajectoryHash=d007a51dd44b97ca minVolumeRatio=0.980562687 minCellDet=0.954540014 finalVolumeRatio=1.00002217 maxShapeError=0.0139480997 finalShapeError=1.40320644e-05 maxGroundPenetration=0 maxExternalPenetration=0 compressionMinimum=1 recoveredFraction=0 contacts=514 firstContactFrame=18 maxPostContactStep=0.0133307604 zeroMotionFrames=0 systemComDrift=2.68911481e-05 maxPostImpactVy=0.6593799 maxMechanicalEstimate=210.009048 finalMechanicalEstimate=21.4157314 averageStepMs=6.88544778 maxStepMs=10.2627001 averageFrameMs=7.164645 activeFrames=360 activeContactFrames=15 averageActiveStepMs=6.88544778 averageActiveContactMs=6.78107333 maxMomentumRelativeError=2.3304412e-05 maxBallisticError=3.45825005 sleepingBeforeWake=0 maxWakeMotion=0.00311733736 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-static-box-w0",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=static-box",
+        "--frames=360",
+        "--dispatcher-threads=0"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 9.612581200000001,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=static-box model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=0 mass=625.004272 contacts=534332 crossContacts=0 centerY=1.5051167 minY=0.223877788 peakPrincipalStrain=1.50723207 finalPrincipalStrain=1.29561985 finalAreaRatio=1.02520025 maxPenetration=0 maxSelfPenetration=0 initialEnergy=25751.25 peakEnergy=25751.25 maxMomentumError=3748.56201 maxBallisticError=2.79592991 finalAwake=576 averageStepMs=24.89897 p95StepMs=53.5103 maxStepMs=91.5151 averageObserverMs=1.45328167 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-visual-showcase-w0",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=360",
+        "--dispatcher-threads=0"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 31.232148200000005,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=visual-showcase frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=convex_cell_joint_volume materialElements=2514 grid=5 dispatcherThreads=0 bodies=5 nodes=787 joints=1888 mass=7530.66113 cellSize=0.200000003 trajectoryHash=ef24834b86cd01c8 contacts=1153396 crossContacts=20089 crossMask=8519712 minCellDet=0.691093266 minVolumeRatio=0.941778958 maxVolumeRatio=1.01155102 finalVolumeRatio=0.950342774 maxExternalPenetration=4.71924693e-07 maxSelfPenetration=0 maxJointAnchorError=0.79671073 maxPostContactStep=1.02791965 maxMomentumRelativeError=17.161129 initialMechanicalEstimate=882856.97 maxMechanicalEstimate=882857 finalMechanicalEstimate=137390.873 finalAwake=788 skinRestError=6.03421586e-06 massRelativeError=1.30616327e-05 assetBytes=352636 skinBytes=101156 diagnosticBytes=50280 averageStepMs=81.3488411 p95StepMs=240.755 maxStepMs=419.1434 activeContactFrames=355 averageActiveContactMs=81.8020949 averageSkinMs=0.0814513889 averageObserverMs=4.69842444 averageFrameMs=81.4302925 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-reaction-w8",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=8"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.4792567000000076,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=reaction model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=8 mass=625.004272 contacts=12208 crossContacts=12208 centerY=3.8526597 minY=3.40560102 peakPrincipalStrain=1.03369665 finalPrincipalStrain=1.01090074 finalAreaRatio=1.00090694 maxPenetration=0 maxSelfPenetration=0 initialEnergy=40.0000003 peakEnergy=40.0000003 maxMomentumError=0.000173791079 maxBallisticError=4.14821661e-05 finalAwake=577 averageStepMs=8.42544361 p95StepMs=9.4518 maxStepMs=10.5161 averageObserverMs=0.944858611 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-reaction-w8",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=8"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 2.9317356000000103,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=reaction frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=rigid_cell_joint_volume materialElements=384 sleepEnabled=1 grid=5 nodes=125 joints=300 mass=800.000732 cellSize=0.400000006 dispatcherThreads=8 compressionHoldFrames=60 maxJointAngle=0.0265296437 trajectoryHash=d007a51dd44b97ca minVolumeRatio=0.980562687 minCellDet=0.954540014 finalVolumeRatio=1.00002217 maxShapeError=0.0139480997 finalShapeError=1.40320644e-05 maxGroundPenetration=0 maxExternalPenetration=0 compressionMinimum=1 recoveredFraction=0 contacts=514 firstContactFrame=18 maxPostContactStep=0.0133307604 zeroMotionFrames=0 systemComDrift=2.68911481e-05 maxPostImpactVy=0.6593799 maxMechanicalEstimate=210.009048 finalMechanicalEstimate=21.4157314 averageStepMs=7.53665417 maxStepMs=11.8028002 averageFrameMs=7.81570417 activeFrames=360 activeContactFrames=15 averageActiveStepMs=7.53665417 averageActiveContactMs=7.51795333 maxMomentumRelativeError=2.3304412e-05 maxBallisticError=3.45825005 sleepingBeforeWake=0 maxWakeMotion=0.00311733736 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-static-box-w8",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=static-box",
+        "--frames=360",
+        "--dispatcher-threads=8"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.529335500000002,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=static-box model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=8 mass=625.004272 contacts=534332 crossContacts=0 centerY=1.5051167 minY=0.223877788 peakPrincipalStrain=1.50723207 finalPrincipalStrain=1.29561985 finalAreaRatio=1.02520025 maxPenetration=0 maxSelfPenetration=0 initialEnergy=25751.25 peakEnergy=25751.25 maxMomentumError=3748.56201 maxBallisticError=2.79592991 finalAwake=576 averageStepMs=8.29514333 p95StepMs=18.9686 maxStepMs=46.7986 averageObserverMs=1.16226111 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-visual-showcase-w8",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=360",
+        "--dispatcher-threads=8"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 12.190788799999993,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=visual-showcase frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=convex_cell_joint_volume materialElements=2514 grid=5 dispatcherThreads=8 bodies=5 nodes=787 joints=1888 mass=7530.66113 cellSize=0.200000003 trajectoryHash=ef24834b86cd01c8 contacts=1153396 crossContacts=20089 crossMask=8519712 minCellDet=0.691093266 minVolumeRatio=0.941778958 maxVolumeRatio=1.01155102 finalVolumeRatio=0.950342774 maxExternalPenetration=4.71924693e-07 maxSelfPenetration=0 maxJointAnchorError=0.79671073 maxPostContactStep=1.02791965 maxMomentumRelativeError=17.161129 initialMechanicalEstimate=882856.97 maxMechanicalEstimate=882857 finalMechanicalEstimate=137390.873 finalAwake=788 skinRestError=6.03421586e-06 massRelativeError=1.30616327e-05 assetBytes=352636 skinBytes=101156 diagnosticBytes=50280 averageStepMs=28.6973394 p95StepMs=84.5884 maxStepMs=172.4562 activeContactFrames=355 averageActiveContactMs=28.7866431 averageSkinMs=0.0760377778 averageObserverMs=4.45495444 averageFrameMs=28.7733772 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-free-flight-360",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=free-flight",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 4.250089000000003,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=free-flight model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=360 completedFrames=360 grid=24 cells=576 joints=1104 dispatcherThreads=4 mass=625.004272 contacts=0 crossContacts=0 centerY=2.69998956 minY=2.69002271 peakPrincipalStrain=1.00000513 finalPrincipalStrain=1.0000037 finalAreaRatio=0.999999523 maxPenetration=0 maxSelfPenetration=0 initialEnergy=110.156247 peakEnergy=110.158074 maxMomentumError=2.44118983e-05 maxBallisticError=4.87092148e-05 finalAwake=576 averageStepMs=10.6689764 p95StepMs=12.7214 maxStepMs=13.5665 averageObserverMs=0.846485556 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-free-flight-360",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=free-flight",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 2.9587535000000003,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=free-flight frames=360 completedFrames=360 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=rigid_cell_joint_volume materialElements=384 sleepEnabled=1 grid=5 nodes=125 joints=300 mass=800.000732 cellSize=0.400000006 dispatcherThreads=4 compressionHoldFrames=60 maxJointAngle=0.0009765625 trajectoryHash=56c4c65bfd0e8bcb minVolumeRatio=0.999999762 minCellDet=0.999998808 finalVolumeRatio=1.00000024 maxShapeError=4.05842593e-06 finalShapeError=3.514215e-06 maxGroundPenetration=0 maxExternalPenetration=0 compressionMinimum=0.999999881 recoveredFraction=0 contacts=0 firstContactFrame=4294967295 maxPostContactStep=0 zeroMotionFrames=0 systemComDrift=3.56230569 maxPostImpactVy=-3.40282347e+38 maxMechanicalEstimate=141.00235 finalMechanicalEstimate=141.001785 averageStepMs=7.67152389 maxStepMs=9.65069962 averageFrameMs=7.93679361 activeFrames=360 activeContactFrames=0 averageActiveStepMs=7.67152389 averageActiveContactMs=0 maxMomentumRelativeError=1.35852833e-05 maxBallisticError=2.92735876e-05 sleepingBeforeWake=0 maxWakeMotion=0.00989545137 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-visual-showcase-1200",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 31.2584303,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=visual-showcase frames=1200 completedFrames=1200 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=convex_cell_joint_volume materialElements=2514 grid=5 dispatcherThreads=4 bodies=5 nodes=787 joints=1888 mass=7530.66113 cellSize=0.200000003 trajectoryHash=1a8374eb2671203c contacts=1363913 crossContacts=56615 crossMask=8519712 minCellDet=0.487102866 minVolumeRatio=0.90259707 maxVolumeRatio=1.01155102 finalVolumeRatio=0.978904605 maxExternalPenetration=4.71924693e-07 maxSelfPenetration=0 maxJointAnchorError=0.79671073 maxPostContactStep=1.04223084 maxMomentumRelativeError=17.161129 initialMechanicalEstimate=882856.97 maxMechanicalEstimate=882857 finalMechanicalEstimate=99796.6212 finalAwake=192 skinRestError=6.03421586e-06 massRelativeError=1.30616327e-05 assetBytes=352636 skinBytes=101156 diagnosticBytes=50280 averageStepMs=20.8359818 p95StepMs=57.8592 maxStepMs=196.5987 activeContactFrames=1195 averageActiveContactMs=20.8199462 averageSkinMs=0.0872753333 averageObserverMs=4.89822733 averageFrameMs=20.9232571 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Surface-reaction-1200",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 15.270804599999991,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetDeformableSurfaceAVBD solver=avbd case=reaction model=rigid_patch_joint_sheet capability=EXPERIMENTAL validation=GATED status=PASS reason=none frames=1200 completedFrames=1200 grid=24 cells=576 joints=1104 dispatcherThreads=4 mass=625.004272 contacts=12208 crossContacts=12208 centerY=2.98448396 minY=2.20415092 peakPrincipalStrain=1.03369665 finalPrincipalStrain=1.01441574 finalAreaRatio=1.00061536 maxPenetration=0 maxSelfPenetration=0 initialEnergy=40.0000003 peakEnergy=40.0000003 maxMomentumError=0.000344021624 maxBallisticError=7.546087e-05 finalAwake=577 averageStepMs=11.3584262 p95StepMs=12.6698 maxStepMs=14.3248 averageObserverMs=1.266316 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-Volume-reaction-1200",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 9.531892700000014,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJointSoftBody solver=avbd case=reaction frames=1200 completedFrames=1200 status=PASS reason=none capability=EXPERIMENTAL validation=GATED model=rigid_cell_joint_volume materialElements=384 sleepEnabled=1 grid=5 nodes=125 joints=300 mass=800.000732 cellSize=0.400000006 dispatcherThreads=4 compressionHoldFrames=60 maxJointAngle=0.0265296437 trajectoryHash=c549b058142ba308 minVolumeRatio=0.980562687 minCellDet=0.954540014 finalVolumeRatio=1.00002217 maxShapeError=0.0139480997 finalShapeError=1.50355218e-05 maxGroundPenetration=0 maxExternalPenetration=0 compressionMinimum=1 recoveredFraction=0 contacts=514 firstContactFrame=18 maxPostContactStep=0.0133307604 zeroMotionFrames=0 systemComDrift=0.000165652906 maxPostImpactVy=0.65940851 maxMechanicalEstimate=210.009048 finalMechanicalEstimate=21.414959 averageStepMs=7.4663535 maxStepMs=9.73989964 averageFrameMs=7.82110367 activeFrames=1200 activeContactFrames=15 averageActiveStepMs=7.4663535 averageActiveContactMs=6.62280667 maxMomentumRelativeError=4.36531991e-05 maxBallisticError=11.4565687 sleepingBeforeWake=0 maxWakeMotion=0.00311733736 nonFinite=0 fetchFailures=0 fatalErrors=0"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-probe-body_index",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_body_index_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.9783087000000004,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-program_schedule",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_program_schedule_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.172737999999999,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-local_reaction",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_local_reaction_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 10.5979406,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-nonlinear_block",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_nonlinear_block_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 14.957525200000003,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-frame_packet",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_frame_packet_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 15.531912300000002,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-frame_curvature",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_frame_curvature_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 7.544094100000002,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-compact_frame",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_compact_frame_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 8.602121799999999,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-row_program",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_row_program_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.9574630999999982,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-pose_view",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_pose_view_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 5.190575100000004,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-current_soft_pair_objectivity",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_current_soft_pair_objectivity_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 6.554825099999988,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-elastic_frame_scene",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_elastic_frame_scene_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.705814399999994,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-coloring",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_coloring_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.2022725000000065,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-np_factorization",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_np_factorization_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 17.112503900000007,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-probe-np_domain",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_np_domain_probe.py"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 3.4669726999999995,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-row-tiles",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_row_tiles_probe.py",
+        "--logs",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\validation\\final-row-tiles"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 46.88012509999999,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "final-hello",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--cases",
+        "gated",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 10.0520305,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-idle solver=avbd execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=auto-sleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=1 freeFirstSleepFrame=25 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=156 freeAwakeSamples=24 freeSleepNotify=1 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=1 staticFirstSleepFrame=25 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=156 staticAwakeSamples=24 staticSleepNotify=1 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-disabled solver=avbd execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=1 probeFinding=sleep-disabled-control-ok wakeCounterFinding=not-gated-scene-disabled freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=0 freeFirstSleepFrame=4294967295 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=0 freeAwakeSamples=180 freeSleepNotify=0 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=0 staticFirstSleepFrame=4294967295 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=0 staticAwakeSamples=180 staticSleepNotify=0 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=lock-flags solver=avbd execution=parallel requestedFrames=120 completedFrames=120 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=12 lockWitnessCount=6 lockFlagsReadback=6 runtimeImpulseFrame=30 runtimeExcitations=12 finiteSamples=1440 maxLockedAxisMotion=0 maxLockedAxisSpeed=0 minControlAxisMotion=3.10972404 minControlAxisSpeed=3.98951387 maxControlAxisMotion=10.499979 maxControlAxisSpeed=5.9999938 lockMotionTolerance=9.99999975e-05 lockSpeedTolerance=9.99999975e-05 controlMotionMinimum=1 controlSpeedMinimum=1",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=stack-settle solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=0 hitPoints=0 firstHitFrame=4294967295 contactedBoxes=0 responseBodies=0 responseMomentumRatio=0 responseDisplacement=0 ballResponseFraction=0 maxContactImpulseDiagnostic=0 maxEnergyRatio=1.00009763 tailEnergyW1=24171622 tailEnergyW2=24171622 tailEnergyW3=24171622 tailEnergyW4=24171622 tailEnergyGrowth=0 maxBoxSpeedSettle=0 tailAverageMaxBoxSpeed=0 finalAwake=0 lateAwakeRatio=0 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.99968278 maxBoxCenterY=37.9983978 minBallCenterY=0 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=6.253841e-09 maxAbsPosition=40.0000458 maxLinearSpeed=0.052906163 maxAngularSpeed=0.00146624283 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-wake solver=avbd execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=wake-propagation-resleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=1 sleepingBeforeWake=1 awakeImmediatelyAfterWake=1 wakeCounterAfterImpulse=0.399999976 freeInitialSleeping=1 freeFinalSleeping=1 freeFirstSleepFrame=0 freeFirstSleepAfterWakeFrame=209 freeSleepSamples=212 freeAwakeSamples=148 freeSleepNotify=2 freeWakeNotify=1 freeFirstWakeNotifyFrame=61 freeInitialWakeCounter=0 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.416666657 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0.967741966 freeMaxAngularSpeed=5.96980226e-06 freeMaxWakeVelocityX=0.967741966 freeMaxWakeDisplacementX=0.504882872 staticInitialSleeping=1 staticFinalSleeping=1 staticFirstSleepFrame=0 staticFirstSleepAfterWakeFrame=209 staticSleepSamples=212 staticAwakeSamples=148 staticSleepNotify=2 staticWakeNotify=1 staticFirstWakeNotifyFrame=61 staticInitialWakeCounter=0 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.416666657 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0.967741966 staticMaxAngularSpeed=5.80359574e-06 staticMaxWakeVelocityX=0.967741966 staticMaxWakeDisplacementX=0.520356536 staticMinTopY=4.5 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=ball-shot solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=12 hitPoints=12 firstHitFrame=48 contactedBoxes=12 responseBodies=5 responseMomentumRatio=0.151582405 responseDisplacement=6.34200621 ballResponseFraction=1.25819957 maxContactImpulseDiagnostic=1197358.12 maxEnergyRatio=1 tailEnergyW1=20378522 tailEnergyW2=18823422 tailEnergyW3=12933782 tailEnergyW4=11203543 tailEnergyGrowth=-0.450227886 maxBoxSpeedSettle=45.5010605 tailAverageMaxBoxSpeed=25.3745422 finalAwake=263 lateAwakeRatio=0.978060603 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.99257934 maxBoxCenterY=55.5637321 minBallCenterY=2.83938789 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=2.89652121e-07 maxAbsPosition=369.451935 maxLinearSpeed=221.176071 maxAngularSpeed=21.1026764 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sub-bounce-stack solver=avbd execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 boxCount=3 restitution=0.6 bounceThresholdVelocity=2 interfaceMask=0x7 allInterfacesObserved=1 maxPenetration=0.000102341175 maxPenetration0=6.14225864e-05 maxPenetration1=0.000102341175 maxPenetration2=8.17775726e-05 maxGap0=2.17556953e-05 maxGap1=3.6239624e-05 maxGap2=2.36034393e-05 reportedSeparationMin=-0.000102341175 reportedSeparationMax=3.64780426e-05 tailPeakLinearSpeed=0 tailPeakAngularSpeed=0 tailMeanMaxLinearSpeed=0 tailMeanMaxAngularSpeed=0 maxTiltDegrees=0 firstAllSleepFrame=25 finalSleeping=3 sleepGate=DIAGNOSTIC penetrationCap=0.0199999996 tailLinearCap=0.25 tailAngularCap=0.25"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-joint-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_joint_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "avbd",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 0.8840280999999948,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-spherical joint=all solver=avbd execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.0087720044 maxAbsPosition=19.9982967 maxLinearSpeed=14.2484388 maxAngularSpeed=2.97031975 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-d6 joint=all solver=avbd execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.023738848 maxAbsPosition=20 maxLinearSpeed=8.36400223 maxAngularSpeed=0.705218554 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-no-break joint=fixed solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=135 dynamicActors=2 maxAnchorError=0.00146623864 maxAbsPosition=31.0176125 maxLinearSpeed=20.1305351 maxAngularSpeed=5.51435757 linearBreakForce=3.40282347e+38",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-break joint=fixed solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=1 breakCallbacks=1 breakCallbackIdentityMatches=1 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=135 firstContactFrame=135 dynamicActors=2 maxAnchorError=1.04904175e-05 maxAbsPosition=31.0175972 maxLinearSpeed=20.1305351 maxAngularSpeed=5.51435757 linearBreakForce=250"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-articulation_rc-avbd",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "avbd",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 20.691083300000003,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-unloaded solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=0 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=0.0201907568 revoluteSwingDegMax=0.481325418 lockedAngularDegMax=0.366907895 loopAnchorMax=0.00285916915 maxAbsPosition=6.64741611 maxLinearSpeed=4.85967922 maxAngularSpeed=20.0000019 driveCoord=-0.0881357342 driveErrorMax=0.0368612334 baseYMin=0.245643392 baseYMax=0.369596183 baseTiltDegMax=0.72766161 topYMin=3.50635004 topYMax=6.64741611 topTiltDegMax=8.62998772 stroke=3.14106607 cargoMinY=0 cargoCurrentMinY=0 cargoCurrentMinTopClearance=0 cargoCurrentMaxPlanarOffset=0 cargoMaxAbsPosition=0 cargoMaxLinearSpeed=0 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8",
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-cycle solver=avbd execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=8 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=0.0192260649 revoluteSwingDegMax=0.463093042 lockedAngularDegMax=0.389667094 loopAnchorMax=0.00326854433 maxAbsPosition=7.48121977 maxLinearSpeed=4.98359394 maxAngularSpeed=20.0000038 driveCoord=-0.0900165588 driveErrorMax=0.0388872772 baseYMin=0.243459716 baseYMax=0.367506653 baseTiltDegMax=0.630560398 topYMin=3.46602106 topYMax=6.64487219 topTiltDegMax=8.97491646 stroke=3.17885113 cargoMinY=3.80390406 cargoCurrentMinY=4.87786627 cargoCurrentMinTopClearance=0.442341328 cargoCurrentMaxPlanarOffset=0.963222802 cargoMaxAbsPosition=7.48121977 cargoMaxLinearSpeed=4.90943146 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-joint-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_joint_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "pgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 0.7813516999999877,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-spherical joint=all solver=pgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.178083137 maxAbsPosition=19.9982891 maxLinearSpeed=25.8194656 maxAngularSpeed=8.40054035 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-d6 joint=all solver=pgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.0201474708 maxAbsPosition=20 maxLinearSpeed=15.1043787 maxAngularSpeed=1.04321647 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-no-break joint=fixed solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=136 dynamicActors=2 maxAnchorError=0 maxAbsPosition=52.4425583 maxLinearSpeed=20.1498089 maxAngularSpeed=10.6515732 linearBreakForce=3.40282347e+38",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-break joint=fixed solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=1 breakCallbacks=1 breakCallbackIdentityMatches=1 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=136 firstContactFrame=136 dynamicActors=2 maxAnchorError=0 maxAbsPosition=52.4425583 maxLinearSpeed=20.1498089 maxAngularSpeed=10.6515732 linearBreakForce=250"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-articulation_rc-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "pgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 1.1530170000000055,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-unloaded solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=0 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=1.19803849e-06 revoluteSwingDegMax=0 lockedAngularDegMax=0 loopAnchorMax=0.0346653461 maxAbsPosition=6.74538231 maxLinearSpeed=5.5041852 maxAngularSpeed=31.9960423 driveCoord=-0.0919167995 driveErrorMax=0.0025646463 baseYMin=0.249721989 baseYMax=0.250020742 baseTiltDegMax=0 topYMin=3.34102464 topYMax=6.74538231 topTiltDegMax=6.17514181 stroke=3.40435767 cargoMinY=0 cargoCurrentMinY=0 cargoCurrentMinTopClearance=0 cargoCurrentMaxPlanarOffset=0 cargoMaxAbsPosition=0 cargoMaxLinearSpeed=0 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8",
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-cycle solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=8 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=1.45024364e-06 revoluteSwingDegMax=0 lockedAngularDegMax=0 loopAnchorMax=0.0574101582 maxAbsPosition=7.57191038 maxLinearSpeed=4.44037485 maxAngularSpeed=19.1412964 driveCoord=-0.0882551447 driveErrorMax=0.00397864729 baseYMin=0.249557674 baseYMax=0.250003189 baseTiltDegMax=0 topYMin=3.17186904 topYMax=6.72413874 topTiltDegMax=2.81160235 stroke=3.5522697 cargoMinY=3.50459623 cargoCurrentMinY=3.92837954 cargoCurrentMinTopClearance=0.332770586 cargoCurrentMaxPlanarOffset=0.536178052 cargoMaxAbsPosition=7.57191038 cargoMaxLinearSpeed=4.32775021 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-joint-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_joint_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "tgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 0.8109790000000032,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-spherical joint=all solver=tgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.119181737 maxAbsPosition=19.9982777 maxLinearSpeed=26.1377487 maxAngularSpeed=9.7539711 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=hang-d6 joint=all solver=tgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=0 hitChains=0 responseProjectiles=0 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=4294967295 dynamicActors=5 maxAnchorError=0.0108454004 maxAbsPosition=20 maxLinearSpeed=16.1469765 maxAngularSpeed=1.10342526 linearBreakForce=1000",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-no-break joint=fixed solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=0 breakCallbacks=0 breakCallbackIdentityMatches=0 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=4294967295 firstContactFrame=136 dynamicActors=2 maxAnchorError=0 maxAbsPosition=73.4350891 maxLinearSpeed=20.1498089 maxAngularSpeed=14.3755112 linearBreakForce=3.40282347e+38",
+        "[AVBD_GATE] schema=1 snippet=SnippetJoint case=fixed-break joint=fixed solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 expectedHits=1 hitChains=1 responseProjectiles=1 brokenCount=1 breakCallbacks=1 breakCallbackIdentityMatches=1 breakCallbackConstraintMismatches=0 breakCallbackExternalReferenceMismatches=0 breakCallbackTypeMismatches=0 breakCallbackBrokenFlagMismatches=0 breakCallbackDuplicateMismatches=0 breakCallbackPollMismatches=0 firstBrokenFrame=136 firstContactFrame=136 dynamicActors=2 maxAnchorError=0 maxAbsPosition=73.3843765 maxLinearSpeed=20.1498089 maxAngularSpeed=14.4018135 linearBreakForce=250"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-articulation_rc-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_articulation_rc_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "tgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 1.2517281000000082,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-unloaded solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=0 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=1.59936042e-06 revoluteSwingDegMax=0 lockedAngularDegMax=0 loopAnchorMax=0.0108339116 maxAbsPosition=6.76206493 maxLinearSpeed=5.9616127 maxAngularSpeed=97.1382599 driveCoord=-0.0932958126 driveErrorMax=0.00446774811 baseYMin=0.249942094 baseYMax=0.259559184 baseTiltDegMax=0.366908371 topYMin=3.49756742 topYMax=6.76206493 topTiltDegMax=21.7018089 stroke=3.26449752 cargoMinY=0 cargoCurrentMinY=0 cargoCurrentMinTopClearance=0 cargoCurrentMaxPlanarOffset=0 cargoMaxAbsPosition=0 cargoMaxLinearSpeed=0 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8",
+        "[AVBD_GATE] schema=1 snippet=SnippetArticulationRC case=scissor-cycle solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 linkCount=18 loopJointCount=8 cargoCount=8 firstFailFrame=4294967295 firstStallFrame=4294967295 twistLimitViolationDegMax=0 internalAnchorMax=1.56142551e-06 revoluteSwingDegMax=0 lockedAngularDegMax=0 loopAnchorMax=0.0155783938 maxAbsPosition=7.60814238 maxLinearSpeed=6.1138339 maxAngularSpeed=35.0968132 driveCoord=-0.0920075551 driveErrorMax=0.00632688403 baseYMin=0.24992457 baseYMax=0.261262685 baseTiltDegMax=0.433410376 topYMin=3.45885634 topYMax=6.75816202 topTiltDegMax=19.7396011 stroke=3.29930568 cargoMinY=3.80430532 cargoCurrentMinY=5.15760851 cargoCurrentMinTopClearance=0.640630245 cargoCurrentMaxPlanarOffset=1.03263462 cargoMaxAbsPosition=7.60814238 cargoMaxLinearSpeed=5.8932395 twistLimitCapDeg=5 internalAnchorCap=0.1 revoluteSwingCapDeg=5 loopAnchorCap=0.1 topTiltDegCap=25 cargoMinTopClearanceCap=0.150000006 cargoPlanarOffsetCap=1.20000005 cargoLinearSpeedCap=8"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "final-smoke",
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\avbd_smoke.exe"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 9.6257545,
+      "gates": [],
+      "evidence": "validation"
+    },
+    {
+      "name": "extra-hello-pgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "pgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 1.7727725999999961,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-idle solver=pgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=auto-sleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=1 freeFirstSleepFrame=25 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=156 freeAwakeSamples=24 freeSleepNotify=1 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=1 staticFirstSleepFrame=25 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=156 staticAwakeSamples=24 staticSleepNotify=1 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-disabled solver=pgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=1 probeFinding=sleep-disabled-control-ok wakeCounterFinding=not-gated-scene-disabled freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=0 freeFirstSleepFrame=4294967295 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=0 freeAwakeSamples=180 freeSleepNotify=0 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=-431602080 freeMinWakeCounter=-431602080 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=180 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=0 staticFirstSleepFrame=4294967295 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=0 staticAwakeSamples=180 staticSleepNotify=0 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=-431602080 staticMinWakeCounter=-431602080 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=180 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=lock-flags solver=pgs execution=parallel requestedFrames=120 completedFrames=120 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=12 lockWitnessCount=6 lockFlagsReadback=6 runtimeImpulseFrame=30 runtimeExcitations=12 finiteSamples=1440 maxLockedAxisMotion=0 maxLockedAxisSpeed=0 minControlAxisMotion=3.13333344 minControlAxisSpeed=3.99999928 maxControlAxisMotion=10.5000114 maxControlAxisSpeed=6 lockMotionTolerance=9.99999975e-05 lockSpeedTolerance=9.99999975e-05 controlMotionMinimum=1 controlSpeedMinimum=1",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=stack-settle solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=0 hitPoints=0 firstHitFrame=4294967295 contactedBoxes=0 responseBodies=0 responseMomentumRatio=0 responseDisplacement=0 ballResponseFraction=0 maxContactImpulseDiagnostic=0 maxEnergyRatio=1 tailEnergyW1=24156544 tailEnergyW2=24156544 tailEnergyW3=24156544 tailEnergyW4=24156544 tailEnergyGrowth=0 maxBoxSpeedSettle=0 tailAverageMaxBoxSpeed=0 finalAwake=0 lateAwakeRatio=0 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.99974191 maxBoxCenterY=37.9972763 minBallCenterY=0 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=2.24042282e-07 maxAbsPosition=40.0258446 maxLinearSpeed=0.345965058 maxAngularSpeed=0.0222200565 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-wake solver=pgs execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=wake-propagation-resleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=1 sleepingBeforeWake=1 awakeImmediatelyAfterWake=1 wakeCounterAfterImpulse=0.399999976 freeInitialSleeping=1 freeFinalSleeping=1 freeFirstSleepFrame=0 freeFirstSleepAfterWakeFrame=208 freeSleepSamples=213 freeAwakeSamples=147 freeSleepNotify=2 freeWakeNotify=1 freeFirstWakeNotifyFrame=61 freeInitialWakeCounter=0 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.416666657 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0.949794948 freeMaxAngularSpeed=0.159256518 freeMaxWakeVelocityX=0.949794769 freeMaxWakeDisplacementX=0.446714193 staticInitialSleeping=1 staticFinalSleeping=1 staticFirstSleepFrame=0 staticFirstSleepAfterWakeFrame=208 staticSleepSamples=213 staticAwakeSamples=147 staticSleepNotify=2 staticWakeNotify=1 staticFirstWakeNotifyFrame=61 staticInitialWakeCounter=0 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.416666657 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0.983538628 staticMaxAngularSpeed=0.162419304 staticMaxWakeVelocityX=0.983538508 staticMaxWakeDisplacementX=0.513329625 staticMinTopY=4.5 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=ball-shot solver=pgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=5 hitPoints=5 firstHitFrame=49 contactedBoxes=5 responseBodies=5 responseMomentumRatio=0.196111634 responseDisplacement=6.43950796 ballResponseFraction=1.15130496 maxContactImpulseDiagnostic=78666.4766 maxEnergyRatio=1 tailEnergyW1=20253892 tailEnergyW2=19258218 tailEnergyW3=18022742 tailEnergyW4=16175560 tailEnergyGrowth=-0.201360404 maxBoxSpeedSettle=26.0708904 tailAverageMaxBoxSpeed=19.1556149 finalAwake=266 lateAwakeRatio=0.977272749 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.91034532 maxBoxCenterY=51.6171799 minBallCenterY=2.64195538 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=3.0936846e-07 maxAbsPosition=250.52597 maxLinearSpeed=221.193085 maxAngularSpeed=10.8963614 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sub-bounce-stack solver=pgs execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 boxCount=3 restitution=0.6 bounceThresholdVelocity=2 interfaceMask=0x7 allInterfacesObserved=1 maxPenetration=0.00397217274 maxPenetration0=0.000411331654 maxPenetration1=0.00280696154 maxPenetration2=0.00397217274 maxGap0=0 maxGap1=0 maxGap2=0 reportedSeparationMin=-0.00234097242 reportedSeparationMax=0.000398188829 tailPeakLinearSpeed=0 tailPeakAngularSpeed=0 tailMeanMaxLinearSpeed=0 tailMeanMaxAngularSpeed=0 maxTiltDegrees=0.153233394 firstAllSleepFrame=36 finalSleeping=3 sleepGate=DIAGNOSTIC penetrationCap=0.0199999996 tailLinearCap=0.25 tailAngularCap=0.25"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "extra-hello-tgs",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_snippet_hello_world_headless.py",
+        "--cases",
+        "gated",
+        "--solver",
+        "tgs",
+        "--bin-dir",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 1.8035924999999793,
+      "gates": [
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-idle solver=tgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=auto-sleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=1 freeFirstSleepFrame=25 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=156 freeAwakeSamples=24 freeSleepNotify=1 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=1 staticFirstSleepFrame=25 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=156 staticAwakeSamples=24 staticSleepNotify=1 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-disabled solver=tgs execution=parallel requestedFrames=180 completedFrames=180 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=1 probeFinding=sleep-disabled-control-ok wakeCounterFinding=not-gated-scene-disabled freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=0 sleepingBeforeWake=0 awakeImmediatelyAfterWake=0 wakeCounterAfterImpulse=0 freeInitialSleeping=0 freeFinalSleeping=0 freeFirstSleepFrame=4294967295 freeFirstSleepAfterWakeFrame=4294967295 freeSleepSamples=0 freeAwakeSamples=180 freeSleepNotify=0 freeWakeNotify=1 freeFirstWakeNotifyFrame=1 freeInitialWakeCounter=0.399999976 freeFinalWakeCounter=-431602080 freeMinWakeCounter=-431602080 freeMaxWakeCounter=0.399999976 freeInvalidWakeCounterSamples=180 freeMaxLinearSpeed=0 freeMaxAngularSpeed=0 freeMaxWakeVelocityX=0 freeMaxWakeDisplacementX=0 staticInitialSleeping=0 staticFinalSleeping=0 staticFirstSleepFrame=4294967295 staticFirstSleepAfterWakeFrame=4294967295 staticSleepSamples=0 staticAwakeSamples=180 staticSleepNotify=0 staticWakeNotify=1 staticFirstWakeNotifyFrame=1 staticInitialWakeCounter=0.399999976 staticFinalWakeCounter=-431602080 staticMinWakeCounter=-431602080 staticMaxWakeCounter=0.399999976 staticInvalidWakeCounterSamples=180 staticMaxLinearSpeed=0 staticMaxAngularSpeed=0 staticMaxWakeVelocityX=0 staticMaxWakeDisplacementX=0 staticMinTopY=1.03999996 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=lock-flags solver=tgs execution=parallel requestedFrames=120 completedFrames=120 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=12 lockWitnessCount=6 lockFlagsReadback=6 runtimeImpulseFrame=30 runtimeExcitations=12 finiteSamples=1440 maxLockedAxisMotion=0 maxLockedAxisSpeed=0 minControlAxisMotion=3.13336682 minControlAxisSpeed=4.00017214 maxControlAxisMotion=10.5000114 maxControlAxisSpeed=6 lockMotionTolerance=9.99999975e-05 lockSpeedTolerance=9.99999975e-05 controlMotionMinimum=1 controlSpeedMinimum=1",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=stack-settle solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=0 hitPoints=0 firstHitFrame=4294967295 contactedBoxes=0 responseBodies=0 responseMomentumRatio=0 responseDisplacement=0 ballResponseFraction=0 maxContactImpulseDiagnostic=0 maxEnergyRatio=1.00001788 tailEnergyW1=24167804 tailEnergyW2=24167804 tailEnergyW3=24167804 tailEnergyW4=24167804 tailEnergyGrowth=0 maxBoxSpeedSettle=0 tailAverageMaxBoxSpeed=0 finalAwake=0 lateAwakeRatio=0 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.9999187 maxBoxCenterY=37.9972725 minBallCenterY=0 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=4.55452884e-08 maxAbsPosition=40.0064926 maxLinearSpeed=0.225240111 maxAngularSpeed=0.0439559631 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sleep-wake solver=tgs execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 actorCount=2 sceneSleepingDisabled=0 probeFinding=wake-propagation-resleep-observed wakeCounterFinding=counter-range-valid freeSleepLifecycleGate=HARD staticTouchSleepGate=HARD wakeCounterReset=0.399999976 wakeFrame=60 wakeImpulseApplied=1 sleepingBeforeWake=1 awakeImmediatelyAfterWake=1 wakeCounterAfterImpulse=0.399999976 freeInitialSleeping=1 freeFinalSleeping=1 freeFirstSleepFrame=0 freeFirstSleepAfterWakeFrame=205 freeSleepSamples=216 freeAwakeSamples=144 freeSleepNotify=2 freeWakeNotify=1 freeFirstWakeNotifyFrame=61 freeInitialWakeCounter=0 freeFinalWakeCounter=0 freeMinWakeCounter=0 freeMaxWakeCounter=0.416666657 freeInvalidWakeCounterSamples=0 freeMaxLinearSpeed=0.975763977 freeMaxAngularSpeed=0.0161813386 freeMaxWakeVelocityX=0.975763857 freeMaxWakeDisplacementX=0.469667643 staticInitialSleeping=1 staticFinalSleeping=1 staticFirstSleepFrame=0 staticFirstSleepAfterWakeFrame=205 staticSleepSamples=216 staticAwakeSamples=144 staticSleepNotify=2 staticWakeNotify=1 staticFirstWakeNotifyFrame=61 staticInitialWakeCounter=0 staticFinalWakeCounter=0 staticMinWakeCounter=0 staticMaxWakeCounter=0.416666657 staticInvalidWakeCounterSamples=0 staticMaxLinearSpeed=0.957569659 staticMaxAngularSpeed=0.0179518908 staticMaxWakeVelocityX=0.95756954 staticMaxWakeDisplacementX=0.489667714 staticMinTopY=4.5 unexpectedNotifications=0 freeAwakeBeforeWakeSamples=0",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=ball-shot solver=tgs execution=parallel requestedFrames=600 completedFrames=600 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 launchFailures=0 boxCount=275 targetBoxCount=55 hitCount=5 hitPoints=5 firstHitFrame=49 contactedBoxes=5 responseBodies=5 responseMomentumRatio=0.187812254 responseDisplacement=6.7936511 ballResponseFraction=1.15270138 maxContactImpulseDiagnostic=87465.0938 maxEnergyRatio=1.00000012 tailEnergyW1=18775198 tailEnergyW2=16990520 tailEnergyW3=12280041 tailEnergyW4=9848138 tailEnergyGrowth=-0.475470871 maxBoxSpeedSettle=41.4039879 tailAverageMaxBoxSpeed=32.4056778 finalAwake=259 lateAwakeRatio=0.955939412 sleepGate=DIAGNOSTIC avbdRigidSleepCheckPresent=1 groundGate=FULL_FALL_THROUGH minBoxCenterY=1.78685367 maxBoxCenterY=60.3098297 minBallCenterY=2.48934269 sunkBodies=0 levitatingBodies=0 maxQuaternionNormError=3.122029e-07 maxAbsPosition=262.500397 maxLinearSpeed=221.193085 maxAngularSpeed=13.8861876 energyGainCap=0.0500000007 tailGrowthCap=0.0500000007 settleSpeedCap=12 minResponseMomentumCap=0.00999999978 minResponseDisplacementCap=0.5 minBallResponseCap=0.0500000007 responseWindowFrames=12",
+        "[AVBD_GATE] schema=1 snippet=SnippetHelloWorld case=sub-bounce-stack solver=tgs execution=parallel requestedFrames=360 completedFrames=360 dt=0.0166666675 seed=1 dispatcherThreads=2 capability=SUPPORTED validation=GATED status=PASS reason=none nonFinite=0 physicsErrors=0 physicsWarnings=0 fetchFailures=0 fetchErrorState=0 boxCount=3 restitution=0.6 bounceThresholdVelocity=2 interfaceMask=0x7 allInterfacesObserved=1 maxPenetration=0.00123918056 maxPenetration0=0.000165432692 maxPenetration1=0.00101238489 maxPenetration2=0.00123918056 maxGap0=0 maxGap1=0 maxGap2=0 reportedSeparationMin=-0.000870227814 reportedSeparationMax=0.000152230263 tailPeakLinearSpeed=0 tailPeakAngularSpeed=0 tailMeanMaxLinearSpeed=0 tailMeanMaxAngularSpeed=0 maxTiltDegrees=0 firstAllSleepFrame=25 finalSleeping=3 sleepGate=DIAGNOSTIC penetrationCap=0.0199999996 tailLinearCap=0.25 tailAngularCap=0.25"
+      ],
+      "evidence": "validation-retry"
+    },
+    {
+      "name": "extra-bounded-reference",
+      "command": [
+        "C:\\Users\\vigor\\miniconda3\\python.exe",
+        "tools/run_avbd_common_step_probe.py",
+        "--mode",
+        "bounded",
+        "--logs",
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\validation\\extra-bounded-reference"
+      ],
+      "exit": 0,
+      "passed": true,
+      "seconds": 43.328144699999996,
+      "gates": [],
+      "evidence": "validation"
+    }
+  ],
+  "budgetAudit": [
+    {
+      "name": "Surface-static-box",
+      "passed": true,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=static-box",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "frames": 360,
+      "bounds": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 32,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "observedMax": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 32,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "coverage": [],
+      "gate": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableSurfaceAVBD",
+          "solver": "avbd",
+          "case": "static-box",
+          "model": "rigid_patch_joint_sheet",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "status": "PASS",
+          "reason": "none",
+          "frames": "360",
+          "completedFrames": "360",
+          "grid": "24",
+          "cells": "576",
+          "joints": "1104",
+          "dispatcherThreads": "4",
+          "mass": "625.004272",
+          "contacts": "534332",
+          "crossContacts": "0",
+          "centerY": "1.5051167",
+          "minY": "0.223877788",
+          "peakPrincipalStrain": "1.50723207",
+          "finalPrincipalStrain": "1.29561985",
+          "finalAreaRatio": "1.02520025",
+          "maxPenetration": "0",
+          "maxSelfPenetration": "0",
+          "initialEnergy": "25751.25",
+          "peakEnergy": "25751.25",
+          "maxMomentumError": "3748.56201",
+          "maxBallisticError": "2.79592991",
+          "finalAwake": "576",
+          "averageStepMs": "10.7702089",
+          "p95StepMs": "25.5751",
+          "maxStepMs": "46.9204",
+          "averageObserverMs": "1.15576778",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    },
+    {
+      "name": "Volume-visual-showcase",
+      "passed": true,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "frames": 360,
+      "bounds": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 32,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "observedMax": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 23,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "coverage": [],
+      "gate": [
+        {
+          "schema": "1",
+          "snippet": "SnippetJointSoftBody",
+          "solver": "avbd",
+          "case": "visual-showcase",
+          "frames": "360",
+          "completedFrames": "360",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "model": "convex_cell_joint_volume",
+          "materialElements": "2514",
+          "grid": "5",
+          "dispatcherThreads": "4",
+          "bodies": "5",
+          "nodes": "787",
+          "joints": "1888",
+          "mass": "7530.66113",
+          "cellSize": "0.200000003",
+          "trajectoryHash": "ef24834b86cd01c8",
+          "contacts": "1153396",
+          "crossContacts": "20089",
+          "crossMask": "8519712",
+          "minCellDet": "0.691093266",
+          "minVolumeRatio": "0.941778958",
+          "maxVolumeRatio": "1.01155102",
+          "finalVolumeRatio": "0.950342774",
+          "maxExternalPenetration": "4.71924693e-07",
+          "maxSelfPenetration": "0",
+          "maxJointAnchorError": "0.79671073",
+          "maxPostContactStep": "1.02791965",
+          "maxMomentumRelativeError": "17.161129",
+          "initialMechanicalEstimate": "882856.97",
+          "maxMechanicalEstimate": "882857",
+          "finalMechanicalEstimate": "137390.873",
+          "finalAwake": "788",
+          "skinRestError": "6.03421586e-06",
+          "massRelativeError": "1.30616327e-05",
+          "assetBytes": "352636",
+          "skinBytes": "101156",
+          "diagnosticBytes": "50280",
+          "averageStepMs": "34.6119067",
+          "p95StepMs": "105.4263",
+          "maxStepMs": "181.7754",
+          "activeContactFrames": "355",
+          "averageActiveContactMs": "34.7237465",
+          "averageSkinMs": "0.0743752778",
+          "averageObserverMs": "4.18176139",
+          "averageFrameMs": "34.6862819",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    },
+    {
+      "name": "Surface-reaction",
+      "passed": true,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "frames": 360,
+      "bounds": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 32,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "observedMax": {
+        "queuePeak": 13,
+        "primalMaxBlocks": 28,
+        "primalMaxRows": 220,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "coverage": [
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 577,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        },
+        {
+          "blocks": 576,
+          "components": 1
+        }
+      ],
+      "gate": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableSurfaceAVBD",
+          "solver": "avbd",
+          "case": "reaction",
+          "model": "rigid_patch_joint_sheet",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "status": "PASS",
+          "reason": "none",
+          "frames": "360",
+          "completedFrames": "360",
+          "grid": "24",
+          "cells": "576",
+          "joints": "1104",
+          "dispatcherThreads": "4",
+          "mass": "625.004272",
+          "contacts": "12208",
+          "crossContacts": "12208",
+          "centerY": "3.8526597",
+          "minY": "3.40560102",
+          "peakPrincipalStrain": "1.03369665",
+          "finalPrincipalStrain": "1.01090074",
+          "finalAreaRatio": "1.00090694",
+          "maxPenetration": "0",
+          "maxSelfPenetration": "0",
+          "initialEnergy": "40.0000003",
+          "peakEnergy": "40.0000003",
+          "maxMomentumError": "0.000173791079",
+          "maxBallisticError": "4.14821661e-05",
+          "finalAwake": "577",
+          "averageStepMs": "11.4231369",
+          "p95StepMs": "13.5474",
+          "maxStepMs": "14.5207",
+          "averageObserverMs": "0.989753611",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    },
+    {
+      "name": "Volume-reaction",
+      "passed": true,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\restart-baseline-20261117\\sdk\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=360",
+        "--dispatcher-threads=4"
+      ],
+      "exit": 0,
+      "frames": 360,
+      "bounds": {
+        "queuePeak": 16,
+        "primalMaxBlocks": 32,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "observedMax": {
+        "queuePeak": 6,
+        "primalMaxBlocks": 16,
+        "primalMaxRows": 256,
+        "dualMaxRows": 256,
+        "queryMaxRows": 32
+      },
+      "coverage": [
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 126,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        },
+        {
+          "blocks": 125,
+          "components": 1
+        }
+      ],
+      "gate": [
+        {
+          "schema": "1",
+          "snippet": "SnippetJointSoftBody",
+          "solver": "avbd",
+          "case": "reaction",
+          "frames": "360",
+          "completedFrames": "360",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "model": "rigid_cell_joint_volume",
+          "materialElements": "384",
+          "sleepEnabled": "1",
+          "grid": "5",
+          "nodes": "125",
+          "joints": "300",
+          "mass": "800.000732",
+          "cellSize": "0.400000006",
+          "dispatcherThreads": "4",
+          "compressionHoldFrames": "60",
+          "maxJointAngle": "0.0265296437",
+          "trajectoryHash": "d007a51dd44b97ca",
+          "minVolumeRatio": "0.980562687",
+          "minCellDet": "0.954540014",
+          "finalVolumeRatio": "1.00002217",
+          "maxShapeError": "0.0139480997",
+          "finalShapeError": "1.40320644e-05",
+          "maxGroundPenetration": "0",
+          "maxExternalPenetration": "0",
+          "compressionMinimum": "1",
+          "recoveredFraction": "0",
+          "contacts": "514",
+          "firstContactFrame": "18",
+          "maxPostContactStep": "0.0133307604",
+          "zeroMotionFrames": "0",
+          "systemComDrift": "2.68911481e-05",
+          "maxPostImpactVy": "0.6593799",
+          "maxMechanicalEstimate": "210.009048",
+          "finalMechanicalEstimate": "21.4157314",
+          "averageStepMs": "7.61844639",
+          "maxStepMs": "9.45530033",
+          "averageFrameMs": "7.88932889",
+          "activeFrames": "360",
+          "activeContactFrames": "15",
+          "averageActiveStepMs": "7.61844639",
+          "averageActiveContactMs": "7.80541333",
+          "maxMomentumRelativeError": "2.3304412e-05",
+          "maxBallisticError": "3.45825005",
+          "sleepingBeforeWake": "0",
+          "maxWakeMotion": "0.00311733736",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    }
+  ],
+  "performance": {
+    "surface": {
+      "0": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 22.6439683,
+        "medianOccupiedCores": 0.8792194665895235,
+        "stepSpeedup": 1.0,
+        "medianP95Ms": 52.1885,
+        "medianPeakMs": 94.9044,
+        "medianProcessCpuMsPerFrame": 21.223958333333332,
+        "minAverageStepMs": 21.9349075,
+        "maxAverageStepMs": 23.6650275
+      },
+      "4": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 9.57174083,
+        "medianOccupiedCores": 2.1098138773859736,
+        "stepSpeedup": 2.365710553824095,
+        "medianP95Ms": 23.0637,
+        "medianPeakMs": 51.768,
+        "medianProcessCpuMsPerFrame": 23.046875,
+        "minAverageStepMs": 9.45997639,
+        "maxAverageStepMs": 9.85577389
+      },
+      "8": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 7.44200167,
+        "medianOccupiedCores": 2.86091448559349,
+        "stepSpeedup": 3.0427255064026344,
+        "medianP95Ms": 19.1331,
+        "medianPeakMs": 37.5959,
+        "medianProcessCpuMsPerFrame": 24.82638888888889,
+        "minAverageStepMs": 7.35959417,
+        "maxAverageStepMs": 7.70131444
+      }
+    },
+    "volume": {
+      "0": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 80.8425569,
+        "medianOccupiedCores": 0.8792783006664783,
+        "stepSpeedup": 1.0,
+        "medianP95Ms": 252.0972,
+        "medianPeakMs": 406.3237,
+        "medianProcessCpuMsPerFrame": 77.34375,
+        "minAverageStepMs": 80.0327822,
+        "maxAverageStepMs": 86.1298158
+      },
+      "4": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 34.9784517,
+        "medianOccupiedCores": 1.9880458424035246,
+        "stepSpeedup": 2.311210272923544,
+        "medianP95Ms": 111.4017,
+        "medianPeakMs": 203.0951,
+        "medianProcessCpuMsPerFrame": 79.55729166666667,
+        "minAverageStepMs": 34.0048844,
+        "maxAverageStepMs": 36.6358056
+      },
+      "8": {
+        "allPhysicalPass": true,
+        "runs": 3,
+        "medianStepMs": 28.529995,
+        "medianOccupiedCores": 2.509488248691196,
+        "stepSpeedup": 2.8335987055027525,
+        "medianP95Ms": 87.2719,
+        "medianPeakMs": 177.9502,
+        "medianProcessCpuMsPerFrame": 84.46180555555556,
+        "minAverageStepMs": 27.8604172,
+        "maxAverageStepMs": 29.9124539
+      }
+    }
+  },
+  "costRuns": 18,
+  "costFrames": 6480,
+  "simulationCodeChanged": false,
+  "gpuQualified": false,
+  "stable60FpsQualified": false,
+  "performanceNotes": [
+    "Three repetitions of 360 frames per worker count; diagnostics off; sequential runs; worker order reversed on repeat 2.",
+    "Current machine/time-window baseline only. Historical timings are not a controlled A/B comparison.",
+    "Process CPU time includes setup, observer and teardown, not solely the solver."
+  ]
+}

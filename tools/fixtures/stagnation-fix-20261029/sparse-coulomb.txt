@@ -1,0 +1,4 @@
+/fp:precise
+[SPARSE_COULOMB] Table/mixed/caps/padding/failure sparseIndefinite=192 sparseSpd=192 derivatives=192 solve=3.30139213e-16 derivative=3.10572901e-10 adjoint=1.77635684e-15 failures=0
+/fp:fast
+[SPARSE_COULOMB] Table/mixed/caps/padding/failure sparseIndefinite=192 sparseSpd=192 derivatives=192 solve=4.45131093e-16 derivative=3.10572901e-10 adjoint=8.8817842e-16 failures=0

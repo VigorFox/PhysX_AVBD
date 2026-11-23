@@ -1,0 +1,35 @@
+{
+  "frames": 360,
+  "fixed": [
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    163,
+    164,
+    165,
+    166,
+    167,
+    274,
+    275,
+    276,
+    277,
+    278,
+    279
+  ],
+  "workers": [
+    4,
+    8
+  ],
+  "repeats": {
+    "diagnostic": 3,
+    "cpu": 6,
+    "timing": 8
+  },
+  "order": "paired AB/BA, alternate scene/worker order, split half balanced for each cell",
+  "main": "Root-merge final against production. Fresh eight balanced timing pairs, six CPU pairs, three diagnostic pairs and full 109 gates. Root-merge screen independent.",
+  "decision": "Require physics, reduction of tree span and wave count, reproducible fixed-frame P95 and 4-to-8 scaling gain; guard whole-step process CPU and default cloth mean/P95. Inspect paired halves, do not treat inclusive time or measured cycles as uninstrumented wall time."
+}

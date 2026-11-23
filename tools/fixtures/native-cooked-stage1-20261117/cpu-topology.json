@@ -1,0 +1,162 @@
+[
+  {
+    "id": 256,
+    "group": 0,
+    "logical": 0,
+    "core": 0,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 257,
+    "group": 0,
+    "logical": 1,
+    "core": 0,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 258,
+    "group": 0,
+    "logical": 2,
+    "core": 2,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 259,
+    "group": 0,
+    "logical": 3,
+    "core": 2,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 260,
+    "group": 0,
+    "logical": 4,
+    "core": 4,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 261,
+    "group": 0,
+    "logical": 5,
+    "core": 4,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 262,
+    "group": 0,
+    "logical": 6,
+    "core": 6,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 263,
+    "group": 0,
+    "logical": 7,
+    "core": 6,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 264,
+    "group": 0,
+    "logical": 8,
+    "core": 8,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 265,
+    "group": 0,
+    "logical": 9,
+    "core": 8,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 266,
+    "group": 0,
+    "logical": 10,
+    "core": 10,
+    "efficiency": 1,
+    "flags": 0
+  },
+  {
+    "id": 267,
+    "group": 0,
+    "logical": 11,
+    "core": 10,
+    "efficiency": 1,
+    "flags": 1
+  },
+  {
+    "id": 268,
+    "group": 0,
+    "logical": 12,
+    "core": 12,
+    "efficiency": 0,
+    "flags": 0
+  },
+  {
+    "id": 269,
+    "group": 0,
+    "logical": 13,
+    "core": 13,
+    "efficiency": 0,
+    "flags": 1
+  },
+  {
+    "id": 270,
+    "group": 0,
+    "logical": 14,
+    "core": 14,
+    "efficiency": 0,
+    "flags": 1
+  },
+  {
+    "id": 271,
+    "group": 0,
+    "logical": 15,
+    "core": 15,
+    "efficiency": 0,
+    "flags": 1
+  },
+  {
+    "id": 272,
+    "group": 0,
+    "logical": 16,
+    "core": 16,
+    "efficiency": 0,
+    "flags": 0
+  },
+  {
+    "id": 273,
+    "group": 0,
+    "logical": 17,
+    "core": 17,
+    "efficiency": 0,
+    "flags": 0
+  },
+  {
+    "id": 274,
+    "group": 0,
+    "logical": 18,
+    "core": 18,
+    "efficiency": 0,
+    "flags": 1
+  },
+  {
+    "id": 275,
+    "group": 0,
+    "logical": 19,
+    "core": 19,
+    "efficiency": 0,
+    "flags": 1
+  }
+]

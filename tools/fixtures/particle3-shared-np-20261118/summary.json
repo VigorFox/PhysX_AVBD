@@ -1,0 +1,116 @@
+{
+  "scope": "Shared NP schedule, mixed rows and one shared dual integrated; physical acceptance FAILED",
+  "head": "626af54f1229fb5ce098daa016ce0df5fdaa6faf",
+  "iterations": 4,
+  "productionSwitched": false,
+  "sharedNpScheduleIntegrated": true,
+  "mixedContactRowsIntegrated": true,
+  "sharedDualIntegrated": true,
+  "boundedNpPacketsPerTask": 16,
+  "rigidSoftReactionQualified": false,
+  "softSoftReactionQualified": false,
+  "materialReleaseQualified": false,
+  "wholeStepCostQualified": false,
+  "parallelScalingQualified": false,
+  "gpuQualified": false,
+  "checks": 35,
+  "checksPassed": 31,
+  "failedChecks": [
+    "soft-soft-0",
+    "soft-soft-4",
+    "soft-soft-8",
+    "reaction-audit"
+  ],
+  "executionAuditPassed": true,
+  "defaultProducts": [
+    {
+      "file": "PhysX_64.dll",
+      "sha256": "bbf2aa89f6e6171f933f0d293026c77ed5d3b694e0684fe4e33e141f793d7451",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXCommon_64.dll",
+      "sha256": "1ef33ef954fa422b8eb6ef617daea8f28b5c9373b89273ace3711cd3eaaaafbf",
+      "unchanged": true
+    },
+    {
+      "file": "PhysXFoundation_64.dll",
+      "sha256": "0de95b4d0d10f2eb38afbf034a0770a38365f239654e45fec7252ff2b1fb76ee",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableSurfaceAVBD_64.exe",
+      "sha256": "08cbf3545074f0552b879e1beb552556a7470b9570b156e601bbfc184067a0f9",
+      "unchanged": true
+    },
+    {
+      "file": "SnippetDeformableVolumeAVBD_64.exe",
+      "sha256": "969dbe14dd30f1aec1c6239736de320884ec072b978967f54769eca61f2ede82",
+      "unchanged": true
+    }
+  ],
+  "testedSdk": {
+    "avbd_smoke.exe": "a9357739c544ced616fc6e01e1758a1883ee9244a2e28eb5354c93b712ec8826",
+    "freeglut.dll": "baa504791fba027b2e6adff6316bdcb21042a882a967c034532cdce1f270117a",
+    "PhysX_64.dll": "a360f32be97f7f1d99a53e3aaa5b8b8b85cdfd5b07d81dfe52e35af1c9fba793",
+    "PhysXCommon_64.dll": "64280253442ab7587d23bb28b7a5f84dec2c6c22aad9e10fe1be24a8ca1c8851",
+    "PhysXCooking_64.dll": "ada93b93832fbd6111eb4180e127c334ffc465479f77d55b4e71350ebc8c93fd",
+    "PhysXFoundation_64.dll": "fe4f3402b1b549601d6c6ccbb9169b60ca3dbf4c1b0ac231317f2c05334325cf",
+    "PVDRuntime_64.dll": "5bff1bb9442e01019825f9f9c925ccec04f46de35a798f555280332bd8b969cf",
+    "SnippetArticulationRC_64.exe": "8f7e5826dcda48b008bc51cce599bc44d8045e999d7af824d1bec5fa07a8042b",
+    "SnippetDeformableSurfaceAVBD_64.exe": "a8b3d896a9dd32ceb79b49a9b8cfa03d32aaaa74fb6a2887aa3328eafb10b7c9",
+    "SnippetDeformableVolumeAVBD_64.exe": "e998ffda3a896466ec4c5cff5983f295b87e721a0344b6e9db9c4c56d0c1cc18",
+    "SnippetHelloWorld_64.exe": "888276e27a51c0893ae1f6f1e78dd3c59b8e60e3b06f7c563038ce86f9830088",
+    "SnippetJoint_64.exe": "1e48b09ef700831d0ff8735e32cce637e5eeffaa1130bc472a32a4fe9ac933f3"
+  },
+  "reactionBenchmarkMedians": {
+    "rigid6-0": {
+      "meanMs": 0.277055,
+      "p95Ms": 0.5085,
+      "cpuMs": 0.260417,
+      "maxMomentumError": 8.56760085e-05,
+      "maxComError": 0.000112907301
+    },
+    "particle3-0": {
+      "meanMs": 0.106253,
+      "p95Ms": 0.2033,
+      "cpuMs": 0.173611,
+      "maxMomentumError": 0.0417016328,
+      "maxComError": 0.0314035928
+    },
+    "rigid6-4": {
+      "meanMs": 0.509934,
+      "p95Ms": 0.7329,
+      "cpuMs": 0.694444,
+      "maxMomentumError": 8.56760085e-05,
+      "maxComError": 0.000112907301
+    },
+    "particle3-4": {
+      "meanMs": 0.284473,
+      "p95Ms": 0.4972,
+      "cpuMs": 0.434028,
+      "maxMomentumError": 0.0417016328,
+      "maxComError": 0.0314035928
+    },
+    "rigid6-8": {
+      "meanMs": 0.567444,
+      "p95Ms": 0.7811,
+      "cpuMs": 1.041667,
+      "maxMomentumError": 8.56760085e-05,
+      "maxComError": 0.000112907301
+    },
+    "particle3-8": {
+      "meanMs": 0.329106,
+      "p95Ms": 0.5967,
+      "cpuMs": 0.954861,
+      "maxMomentumError": 0.0417016328,
+      "maxComError": 0.0314035928
+    }
+  },
+  "sourceFiles": 64,
+  "evidenceFiles": 212,
+  "sourceArchiveSha256": "b8de3ed65561990a8c4666252d5496a92876b7eba5b87d4a4f4b3c61e40fa5e4",
+  "evidenceArchiveSha256": "f8f969636153869efe366ec76fe940bce4429a251d422822bb9d471cbadd112f",
+  "allPhysicalGatesPassed": false,
+  "qualification": "Restricted cloth drape passes; rigid-soft and soft-soft reaction fail. No default/five-body or GPU qualification."
+}

@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-row-20261105\\fresh-warm.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 756,
+  "groups": 2880,
+  "activeNormalForces": 32,
+  "maximumForce": 128.31256049932998,
+  "symmetry": 7.275957614183426e-12,
+  "stationarity": 8.56717281005892e-08,
+  "relativeStationarity": 7.342222097586666e-11,
+  "unitStepRoot": 9.521583521632238e-11,
+  "relativeUnitStepRoot": 7.420616878487089e-13,
+  "minimumNormalResidual": -7.002810644363505e-11,
+  "tableIterations": 73,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "captured"
+}

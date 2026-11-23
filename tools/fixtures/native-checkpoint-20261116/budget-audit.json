@@ -1,0 +1,32 @@
+{
+  "Surface": {
+    "passed": true,
+    "frames": 360,
+    "physicalBlocksPerSweep": 577,
+    "dispatchMax": {
+      "queuePeak": 13,
+      "primalMaxBlocks": 28,
+      "primalMaxRows": 220,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    },
+    "maxColorBuilds": 4,
+    "maxFactorizationsPerFrame": 370,
+    "maxRightHandSidesPerFrame": 740
+  },
+  "Volume": {
+    "passed": true,
+    "frames": 360,
+    "physicalBlocksPerSweep": 126,
+    "dispatchMax": {
+      "queuePeak": 6,
+      "primalMaxBlocks": 16,
+      "primalMaxRows": 256,
+      "dualMaxRows": 256,
+      "queryMaxRows": 32
+    },
+    "maxColorBuilds": 4,
+    "maxFactorizationsPerFrame": 90,
+    "maxRightHandSidesPerFrame": 180
+  }
+}

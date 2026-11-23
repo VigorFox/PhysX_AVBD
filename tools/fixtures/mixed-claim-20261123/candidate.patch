@@ -1,0 +1,344 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdColorTasks.h
+@@ -6,8 +6,10 @@
+ #include "DyAvbdNodalShell.h"
+ 
+ namespace physx { namespace Dy {
++class AvbdMixedColorLane;
+ struct AvbdColorTasks : PxUserAllocated
+ {
++    ~AvbdColorTasks();
+     enum { LeafRows=16 };
+     struct Tile
+     {
+@@ -22,6 +24,7 @@
+     struct Wave
+     {
+         PxU32 first,count,blocks,maxBlocks,maxRows,splitBlocks,leaves;
++        bool hasWide;
+     };
+     PxArray<Tile> tiles;
+     PxArray<Wave> waves;
+@@ -33,6 +36,23 @@
+     // suffice even when the actual material or contact row IDs have changed.
+     PxArray<PxU32> incidenceOffsets,incidenceShape;
+     PxU32 workers=0,firstTile=0,lanes=0;
++    struct QueueTiming
++    {
++        PxU64 ticks=0, maxTicks=0;
++        PxU32 count=0, inlineSlot=0;
++    } wait;
++    struct MixedWave
++    {
++        PxU32 firstTile=0, tiles=0, firstLeaf=0, leaves=0, lanes=0;
++        volatile PxI32 nextTicket=0;
++        PxArray<AvbdMixedColorLane*> tasks;
++    } mixed;
++    struct ClaimTiming
++    {
++        PxI64 itemWaitTicks=0;
++        PxI32 claimed=0, maxClaimed=0;
++        PxU32 waves=0, lanes=0, tiles=0, leaves=0;
++    } claims;
+     void clear()
+     {
+         offsets.clear();wideOffsets.clear();wideBlocks.clear();tiles.clear();waves.clear();splits.clear();nodal.clear();rigid.clear();
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -115,6 +115,7 @@
+ // fan-in counts every tile before the first submission, including synchronous dispatch.
+ class AvbdColorLane : public Cm::Task, public PxUserAllocated
+ {
++protected:
+     AvbdDynamicsContext& mContext;
+     const PxU32 mSlot;
+ public:
+@@ -126,6 +127,17 @@
+     void runInternal() PX_OVERRIDE { mContext.runColorLane(mSlot); }
+     const char* getName() const PX_OVERRIDE { return "AVBD.colorBlocks"; }
+ };
++class AvbdMixedColorLane : public AvbdColorLane
++{
++public:
++    using AvbdColorLane::AvbdColorLane;
++    void runInternal() PX_OVERRIDE { mContext.runMixedColorLane(mSlot); }
++};
++
++AvbdColorTasks::~AvbdColorTasks()
++{
++    for(auto* task:mixed.tasks)PX_DELETE(task);
++}
+ } // namespace Dy
+ } // namespace physx
+ 
+@@ -1333,6 +1345,14 @@
+         const PxU64 loss=span>lpt?span-lpt:0;
+         for(PxU32 i=0;i<mStep.localWaveTaskCount;++i)
+         {
++            if(mColorTasks && i!=mColorTasks->wait.inlineSlot)
++            {
++                auto& wait=mColorTasks->wait;
++                const PxU64 delay=mStep.localWaveTaskStarts[i]-mStep.localWaveTaskReady[i];
++                wait.ticks+=delay;
++                wait.maxTicks=PxMax(wait.maxTicks,delay);
++                ++wait.count;
++            }
+             const PxU64 ready=mStep.localWaveTaskReady[i]-mStep.localWaveStart;
+             const PxU64 start=mStep.localWaveTaskStarts[i]-mStep.localWaveStart;
+             const PxU64 end=start+mStep.localWaveTaskTicks[i];
+@@ -1477,9 +1497,12 @@
+     {
+         const PxU32 first=plan.offsets[c],end=plan.offsets[c+1];
+         plan.offsets[c]=plan.waves.size();
++        const bool hasWide=workers>1 && plan.wideOffsets[c]!=plan.wideOffsets[c+1];
++        // Leave room for ready assembly leaves even when the ordinary span is full.
++        const PxU32 ordinaryLimit=hasWide?waveLimit-workers:waveLimit;
+         for(PxU32 t=first;t<end;)
+         {
+-            AvbdColorTasks::Wave wave={t,PxMin(end-t,waveLimit),0,0,0,0,0};
++            AvbdColorTasks::Wave wave={t,PxMin(end-t,ordinaryLimit),0,0,0,0,0,hasWide};
+             const PxU32 stop=t+wave.count;
+             for(;t<stop;++t)
+             {
+@@ -1538,6 +1561,15 @@
+         mStep.splitPrimalBlocks+=w.splitBlocks;mStep.splitRowLeaves+=w.leaves;
+         mStep.localPrimalMaxBlocks=PxMax(mStep.localPrimalMaxBlocks,w.maxBlocks);
+         mStep.localPrimalMaxRows=PxMax(mStep.localPrimalMaxRows,w.maxRows);
++        if(w.hasWide)
++        {
++            if(!mLocalWork)prepareLocalWork();
++            if(mLocalWork && mLocalWork->cursor<mLocalWork->leaves.size())
++            {
++                const PxU32 room=mColorTasks->workers*LocalQueueDepth-w.count;
++                return submitMixedColorWave(w.first,w.count,PxMin(room,mLocalWork->leaves.size()-mLocalWork->cursor));
++            }
++        }
+         return submitLocalWave(stage,w.count,NULL,NULL,w.first);
+     }
+     PxU32& cursor=stage==NodalImpactStage?mStep.impactCursor:stage==IncidenceHistoryStage?mStep.historyCursor:stage==NodalLoadStage?mStep.loadCursor:stage==NodalMatchStage?mStep.nominationCursor:stage==3?mLocalWork->cursor:stage==2?mStep.queryCursor:stage==1?mStep.dualCursor:mStep.localCursor;
+@@ -1628,6 +1660,102 @@
+     return submitLocalWave(stage,count,starts,stops);
+ }
+ 
++bool AvbdDynamicsContext::submitMixedColorWave(PxU32 firstTile,PxU32 tiles,PxU32 leaves)
++{
++    auto& plan=*mColorTasks;
++    auto& mixed=plan.mixed;
++    const PxU32 count=tiles+leaves;
++    // Aim for one spare claim per four items on narrow waves. Wide waves use
++    // every worker. A lane always owns its first ticket, including inline.
++    const PxU32 lanes=PxMin(plan.workers,PxMax(2u,(3*count+3)/4));
++    PX_ASSERT(tiles && leaves && lanes<=count && count<=lanes*LocalQueueDepth);
++    PX_ASSERT(mLocalWork->phase==AvbdLocalWork::Assemble);
++    mixed.firstTile=firstTile;
++    mixed.tiles=tiles;
++    mixed.firstLeaf=mLocalWork->cursor;
++    mixed.leaves=leaves;
++    mixed.lanes=lanes;
++    mixed.nextTicket=PxI32(lanes-1);
++    mLocalWork->cursor+=leaves;
++    mStep.tiledJobs+=leaves;
++    mStep.localQueuePeak=PxMax(mStep.localQueuePeak,lanes);
++    if(!mColorContinuation)mColorContinuation=PX_NEW(AvbdAdvanceTask)(*this,mContextID);
++    while(mixed.tasks.size()+1<lanes)
++        mixed.tasks.pushBack(PX_NEW(AvbdMixedColorLane)(*this,mContextID,mixed.tasks.size()+1));
++    auto* join=mColorContinuation;
++    join->reserveWave(*mStep.continuation->getTaskManager(),lanes);
++    mStep.submittedTasks+=lanes-1;
++    if(mStep.profile)
++    {
++        mStep.localWaveStart=PxTime::getCurrentCounterValue();
++        mStep.localWaveStage=0;
++        mStep.localWaveJobs=mStep.localWaveTaskCount=lanes;
++        if(mStep.localTimeline)
++        {
++            plan.wait.inlineSlot=0;
++            ++plan.claims.waves;
++            plan.claims.lanes+=lanes;
++            plan.claims.tiles+=tiles;
++            plan.claims.leaves+=leaves;
++        }
++    }
++    for(PxU32 slot=1;slot<lanes;++slot)
++    {
++        if(mStep.localTimeline)mStep.localWaveTaskReady[slot]=PxTime::getCurrentCounterValue();
++        mixed.tasks[slot-1]->submit(*join);
++    }
++    if(mStep.localTimeline)mStep.localWaveTaskReady[0]=PxTime::getCurrentCounterValue();
++    runMixedColorLane(0);
++    const bool complete=join->completeInline();
++    if(complete)finishLocalProfileWave();
++    return complete;
++}
++
++void AvbdDynamicsContext::runMixedColorLane(PxU32 slot)
++{
++    const auto started=mStep.profile?PxTime::getCurrentCounterValue():0;
++    auto& plan=*mColorTasks;
++    auto& mixed=plan.mixed;
++    const PxU32 count=mixed.tiles+mixed.leaves, pairs=PxMin(mixed.tiles,mixed.leaves);
++    auto hottest=StepState::HotItem{};
++    PxU64 wait=0;
++    PxU32 ticket=slot,claimed=0;
++    while(ticket<count)
++    {
++        // Interleave the first pairs, then consume the longer span. Each
++        // ticket addresses exactly one original tile or exclusive tree leaf.
++        const bool leaf=ticket<2*pairs?(ticket%2==0):mixed.leaves>mixed.tiles;
++        const PxU32 ordinal=ticket<2*pairs?ticket/2:ticket-pairs;
++        const PxU32 index=leaf?mixed.firstLeaf+ordinal:mixed.firstTile+ordinal;
++        if(mStep.localTimeline)wait+=PxTime::getCurrentCounterValue()-mStep.localWaveStart;
++        solveLocalBatch(index,index+1,leaf?3:0,slot);
++        if(mStep.profile)
++        {
++            if(leaf)
++            {
++                const auto& n=mLocalWork->nodes[mLocalWork->leaves[index]];
++                mStep.hotItems[slot]={mStep.localWaveTaskTicks[slot],
++                    mLocalWork->states[n.state].body<mBodies.size()?0u:1u,n.end-n.begin};
++            }
++            if(mStep.hotItems[slot].ticks>hottest.ticks)hottest=mStep.hotItems[slot];
++        }
++        if(++claimed==LocalQueueDepth || count==mixed.lanes)break;
++        ticket=PxU32(PxAtomicIncrement(&mixed.nextTicket));
++    }
++    if(mStep.profile)
++    {
++        mStep.localWaveTaskStarts[slot]=started;
++        mStep.localWaveTaskTicks[slot]=PxTime::getCurrentCounterValue()-started;
++        mStep.hotItems[slot]=hottest;
++        if(mStep.localTimeline)
++        {
++            PxAtomicAdd(&plan.claims.itemWaitTicks,PxI64(wait));
++            PxAtomicAdd(&plan.claims.claimed,PxI32(claimed));
++            PxAtomicMax(&plan.claims.maxClaimed,PxI32(claimed));
++        }
++    }
++}
++
+ void AvbdDynamicsContext::runColorLane(PxU32 slot)
+ {
+     const PxU32 lanes=mColorTasks->lanes;
+@@ -1647,7 +1775,8 @@
+     mStep.localQueuePeak=PxMax(mStep.localQueuePeak,count);
+     if(mStep.profile)
+     {mStep.localWaveStart=PxTime::getCurrentCounterValue();mStep.localWaveStage=stage;
+-        mStep.localWaveJobs=PxMin(count,workers);mStep.localWaveTaskCount=count;}
++        mStep.localWaveJobs=PxMin(count,workers);mStep.localWaveTaskCount=count;
++        if(mStep.localTimeline && mColorTasks)mColorTasks->wait.inlineSlot=starts?count-1:0;}
+     if(count>1)
+     {
+         if(!mColorContinuation)mColorContinuation=PX_NEW(AvbdAdvanceTask)(*this,mContextID);
+@@ -1680,37 +1809,41 @@
+     solveLocalBatch(starts?starts[0]:firstTile,stops?stops[0]:firstTile+1,stage,0);finishLocalProfileWave();return true;
+ }
+ 
++void AvbdDynamicsContext::prepareLocalWork()
++{
++    const bool baked=mColorTasks && !mColorTasks->offsets.empty();
++    const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
++    const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
++    bool hasNodes=false,hasRigids=false;
++    for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
++    {
++        const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
++        const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
++        if(end-begin<=AvbdLocalWork::RowLimit)continue;
++        if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
++        mLocalWork->add(b,begin,end);
++        if(b<mBodies.size())
++        {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
++        else hasNodes=true;
++        ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
++    }
++    if(!mLocalWork)return;
++    if(hasNodes)
++    {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
++    if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
++    mStep.tiledLeaves+=mLocalWork->leaves.size();
++    mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
++        sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
++        PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
++        PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
++}
++
+ bool AvbdDynamicsContext::dispatchLocalWork()
+ {
+     const bool baked=mColorTasks && !mColorTasks->offsets.empty();
+     if(baked && mColorTasks->wideOffsets[mStep.nextColor]==mColorTasks->wideOffsets[mStep.nextColor+1])return true;
+-    if(!mLocalWork)
+-    {
+-        const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
+-        const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
+-        bool hasNodes=false,hasRigids=false;
+-        for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
+-        {
+-            const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
+-            const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
+-            if(end-begin<=AvbdLocalWork::RowLimit)continue;
+-            if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
+-            mLocalWork->add(b,begin,end);
+-            if(b<mBodies.size())
+-            {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
+-            else hasNodes=true;
+-            ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
+-        }
+-        if(!mLocalWork)return true;
+-        if(hasNodes)
+-        {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
+-        if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
+-        mStep.tiledLeaves+=mLocalWork->leaves.size();
+-        mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
+-            sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
+-            PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
+-            PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
+-    }
++    if(!mLocalWork)prepareLocalWork();
++    if(!mLocalWork)return true;
+     auto& work=*mLocalWork;
+     while(!mLocalDomainFailed)
+     {
+@@ -3065,6 +3198,7 @@
+ 	const PxVec3& gravity, Cm::PinnableBitMap& /*changedHandleMap*/)
+ {
+ 	mStep=StepState();
++    if(mColorTasks){mColorTasks->wait={};mColorTasks->claims={};}
+     mFixedReactions.clear();
+     mReleasedRigidBodies.clear();
+     mAttachmentRows.clear();
+@@ -3748,6 +3882,15 @@
+         {
+             if(mStep.localTimeline)
+             {
++                if(mColorTasks)
++                {
++                    const auto& wait=mColorTasks->wait;
++                    const auto& claims=mColorTasks->claims;
++                    std::fprintf(stderr,"[AVBD_MIXED_CLAIMS] waves=%u lanes=%u tiles=%u leaves=%u claimed=%d maxPerLane=%d itemWaitMs=%.7f\n",
++                        claims.waves,claims.lanes,claims.tiles,claims.leaves,claims.claimed,claims.maxClaimed,claims.itemWaitTicks*ms);
++                    std::fprintf(stderr,"[AVBD_QUEUE_WAIT] external=%u sumMs=%.7f maxMs=%.7f\n",
++                        wait.count,wait.ticks*ms,wait.maxTicks*ms);
++                }
+                 std::fprintf(stderr,"[AVBD_LOCAL_TIMELINE] stage=%u jobs=%u lanes=%u spanMs=%.6f lptMs=%.6f selection=worstGapPerStep\n",
+                     mStep.localTraceStage,mStep.localTraceJobs,mStep.localTraceLanes,mStep.localTraceSpan*ms,mStep.localTraceLpt*ms);
+                 for(PxU32 i=0;i<mStep.localTraceJobs;++i)
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
+@@ -394,6 +394,7 @@
+ private:
+ 	friend class AvbdBlockSolveTask;
+     friend class AvbdColorLane;
++    friend class AvbdMixedColorLane;
+ 	friend class AvbdAdvanceTask;
+ 	void compileBlockColors();
+ 	void advancePrimal();
+@@ -409,6 +410,9 @@
+     PxU32 localColorStart(PxU32 color) const;
+     PxU32 localDualRows() const;
+     void runColorLane(PxU32 slot);
++    void runMixedColorLane(PxU32 slot);
++    bool submitMixedColorWave(PxU32 firstTile,PxU32 tiles,PxU32 leaves);
++    void prepareLocalWork();
+     void executeColorLeaf(PxU32 tile);
+     void assembleNodalRows(PxU32 block,PxU32 begin,PxU32 end,AvbdNodalAssembly& out);
+     void finishNodalAssembly(PxU32 block,const AvbdNodalAssembly& rows);

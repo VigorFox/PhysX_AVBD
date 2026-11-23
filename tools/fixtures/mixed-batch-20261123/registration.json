@@ -1,0 +1,45 @@
+{
+  "frames": 360,
+  "fixed": [
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    163,
+    164,
+    165,
+    166,
+    167,
+    274,
+    275,
+    276,
+    277,
+    278,
+    279
+  ],
+  "models": [
+    "base",
+    "atomic",
+    "batch"
+  ],
+  "workers": [
+    4,
+    8
+  ],
+  "repetitions": 12,
+  "order": "all 6 implementation orders twice; alternate worker/scene order, reverse worker order per cycle",
+  "cpuProbeRepeats": 6,
+  "tailProbeRepeats": 3,
+  "primary": [
+    "volume fixed18 P95, mean, T4/T8",
+    "process CPU (kernel+user) over 360; separate Windows process time and cycles measured on the 18 simulate/fetch intervals",
+    "cloth full mean/P95, full step CPU",
+    "109 physical gates"
+  ],
+  "bounds": "identical workers, wave size, <=4 tickets per lane and 256-row leaf; change only ticket ownership, identical ordinary route",
+  "promotion": "Require reproducible fixed18 P95 gain and mean scaling with no repeatable CPU or default drape regression versus production, and qualify against prior atomic experimentally. Use full 12 triples including noisy runs; evaluate halves and favorable counts.",
+  "diagnostics": "Identify actual final fan-in decrement on inline/worker. Record per-last-lane start, service, phase of longest item, compute-desert/second arrival gap, join drain. No per-wave stderr until publication."
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "publication",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_common_step_probe.py",
+      "--mode",
+      "local",
+      "--logs",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\publication-local"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 25.3233527
+  },
+  {
+    "name": "geometry",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 2.9269391999999996
+  },
+  {
+    "name": "independent",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_np_geometry_scene_probe.py",
+      "0",
+      "independent"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 2.789561599999999
+  }
+]

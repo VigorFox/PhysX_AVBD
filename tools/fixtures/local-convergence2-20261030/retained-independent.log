@@ -1,0 +1,8 @@
+[AVBD_SCHEDULE] blocks=2 colors=1 maxWidth=2 tasks=0 peakTasks=0 workers=2 idleSkips=0
+[AVBD_STORAGE] bodies=2 rows=40 joints=0 bodyBytes=2016 rowBytes=10880 jointBytes=0 rowStride=272 supports=0 triangleDomains=0 trianglePoints=0 volumeCaches=0 surfaceCaches=0 softPairContacts=0
+[AVBD_ROW_PROGRAM] rows=40 uniqueSupports=40 blockRefs=40 bytes=512
+[AVBD_GROUP_KERNEL] implementation=shared-linear-response attempts=0 unsupported=0 solved=0 accepted=0 products=0 frictionAttempts=0 frictionAccepted=0 sharedContactAttempts=0 sharedContactAccepted=0
+[AVBD_MATERIAL_ASSEMBLY] evaluations=0 endpointUses=0
+[AVBD_CONTACT_COVERAGE] npRows=40 rigidCertificateBodies=0 rigidCertificatePlanes=0 triangleDomains=0 npCompleteSupportDomains=1 npUnsupported=0 npPolicyExcluded=0 npUnseparated=0 npDomainMode=2 npCertificateEndViolations=0 npCertificateEndMaxViolation=0 npAxisRecovered=0 completeRigidNpOgc=partial_np_pairs
+[NP_GEOMETRY_SCENE] kind=0 convexTarget=0 disabled=0 overlap=0 depth=0 moved=0.613732159 status=PASS
+[NP_COMPONENT_INDEPENDENCE] positionError=0 status=PASS

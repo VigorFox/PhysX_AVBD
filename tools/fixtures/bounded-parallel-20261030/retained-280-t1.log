@@ -1,0 +1,14 @@
+[LOCAL_RESPONSE] blocks=4 groups=280 colors=3 sweeps=1024 residual=1.65093685e-08 ms=109.138 status=FAIL
+{
+  "file": "tools\\benchmark-results\\bounded-20261030\\retained-280-t1.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "reason": "local_response_capture",
+  "materialProducts": 0,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

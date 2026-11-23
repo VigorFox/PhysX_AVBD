@@ -1,0 +1,64 @@
+[
+  {
+    "name": "five-local",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_response_probe.py",
+      "tools/fixtures/common-program-20261028/five.json.gz",
+      "--report",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\five-local-final.json",
+      "--repeat",
+      "5"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 4.8137523
+  },
+  {
+    "name": "five-strict",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_response_probe.py",
+      "tools/fixtures/common-program-20261028/five.json.gz",
+      "--report",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\five-strict-final.json",
+      "--repeat",
+      "5",
+      "--strict"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 6.405963099999999
+  },
+  {
+    "name": "compression-local",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_response_probe.py",
+      "tools/fixtures/common-program-20261028/compression.json.gz",
+      "--report",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\compression-local-final.json",
+      "--repeat",
+      "5"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 7.8349277000000015
+  },
+  {
+    "name": "compression-strict",
+    "command": [
+      "C:\\Users\\vigor\\miniconda3\\python.exe",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\run_avbd_local_response_probe.py",
+      "tools/fixtures/common-program-20261028/compression.json.gz",
+      "--report",
+      "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\compression-strict-final.json",
+      "--repeat",
+      "5",
+      "--strict"
+    ],
+    "exit": 0,
+    "timedOut": false,
+    "seconds": 5.7090875000000025
+  }
+]

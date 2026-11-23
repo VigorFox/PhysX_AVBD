@@ -1,0 +1,272 @@
+{
+  "date": "2026-10-29",
+  "head": "ead9fb33e66026a131d92807e0c369024665a6c5",
+  "dirtyWorktree": true,
+  "configuration": "Checked SDK; offline probe /O2 /fp:precise",
+  "qualification": {
+    "frozenInputs": "PASS (independent original equations)",
+    "unit": "PASS precise/fast, 48 cases each + closed chain",
+    "localSdkSmall": "PASS publication/geometry/independent",
+    "publicRegression": "PASS 9 suites + smoke",
+    "oldNpTrial": "PASS reaction/compression-recovery/five, each 360 frames",
+    "localFive": "FAIL: frame 16 nonlinear_work; 15 accepted, 1 rejected, 2 accepted nonstationary",
+    "localGpuOrProductionThreading": "NOT IMPLEMENTED",
+    "localRealtimeOr360": "NOT QUALIFIED"
+  },
+  "benchmarks": {
+    "five": {
+      "local": {
+        "converged": true,
+        "iterations": 72,
+        "residual": 8.907808408120624e-12,
+        "milliseconds": 89.8493,
+        "colors": 8,
+        "materialProducts": 65,
+        "samplesMs": [
+          85.7245,
+          85.2942,
+          89.8493,
+          95.8017,
+          94.2929
+        ]
+      },
+      "strict": {
+        "converged": true,
+        "iterations": 12,
+        "residual": 2.0834573097128198e-11,
+        "milliseconds": 474.5348,
+        "colors": 0,
+        "materialProducts": 72,
+        "samplesMs": [
+          471.64,
+          474.5348,
+          477.1994,
+          477.6232,
+          453.2455
+        ]
+      },
+      "ratio": 5.281452387497732
+    },
+    "compression": {
+      "local": {
+        "converged": true,
+        "iterations": 86,
+        "residual": 4.2362588758773106e-13,
+        "milliseconds": 13.9573,
+        "colors": 8,
+        "materialProducts": 36,
+        "samplesMs": [
+          13.428,
+          13.5183,
+          15.8546,
+          13.9573,
+          15.2434
+        ]
+      },
+      "strict": {
+        "converged": true,
+        "iterations": 13,
+        "residual": 2.3580182817827403e-11,
+        "milliseconds": 380.4845,
+        "colors": 0,
+        "materialProducts": 2428,
+        "samplesMs": [
+          376.0867,
+          380.4845,
+          375.4402,
+          388.4206,
+          382.2082
+        ]
+      },
+      "ratio": 27.260609143602274
+    }
+  },
+  "notes": [
+    "Timing includes response construction and solve, excludes H/J physical compilation and nonlinear geometry checks. Five samples per mode, no concurrent test/build.",
+    "Final optional SOC capture is a failed auxiliary numerical solve, not final nonlinear geometry/work rejection.",
+    "five-local40-latest and five-local40-budget are removed intermediate variants; their source versions are not the final source fingerprint.",
+    "No failed trial is accepted as a successful scene; default switches remain off."
+  ],
+  "sources": {
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdBlockGroup.h": "48dee08fdac6bfb7b7e52744fe54982263a483e9484212bdd16365341fa8129c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdColoring.h": "f28683aea00ab1eb42976d41418381af95ab8ca9c95109f88617f297264763d5",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h": "84e13d8c6af4a98970d29b660ce2235998a25d4fbdbcabe0b05901b660faccee",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h": "d1c7029f8e16f14f25404b7db86adbd27ec70e2119b8989bd334ecca5b6ccb02",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResponse.h": "82022eb0677f06090f6a26dfdd9b77a3c426943bca4a5f22bfdfd1818c90e8eb",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactGeometry.h": "aa17a28e9d25ee927af6b9534031e3b18ff08f3a436b2c33db4f4648792f11b0",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPotential.h": "4b7a4a423a18387e7b2b9c7e23d812c4ee675e9c58f4b7f1b84418165241565c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp": "59bb903ebc3a6d2b1a09739bc342de618e80d69c3e6e2bc82abbba16cd6d87ef",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCoulombNcp.h": "4c353d6d18a92be04cdddc709f8cb8e2a22c32952c32cfacff9178f9d5241cd3",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCoupledDomain.h": "7abdc90212907d00e7dc371172b68463739299ce7f879144b6d74b4c93668d13",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "6c3f5bcc5e4145fd60332836eb4d01e70d128c4fdd50bff895716b5984b41800",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "bcf55c073b7f79dcb3b6918bee4cb1fbaa29292fdc6a5b02ac43d2d7af8f5d61",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrame.h": "1eb0902e8f687033ded03ae410eed5985c9452a07d593cbe865962f5f25f4ce5",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameCurvature.h": "a2bb3a44aef332a90fd061256bf3ca0326a56a465d7c4ac10987fbe193b08419",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameMath.h": "927d0e7ab348cf7422f482952427d18d5b38978385ffa620fe48c8d53ea9b4d3",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h": "d5f34054f2c66e0f784355f3d721861f57cd2dcf0d0e8237f6494fc3d6e9d942",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp": "be22f91cd7a7b1423d3f9a4444b178b79de189113a0bb47d9671a8f6734b92e8",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdKernelsScalar.h": "99ca2f5c3d7d3d1db8784c464ea25a852afb3e8d03b3d041bd2dcc5b290237a2",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLinearResponse.h": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalAcceleration.h": "b7fcaaededa1f98d6c03788dc27f7f095d8e1fea63a674d745fe86146288c1a4",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalResponse.h": "82ed0211786953cbc8b2bb9bc38ca74603411f620bd331a0007538f2f4f1026b",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdMaterialAssembly.h": "da1d6061297dd0931f5751c8efc368f7f290d847ba5cc5a9fca0ab2e892f7b7e",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdMixedKkt.h": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNormalCone.h": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h": "3959a7c3d5e0036baf6bc57f9a9a18121df2bc2209be289c04b197d6ddc4bdac",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgc.h": "f62be4adcdebeb3c93b541bbe33119103a3b70da2a33f9c11b9f7b78fa280110",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcActivation.h": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcProjection.h": "05dbc797c3c281dbfdb80096b6c07271a3f89ec92645a4316b06a6f809f15b74",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdRigidMetric.h": "1692c827f82b153bcf0e2d70ce270f695bf9541bb8ffdac803a36fe0a26c5d63",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdRowProgram.h": "580504c9c8e3e078051a0f870a374c30948bfa7f66d8ba595122d14d72c37461",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "62ff7f955a5a5c3cc7b3842174aeb682ad20273b0b639f39cbc22618b951cbaf",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSparseSymmetric.h": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdTetrahedron.h": "f4e5da89ea2ca339233595e0d3a9a33a43d14d41c918931b2a0e524e0170bf1d",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdVbd.h": "ff4fb434ac5d8bd4aff412d76db530e2f0f1e0d3c2bcd13d743a0c2962bd550f",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "7330c43d5bcb8f5e840ce7dfaadb9ca689c6d601fccead2702a6a0b34764b953",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "df36ee937d8a8aa43d9a11941825b3b6417952bf5ef9a1f8f00c9b588b9e2735",
+    "tools/avbd_local_block_probe.cpp": "45e5b134601e97f9dcbacc3571221f5e0eb3326fe4edac7779e0c81d368aab35",
+    "tools/avbd_local_response_probe.cpp": "7f735c9ad5c5f99e5f7db9d760b0319f98ac67bf6f0d28117d32c41b4bc77309",
+    "tools/run_avbd_local_block_probe.py": "5c24e1867172ecda0d12809141edc80f11c51bad5d9da986dda6368225ddcef5",
+    "tools/run_avbd_local_response_probe.py": "af461a93270fd9550fa9a2a7d612bc7aea0bfd675de6feb5a30721de6e52daf0",
+    "tools/run_avbd_local_scene.py": "e57724a8d02c5fb753a37865f99604808cba089da62bdb8c21efc122bcaa7a61",
+    "tools/run_avbd_common_step_probe.py": "211307aa43f4a4848410c8b01253808dbfe3144a1747c555d6e191805cb99e79",
+    "tools/validate_avbd_common_capture.py": "e4d5175401dcaeacc867ae2635725b1c8b4c58b061ea414b5ae25bccd8168946",
+    "docs/LOCAL_BLOCK_SOFT_BODY_20261029.md": "73a59d5a5b4158150002e51a1ee1c27ee09f47152e3aadaa7283757ba1c9426f",
+    "physx/bin/win.x86_64.vc143.md/checked/PhysX_64.dll": "a4480f8a74890e1667440dc0a5e04a599c44ec45db07da61e59fcb6bee7a6639",
+    "physx/bin/win.x86_64.vc143.md/checked/SnippetJointSoftBody_64.exe": "906b5b7a14b44ed0c95d832cf9f5f45485588efdabfbc8e56d99104540ef0411"
+  },
+  "inputs": {
+    "tools/fixtures/common-program-20261028/five.json.gz": "24367b14f52ed2b7be5b522cd8d28ed8e73acca7ce1d08e17b4783f0f959b501",
+    "tools/fixtures/common-program-20261028/compression.json.gz": "46ea0751cef7e5f4443c1b099f6564a9e1a64d205956327df7a31477dfc3504c"
+  },
+  "artifacts": [
+    {
+      "file": "five-local-final.json.gz",
+      "sha256": "b3a56161b93bcd12cd0598700814c3120096a6333323ffb8ff81314e4747e443"
+    },
+    {
+      "file": "five-local-final.validation.json",
+      "sha256": "246ee95d0c1d210ee79067afb350a0f7a38f252c26d3ea8f21d08e0c66ed1798"
+    },
+    {
+      "file": "five-strict-final.json.gz",
+      "sha256": "ea537eae0b1b9fe12c83d551330b3a1576593436d427d2e947267cadd55b18f3"
+    },
+    {
+      "file": "five-strict-final.validation.json",
+      "sha256": "ec8148a9f3358c717508abbfaabafd12ceac467f7b3cf3629b5f27469b38f39b"
+    },
+    {
+      "file": "compression-local-final.json.gz",
+      "sha256": "7945e5d7de60100e8931510b738f5fef8e10082260f7da217d9f4e809eb4a3a4"
+    },
+    {
+      "file": "compression-local-final.validation.json",
+      "sha256": "058f946e7acb9066ced9769a7e1369c05b78356d019070e3ffa74acfb60e1e3a"
+    },
+    {
+      "file": "compression-strict-final.json.gz",
+      "sha256": "9ea7105a9aa8b6ec44629f0b4aee88bf93d87bafe08432f668ed380f128e1f85"
+    },
+    {
+      "file": "compression-strict-final.validation.json",
+      "sha256": "c921b731e4f6ed7f3fa79190fa2f6a5eb5d6f2b5f705c77d319fa042e3dcf585"
+    },
+    {
+      "file": "public-checks.json",
+      "sha256": "6c2961544280aebbcd668dafcc9b76566d81fa7f65489134ef360bca71dbaa56"
+    },
+    {
+      "file": "numeric-checks.json",
+      "sha256": "47e1ff9e6058621dcc7bf0739f7dfc28e0708ded9088cd727133777b7feb1e9a"
+    },
+    {
+      "file": "small-checks.json",
+      "sha256": "2b38a89a72a4499a995cd0d317a3c8c00366f898b2c39006714bf4435907d655"
+    },
+    {
+      "file": "baseline-checks.json",
+      "sha256": "31f4bb5835ae621b3709c7ba46859e97d03c2f607ba63a3ba08256c9348be17a"
+    },
+    {
+      "file": "benchmark-checks.json",
+      "sha256": "e233ae0af3a8f1184390ef96ccb3287cc4a5c24ea40506c40ed0ecd2e58a336d"
+    },
+    {
+      "file": "numeric-local-unit.log",
+      "sha256": "f8301181089b2691bceaebf167ad123049ccdd67a98c5daca993f2adaabac856"
+    },
+    {
+      "file": "numeric-common.log",
+      "sha256": "89ca2b96b4495264d75d0d85a6f5d3c376245a19274600ae3251dbe649e3fff9"
+    },
+    {
+      "file": "small-publication.log",
+      "sha256": "a562517f9a22ba597f17a152d5e6f66911b5e28aebbd8beb20dd62e7e5f5df7b"
+    },
+    {
+      "file": "small-independent.log",
+      "sha256": "35bf2354492b8bd7a4476324f9aa7335a9fb43fcaea56d119d82f01356eaeb44"
+    },
+    {
+      "file": "final-failure-analysis.json",
+      "sha256": "449a340c4420145adfbb4acf2eba3542c9a44e2ee83ef39664964bc4d53e14ce"
+    },
+    {
+      "file": "small-geometry.log.gz",
+      "sha256": "806e60072f4897c2c32b345e0391768692c3c349bc8b4060f744f5d1fbc7ab75"
+    },
+    {
+      "file": "five-local16-final.json",
+      "sha256": "3c5b5f89f1be1351ba9b8957ba206f48c1cb397fdf88c83d24baf1f6693ef6dc"
+    },
+    {
+      "file": "five-local16-final.txt.gz",
+      "sha256": "4f295c92e8582b04f3f2efebd01f8767eda4808c261dd86e647252bc0478e36e"
+    },
+    {
+      "file": "five-local40-latest.json",
+      "sha256": "5e1388e70e6adf719aee13448e57440341a2af5589fc56a02ef830b7b321cd29"
+    },
+    {
+      "file": "five-local40-latest.txt.gz",
+      "sha256": "acee057be955b02f2c2a01fba3838e3ba3cb9cde978e1cba632c6608bd410397"
+    },
+    {
+      "file": "five-local40-budget.json",
+      "sha256": "7e162ce33f6509a8cd6b83a0f9392ec80ad19a4159f982db56a16d135320bd04"
+    },
+    {
+      "file": "five-local40-budget.txt.gz",
+      "sha256": "b792bbaed732086754cb2d85bc9526c8b893c14ac7766db63c6ef8537aab26f7"
+    },
+    {
+      "file": "final-optional-soc.json.gz",
+      "sha256": "cce0c9b3a3ffc35c4d5a05d6d27940dbc1fbc746df7a5694e48597a6e03a890b"
+    },
+    {
+      "file": "baseline-reaction.json",
+      "sha256": "27d6e1b018817c61c82582a8a46ff5335cb58a26153d8bfbbac8eb5776f9aeb6"
+    },
+    {
+      "file": "baseline-reaction.txt",
+      "sha256": "26ce9a1c7094e0f3b84114fcef93c5047caebbcf6defa63d4d01173efd5ab378"
+    },
+    {
+      "file": "baseline-compression-recovery.json",
+      "sha256": "a890542b383bc286e2247250fdac9ff231a7af950329f22f2954b121ba50137a"
+    },
+    {
+      "file": "baseline-compression-recovery.txt",
+      "sha256": "e47eacdb1a2f16f446e14182873f53c0beb3ceb4473eb596fb23db2d716d505f"
+    },
+    {
+      "file": "baseline-visual-showcase.json",
+      "sha256": "f11a305ad69db2d0eb0ee7fae3d169b6e5164be0f15f582249f79de31ac06ab5"
+    },
+    {
+      "file": "baseline-visual-showcase.txt",
+      "sha256": "6bb143de2bad23d3a03e2993ba67e89afdf07ae9239fbc7cd3732a4fa2a1c888"
+    }
+  ]
+}

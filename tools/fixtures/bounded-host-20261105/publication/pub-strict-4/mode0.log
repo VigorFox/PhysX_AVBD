@@ -1,0 +1,10 @@
+[COMMON_BDF] linearError=1.49011612e-08
+[COMMON_PHYSICAL] overlap=0 depth=0 driveForce=0
+[COMMON_PROGRAM_SCENE] mode=0 fetchedFinite=PASS
+[AVBD_COMMON_WORKSET] blocks=3 groups=6 selected=2 used=0 status=BEGIN
+[AVBD_COMMON_WORKSET] selected=2 iterations=2 residual=1.14920969e-17 status=PASS
+[AVBD_COMMON_TRIAL] iteration=0 search=0 fraction=1 initial=0.1263595709826601 residual=8.8576087163064585e-11 work=-0.03552471356050823 slope=-0.071049372322250601 closed=1 descent=1
+[AVBD_COMMON_CLOSURE] rootSmall=1 correction=0.0263985759 body=0 coordinate=5
+[AVBD_COMMON_STEP] iteration=0 blocks=3 groups=6 fraction=1 requested=230.572339 initial=0.126359571 residual=8.85760872e-11 activeGroups=2 materialProducts=18 secondOrder=0 status=PASS storage=backend_iterate
+[AVBD_COMMON_COMPONENTS] iteration=0 count=1 skipped=0 stationary=1
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1

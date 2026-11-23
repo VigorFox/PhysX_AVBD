@@ -1,0 +1,56 @@
+{
+  "scope": "Rejected complete tet embedding/projection SIMD experiments; no production qualification",
+  "baseline": "7f98029 plus accepted hinge SIMD; frozen file identities in local baseline.json",
+  "primary": "volume 8 workers 360 frames mean ratio <=0.95",
+  "reports": {
+    "first-ab": {
+      "allPhysicalRunsPassed": true,
+      "stableBinaries": true,
+      "wholeStep": {
+        "4": {
+          "meanMs": 1.1001900940430442,
+          "p95Ms": 1.198888755572374
+        },
+        "8": {
+          "meanMs": 1.0905183436576182,
+          "p95Ms": 1.1659825551564904
+        }
+      }
+    },
+    "xyz-ab": {
+      "allPhysicalRunsPassed": true,
+      "stableBinaries": true,
+      "wholeStep": {
+        "4": {
+          "meanMs": 1.0294057100164766,
+          "p95Ms": 1.0708251436347143
+        },
+        "8": {
+          "meanMs": 1.0301092407996253,
+          "p95Ms": 1.0428803214092561
+        }
+      }
+    }
+  },
+  "mechanism": {
+    "testsPerPrecision": 12000,
+    "precisions": [
+      "f32-precise",
+      "f32-fast",
+      "f64"
+    ],
+    "failures": 0,
+    "covered": [
+      "complete signed embedding",
+      "direct nodes",
+      "aliases",
+      "two local candidates",
+      "self contact",
+      "1000-unit translation",
+      "near boundary",
+      "NaN"
+    ],
+    "fullQualityMatrix": "Not run for rejected candidate"
+  },
+  "reason": "Both layouts regress complete step cost. More gather/roundoff work than original scalar. Revert all candidate runtime code."
+}

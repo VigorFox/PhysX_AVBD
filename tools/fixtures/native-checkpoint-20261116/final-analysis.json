@@ -1,0 +1,368 @@
+{
+  "comparisons": [
+    {
+      "snippet": "surface",
+      "case": "reaction",
+      "passed": true,
+      "beforeMedianMs": 7.43092917,
+      "afterMedianMs": 6.61191278,
+      "pairedSpeedupMedian": 1.1215460329701161,
+      "beforeCores": 2.0332549646757707,
+      "afterCores": 2.2596592780819647,
+      "beforeP95Ms": 8.2554,
+      "beforeWorstStepMs": 10.1438,
+      "beforeCpuMsPerFrame": 17.62152777777778,
+      "beforeSamplesMs": [
+        7.43092917,
+        7.43612722,
+        7.40778444
+      ],
+      "afterP95Ms": 7.3684,
+      "afterWorstStepMs": 8.3821,
+      "afterCpuMsPerFrame": 17.274305555555557,
+      "afterSamplesMs": [
+        6.61191278,
+        6.68674583,
+        6.60497583
+      ]
+    },
+    {
+      "snippet": "volume",
+      "case": "reaction",
+      "passed": true,
+      "beforeMedianMs": 4.63211111,
+      "afterMedianMs": 4.56375167,
+      "pairedSpeedupMedian": 1.0186797619471266,
+      "beforeCores": 1.1421561190901532,
+      "afterCores": 1.2069896480843054,
+      "beforeP95Ms": null,
+      "beforeWorstStepMs": 6.9289999,
+      "beforeCpuMsPerFrame": 5.815972222222222,
+      "beforeSamplesMs": [
+        4.63211111,
+        4.7595225,
+        4.60815806
+      ],
+      "afterP95Ms": null,
+      "afterWorstStepMs": 6.70959997,
+      "afterCpuMsPerFrame": 6.076388888888889,
+      "afterSamplesMs": [
+        4.56375167,
+        4.56725778,
+        4.52365722
+      ]
+    },
+    {
+      "snippet": "surface",
+      "case": "static-box",
+      "passed": true,
+      "beforeMedianMs": 6.70955139,
+      "afterMedianMs": 6.23762833,
+      "pairedSpeedupMedian": 1.0763999610506465,
+      "beforeCores": 1.972648191094906,
+      "afterCores": 2.2575119217431703,
+      "beforeP95Ms": 18.3613,
+      "beforeWorstStepMs": 53.8218,
+      "beforeCpuMsPerFrame": 15.45138888888889,
+      "beforeSamplesMs": [
+        6.61258722,
+        6.70955139,
+        6.84442333
+      ],
+      "afterP95Ms": 16.3539,
+      "afterWorstStepMs": 33.7031,
+      "afterCpuMsPerFrame": 16.57986111111111,
+      "afterSamplesMs": [
+        6.24553861,
+        6.23332556,
+        6.23762833
+      ]
+    },
+    {
+      "snippet": "volume",
+      "case": "visual-showcase",
+      "passed": true,
+      "beforeMedianMs": 19.7795281,
+      "afterMedianMs": 19.1311447,
+      "pairedSpeedupMedian": 1.0368859525470613,
+      "beforeCores": 2.020327841605592,
+      "afterCores": 2.074698338397977,
+      "beforeP95Ms": 59.0431,
+      "beforeWorstStepMs": 100.0169,
+      "beforeCpuMsPerFrame": 46.13715277777778,
+      "beforeSamplesMs": [
+        19.9166747,
+        19.6794736,
+        19.7795281
+      ],
+      "afterP95Ms": 57.5083,
+      "afterWorstStepMs": 99.6233,
+      "afterCpuMsPerFrame": 46.18055555555556,
+      "afterSamplesMs": [
+        19.2081633,
+        19.1311447,
+        18.8873678
+      ]
+    }
+  ],
+  "workspan": [
+    {
+      "workers": 4,
+      "backend": 20.10961027777778,
+      "taskWork": 37.264028611111115,
+      "batchSpan": 12.55883388888889,
+      "nonbatch": 7.55077638888889,
+      "uniformModel": 16.86678354166667,
+      "taskBoundModel": 18.405027222222223,
+      "lptModel": 18.914984444444446,
+      "waves": 76.21666666666667,
+      "groupAssembly": 17.868904722222222,
+      "groupSolve": 2.5373225,
+      "groupGeometry": 6.644998611111111
+    },
+    {
+      "workers": 8,
+      "backend": 18.79427638888889,
+      "taskWork": 45.927845277777784,
+      "batchSpan": 10.689707499999999,
+      "nonbatch": 8.10456888888889,
+      "uniformModel": 13.845549548611114,
+      "taskBoundModel": 16.946523055555556,
+      "lptModel": 17.225471111111112,
+      "waves": 65.41944444444445,
+      "groupAssembly": 22.721689722222223,
+      "groupSolve": 3.280996666666667,
+      "groupGeometry": 7.7122125
+    }
+  ],
+  "longRuns": [
+    {
+      "name": "final-Volume-visual-showcase-1200",
+      "exit": 0,
+      "seconds": 16.890723900000005,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=visual-showcase",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "gates": [
+        {
+          "schema": "1",
+          "snippet": "SnippetJointSoftBody",
+          "solver": "avbd",
+          "case": "visual-showcase",
+          "frames": "1200",
+          "completedFrames": "1200",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "model": "convex_cell_joint_volume",
+          "materialElements": "2514",
+          "grid": "5",
+          "dispatcherThreads": "4",
+          "bodies": "5",
+          "nodes": "787",
+          "joints": "1888",
+          "mass": "7530.66113",
+          "cellSize": "0.200000003",
+          "trajectoryHash": "1a8374eb2671203c",
+          "contacts": "1363913",
+          "crossContacts": "56615",
+          "crossMask": "8519712",
+          "minCellDet": "0.487102866",
+          "minVolumeRatio": "0.90259707",
+          "maxVolumeRatio": "1.01155102",
+          "finalVolumeRatio": "0.978904605",
+          "maxExternalPenetration": "4.71924693e-07",
+          "maxSelfPenetration": "0",
+          "maxJointAnchorError": "0.79671073",
+          "maxPostContactStep": "1.04223084",
+          "maxMomentumRelativeError": "17.161129",
+          "initialMechanicalEstimate": "882856.97",
+          "maxMechanicalEstimate": "882857",
+          "finalMechanicalEstimate": "99796.6212",
+          "finalAwake": "192",
+          "skinRestError": "6.03421586e-06",
+          "massRelativeError": "1.30616327e-05",
+          "assetBytes": "352636",
+          "skinBytes": "101156",
+          "diagnosticBytes": "50280",
+          "averageStepMs": "11.2884337",
+          "p95StepMs": "32.7085",
+          "maxStepMs": "107.2291",
+          "activeContactFrames": "1195",
+          "averageActiveContactMs": "11.2688339",
+          "averageSkinMs": "0.0448816667",
+          "averageObserverMs": "2.58485025",
+          "averageFrameMs": "11.3333153",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    },
+    {
+      "name": "final-Surface-reaction-1200",
+      "exit": 0,
+      "seconds": 9.720885899999999,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableSurfaceAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "gates": [
+        {
+          "schema": "1",
+          "snippet": "SnippetDeformableSurfaceAVBD",
+          "solver": "avbd",
+          "case": "reaction",
+          "model": "rigid_patch_joint_sheet",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "status": "PASS",
+          "reason": "none",
+          "frames": "1200",
+          "completedFrames": "1200",
+          "grid": "24",
+          "cells": "576",
+          "joints": "1104",
+          "dispatcherThreads": "4",
+          "mass": "625.004272",
+          "contacts": "12208",
+          "crossContacts": "12208",
+          "centerY": "2.98448396",
+          "minY": "2.20415092",
+          "peakPrincipalStrain": "1.03369665",
+          "finalPrincipalStrain": "1.01441574",
+          "finalAreaRatio": "1.00061536",
+          "maxPenetration": "0",
+          "maxSelfPenetration": "0",
+          "initialEnergy": "40.0000003",
+          "peakEnergy": "40.0000003",
+          "maxMomentumError": "0.000344021624",
+          "maxBallisticError": "7.546087e-05",
+          "finalAwake": "577",
+          "averageStepMs": "7.17617267",
+          "p95StepMs": "11.8687",
+          "maxStepMs": "21.683",
+          "averageObserverMs": "0.83706425",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    },
+    {
+      "name": "final-Volume-reaction-1200",
+      "exit": 0,
+      "seconds": 5.960919899999993,
+      "command": [
+        "D:\\projects\\PhysX_AVBD_3\\physx\\bin\\win.x86_64.vc143.md\\checked\\SnippetDeformableVolumeAVBD_64.exe",
+        "--headless",
+        "--case=reaction",
+        "--frames=1200",
+        "--dispatcher-threads=4"
+      ],
+      "gates": [
+        {
+          "schema": "1",
+          "snippet": "SnippetJointSoftBody",
+          "solver": "avbd",
+          "case": "reaction",
+          "frames": "1200",
+          "completedFrames": "1200",
+          "status": "PASS",
+          "reason": "none",
+          "capability": "EXPERIMENTAL",
+          "validation": "GATED",
+          "model": "rigid_cell_joint_volume",
+          "materialElements": "384",
+          "sleepEnabled": "1",
+          "grid": "5",
+          "nodes": "125",
+          "joints": "300",
+          "mass": "800.000732",
+          "cellSize": "0.400000006",
+          "dispatcherThreads": "4",
+          "compressionHoldFrames": "60",
+          "maxJointAngle": "0.0265296437",
+          "trajectoryHash": "c549b058142ba308",
+          "minVolumeRatio": "0.980562687",
+          "minCellDet": "0.954540014",
+          "finalVolumeRatio": "1.00002217",
+          "maxShapeError": "0.0139480997",
+          "finalShapeError": "1.50355218e-05",
+          "maxGroundPenetration": "0",
+          "maxExternalPenetration": "0",
+          "compressionMinimum": "1",
+          "recoveredFraction": "0",
+          "contacts": "514",
+          "firstContactFrame": "18",
+          "maxPostContactStep": "0.0133307604",
+          "zeroMotionFrames": "0",
+          "systemComDrift": "0.000165652906",
+          "maxPostImpactVy": "0.65940851",
+          "maxMechanicalEstimate": "210.009048",
+          "finalMechanicalEstimate": "21.414959",
+          "averageStepMs": "4.66291917",
+          "maxStepMs": "8.41110039",
+          "averageFrameMs": "4.88149808",
+          "activeFrames": "1200",
+          "activeContactFrames": "15",
+          "averageActiveStepMs": "4.66291917",
+          "averageActiveContactMs": "4.33087333",
+          "maxMomentumRelativeError": "4.36531991e-05",
+          "maxBallisticError": "11.4565687",
+          "sleepingBeforeWake": "0",
+          "maxWakeMotion": "0.00311733736",
+          "nonFinite": "0",
+          "fetchFailures": "0",
+          "fatalErrors": "0"
+        }
+      ]
+    }
+  ],
+  "scaling": [
+    {
+      "snippet": "surface",
+      "workers": 0,
+      "stepMs": 13.52578775,
+      "occupiedCores": 0.9708035401404138
+    },
+    {
+      "snippet": "surface",
+      "workers": 4,
+      "stepMs": 6.25068764,
+      "occupiedCores": 2.2131309493502576
+    },
+    {
+      "snippet": "surface",
+      "workers": 8,
+      "stepMs": 5.67627653,
+      "occupiedCores": 2.6206833810025465
+    },
+    {
+      "snippet": "volume",
+      "workers": 0,
+      "stepMs": 40.9806114,
+      "occupiedCores": 0.9805836141385775
+    },
+    {
+      "snippet": "volume",
+      "workers": 4,
+      "stepMs": 19.028333600000003,
+      "occupiedCores": 2.0374268810401777
+    },
+    {
+      "snippet": "volume",
+      "workers": 8,
+      "stepMs": 17.8019839,
+      "occupiedCores": 2.6292338770260146
+    }
+  ]
+}

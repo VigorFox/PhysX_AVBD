@@ -1,0 +1,89 @@
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp
+@@ -150,7 +150,7 @@
+     {
+         AvbdLocalBlockState state;
+         AvbdNodalTrial nodalTrial;
+-        PxU32 begin=0,end=0,count=0,scratch=0,slot=0,slots=0;
++        PxU32 begin=0,end=0,count=0,rootStride=0,scratch=0,slot=0,slots=0;
+         PxU32 next=0,inlineLeaf=0,attempt=0,windows=0,external=0;
+         PxU64 jobs=0;
+         volatile PxI32 remaining=0;
+@@ -1720,6 +1720,24 @@
+     solveLocalBatch(starts?starts[0]:firstTile,stops?stops[0]:firstTile+1,stage,0);finishLocalProfileWave();return true;
+ }
+ 
++void AvbdDynamicsContext::mergeReadyChildren(PxU32 owner,PxU32 a,PxU32 b)
++{
++    auto& work=*mLocalWork;
++    const auto& block=work.blocks[owner];
++    const bool nodal=block.state.body>=mBodies.size(),trial=block.attempt!=0;
++    if(!nodal)
++    {
++        AvbdLocalReductionArgs args={&work.rigid[a],&work.rigid[b],&work.rigid[a],trial};
++        mKernels.launch(AVBD_LOCAL_REDUCTION,&args);
++    }
++    else if(trial)
++    {
++        work.energy[a].energy+=work.energy[b].energy;
++        work.energy[a].valid&=work.energy[b].valid;
++    }
++    else work.nodal[a].add(work.nodal[b]);
++}
++
+ // The right child's first leaf uniquely identifies each binary join. Odd
+ // tails advance without allocating or copying a unary partial. Only the last
+ // child writes the parent, and the next trial starts after every leaf release.
+@@ -1741,23 +1759,13 @@
+         work.nodal[slot]=AvbdNodalAssembly();
+         assembleNodalRows(state.body,begin,end,work.nodal[slot]);
+     }
+-    for(PxU32 stride=1;stride<block.count;stride*=2)
++    for(PxU32 stride=1;stride<block.rootStride;stride*=2)
+     {
+         const PxU32 left=leaf & ~(2*stride-1),right=left+stride;
+         if(right>=block.count)continue;
+         const PxU32 a=block.scratch+left,b=block.scratch+right;
+         if(PxAtomicDecrement(&work.pending[b]))break;
+-        if(!nodal)
+-        {
+-            AvbdLocalReductionArgs args={&work.rigid[a],&work.rigid[b],&work.rigid[a],trial};
+-            mKernels.launch(AVBD_LOCAL_REDUCTION,&args);
+-        }
+-        else if(trial)
+-        {
+-            work.energy[a].energy+=work.energy[b].energy;
+-            work.energy[a].valid&=work.energy[b].valid;
+-        }
+-        else work.nodal[a].add(work.nodal[b]);
++        mergeReadyChildren(owner,a,b);
+         work.pending[b]=2;
+     }
+     if(mStep.countNodalSolves)PxAtomicDecrement(&mActivePrimalTasks);
+@@ -1795,6 +1803,8 @@
+             const PxU64 start=mStep.profile?PxTime::getCurrentCounterValue():0;
+             // count-1 binary merges and one direction/accept for a full pass.
+             block.jobs+=block.count;
++            // The last leaf release already joined both root subtrees.
++            mergeReadyChildren(owner,block.scratch,block.scratch+block.rootStride);
+             if(state.body<mBodies.size())
+             {
+                 if(block.attempt)finishLocalBlockTrial(state,work.rigid[block.scratch]);
+@@ -1846,6 +1856,7 @@
+         if(b<mBodies.size()){block.state.original=PxTransform(mBodies[b].p,mBodies[b].q);rigids=true;}
+         else nodes=true;
+         block.begin=lo;block.end=hi;block.count=1+(rows-1)/AvbdLocalWork::RowLimit;
++        block.rootStride=1u<<PxHighestSetBit(block.count-1);
+         block.scratch=leaves;leaves+=block.count;
+         block.slot=slots;block.slots=PxMin(block.count,limit-slots);slots+=block.slots;
+         ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledLeaves+=block.count;
+--- a/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
++++ b/physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h
+@@ -423,6 +423,7 @@
+     void sampleNodalTrial(PxU32 block,PxU32 begin,PxU32 end,const AvbdNodalTrial& trial,AvbdNodalEnergy& out);
+     void acceptNodalTrial(PxU32 block,const AvbdNodalAssembly& rows,AvbdNodalTrial& trial,const AvbdNodalEnergy& sample);
+     bool prepareReadyGroup(const PxArray<PxU32>& blocks,PxU32 end,PxU32 limit);
++    void mergeReadyChildren(PxU32 owner,PxU32 a,PxU32 b);
+     void runReadyLeaf(PxU32 owner,PxU32 leaf);
+     void issueReadyWindow(PxU32 owner);
+     bool advanceReadyBlock(PxU32 owner);

@@ -1,0 +1,394 @@
+{
+  "schema": 1,
+  "head": "ead9fb33e66026a131d92807e0c369024665a6c5",
+  "dirty": true,
+  "configuration": "Checked, grid=5, dispatcher-threads=4",
+  "mode": "PHYSX_AVBD_COMMON_STEP=patch; PHYSX_NP_GEOMETRY_CERTIFICATES=2",
+  "scope": "Engineering frozen closure and actual scene results are distinct. Five-body target 360 rejected at frame 29; 28 accepted frames were nonstationary. No production or performance qualification.",
+  "failedInput": "remaining-135.json.gz",
+  "historicalTrials": "trial-* and trials/ are withdrawn implementations, not final qualifications.",
+  "files": [
+    {
+      "path": "retained-five360.txt.gz",
+      "sha256": "957e7943c57b3ed97039c4f76532d7391b39c96944fd4f1bb8931520fe5bcdb9"
+    },
+    {
+      "path": "retained-five360.json",
+      "sha256": "3ef1588bff8b3408d66573c33f967b8ed3504d91c48022f46db1480eb7ca7589"
+    },
+    {
+      "path": "retained-reaction360.txt.gz",
+      "sha256": "ce1f1d39015db8f0cc8f3d36ec380d2bfe772ca01747b2d53140b64885ac0527"
+    },
+    {
+      "path": "retained-reaction360.json",
+      "sha256": "ef1bc54f57f539fa2fd771731fa4fc0df7c7bd9c32a31e258a42bd1f60a4b552"
+    },
+    {
+      "path": "retained240.json",
+      "sha256": "034567812983be65bb8536d1405a85e999ecd0559aa26b81ece8602c351449e1"
+    },
+    {
+      "path": "retained240.validation.json",
+      "sha256": "e0c11e914cfecd4645180c2ed3998ec1b03b02600ba022353a2ef888475e7ede"
+    },
+    {
+      "path": "retained240.log",
+      "sha256": "d5aa1e0897ef8b81515b20e0caacedab51c28c94525715d7479669186b1e2ead"
+    },
+    {
+      "path": "retained240.program.json.gz",
+      "sha256": "7e0eb1fdd4bab19f0bf92ab697552c4ca1fef937248c127db01373f21ba5946b"
+    },
+    {
+      "path": "retained280.json",
+      "sha256": "c87b3892bba77ee6511803e53fa34f89b4c518a91e9f582275339504d5b4be2a"
+    },
+    {
+      "path": "retained280.validation.json",
+      "sha256": "4f752d3a10b6c9880ca7553a794f507cfd6bae8058005bcc757adbdce92fb681"
+    },
+    {
+      "path": "retained280.log",
+      "sha256": "79a3dabba114bf83eda8278eb8e4ed7479f4de7c64d87139b3d4aa567a76c3f5"
+    },
+    {
+      "path": "retained280.program.json.gz",
+      "sha256": "32e131bc9946df547193647902f7e14cc4e8e276789b367730bb55efecdb9b72"
+    },
+    {
+      "path": "retained135.json",
+      "sha256": "78a5c1ba70f989880e631c48e97b1dbb0ab3bf9170b05f7cb6282c1fef9c5002"
+    },
+    {
+      "path": "retained135.validation.json",
+      "sha256": "5ec48fd900e3ecd2c002c66dff4bd0ec34b0d661b6bd3b3d68b404d4aae9f066"
+    },
+    {
+      "path": "retained135.log",
+      "sha256": "0445dc97552327b7ad6153b76d3b79b734bc827f8042b7867b3a4520348b07de"
+    },
+    {
+      "path": "retained135.program.json.gz",
+      "sha256": "bb5ab24130dd29a4ce1d656e2400667a5d980181e09241024e1e86883bf22990"
+    },
+    {
+      "path": "retained135-strict.json",
+      "sha256": "ed1670351d92674ea63f29168b5007fe3eccb8ceb1c75558c94b892c8748a6eb"
+    },
+    {
+      "path": "retained135-strict.validation.json",
+      "sha256": "2d9ede179949a978152ee2d938867a5a62dd94be5142165d59544399cd4f7580"
+    },
+    {
+      "path": "retained135-strict.log",
+      "sha256": "94d43f7f00752a06430d310c55b65bcbd52c2c91346cadb20a10c2506214a298"
+    },
+    {
+      "path": "retained135-strict.program.json.gz",
+      "sha256": "05be9a887ac7750c4cf2b317ccd5d4677ee1c5586c29586f53778f90c5ad8e0d"
+    },
+    {
+      "path": "retained-checks.json",
+      "sha256": "10fcaa434ed7f760dad2b6ffa4e34621f9964cf7c56e17b4167248deba11fc5a"
+    },
+    {
+      "path": "retained-replays.json",
+      "sha256": "37b3a9ef36cc42cc7abcc5fa0f1bfe6a022e2fecd475abaf98160752fced9e78"
+    },
+    {
+      "path": "public-checks.json",
+      "sha256": "06d46c49677836e3cf84f47e7b6ea0ac0a935880a964b478a982a9f1a87e5ef5"
+    },
+    {
+      "path": "retained-correction.log",
+      "sha256": "d6741b36da6d4aff4c51ade55a04d290c378d52739b8810d912fb8531fa548f7"
+    },
+    {
+      "path": "retained-local.log",
+      "sha256": "a5758907dc811a99b164cf7fd8fa1d6a57b5fde993f5df5a37c1e2df14ad6c43"
+    },
+    {
+      "path": "retained-geometry.log",
+      "sha256": "54dcee0d5e24a6f626fa487568a2e1f8738a8b8bcb014efc0c7c147dc9e25f3e"
+    },
+    {
+      "path": "retained-independent.log",
+      "sha256": "1e5b82f8801de6c7b4f1ef781026dcffa00074651a60eac7b1fa4def0f9f1a37"
+    },
+    {
+      "path": "schedule-final.log",
+      "sha256": "049b40b8bec47a09bc83364c7e20d5d8ed354e547c8e92ee333a805df5f15d4b"
+    },
+    {
+      "path": "retained-patch/initial-recovery-rejected.log",
+      "sha256": "4ae5722c91e1dcc798eaa318c9564e827116cc077f0b0adf742efbc277c44411"
+    },
+    {
+      "path": "retained-patch/mode0.log",
+      "sha256": "054440f63eda783b4c0cbb8f199e85503968860363c9218c506a154721e960a9"
+    },
+    {
+      "path": "retained-patch/mode1.log",
+      "sha256": "e570c9c3ccdfe840f25e3d27ee3b8a041ab23b5fc1597a2d11ecc597f6d01efe"
+    },
+    {
+      "path": "retained-patch/mode2.log",
+      "sha256": "e361b8f418e7a20ee93f3b4e54e468ca48abb8cf6e249a9bcf3ac695459cb4f8"
+    },
+    {
+      "path": "retained-patch/mode3.log",
+      "sha256": "717a27656edf3000c8ad366b462d55b2a6e23313c9f1c39c218b1df7433f9a48"
+    },
+    {
+      "path": "retained-patch/mode4.log",
+      "sha256": "d69091d22a713c79db744255ae66b2da86aa359801a408f096744c33c30e4e21"
+    },
+    {
+      "path": "retained-patch/mode5.log",
+      "sha256": "88032caf87c42d47e533392730d18104140c5a9cf4e898b32c2bae8d9871d0a3"
+    },
+    {
+      "path": "retained-patch/mode6.log",
+      "sha256": "ee84d6af460f1e5b021ce741b4ff1d319baa69dc8406cee002267df565dc9e71"
+    },
+    {
+      "path": "retained-strict/initial-recovery-rejected.log",
+      "sha256": "6f5039e3f20fbbb6cbfa9c917308e74625cb2e56c4aadf651db44e1cac3bef28"
+    },
+    {
+      "path": "retained-strict/mode0.log",
+      "sha256": "a4cc04fa69c02b248731639f887569bc7e909609b33f428f19ff4f37c00a9748"
+    },
+    {
+      "path": "retained-strict/mode1.log",
+      "sha256": "b380db2cf03db77bfe9ac87151ae6fc4f1619ca48e4d45927074ddb2b8366dec"
+    },
+    {
+      "path": "retained-strict/mode2.log",
+      "sha256": "4c477727a86ffd7093e8fc38c515ab87b76589414fb57108d96ef66be6c08004"
+    },
+    {
+      "path": "retained-strict/mode3.log",
+      "sha256": "f62f941687d90943909e55357268b8cc59e1f36845419e96c71e15d1e11ff901"
+    },
+    {
+      "path": "retained-strict/mode4.log",
+      "sha256": "e224fabefb3caafdf2377631ba7fe491aa6a1401b39b384ffb0663685dba2f8d"
+    },
+    {
+      "path": "retained-strict/mode5.log",
+      "sha256": "725e25f609074e008438998785b7fe0a7780b0e05180589f05b4b6cb6033da91"
+    },
+    {
+      "path": "retained-strict/mode6.log",
+      "sha256": "fc25c708ac3ee8f092a7b868ae4fb65ac59d95dc05ae21cd6b9c3555c370d194"
+    },
+    {
+      "path": "remaining-135.json.gz",
+      "sha256": "b4f147deb4b598457ca66aae1af4a4156449bd622705189dd93b954adec5b0f5"
+    },
+    {
+      "path": "history-reset-280.json.gz",
+      "sha256": "b9081d91a669643a5a84631867a76e9e1157b5c7adbdda0bcb2fe6c4597f556b"
+    },
+    {
+      "path": "geometry-280.json.gz",
+      "sha256": "a6aaf3b33b1b4d7195903b577014d00645ede82710813efb72b57bd29fcdedfe"
+    },
+    {
+      "path": "projected-stagnation-280.json.gz",
+      "sha256": "e80f5a8d5c35cb56f2033fe515e9c212a02645e587e79e196ccb3ec06f2b350c"
+    },
+    {
+      "path": "trial-before-soc.txt.gz",
+      "sha256": "bdc0fe9486051fb4be2af4e15279b33b88c20f225f8ad241d3ebb10dd9366d6f"
+    },
+    {
+      "path": "trial-before-soc.json",
+      "sha256": "1917067970495d02e415462ee09d56af504571c84c383cbfa572a2474639e181"
+    },
+    {
+      "path": "trial-soc.txt.gz",
+      "sha256": "5392909a9452bb605693ebf07ec2bfbd3108ae5de064a91c205f0d5cb4854fc1"
+    },
+    {
+      "path": "trial-soc.json",
+      "sha256": "9c664f79774f957b3a13dc0f3965b2f47f85ba8157b472b3cc4c42667d4902b9"
+    },
+    {
+      "path": "trial-machine-feasibility.txt.gz",
+      "sha256": "b5c369c6fe1b1bbf1a5e72130006876b38cd89c1761ee3307137fb3e738d8084"
+    },
+    {
+      "path": "trial-machine-feasibility.json",
+      "sha256": "e641afb324a73fe79e8c3d5c4872850e10f94f525b777cc7ac34cf4d48850a44"
+    },
+    {
+      "path": "trial-projected-root.txt.gz",
+      "sha256": "81affa383e3104f31708338860f8ca4c9f55db060900cd53b4506fb59384a132"
+    },
+    {
+      "path": "trial-projected-root.json",
+      "sha256": "b7e38aec1248f3cc4dc2e98eadc7a04689ed36265c334fc781daee52c1932bc0"
+    },
+    {
+      "path": "trials/before.json",
+      "sha256": "d3baa424202a5f9a62fd18c7b414a69dd3444a093642198152ea1c99f5e29fc8"
+    },
+    {
+      "path": "trials/before.validation.json",
+      "sha256": "c8f11a9d91fcb5e599c9b5613cc022db44ab09d1e23efc8afd1c8dba4b4ea148"
+    },
+    {
+      "path": "trials/mixed-qr.json",
+      "sha256": "5983b574e0473d8c0654db02fcc2f033df82ce72b6378e9e3fe51f7eb20f6aa4"
+    },
+    {
+      "path": "trials/mixed-qr.validation.json",
+      "sha256": "e57a9c1ee47d6952d92a584ae07d9e1584cfb65bd41bd9433cb64c7a838d3706"
+    },
+    {
+      "path": "trials/mixed-enriched.json",
+      "sha256": "89bdc274f3cbb512f892336eb04e2c997daf558d1517d62ff97b6486949f2169"
+    },
+    {
+      "path": "trials/mixed-enriched.validation.json",
+      "sha256": "562998c993fc5334a370360356df2ce2e38435bef13b314e4087d28c7af029e2"
+    },
+    {
+      "path": "trials/feasible240.json",
+      "sha256": "57e00d8fe978f3ff7dae22c451d542ab30b1b22b5f6914e750a4ec645baa2ccc"
+    },
+    {
+      "path": "trials/feasible240.validation.json",
+      "sha256": "e591b9e132971f8fe177674c76293228f3edf53b366e50f2cd7c8f5961bcd0c4"
+    },
+    {
+      "path": "trials/projected135.json",
+      "sha256": "98fb757615413f279ebce62ebf94bc18b86b4c44b6ccc753f21a1785a03817a6"
+    },
+    {
+      "path": "trials/projected135.validation.json",
+      "sha256": "66cc1a3e623812c09f1e8b2ce2bff7b077dc2f50af9e5ab7c484d26bac69bbaa"
+    },
+    {
+      "path": "trials/usable-work.json",
+      "sha256": "6fd861c3e6562acad877344fb1318c903a1e8b79f80d107163fc25257cc13353"
+    },
+    {
+      "path": "trials/usable-work.validation.json",
+      "sha256": "42b00caa01542c236a93aa777e6565aa7d89a2d0854c83d72ea24a8c056aad62"
+    },
+    {
+      "path": "trials/null-work.json",
+      "sha256": "04bdb85f14ebf0a6245082b13fa7ebdc3ec571d0cc554cdfbae5f8f74070e09b"
+    },
+    {
+      "path": "trials/null-work.validation.json",
+      "sha256": "65e0aefa0066dd8f6e870a191529f2b53b5ce96ce492738008cccfd7aa2aa76a"
+    },
+    {
+      "path": "trials/null-reset-work.json",
+      "sha256": "df88ae57c1f256296971c19c3b1ed234ed324b1fc08859a107df098f0a98440c"
+    },
+    {
+      "path": "trials/null-reset-work.validation.json",
+      "sha256": "e7c9af43c23d67dbbc53b17060d60173e4b7b211fa09d69249d79d6c32322a9e"
+    },
+    {
+      "path": "trials/pair-work.json",
+      "sha256": "e3c4b4c05fd8bf3367ff20fb78ab9ba72592f97632b8675bbcfd1d9bed9a5e99"
+    },
+    {
+      "path": "trials/pair-work.validation.json",
+      "sha256": "675599190225a53e6d4ac7d0471108b95abd9e5e16d63605a6c7708b9dffcbeb"
+    },
+    {
+      "path": "public-articulation_rc-avbd.log",
+      "sha256": "722a9bd128c8062ff6dea5df6d8f1b9e52684c51d2bc6afc5281876e2b0f888f"
+    },
+    {
+      "path": "public-articulation_rc-pgs.log",
+      "sha256": "26ab8cee94c523c037ffa0700dd4e70439075f469b49776a2d90ff2ef758f006"
+    },
+    {
+      "path": "public-articulation_rc-tgs.log",
+      "sha256": "f61edcbbe6dc6915bf004e2296ecf39f8273488c78ba8316af234bf02a01c06c"
+    },
+    {
+      "path": "public-hello_world-avbd.log",
+      "sha256": "e81c24b4fc4dc523b3751f60f95273575fb0e2b4104d595b7f8c3c283cb3a6c5"
+    },
+    {
+      "path": "public-hello_world-pgs.log",
+      "sha256": "cfeb3812a72e709618c7d550c4003869fa9870451143648d83f5dc8cd4d3082b"
+    },
+    {
+      "path": "public-hello_world-tgs.log",
+      "sha256": "b121bf4bb6239ecad8166300e8f66bd1be784c6c963089af6e8858e25798a0cf"
+    },
+    {
+      "path": "public-joint-avbd.log",
+      "sha256": "726a1bf150573287ef3f0632d3f432a51cce8e052c76afe0362c78b83c7d8749"
+    },
+    {
+      "path": "public-joint-pgs.log",
+      "sha256": "9a0e62a84edd06fa6fb1a431379dde4c3f443a27d1e2c22a09386b0afb3a445c"
+    },
+    {
+      "path": "public-joint-tgs.log",
+      "sha256": "ec37195f19bee8c64807fa8e2f258911ac61e76e1d55075ae652e1d6ca5e5d04"
+    },
+    {
+      "path": "public-smoke.log",
+      "sha256": "9a8bfd8be5acf51cc0cfd3d2a41d963fd6dec34b95ddad4bc5a36df8e5352281"
+    }
+  ],
+  "fingerprints": {
+    "physx/bin/win.x86_64.vc143.md/checked/PhysX_64.dll": "6eafc939c5a033407419b94ea2b08bfef3b7e871dfd8e419bb441cba4f8aeaf8",
+    "physx/bin/win.x86_64.vc143.md/checked/SnippetJointSoftBody_64.exe": "906b5b7a14b44ed0c95d832cf9f5f45485588efdabfbc8e56d99104540ef0411",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdBlockGroup.h": "48dee08fdac6bfb7b7e52744fe54982263a483e9484212bdd16365341fa8129c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdColoring.h": "f28683aea00ab1eb42976d41418381af95ab8ca9c95109f88617f297264763d5",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h": "e46855500cf09849ea8aef5a4aee5501ba35fe95c871bbdd286bed1c0fa918a8",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResidual.h": "d1c7029f8e16f14f25404b7db86adbd27ec70e2119b8989bd334ecca5b6ccb02",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonResponse.h": "090126c1e991a5364cda6da96490d827c2a1a32e53ad737a1a7e1db917da3cbf",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactGeometry.h": "aa17a28e9d25ee927af6b9534031e3b18ff08f3a436b2c33db4f4648792f11b0",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPotential.h": "4b7a4a423a18387e7b2b9c7e23d812c4ee675e9c58f4b7f1b84418165241565c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdContactPrep.cpp": "59bb903ebc3a6d2b1a09739bc342de618e80d69c3e6e2bc82abbba16cd6d87ef",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCoulombNcp.h": "4a214c4ca34a0780f98b30cb5721775e2581ffba5507ca96d0f1b07a477d2974",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdCoupledDomain.h": "7abdc90212907d00e7dc371172b68463739299ce7f879144b6d74b4c93668d13",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.cpp": "6c3f5bcc5e4145fd60332836eb4d01e70d128c4fdd50bff895716b5984b41800",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdDynamics.h": "54dd69acb54d88432a9d32d71e251ce1136802ab70caf553b5a372a3d137823c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrame.h": "1eb0902e8f687033ded03ae410eed5985c9452a07d593cbe865962f5f25f4ce5",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameCurvature.h": "a2bb3a44aef332a90fd061256bf3ca0326a56a465d7c4ac10987fbe193b08419",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdElasticFrameMath.h": "927d0e7ab348cf7422f482952427d18d5b38978385ffa620fe48c8d53ea9b4d3",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdInternal.h": "d5f34054f2c66e0f784355f3d721861f57cd2dcf0d0e8237f6494fc3d6e9d942",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdJointPrep.cpp": "be22f91cd7a7b1423d3f9a4444b178b79de189113a0bb47d9671a8f6734b92e8",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdKernelsScalar.h": "99ca2f5c3d7d3d1db8784c464ea25a852afb3e8d03b3d041bd2dcc5b290237a2",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLinearResponse.h": "1885cd48fb0d93779df384f42aaafa8d3b330450e596cabdcf92fd51af956e2c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalAcceleration.h": "b7fcaaededa1f98d6c03788dc27f7f095d8e1fea63a674d745fe86146288c1a4",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalCorrection.h": "6f52a6c610978be1844f229d15ef55372f137f20e02c1391c4eb3babee89808d",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalResponse.h": "038c6bb76fbda8b58a32801c5301dc9797f58d503dd76683a7595c2612400d5f",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdMaterialAssembly.h": "da1d6061297dd0931f5751c8efc368f7f290d847ba5cc5a9fca0ab2e892f7b7e",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdMixedKkt.h": "4ff6d78e08525d285cf065beabc1f9c89fe568cc2e6755e15c2a749ef43e7f3e",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNormalCone.h": "35121aaf4bd290a59398391a11d2870979475538005804337da0f6ae72eb369f",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdNpDomain.h": "3959a7c3d5e0036baf6bc57f9a9a18121df2bc2209be289c04b197d6ddc4bdac",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgc.h": "f62be4adcdebeb3c93b541bbe33119103a3b70da2a33f9c11b9f7b78fa280110",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcActivation.h": "a90e044ac424d0bb13f4590938ec1dadb59a5f40024013bb54111fab35031780",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdOgcProjection.h": "05dbc797c3c281dbfdb80096b6c07271a3f89ec92645a4316b06a6f809f15b74",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdProgramSchedule.h": "e595943707ece5f4b557a7e92fcc01fdcd387a32446907c81152d882eebb506c",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdRigidMetric.h": "1692c827f82b153bcf0e2d70ce270f695bf9541bb8ffdac803a36fe0a26c5d63",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdRowProgram.h": "580504c9c8e3e078051a0f870a374c30948bfa7f66d8ba595122d14d72c37461",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSolve.cpp": "61de8ac23a256dfd976c5bab47ab11a0596f7f936bb62b167125eb573e628f48",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdSparseSymmetric.h": "1a0da8501576eabf1524c62207343237a4b8af47702b953e57cbea13c1a5f0bf",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdTetrahedron.h": "f4e5da89ea2ca339233595e0d3a9a33a43d14d41c918931b2a0e524e0170bf1d",
+    "physx/source/lowleveldynamics/src/avbd/DyAvbdVbd.h": "ff4fb434ac5d8bd4aff412d76db530e2f0f1e0d3c2bcd13d743a0c2962bd550f",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp": "28637f6dc54969343c4ca4d4f87b48c80feef2cb0a4d515c4b5e183bb895bc08",
+    "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h": "24c742f1d177bc73b835f671676ab7789782c415221263bd9e5f47918cd0b1b6",
+    "tools/avbd_local_correction_probe.cpp": "86c732fbe69e5639ea165eb9e4e50c0d74cacd02ccc51b4c731cae1fc4fe3bb0",
+    "tools/run_avbd_local_correction_probe.py": "9e8b790ffae9d64bbc6dc1fd874df7c8138d134e1548bd3cef016f85a90efb55",
+    "tools/run_avbd_local_response_probe.py": "2126f2089aeb2adb8a4d12b62715ed4a8818c0af29deb96e05e58773b20b08c8",
+    "tools/run_avbd_local_scene.py": "845c2486c098e9f5b2f77a776c0fb088de6b2c810f2286dd83b4de73461a629c"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\bounded-convergence-20261030\\priority-240.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "bounded colored AL; no global inner solver",
+  "dofs": 24,
+  "groups": 240,
+  "activeNormalForces": 4,
+  "maximumForce": 9197.504034382475,
+  "symmetry": 1.4551915228366852e-11,
+  "stationarity": 1.1902211554115638e-06,
+  "relativeStationarity": 9.33161816917493e-11,
+  "unitStepRoot": 5.4569682106375694e-12,
+  "relativeUnitStepRoot": 5.933096838270594e-16,
+  "minimumNormalResidual": -5.419009974094464e-12,
+  "tableIterations": 41,
+  "materialProducts": 0,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

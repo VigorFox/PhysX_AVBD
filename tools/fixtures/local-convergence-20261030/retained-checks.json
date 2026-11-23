@@ -1,0 +1,66 @@
+[
+  {
+    "name": "retained-correction",
+    "command": [
+      "python",
+      "tools/run_avbd_local_correction_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 7.8005031
+  },
+  {
+    "name": "retained-local",
+    "command": [
+      "python",
+      "tools/run_avbd_local_block_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 8.1013756
+  },
+  {
+    "name": "retained-patch",
+    "command": [
+      "python",
+      "tools/run_avbd_common_step_probe.py",
+      "--mode",
+      "patch",
+      "--logs",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained-patch"
+    ],
+    "exit": 0,
+    "seconds": 22.072088
+  },
+  {
+    "name": "retained-strict",
+    "command": [
+      "python",
+      "tools/run_avbd_common_step_probe.py",
+      "--mode",
+      "strict",
+      "--logs",
+      "tools\\benchmark-results\\local-convergence-20261030\\retained-strict"
+    ],
+    "exit": 0,
+    "seconds": 22.0909573
+  },
+  {
+    "name": "retained-geometry",
+    "command": [
+      "python",
+      "tools/run_avbd_np_geometry_scene_probe.py"
+    ],
+    "exit": 0,
+    "seconds": 2.9709596000000005
+  },
+  {
+    "name": "retained-independent",
+    "command": [
+      "python",
+      "tools/run_avbd_np_geometry_scene_probe.py",
+      "0",
+      "independent"
+    ],
+    "exit": 0,
+    "seconds": 2.6381530000000026
+  }
+]

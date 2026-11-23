@@ -1,0 +1,26 @@
+--- turn-start
++++ retained
+@@ -16,12 +16,22 @@
+         const double* force,const double* delta,double& work,double& slope)
+     {
+         if(from.base.size()!=to.base.size() || from.offset.size()!=to.offset.size() ||
+-            from.materialEnergies.size()!=to.materialEnergies.size())return false;
++            from.materialEnergies.size()!=to.materialEnergies.size() || from.energyPairs.size()!=to.energyPairs.size())return false;
+         PxArray<double> reaction(from.base.size());from.transpose(force,reaction.begin());
+         // Difference the identical local potentials before summing: subtracting
+         // two island totals erases the work of weak modes near convergence.
+         work=0;slope=0;
+         for(PxU32 i=0;i<from.materialEnergies.size();++i)work+=to.materialEnergies[i]-from.materialEnergies[i];
++        for(PxU32 i=0;i<from.energyPairs.size();++i)
++        {
++            const auto& a=from.energyPairs[i];const auto& b=to.energyPairs[i];
++            // Subtract before multiplication; a large unchanged strain must
++            // not erase the work of a weak mode inside the same material.
++            // Conjugates use the same symmetric, step-frozen coefficient
++            // operator at both endpoints (mass/inertia/stiffness/damping).
++            volatile double dx=b.coordinate-a.coordinate;
++            work+=.5*dx*(b.conjugate+a.conjugate);
++        }
+         for(PxU32 d=0;d<reaction.size();++d)slope-=(from.base[d]+reaction[d])*delta[d];
+         for(PxU32 r=0;r<from.offset.size();++r)work-=force[r]*(to.offset[r]-from.offset[r]);
+         return std::isfinite(work) && slope<0 && work<=1.e-4*slope;

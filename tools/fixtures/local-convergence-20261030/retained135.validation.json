@@ -1,0 +1,18 @@
+{
+  "file": "tools\\benchmark-results\\local-convergence-20261030\\retained135.program.json",
+  "passed": false,
+  "complete": true,
+  "solved": false,
+  "executionSource": "grouped augmented primal/dual",
+  "reason": "local_response_capture",
+  "materialProducts": 16,
+  "tableIterations": 1024,
+  "solverConverged": false,
+  "engineering": true,
+  "initialForceMode": "zero",
+  "engineeringStationarity": {
+    "maximumRatio": 1.7792518915468636,
+    "passed": false,
+    "scope": "full-H correction only"
+  }
+}

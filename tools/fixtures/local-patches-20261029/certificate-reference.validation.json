@@ -1,0 +1,23 @@
+{
+  "file": "tools\\benchmark-results\\local-patches-20261029\\certificate-reference.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "strict full response",
+  "dofs": 24,
+  "groups": 240,
+  "activeNormalForces": 4,
+  "maximumForce": 9197.504050071877,
+  "symmetry": 1.4551915228366852e-11,
+  "stationarity": 1.8189894035458565e-12,
+  "relativeStationarity": 1.4261311433083377e-16,
+  "unitStepRoot": 1.1368683772161603e-13,
+  "relativeUnitStepRoot": 1.2360618391978592e-17,
+  "minimumNormalResidual": -1.882583664831886e-18,
+  "tableIterations": 249,
+  "materialProducts": 164,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false,
+  "initialForceMode": "zero"
+}

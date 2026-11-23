@@ -1,0 +1,38 @@
+[
+  {
+    "source": "tools\\fixtures\\bounded-host-20261105\\reaction-failure.json.gz",
+    "solverConverged": false,
+    "scope": "independent dense diagnostic only; no publication or production fallback",
+    "fullHCorrection": 4.897321729906161e-11,
+    "states": [
+      {
+        "name": "original",
+        "station": 8.848756181123463e-07,
+        "unitRoot": 4.8682008811088695e-11
+      },
+      {
+        "name": "fixedForceEquilibrium",
+        "station": 1.9895196601282805e-13,
+        "unitRoot": 4.909139761366532e-11
+      }
+    ]
+  },
+  {
+    "source": "tools\\benchmark-results\\bounded-contact-20261105\\reaction-eq-failure.json",
+    "solverConverged": false,
+    "scope": "independent dense diagnostic only; no publication or production fallback",
+    "fullHCorrection": 2.47109465692959e-10,
+    "states": [
+      {
+        "name": "original",
+        "station": 1.7592788871048648e-06,
+        "unitRoot": 9.489438547750889e-11
+      },
+      {
+        "name": "fixedForceEquilibrium",
+        "station": 2.2737367544323206e-13,
+        "unitRoot": 1.509461167170656e-10
+      }
+    ]
+  }
+]

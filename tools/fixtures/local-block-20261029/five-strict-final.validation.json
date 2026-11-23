@@ -1,0 +1,22 @@
+{
+  "file": "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\five-strict-final.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "strict full response",
+  "dofs": 4728,
+  "groups": 136,
+  "activeNormalForces": 6,
+  "maximumForce": 645.1362318655094,
+  "symmetry": 2.9103830456733704e-11,
+  "stationarity": 1.1027623258996755e-11,
+  "relativeStationarity": 3.0430658108612495e-15,
+  "unitStepRoot": 6.575838540356926e-09,
+  "relativeUnitStepRoot": 1.019294563776381e-11,
+  "minimumNormalResidual": -2.35381159008341e-13,
+  "tableIterations": 12,
+  "materialProducts": 72,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false
+}

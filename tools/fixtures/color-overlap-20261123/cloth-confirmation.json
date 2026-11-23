@@ -1,0 +1,4 @@
+{
+  "reason": "First seven cloth8 pairs show mean +3.13% and P95 +7.23%, while trace found no high-degree work in the reference cloth scenario. Resolve the cost guard separately.",
+  "rule": "Exactly seven additional pairs at 8 workers after the QA process finishes, same binaries and unprofiled 360-frame gate. Report both sets and all fourteen; no more optional expansion."
+}

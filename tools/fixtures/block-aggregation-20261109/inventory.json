@@ -1,0 +1,139 @@
+[
+  {
+    "file": "tools\\benchmark-results\\bounded-curvature-model-20261106\\original-candidate.json",
+    "sha256": "3f708a6720557bbc44b8331ac2494e9aa473b0f93f83cd6ca64fc81249e552da",
+    "blocks": 192,
+    "rowGroups": 1360,
+    "scalarCoordinates": 4080,
+    "exactWholeRowClasses": 1360,
+    "wholeRowCompressionAssumed": false,
+    "tangentClasses": 272,
+    "tangentIneligible": 0,
+    "tangentClassSizes": {
+      "5": 272
+    },
+    "tangentPackedCoordinates": 1904,
+    "exactHardParallelClasses": 1360,
+    "hardParallelRows": 1360,
+    "frozenDominanceCandidateSavings": 0,
+    "tangentCoordinateReduction": 0.5333333333333333,
+    "nonzeroCapturedForceRows": 16,
+    "rowsPerSupport": {
+      "65": 1,
+      "70": 3,
+      "80": 5,
+      "90": 4,
+      "105": 1,
+      "110": 2
+    },
+    "materialOperatorBlocks": 2166,
+    "metricBlocks": 0,
+    "solvedCaptureTangentRoundtrip": null,
+    "scope": "exact equality inventory only; not a convergence, candidate-domain or speed qualification"
+  },
+  {
+    "file": "tools\\benchmark-results\\bounded-curvature-model-20261106\\local-candidate.json",
+    "sha256": "66160000b84b175734e4526f2113447aa0cd9d8b840c80584e2f2bf188c57697",
+    "blocks": 192,
+    "rowGroups": 1360,
+    "scalarCoordinates": 4080,
+    "exactWholeRowClasses": 1360,
+    "wholeRowCompressionAssumed": false,
+    "tangentClasses": 272,
+    "tangentIneligible": 0,
+    "tangentClassSizes": {
+      "5": 272
+    },
+    "tangentPackedCoordinates": 1904,
+    "exactHardParallelClasses": 1360,
+    "hardParallelRows": 1360,
+    "frozenDominanceCandidateSavings": 0,
+    "tangentCoordinateReduction": 0.5333333333333333,
+    "nonzeroCapturedForceRows": 16,
+    "rowsPerSupport": {
+      "65": 1,
+      "70": 3,
+      "80": 5,
+      "90": 4,
+      "105": 1,
+      "110": 2
+    },
+    "materialOperatorBlocks": 2166,
+    "metricBlocks": 2166,
+    "solvedCaptureTangentRoundtrip": null,
+    "scope": "exact equality inventory only; not a convergence, candidate-domain or speed qualification"
+  },
+  {
+    "file": "tools\\benchmark-results\\bounded-curvature-model-20261106\\positive-replay.program.json",
+    "sha256": "6930773accc46e0e3fc1fe7232d343decabe1afdeea030accf0a1772be6d6187",
+    "blocks": 192,
+    "rowGroups": 1360,
+    "scalarCoordinates": 4080,
+    "exactWholeRowClasses": 1360,
+    "wholeRowCompressionAssumed": false,
+    "tangentClasses": 272,
+    "tangentIneligible": 0,
+    "tangentClassSizes": {
+      "5": 272
+    },
+    "tangentPackedCoordinates": 1904,
+    "exactHardParallelClasses": 1360,
+    "hardParallelRows": 1360,
+    "frozenDominanceCandidateSavings": 0,
+    "tangentCoordinateReduction": 0.5333333333333333,
+    "nonzeroCapturedForceRows": 16,
+    "rowsPerSupport": {
+      "65": 1,
+      "70": 3,
+      "80": 5,
+      "90": 4,
+      "105": 1,
+      "110": 2
+    },
+    "materialOperatorBlocks": 2166,
+    "metricBlocks": 2166,
+    "solvedCaptureTangentRoundtrip": {
+      "before": {
+        "passed": true,
+        "relativeStationarity": 4.6381827788257804e-11,
+        "relativeUnitStepRoot": 3.2129971463341567e-15,
+        "activeNormalForces": 16
+      },
+      "after": {
+        "passed": true,
+        "relativeStationarity": 4.6381827788257804e-11,
+        "relativeUnitStepRoot": 3.2129971463341567e-15,
+        "activeNormalForces": 16
+      },
+      "maxForceChange": 0
+    },
+    "scope": "exact equality inventory only; not a convergence, candidate-domain or speed qualification"
+  },
+  {
+    "file": "tools\\fixtures\\bounded-contact-20261105\\reaction-next-failure.json.gz",
+    "sha256": "a98c28118587c54d904dc1f7a4dd263a186c9bb7aaa85c19404a95f7809ac93c",
+    "blocks": 126,
+    "rowGroups": 2880,
+    "scalarCoordinates": 8640,
+    "exactWholeRowClasses": 2880,
+    "wholeRowCompressionAssumed": false,
+    "tangentClasses": 576,
+    "tangentIneligible": 0,
+    "tangentClassSizes": {
+      "5": 576
+    },
+    "tangentPackedCoordinates": 4032,
+    "exactHardParallelClasses": 2880,
+    "hardParallelRows": 2880,
+    "frozenDominanceCandidateSavings": 0,
+    "tangentCoordinateReduction": 0.5333333333333333,
+    "nonzeroCapturedForceRows": 47,
+    "rowsPerSupport": {
+      "320": 9
+    },
+    "materialOperatorBlocks": 1334,
+    "metricBlocks": 0,
+    "solvedCaptureTangentRoundtrip": null,
+    "scope": "exact equality inventory only; not a convergence, candidate-domain or speed qualification"
+  }
+]

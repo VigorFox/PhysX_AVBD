@@ -1,0 +1,98 @@
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98428997e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98359041e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.9836265e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98433583e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98479391e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98447319e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98520897e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98375036e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98489577e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98399739e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98455653e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.9846791e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98443371e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.9839797e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98484438e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98362153e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98519961e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98441068e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98401644e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98455922e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98429069e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98492718e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98397649e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98509028e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98459846e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98356844e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98518062e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98474827e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98585316e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98361985e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98494058e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98355904e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98343289e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98475704e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=0 colors=8 sweeps=30 error=8.98552445e-15 status=converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.98480324e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2162 batches=2888 sweeps=60 tasks=726 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_DIRECTION_CERTIFICATE] iteration=0 sweeps=23 fullCorrectionRatio=0.000284767572 linearStatus=converged qualified=1
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=2880 colors=8 sweeps=7 error=1.56925929e-05 status=engineering_converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=8.96562818e-15 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=1
+[AVBD_BOUNDED_SCHEDULE] waves=2535 batches=7868 sweeps=60 tasks=4296 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_DIRECTION_CERTIFICATE] iteration=0 sweeps=22 fullCorrectionRatio=8.86795129e-05 linearStatus=converged qualified=1
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=2880 colors=8 sweeps=63 error=7.14896874e-10 status=engineering_converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=9.40513628e-13 status=converged
+[AVBD_BOUNDED_DIRECTION_CERTIFICATE] iteration=1 sweeps=21 fullCorrectionRatio=9.21663022e-05 linearStatus=converged qualified=1
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=126 rows=2880 colors=8 sweeps=55 error=9.21875614e-10 status=engineering_converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=2 blocks=126 rows=0 colors=8 sweeps=29 error=1.0057493e-14 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2
+[AVBD_BOUNDED_SCHEDULE] waves=14182 batches=93128 sweeps=220 tasks=61792 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_DIRECTION_CERTIFICATE] iteration=0 sweeps=22 fullCorrectionRatio=7.71977918e-05 linearStatus=converged qualified=1
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=2880 colors=8 sweeps=89 error=3.02007578e-09 status=engineering_converged
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=2 blocks=126 rows=0 colors=8 sweeps=31 error=1.02505244e-13 status=converged
+[AVBD_BOUNDED_DIRECTION_CERTIFICATE] iteration=1 sweeps=21 fullCorrectionRatio=7.95305755e-05 linearStatus=converged qualified=1
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=0 blocks=126 rows=2880 colors=8 sweeps=138 error=1.13921982e-09 status=engineering_converged
+[AVBD_BOUNDED_RESPONSE] iteration=1 phase=2 blocks=126 rows=0 colors=8 sweeps=30 error=1.07058459e-14 status=converged
+[AVBD_COMMON_FRAME] status=ACCEPTED poseForcePublications=1 bdf=1 stationary=1 iterations=2
+[AVBD_BOUNDED_SCHEDULE] waves=23955 batches=174538 sweeps=331 tasks=117624 peakTasks=4 workers=4 batchLimit=32
+[AVBD_BOUNDED_RESPONSE] iteration=0 phase=0 blocks=126 rows=2880 colors=8 sweeps=1024 error=5.38473086e-09 status=budget_exhausted
+[AVBD_COMMON_STEP] iteration=0 stage=solve reason=bounded_response_unresolved status=FAIL
+[AVBD_COMMON_FRAME] status=REJECTED poseForcePublications=0 bdf=0
+[JOINT_SOFT_ERROR] AVBD could not verify the local contact/material domain; step not published.
+[AVBD_BOUNDED_SCHEDULE] waves=91138 batches=763998 sweeps=1024 tasks=524358 peakTasks=4 workers=4 batchLimit=32

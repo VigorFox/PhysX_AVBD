@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "head": "ead9fb33e66026a131d92807e0c369024665a6c5",
+  "dirty": true,
+  "scope": "Bounded numerical Table kernel only. No Host continuation, physical publication, GPU or end-to-end five-body qualification. Three frozen contact packets and the long hard chain remain unresolved.",
+  "replayInputs": {
+    "135": "../local-convergence-20261030/remaining-135.json.gz",
+    "240": "../local-patches-20261029/certificate-failure.json.gz",
+    "280": "../local-convergence-20261030/projected-stagnation-280.json.gz",
+    "five": "../common-program-20261028/five.json.gz"
+  },
+  "sources": [
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdBoundedResponse.h",
+      "sha256": "fe284ab4a0eb647ac0977ba503c1903455101a1787a594ed086a6fc3b64bcfa3",
+      "archive": "sources/DyAvbdBoundedResponse.h.gz"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdCommonProgram.h",
+      "sha256": "e129abf93f0667df2f6176dc6c94e429ed6b45eb95b485d71764bc98a45241e2",
+      "archive": "sources/DyAvbdCommonProgram.h.gz"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyAvbdLocalResponse.h",
+      "sha256": "434f4426dc9a2b4aeeafecbd7c55f0073002a72b423652d82a42fe40cb3f1b43",
+      "archive": "sources/DyAvbdLocalResponse.h.gz"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.h",
+      "sha256": "f0a76b2db5d6cfdca8bf8c3dbeb2d2ee273380dc9d29065b1f3fe090168cc3d2",
+      "archive": "sources/DyKernelTable.h.gz"
+    },
+    {
+      "path": "physx/source/lowleveldynamics/src/avbd/DyKernelTable.cpp",
+      "sha256": "3d703c0b479ad4888459fb990be8a9a33a5d101f1ec18f6b24f9cb8d140353f9",
+      "archive": "sources/DyKernelTable.cpp.gz"
+    },
+    {
+      "path": "tools/avbd_bounded_response_probe.cpp",
+      "sha256": "4cda5ff9a5be38dfa93f4c5130489d450b0e89fdb43c8e377a4955a71ed04d38",
+      "archive": "sources/avbd_bounded_response_probe.cpp.gz"
+    },
+    {
+      "path": "tools/avbd_bounded_probe_pool.h",
+      "sha256": "828aa5339c25f0e425001873b2642c79ff18f90f34d9449b84d7707a5b2f6d10",
+      "archive": "sources/avbd_bounded_probe_pool.h.gz"
+    },
+    {
+      "path": "tools/run_avbd_bounded_response_probe.py",
+      "sha256": "164c563679f7cbfc6bfe1fc0f5574c8c52b4ce602d7f0328047afc4949790585",
+      "archive": "sources/run_avbd_bounded_response_probe.py.gz"
+    },
+    {
+      "path": "tools/avbd_local_response_probe.cpp",
+      "sha256": "5030ce9601ca4a7b89226354ab4c1acfd187beeec147fdaa7da14ba5d9db6ced",
+      "archive": "sources/avbd_local_response_probe.cpp.gz"
+    },
+    {
+      "path": "tools/run_avbd_local_response_probe.py",
+      "sha256": "4d0db08b2572ed93b3c233969750f708d02bed8d6f375ad7d82f94f40769eb6f",
+      "archive": "sources/run_avbd_local_response_probe.py.gz"
+    },
+    {
+      "path": "tools/validate_avbd_common_capture.py",
+      "sha256": "e4d5175401dcaeacc867ae2635725b1c8b4c58b061ea414b5ae25bccd8168946",
+      "archive": "sources/validate_avbd_common_capture.py.gz"
+    }
+  ],
+  "files": [
+    {
+      "path": "retained-135-t1.json",
+      "sha256": "a31e07e801f5019110d589413d39367308dfef34463b5985f9f9d4e5f355a55d"
+    },
+    {
+      "path": "retained-135-t1.log",
+      "sha256": "3aeb82affcaa1f3b3fb6b321f46e63edfbeaa3fb7ecbfaf1cd268dc141ca7324"
+    },
+    {
+      "path": "retained-135-t1.validation.json",
+      "sha256": "0fa98c79d79660ef6d00efc6ee4f8b867e9e5660526c03fbbe12c67e4ecf8d24"
+    },
+    {
+      "path": "retained-135-t4.json",
+      "sha256": "81665474c1080dd41159d692785cc178a3e4e30812792241295f4f80cc68f6b4"
+    },
+    {
+      "path": "retained-135-t4.log",
+      "sha256": "0b2778be46af63e97c28aa334a69c4b8623e8c3a4b87befb5fe65e572132543d"
+    },
+    {
+      "path": "retained-135-t4.validation.json",
+      "sha256": "b0213831f7c7bd20cd799d5e4faa7a47843b356b30880645bcbd3d05fef427e7"
+    },
+    {
+      "path": "retained-240-t1.json",
+      "sha256": "918c0eda374575c82a04a80a1da0d322ace6453969aa817b7f1566e2d63f2d6e"
+    },
+    {
+      "path": "retained-240-t1.log",
+      "sha256": "4ad5146783814339e70a643d5ac669926ed2cc7939b094503903ceebd97d7f8f"
+    },
+    {
+      "path": "retained-240-t1.validation.json",
+      "sha256": "f6d09a91a8446e7fbb5150e3971bb800e29bbcc554af77076a59a0f3ba415907"
+    },
+    {
+      "path": "retained-240-t4.json",
+      "sha256": "7e23ed21eb6e1925cc437ff4c4fbc1f539e40d5869df18306542c5b5c3fbc9e9"
+    },
+    {
+      "path": "retained-240-t4.log",
+      "sha256": "8eb195bd5262a3b9f07559081d68f65f3b97a85625eb2c11c18b0e0fc73ce772"
+    },
+    {
+      "path": "retained-240-t4.validation.json",
+      "sha256": "ea9d6e5796b4bf1a851e91cc70989e355239dafffff85b050a47dacddebf88d5"
+    },
+    {
+      "path": "retained-280-t1.json",
+      "sha256": "1cfc49326ac33c00cb203e0e5a764926395710e8e4d9993cbb96fc934869415a"
+    },
+    {
+      "path": "retained-280-t1.log",
+      "sha256": "ebf3083f7456ae13d3a6c359fc63553acaa93533c614f1dcf72ff131b169b4e8"
+    },
+    {
+      "path": "retained-280-t1.validation.json",
+      "sha256": "e63624de5edd5560f886ecd7f39195f2127a2a314586e013a5239a92e590ef94"
+    },
+    {
+      "path": "retained-280-t4.json",
+      "sha256": "a16e1ee2cc4c3ac1c6722f991ff86c0bad1955be2a8d633c722f88d490aff961"
+    },
+    {
+      "path": "retained-280-t4.log",
+      "sha256": "f21baf6448c6b9319cf75b58119c9d70bddb680d640ab0262f6fb7ada0213a57"
+    },
+    {
+      "path": "retained-280-t4.validation.json",
+      "sha256": "e2215beed46c36db71dfbc141c8d48b369d9a40be18c016828fba4d47f1cac49"
+    },
+    {
+      "path": "retained-checks.json",
+      "sha256": "45c6b35855e34d4243b4db920f81730a923261d51a39ad9d7bfc8e59d93c6224"
+    },
+    {
+      "path": "retained-five-t1.json",
+      "sha256": "4854c338a0ab55ac695b63292d27ee86316abee1cfcfdca906cbcd6834ad2ad4"
+    },
+    {
+      "path": "retained-five-t1.log",
+      "sha256": "21c5e05a8b5c0c5a7b473184c9532a497b37a4246878dc6920484f5c2d8743f9"
+    },
+    {
+      "path": "retained-five-t1.validation.json",
+      "sha256": "091a1b21261ed791af033fd1bdae26fbd10e8a6534b6557fd8bdec6c22286efe"
+    },
+    {
+      "path": "retained-five-t4.json",
+      "sha256": "36c756e0117e39f89c8b2d120f355b90cda17f9280ad4072bbf6fd85b1b66b7f"
+    },
+    {
+      "path": "retained-five-t4.log",
+      "sha256": "1aa0537a5a826eda7d4f7463768c8fd3f0fba3586db0404090d7a38a86044957"
+    },
+    {
+      "path": "retained-five-t4.validation.json",
+      "sha256": "0707306996ac561857b083fa77b38448584797b8701d896df957ae0104e31982"
+    },
+    {
+      "path": "retained-local.log",
+      "sha256": "a5758907dc811a99b164cf7fd8fa1d6a57b5fde993f5df5a37c1e2df14ad6c43"
+    },
+    {
+      "path": "retained-mechanisms.log",
+      "sha256": "bab67c7ff21f4eff0562f3c22d7d41b3a859882cc8802ca1e8d431d1180f26ba"
+    },
+    {
+      "path": "retained-public-articulation_rc-avbd.log",
+      "sha256": "722a9bd128c8062ff6dea5df6d8f1b9e52684c51d2bc6afc5281876e2b0f888f"
+    },
+    {
+      "path": "retained-public-articulation_rc-pgs.log",
+      "sha256": "26ab8cee94c523c037ffa0700dd4e70439075f469b49776a2d90ff2ef758f006"
+    },
+    {
+      "path": "retained-public-articulation_rc-tgs.log",
+      "sha256": "f61edcbbe6dc6915bf004e2296ecf39f8273488c78ba8316af234bf02a01c06c"
+    },
+    {
+      "path": "retained-public-checks.json",
+      "sha256": "dcd85ae00a654cdd84dfcf0006c69175dad111e3e9373fcaf471beb74b73dccd"
+    },
+    {
+      "path": "retained-public-hello_world-avbd.log",
+      "sha256": "e81c24b4fc4dc523b3751f60f95273575fb0e2b4104d595b7f8c3c283cb3a6c5"
+    },
+    {
+      "path": "retained-public-hello_world-pgs.log",
+      "sha256": "cfeb3812a72e709618c7d550c4003869fa9870451143648d83f5dc8cd4d3082b"
+    },
+    {
+      "path": "retained-public-hello_world-tgs.log",
+      "sha256": "b121bf4bb6239ecad8166300e8f66bd1be784c6c963089af6e8858e25798a0cf"
+    },
+    {
+      "path": "retained-public-joint-avbd.log",
+      "sha256": "726a1bf150573287ef3f0632d3f432a51cce8e052c76afe0362c78b83c7d8749"
+    },
+    {
+      "path": "retained-public-joint-pgs.log",
+      "sha256": "9a0e62a84edd06fa6fb1a431379dde4c3f443a27d1e2c22a09386b0afb3a445c"
+    },
+    {
+      "path": "retained-public-joint-tgs.log",
+      "sha256": "ec37195f19bee8c64807fa8e2f258911ac61e76e1d55075ae652e1d6ca5e5d04"
+    },
+    {
+      "path": "retained-smoke.log",
+      "sha256": "9a8bfd8be5acf51cc0cfd3d2a41d963fd6dec34b95ddad4bc5a36df8e5352281"
+    },
+    {
+      "path": "remaining-analysis.json",
+      "sha256": "06a200f9ae7918267254766f8beebbaec3baeb3bc5d781c58c0892bf8eebef3a"
+    }
+  ],
+  "sourceSnapshotNote": "Numerical SDK sources match retained runs. The replay probe snapshot additionally prints BOUNDED_DETAIL (a diagnostic added after retained replays); mechanism log was refreshed after adding the long hard-chain termination case. Timings are diagnostic observations, not a performance gate."
+}

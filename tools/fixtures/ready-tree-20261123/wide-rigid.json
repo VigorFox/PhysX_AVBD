@@ -1,0 +1,26 @@
+[
+  {
+    "arm": "base",
+    "w": 0,
+    "rows": 576,
+    "result": "[WIDE_RIGID] excursion=1.95935e-06 status=PASS"
+  },
+  {
+    "arm": "base",
+    "w": 8,
+    "rows": 576,
+    "result": "[WIDE_RIGID] excursion=1.95935e-06 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 0,
+    "rows": 576,
+    "result": "[WIDE_RIGID] excursion=1.95935e-06 status=PASS"
+  },
+  {
+    "arm": "ready",
+    "w": 8,
+    "rows": 576,
+    "result": "[WIDE_RIGID] excursion=1.95935e-06 status=PASS"
+  }
+]

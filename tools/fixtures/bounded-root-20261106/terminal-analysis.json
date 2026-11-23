@@ -1,0 +1,13 @@
+{
+  "blocks": 192,
+  "rows": 1360,
+  "body": 7,
+  "coordinate": 5,
+  "actualCorrectionRatio": 1.2156982719418532,
+  "unroundedForceCorrectionRatio": 1.2164696686120773,
+  "frozenCorrectionRatio": 1.283706847505248e-05,
+  "forceRoundingCorrectionRatio": 0.0009510899195491695,
+  "storedMotionDifferenceRatio": 0.01162804593313162,
+  "solveResidual": 2.0816681711721685e-17,
+  "scope": "offline full-H diagnostic only; not a production solve or physical qualification"
+}

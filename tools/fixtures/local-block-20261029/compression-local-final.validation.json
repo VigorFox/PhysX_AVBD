@@ -1,0 +1,22 @@
+{
+  "file": "D:\\projects\\PhysX_AVBD_3\\tools\\benchmark-results\\local-block-20261029\\compression-local-final.program.json",
+  "passed": true,
+  "complete": true,
+  "solved": true,
+  "executionSource": "local block primal/dual",
+  "dofs": 750,
+  "groups": 100,
+  "activeNormalForces": 75,
+  "maximumForce": 66.36828623764887,
+  "symmetry": 2.1827872842550278e-11,
+  "stationarity": 1.186277580854378e-08,
+  "relativeStationarity": 8.937097611688647e-11,
+  "unitStepRoot": 4.98362635881211e-13,
+  "relativeUnitStepRoot": 7.509047831922226e-15,
+  "minimumNormalResidual": -4.98362635881211e-13,
+  "tableIterations": 86,
+  "materialProducts": 36,
+  "publication": "none",
+  "solverConverged": true,
+  "engineering": false
+}
