@@ -40,6 +40,7 @@ def main():
         '/I"%s"' % os.path.join(ROOT, "physx", "include"),
         '/I"%s"' % os.path.join(ROOT, "physx", "include", "cudamanager"),
         '/I"%s"' % os.path.join(ROOT, "tools"),
+        '/I"%s"' % os.path.join(ROOT, "physx", "source", "lowleveldynamics", "src"),
     ])
     libs = " ".join([
         os.path.join(bin_dir, "PhysXExtensions_static_64.lib"),

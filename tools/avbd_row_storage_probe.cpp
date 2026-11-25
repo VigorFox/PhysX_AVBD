@@ -18,7 +18,7 @@ static AvbdRowBuilder makeRow(PxU32 id,PxReal* output)
     p.jLinA=PxVec3(1,2,3);p.jAngB=PxVec3(4,5,6);p.minLambda=-10;p.maxLambda=20;
     p.t0=PxVec3(1,0,0);p.t1=PxVec3(0,0,1);p.mu=.5f;p.rhoT0=5;p.rhoT1=6;
     p.lambdaT0=7;p.lambdaT1=8;p.articAxis=2;p.articFlip=1;p.integratedAngular=1;
-    p.accelerationDrive=1;p.driveStiffness=9;p.driveDampingOverDt=10;p.forceWriteback=output;
+    p.accelerationDrive=1;p.driveStiffness=9;p.driveDampingOverDt=10;p.reactionOutput=output;
     return row;
 }
 static bool same(const AvbdRowConstRef& row,const AvbdRowBuilder& expected)
@@ -34,7 +34,7 @@ static bool same(const AvbdRowConstRef& row,const AvbdRowBuilder& expected)
         a.t0==b.t0 && a.t1==b.t1 && a.mu==b.mu && a.rhoT0==b.rhoT0 && a.rhoT1==b.rhoT1 &&
         a.lambdaT0==b.lambdaT0 && a.lambdaT1==b.lambdaT1 && a.articAxis==b.articAxis && a.articFlip==b.articFlip &&
         a.integratedAngular==b.integratedAngular && a.accelerationDrive==b.accelerationDrive &&
-        a.driveStiffness==b.driveStiffness && a.driveDampingOverDt==b.driveDampingOverDt && a.forceWriteback==b.forceWriteback;
+        a.driveStiffness==b.driveStiffness && a.driveDampingOverDt==b.driveDampingOverDt && a.reactionOutput==b.reactionOutput;
 }
 int main()
 {
@@ -53,7 +53,7 @@ int main()
     for(PxU32 t=0;t<4;++t)workers.emplace_back([&,t]()
     {
         for(PxU32 i=t;i<rows.size();i+=4)
-        {auto row=rows[i];row.header().flags^=eAVBD_ROW_FRESH;if(row.hasScalar()){row.scalar().lambda-=3;*row.scalar().forceWriteback=row.scalar().lambda;}}
+        {auto row=rows[i];row.header().flags^=eAVBD_ROW_FRESH;if(row.hasScalar()){row.scalar().lambda-=3;*row.scalar().reactionOutput=row.scalar().lambda;}}
     });
     for(auto& worker:workers)worker.join();
     for(PxU32 i=0;i<rows.size();++i)

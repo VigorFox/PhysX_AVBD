@@ -28,6 +28,15 @@ def main():
         def fields(tag):
             return [dict(t.split('=', 1) for t in line.split()[1:] if '=' in t)
                     for line in text.splitlines() if line.startswith(tag + ' ')]
+        if name.startswith('chainmail-four-'):
+            case = name[len('chainmail-four-'):]
+            frames = 600 if case == 'impact' else 360
+            gates, schedules = fields('[AVBD_GATE]'), fields('[AVBD_SCHEDULE]')
+            record['passed'] &= (len(gates) == 1 and gates[0].get('case') == case and
+                gates[0].get('status') == 'PASS' and gates[0].get('completedFrames') == str(frames) and
+                len(schedules) == frames and all(s.get('positionBudget') == s.get('rigidDualSweeps') == '4'
+                                                 for s in schedules))
+            record['gate'] = gates
         if name.startswith('warm-admission-'):
             epochs, checks = fields('[WARM_ORACLE]'), fields('[AVBD_WARM_CHECKS]')
             record['warmOracle'], record['warmChecks'] = epochs, checks
@@ -211,6 +220,12 @@ def main():
         run('hinge-simd-' + suffix, [sys.executable, 'tools/run_avbd_hinge_simd_probe.py'] + flags)
         run('membrane-simd-' + suffix, [sys.executable, 'tools/run_avbd_membrane_simd_probe.py'] + flags)
     run('row-program', [sys.executable, 'tools/run_avbd_row_program_probe.py'])
+    run('rigid-contact-reaction', [sys.executable, 'tools/run_avbd_contact_reaction_probe.py'])
+    run('rigid-loop-factor', [sys.executable, 'tools/run_avbd_rigid_loop_probe.py'])
+    for case, frames, workers in [('impact', 600, 4), ('projectile', 360, 8)]:
+        run('chainmail-four-' + case, [sdk / 'SnippetChainmail_64.exe', '--headless', '--solver=avbd',
+            '--case=' + case, f'--frames={frames}', '--execution=parallel', f'--dispatcher-threads={workers}'],
+            env=dict(PHYSX_AVBD_SCHEDULE_STATS='1'))
     run('surface-rest-revision', [sys.executable,'tools/run_avbd_nodal_cloth_contact_probe.py',
         '--warm-admission',8,'rest-revision'], env=dict(PHYSX_AVBD_COMMON_STATS='1',PHYSX_AVBD_LOCAL_PROFILE='1'))
     run('fixed-chain-impact', [sys.executable, 'tools/run_avbd_fixed_chain_impact.py',

@@ -6,7 +6,7 @@
 
 // KernelId x DeviceKind table (outline section 4). Hot path is launch(id, args)
 // with the device pointer bound at context construct - no if(gpu)/if(avx2).
-// CUDA AVBD_LDLT6 fills later; v1 CPU binds SCALAR only.
+// The CPU table selects the rigid assembly and contact material SIMD width once.
 
 #include "foundation/PxAssert.h"
 #include "foundation/PxMat33.h"
@@ -71,6 +71,8 @@ enum KernelId
     AVBD_NODAL_HINGE_BATCH,
     AVBD_MEMBRANE_BATCH,
     AVBD_CONTACT_MATERIAL_BATCH,
+    AVBD_RIGID_RANK_ONE,
+    AVBD_POINT_RESPONSE,
 	KERNEL_ID_COUNT
 };
 
@@ -80,6 +82,7 @@ enum DeviceKind
 	DEVICE_SSE2,
 	DEVICE_AVX2_FMA,
 	DEVICE_CUDA,
+    DEVICE_AVX256,
 	DEVICE_KIND_COUNT
 };
 
@@ -122,6 +125,14 @@ struct AvbdNormalConeArgs
     PxU8* active;
     double tolerance;
     AvbdNormalConeResult* result;
+};
+
+struct AvbdPointPatch;
+struct AvbdPointResponseArgs
+{
+    const AvbdPointPatch* patch;
+    PxReal jacobian[6], response;
+    bool solved;
 };
 
 struct AvbdLdlt6Args
@@ -177,6 +188,14 @@ struct AvbdTetrahedronArgs
     AvbdTetrahedronEvaluation* evaluation;
 };
 
+struct AvbdRankOneArgs
+{
+    PxReal (*matrix)[6];
+    const PxVec3& linear;
+    const PxVec3& angular;
+    PxReal scale;
+};
+
 struct KernelTable
 {
 	KernelFn bound[KERNEL_ID_COUNT];
@@ -194,6 +213,7 @@ struct KernelTable
 		return bound[id] != 0;
 	}
 
+    static KernelTable makeAvbdCpu();
 	static KernelTable makeAvbdCpuScalar();
 };
 

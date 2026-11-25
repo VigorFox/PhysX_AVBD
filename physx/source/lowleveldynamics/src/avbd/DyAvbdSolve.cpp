@@ -2101,7 +2101,8 @@ template<class Assembly> void AvbdDynamicsContext::accumulateRigidConstraintRow(
         // Endpoint conditioning is diagonal-only. Shared NP cross terms use
         // the same row coefficient on both ends, preserving an SPD metric.
         if(assembly) assembly->record(ri,jLin,jAng,ogcContact && !row.header().supportCount?row.scalar().rho:hessianCoeff);
-		avbdAddOuter(H, jLin, jAng, hessianCoeff);
+		AvbdRankOneArgs rank={H,jLin,jAng,hessianCoeff};
+		mKernels.launch(AVBD_RIGID_RANK_ONE,&rank);
 		g[0] += jLin.x * coeff;
 		g[1] += jLin.y * coeff;
 		g[2] += jLin.z * coeff;
@@ -2142,8 +2143,10 @@ template<class Assembly> void AvbdDynamicsContext::accumulateRigidConstraintRow(
 			// and slip.  A maximal-coordinate link is not a different material:
 			// omitting only its half of the Hessian breaks the shared friction
 			// potential and lets cargo drift across a moving link.
-			avbdAddOuter(H, j0, a0, tangentPenalty0*tangentScale);
-			avbdAddOuter(H, j1, a1, tangentPenalty1*tangentScale);
+			AvbdRankOneArgs tangent0={H,j0,a0,tangentPenalty0*tangentScale};
+			mKernels.launch(AVBD_RIGID_RANK_ONE,&tangent0);
+			AvbdRankOneArgs tangent1={H,j1,a1,tangentPenalty1*tangentScale};
+			mKernels.launch(AVBD_RIGID_RANK_ONE,&tangent1);
             if(assembly)
             {
                 assembly->record(ri,j0,a0,row.scalar().rhoT0*tangentScale,1);
@@ -2741,6 +2744,8 @@ void avbdLaunchLocalGroup(const KernelTable& table,AvbdNonlinearGroup& block)
 void avbdLaunchLocalGroup(const KernelTable& table,AvbdLocalNonlinearGroup& block)
 {AvbdLocalNonlinearGroupArgs args={&block};table.launch(AVBD_LOCAL_NONLINEAR_GROUP,&args);}
 }
+#include "DyAvbdRigidLoopSolve.inl"
+
 void AvbdDynamicsContext::solveLocalRigidGroup(PxU32 root,PxReal invH2)
 {
     if(mRigidGroups[root].count<=4)solveLocalRigidGroupKernel<4>(root,invH2);
@@ -3408,8 +3413,6 @@ void AvbdDynamicsContext::applyDualRange(PxU32 begin,PxU32 end)
 			// speculative contacts into a tangential glue network.
 			if(Fn < 0.0f && oldFn >= 0.0f && row.scalar().positionTangent)
 				avbdFloorLoadedContactTangentRho(row, mBodies, mDt);
-			if(row.scalar().forceWriteback)
-				*row.scalar().forceWriteback = -row.scalar().lambda;
 			if(ri < mContactWarm.size())
 			{
 				mContactWarm[ri].lambda = row.scalar().lambda;
@@ -3466,64 +3469,52 @@ void AvbdDynamicsContext::applyDualRange(PxU32 begin,PxU32 end)
 	}
 }
 
-static PxReal avbdMaterialEndpointResponse(const AvbdSolverBody& b,
-	const PxVec3& axis, const PxVec3& arm)
+// Compile the Jacobians, inverse-inertia products and local mobility
+// together at the material epoch. The velocity solve reuses these coefficients.
+static void avbdPrepareMaterialPoint(const AvbdRowConstRef& row, const AvbdMaterialRow& material,
+    const PxArray<AvbdSolverBody>& bodies, bool useTangents, AvbdMaterialPoint& point,
+    PxReal (&diagonal)[3], PxReal& tangentCross)
 {
-	if(!avbdBodyResponds(b))
-		return 0.0f;
-	const PxVec3 jAngLocal = b.qStart.rotateInv(arm.cross(axis));
-	return b.invMass +
-		jAngLocal.x * jAngLocal.x * b.invInertia.x +
-		jAngLocal.y * jAngLocal.y * b.invInertia.y +
-		jAngLocal.z * jAngLocal.z * b.invInertia.z;
-}
-
-static PxReal avbdMaterialAxisResponse(const AvbdRowConstRef& row,
-	const AvbdMaterialRow& material, const PxArray<AvbdSolverBody>& bodies,
-	const PxVec3& axis)
-{
-	PxReal response = 0.0f;
-	if(row.header().bodyA < bodies.size())
-		response += avbdMaterialEndpointResponse(bodies[row.header().bodyA], axis,
-			material.armA);
-	if(row.header().bodyB < bodies.size())
-		response += avbdMaterialEndpointResponse(bodies[row.header().bodyB], axis,
-			material.armB);
-	return PxIsFinite(response) && response > 1.0e-12f ? response : 0.0f;
-}
-
-static PxReal avbdMaterialLinearAxisResponse(const AvbdRowConstRef& row,
-	const PxArray<AvbdSolverBody>& bodies)
-{
-	PxReal response = 0.0f;
-	if(row.header().bodyA < bodies.size() && avbdBodyResponds(bodies[row.header().bodyA]))
-		response += bodies[row.header().bodyA].invMass;
-	if(row.header().bodyB < bodies.size() && avbdBodyResponds(bodies[row.header().bodyB]))
-		response += bodies[row.header().bodyB].invMass;
-	return PxIsFinite(response) && response > 1.0e-12f ? response : 0.0f;
-}
-
-static PxReal avbdMaterialCrossResponse(const AvbdRowConstRef& row,
-	const AvbdMaterialRow& material, const PxArray<AvbdSolverBody>& bodies,
-	const PxVec3& axis0, const PxVec3& axis1)
-{
-	PxReal response = 0.0f;
-	const PxU32 ids[2] = { row.header().bodyA, row.header().bodyB };
-	const PxVec3 arms[2] = { material.armA, material.armB };
-	for(PxU32 endpoint = 0; endpoint < 2; ++endpoint)
-	{
-		if(ids[endpoint] >= bodies.size() ||
-			!avbdBodyResponds(bodies[ids[endpoint]]))
-			continue;
-		const AvbdSolverBody& b = bodies[ids[endpoint]];
-		const PxVec3 j0 = b.qStart.rotateInv(arms[endpoint].cross(axis0));
-		const PxVec3 j1 = b.qStart.rotateInv(arms[endpoint].cross(axis1));
-		response += b.invMass * axis0.dot(axis1) +
-			j0.x * j1.x * b.invInertia.x +
-			j0.y * j1.y * b.invInertia.y +
-			j0.z * j1.z * b.invInertia.z;
-	}
-	return PxIsFinite(response) ? response : 0.0f;
+    const PxU32 ids[2]={row.header().bodyA,row.header().bodyB};
+    const PxVec3 arms[2]={material.armA,material.armB};
+    const PxVec3 directions[3]={row.scalar().n,row.scalar().t0,row.scalar().t1};
+    for(PxU32 side=0;side<2;++side)
+    {
+        if(ids[side]>=bodies.size() || !bodies[ids[side]].core) continue;
+        const auto& body=bodies[ids[side]];
+        const bool responds=avbdBodyResponds(body);
+        PxVec3 local[3];
+        for(PxU32 k=0;k<(useTangents ? 3u : 1u);++k)
+        {
+            const PxVec3& n=directions[k];
+            const PxVec3 j=(k==0 && material.normalLinearOnly) ? PxVec3(0.f) : arms[side].cross(n);
+            local[k]=body.qStart.rotateInv(j);
+            const PxVec3 inverse=body.qStart.rotate(local[k].multiply(body.invInertia));
+            auto& axis=point.axes[k];
+            axis.setEndpoint(side,n,j,inverse,responds ? body.invMass : 0.f);
+            const PxVec3& l=body.outputLinVel;
+            const PxVec3& w=body.outputAngVel;
+            const double speed=double(n.x)*l.x+double(n.y)*l.y+double(n.z)*l.z+
+                double(j.x)*w.x+double(j.y)*w.y+double(j.z)*w.z;
+            axis.baseSpeed+=side ? -speed : speed;
+            if(responds)
+            {
+                const PxVec3& t=local[k];
+                diagonal[k]+=body.invMass+t.x*t.x*body.invInertia.x+
+                    t.y*t.y*body.invInertia.y+t.z*t.z*body.invInertia.z;
+            }
+        }
+        if(responds && useTangents)
+        {
+            const PxVec3& u=local[1];
+            const PxVec3& v=local[2];
+            tangentCross+=body.invMass*directions[1].dot(directions[2])+u.x*v.x*body.invInertia.x+
+                u.y*v.y*body.invInertia.y+u.z*v.z*body.invInertia.z;
+        }
+    }
+    for(PxU32 k=0;k<3;++k)
+        if(!PxIsFinite(diagonal[k]) || diagonal[k]<=1.0e-12f) diagonal[k]=0.f;
+    if(!PxIsFinite(tangentCross)) tangentCross=0.f;
 }
 
 static void avbdApplyMaterialAxisImpulse(const AvbdRowConstRef& row,
@@ -3553,10 +3544,11 @@ static void avbdApplyMaterialAxisImpulse(const AvbdRowConstRef& row,
 }
 
 
-void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& materialBody)
+enum MaterialIncidence { eHAS_INCIDENT_ROW = 1, eCOMPONENT_HAS_JOINT = 2 };
+
+void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& materialBody,PxU32 materialEnd)
 {
 	const PxReal bounceThreshold = getBounceThreshold();
-	const PxU32 nbRows = mRows.size();
 	mStep.materialPending=true;
     mContactMaterial.begin(mBodies.size());
     auto& velocityDelta=mContactMaterial.delta;
@@ -3568,19 +3560,9 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 	// prepareRigidVelocities compiled this finalized row program. Only staged
 	// velocities changed since then; reuse the same immutable components.
 	const PxArray<PxU32>& componentParent = mMaterialComponentParentScratch;
-	PxArray<PxU8>& jointComponent = mMaterialJointComponentScratch;
-	jointComponent.resize(mBlocks.size());
-	for(PxU32 i = 0; i < jointComponent.size(); ++i) jointComponent[i] = 0;
-	for(PxU32 ri = 0; ri < nbRows; ++ri)
-	{
-		const AvbdRowConstRef& row = mRows[ri];
-		if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_INACTIVE)) == 0)
-			mRowProgram.forEachBlock(ri, [&](PxU32 block)
-			{ jointComponent[componentParent[block]] = 1; });
-	}
 	mMaterialRowsScratch.clear();
-	mMaterialRowsScratch.reserve(nbRows);
-	for(PxU32 ri = 0; ri < nbRows; ++ri)
+	mMaterialRowsScratch.reserve(materialEnd);
+	for(PxU32 ri = 0; ri < materialEnd; ++ri)
 	{
 		const AvbdRowConstRef& row = mRows[ri];
 		if((row.header().flags & eAVBD_ROW_CONTACT) == 0 ||
@@ -3592,7 +3574,7 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 			avbdBodyResponds(mBodies[row.header().bodyB]);
 		const bool jointCoupledPair = dynamicA && dynamicB &&
 			componentParent[row.header().bodyA] == componentParent[row.header().bodyB] &&
-			jointComponent[componentParent[row.header().bodyA]] != 0;
+			(mMaterialIncidentScratch[componentParent[row.header().bodyA]] & eCOMPONENT_HAS_JOINT) != 0;
 		// The legacy joint-island restitution coordinate is translational.  Its
 		// approach epoch must use the same linear Jacobian as its response; mixing
 		// point angular velocity into the target but not the mobility changes the
@@ -3625,10 +3607,9 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		const bool reconstructB = dynamicB && row.header().bodyB < materialBody.size() &&
 			materialBody[row.header().bodyB];
 		const bool finiteNormalBudget = row.scalar().minLambda > -1.0e15f;
-		// NP rigid rows are Position-AL: the material NCP consumes the AL load
-		// (-lambda dt) as its normal capacity.  A finite maxImpulse restarts
-		// from the incoming velocity and lets the projection spend the authored
-		// impulse exactly.
+		// Pose-derived velocities already carry the AL support impulse. When
+		// both responding endpoints restart from incoming velocity, the
+		// material normal unknown instead represents the total impulse.
 		const bool replayCertificate =
 			(!dynamicA || reconstructA) && (!dynamicB || reconstructB);
 		AvbdMaterialRow material;
@@ -3649,7 +3630,7 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 			materialPoint - mBodies[row.header().bodyA].p : PxVec3(0.0f);
 		material.armB = row.header().bodyB < mBodies.size() ?
 			materialPoint - mBodies[row.header().bodyB].p : PxVec3(0.0f);
-		material.positionNormalImpulse = finiteNormalBudget && replayCertificate ?
+		material.positionNormalImpulse = replayCertificate ?
 			0.0f : PxMax(0.0f, -row.scalar().lambda * dt);
 		material.normalImpulse = 0.0f;
 		material.normalCapacity = material.positionNormalImpulse;
@@ -3685,10 +3666,12 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		const bool solveRow = impactRow || activeMaterialRow;
 		material.normalTarget = impactRow && row.scalar().restitution > 0.0f ?
 			-row.scalar().restitution * vnIn : 0.0f;
-		material.normalResponse = solveRow ?
-			(material.normalLinearOnly ?
-				avbdMaterialLinearAxisResponse(row, mBodies) :
-				avbdMaterialAxisResponse(row, material, mBodies, row.scalar().n)) : 0.0f;
+        AvbdMaterialPoint point={};
+        PxReal mobility[3]={}, tangentCross=0.f;
+        const bool useTangents=solveRow && row.scalar().mu>0.f && !jointLinearRestitution && !jointPoseOwnedMaterial;
+        if(solveRow && !jointPoseOwnedMaterial)
+            avbdPrepareMaterialPoint(row,material,mBodies,useTangents,point,mobility,tangentCross);
+        material.normalEffectiveMass=mobility[0]>0.f ? 1.f/mobility[0] : 0.f;
 		if(!replayCertificate && !jointLinearRestitution &&
 			(row.header().flags & eAVBD_ROW_FRESH) == 0)
 		{
@@ -3738,7 +3721,7 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		material.maxNormalImpulse = totalNormalBudget == PX_MAX_F32 ?
 			PX_MAX_F32 : PxMax(0.0f,
 				totalNormalBudget - material.positionNormalImpulse);
-		material.solveNormal = PxU8(material.normalResponse > 0.0f &&
+		material.solveNormal = PxU8(material.normalEffectiveMass > 0.0f &&
 			!jointPoseOwnedMaterial);
 		material.solveTangent = 0;
 		// The free-rigid frontier has an exact M^-1 contact operator.  A hard
@@ -3747,15 +3730,12 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		// the material residual, matching the AVBD_2 joint path.
 		material.tangentStep = 0.0f;
         material.tangentInverse=PxVec3(0.f);
-		if(solveRow && row.scalar().mu > 0.0f && !jointLinearRestitution &&
-			!jointPoseOwnedMaterial)
-		{
-			const PxReal w0 = avbdMaterialAxisResponse(row, material, mBodies, row.scalar().t0);
-			const PxReal w1 = avbdMaterialAxisResponse(row, material, mBodies, row.scalar().t1);
+        if(useTangents)
+        {
+            const PxReal w0=mobility[1], w1=mobility[2];
 			if(w0 > 0.0f && w1 > 0.0f)
 			{
-				const PxReal w01 = avbdMaterialCrossResponse(row, material, mBodies,
-					row.scalar().t0, row.scalar().t1);
+                const PxReal w01=tangentCross;
 				const PxReal trace = w0 + w1;
 				const PxReal disc = PxSqrt(PxMax(0.0f,
 					(w0 - w1) * (w0 - w1) + 4.0f * w01 * w01));
@@ -3798,29 +3778,14 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
             program.patches.pushBack(patch);
         }
         ++program.patches.back().count;
-        AvbdMaterialPoint point={};
         point.state=mMaterialRowsScratch.size()-1; point.friction=row.scalar().mu;
-        point.axes[0].direction=row.scalar().n;
-        point.axes[1].direction=row.scalar().t0;
-        point.axes[2].direction=row.scalar().t1;
-        const PxVec3 arms[2]={material.armA,material.armB};
-        for(PxU32 s=0;s<2;++s)
-        {
-            if(ids[s]>=mBodies.size() || !mBodies[ids[s]].core) continue;
-            const auto& body=mBodies[ids[s]];
-            for(PxU32 k=0;k<3;++k)
+        if(ids[0]==ids[1])
+            for(auto& axis:point.axes) for(PxU32 k=0;k<3;++k) for(PxU32 j=0;j<2;++j)
             {
-                auto& axis=point.axes[k];
-                const PxVec3 a=axis.direction;
-                const PxVec3 j=(k==0 && material.normalLinearOnly) ? PxVec3(0.f) : arms[s].cross(a);
-                axis.angular[s]=j;
-                axis.angularResponse[s]=avbdWorldInvInertiaMul(body,j);
-                const PxVec3& l=body.outputLinVel; const PxVec3& w=body.outputAngVel;
-                const double vn=double(a.x)*l.x+double(a.y)*l.y+double(a.z)*l.z+
-                    double(j.x)*w.x+double(j.y)*w.y+double(j.z)*w.z;
-                axis.baseSpeed += s ? -vn : vn;
+                axis.jacobian[k][j]+=axis.jacobian[k][j+2];
+                axis.response[k][j]+=axis.response[k][j+2];
+                axis.jacobian[k][j+2]=axis.response[k][j+2]=0.f;
             }
-        }
         program.points.pushBack(point);
     }
     mContactMaterial.schedule(componentParent,mStep.workers);
@@ -3831,37 +3796,78 @@ bool AvbdDynamicsContext::advanceContactMaterial()
     auto& p=mContactMaterial;
     while(!p.patches.empty())
     {
-        while(p.islandCursor+1<p.islandOffsets.size())
-            if(!dispatchRowRanges(MaterialIslandStage,p.islandCursor,p.islandOffsets.size()-1,1)) return false;
-        while(p.color+1<p.offsets.size())
+        const PxU32 islandJobs=p.jobs.size()-p.coloredJobs();
+        while(p.islandCursor<islandJobs)
+            if(!dispatchRowRanges(MaterialIslandStage,p.islandCursor,islandJobs,1)) return false;
+        while(p.coloredSweeps<p.sweepsPerCheck && !p.order.empty())
         {
-            const PxU32 end=p.offsets[p.color+1];
-            while(p.cursor<end)
-                if(!dispatchRowRanges(MaterialSolveStage,p.cursor,end,AvbdContactMaterial::PatchesPerTask)) return false;
-            if(++p.color+1==p.offsets.size()) p.cursor=0;
+            while(p.color+1<p.offsets.size())
+            {
+                const PxU32 end=p.offsets[p.color+1];
+                while(p.cursor<end)
+                    if(!dispatchRowRanges(MaterialSolveStage,p.cursor,end,1)) return false;
+                ++p.color;
+            }
+            p.cursor=p.color=0;
+            ++p.coloredSweeps;
         }
-        while(p.cursor<p.order.size())
-            if(!dispatchRowRanges(MaterialResidualStage,p.cursor,p.order.size(),AvbdContactMaterial::PatchesPerTask)) return false;
-        AvbdMaterialResidual residual;
-        for(const auto& r:p.residual) residual.include(r.error,r.scale);
-        ++p.iteration;
-        if(p.iteration==AVBD_MATERIAL_MAX_ITERS || residual.error<=AVBD_MATERIAL_REL_TOL*residual.scale)
+        PxU32 completed=p.iteration+p.sweepsPerCheck;
+        if(p.checksResidual())
         {
-            if(std::getenv("PHYSX_AVBD_MATERIAL_STATS"))
-                std::fprintf(stderr,"[AVBD_MATERIAL_SWEEP] coupled=%u iterations=%u residual=%.9g points=%u patches=%u islandJobs=%u colored=%u\n",
-                    unsigned(p.friction),p.iteration,double(residual.error/residual.scale),p.points.size(),p.patches.size(),
-                    p.islandOffsets.empty()?0:p.islandOffsets.size()-1,p.order.size());
-            if(p.friction) break;
-            p.friction=true; p.iteration=0;
+            while(p.cursor<p.coloredJobs())
+                if(!dispatchRowRanges(MaterialResidualStage,p.cursor,p.coloredJobs(),1)) return false;
+            AvbdMaterialResidual residual;
+            for(const auto& job:p.jobs) residual.include(job.residual.error,job.residual.scale);
+            if(completed==AVBD_MATERIAL_MAX_ITERS || residual.converged())
+            {
+                if(std::getenv("PHYSX_AVBD_MATERIAL_STATS"))
+                    std::fprintf(stderr,"[AVBD_MATERIAL_SWEEP] coupled=%u iterations=%u residual=%.9g points=%u patches=%u islandJobs=%u colored=%u\n",
+                        unsigned(p.friction),completed,double(residual.error/residual.scale),p.points.size(),p.patches.size(),
+                        islandJobs,p.order.size());
+                if(p.friction) break;
+                p.friction=true; completed=0;
+            }
+            // Probe light contacts after 1, 2 and 4 sweeps. On sustained loads,
+            // double the interval between full KKT scans, up to the phase cap.
+            p.nextCheck=PxMin(AVBD_MATERIAL_MAX_ITERS,PxMax(1u,2*completed));
         }
-        p.color=p.cursor=p.islandCursor=0;
+        p.iteration=completed;
+        p.sweepsPerCheck=PxU8(PxMin(PxU32(AvbdContactMaterial::MaxSweepsPerCheck),p.nextCheck-completed));
+        p.color=p.cursor=p.islandCursor=p.coloredSweeps=0;
     }
     return true;
+}
+
+void AvbdDynamicsContext::publishNpContactImpulses()
+{
+    if(mNpImpulseOutputs.empty()) return;
+    // Skipped points carry no impulse. Complete geometric witnesses can alias
+    // one original NP point, so initialize the entire host span before scatter.
+    for(const auto& output : mNpImpulseOutputs)
+        PxMemZero(output.impulses,sizeof(PxReal)*output.count);
+    if(mStep.commonProgram)
+    {
+        for(PxU32 i=0;i<mNpContactRowCount;++i)
+        {
+            const auto row=mRows[i];
+            if(row.scalar().reactionOutput)
+                *row.scalar().reactionOutput-=mDt*row.scalar().lambda;
+        }
+    }
+    else
+    {
+        for(const auto& material : mMaterialRowsScratch)
+        {
+            PxReal* slot=mRows[material.rowIndex].scalar().reactionOutput;
+            if(slot) *slot=material.positionNormalImpulse+material.normalImpulse;
+        }
+    }
 }
 
 void AvbdDynamicsContext::publishContactMaterial()
 {
     const auto& velocityDelta=mContactMaterial.delta;
+
     // Recover support wrenches from the very impulse accepted by material.
     // Material rows are appended in increasing NP row order.
     for(const auto& reaction : mFixedReactions)
@@ -3915,12 +3921,14 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 	// keeps pose-derived velocity; mixed contacts replay the same normal and
 	// passive-tangent certificate only on their contact-only endpoint.
 	PxArray<PxU8>& materialBody = mMaterialBodyScratch;
-	PxArray<PxU8>& hasIncidentRow = mMaterialIncidentScratch;
-	PxArray<PxU8>& materialTangentBody = mMaterialTangentBodyScratch;
+	PxArray<PxU8>& incidence = mMaterialIncidentScratch;
+	PxArray<PxU32>& epochParent = mMaterialComponentParentScratch;
+	compileVelocityComponents(epochParent);
+	PxU32 materialEnd = 0;
 	materialBody.resize(mBlocks.size());
 	for(PxU32 i = mBodies.size(); i < mBlocks.size(); ++i) materialBody[i] = 0;
-	hasIncidentRow.resize(mBodies.size());
-	materialTangentBody.resize(mBodies.size());
+	incidence.clear();
+	incidence.resize(mBlocks.size(),0);
 	for(PxU32 i = 0; i < mBodies.size(); ++i)
 	{
 		// A contact-only body normally publishes the OGC pose velocity. The row
@@ -3928,8 +3936,6 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 		// program, whose geometric repair is not physical momentum.
 		materialBody[i] = !mStep.commonProgram && mBodies[i].core && mBodies[i].invMass > 0.0f &&
 			!mBodies[i].isKinematic && !mBodies[i].artic;
-		hasIncidentRow[i] = 0;
-		materialTangentBody[i] = 0;
 	}
 	PxArray<PxU8> released;
     if(!mReleasedRigidBodies.empty())
@@ -3941,24 +3947,25 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 	{
 		const AvbdRowConstRef& row = mRows[ri];
 		if(row.header().flags & eAVBD_ROW_INACTIVE) continue;
+		if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_SOFT_PAIR)) == eAVBD_ROW_CONTACT)
+			materialEnd = ri + 1;
 		mRowProgram.forEachBlock(ri, [&](PxU32 block)
 		{
+			if(!(row.header().flags & eAVBD_ROW_CONTACT))
+				incidence[epochParent[block]] |= eCOMPONENT_HAS_JOINT;
 			if(block >= mBodies.size()) return;
-			hasIncidentRow[block] = 1;
+			incidence[block] |= eHAS_INCIDENT_ROW;
 			if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_SOFT_PAIR)) != eAVBD_ROW_CONTACT)
 				materialBody[block] = 0;
 		});
 	}
 	for(PxU32 i = 0; i < mBodies.size(); ++i)
 	{
-		materialBody[i] = PxU8(materialBody[i] && (hasIncidentRow[i] || (!released.empty() && released[i])));
-		hasIncidentRow[i] = 0;
+		materialBody[i] = PxU8(materialBody[i] && ((incidence[i] & eHAS_INCIDENT_ROW) || (!released.empty() && released[i])));
 	}
 	// Velocity epoch belongs to the complete dynamic component. Resetting a
 	// contact-only projectile while its spring/joint endpoint retains BDF
 	// replaces only half of the coupled impulse and creates net momentum.
-	PxArray<PxU32>& epochParent = mMaterialComponentParentScratch;
-	compileVelocityComponents(epochParent);
     // A released component has no physical impulse from a broken equality.
     // Restart all its free endpoints at the same incoming momentum epoch.
     for(PxU32 i=0; i<released.size(); ++i)
@@ -3973,7 +3980,7 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 	// Restoring solve-start velocity here would first erase that reaction and
 	// then ask a pointwise free-body solve to rediscover the mobility of an
 	// attached endpoint.
-	for(PxU32 ri = 0; ri < mRows.size(); ++ri)
+	for(PxU32 ri = 0; ri < materialEnd; ++ri)
 	{
 		const AvbdRowConstRef& row = mRows[ri];
 		if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_INACTIVE |
@@ -3987,34 +3994,6 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 			continue;
 		materialBody[row.header().bodyA] = 0;
 		materialBody[row.header().bodyB] = 0;
-	}
-	// Solver-level velocity damping is a joint-program stabilization term in
-	// the AVBD_2 step contract.  A free/contact-only island does not run that
-	// program: damping it merely because it has no material row changes free
-	// fall and makes a later impact look artificially stiff.  Reuse the scratch
-	// mask for the bodies that actually participate in an active non-contact
-	// hard AL rigid row; finite DRIVE rows already dissipate their relative
-	// coordinate through authored damping and must preserve common translation.
-	// Public per-body damping remains independent below.
-	for(PxU32 ri = 0; ri < mRows.size(); ++ri)
-	{
-		const AvbdRowConstRef& row = mRows[ri];
-		if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_INACTIVE |
-			eAVBD_ROW_SOFT_PAIR)) == eAVBD_ROW_CONTACT && row.scalar().mu > 0.0f &&
-			row.scalar().positionTangent)
-		{
-			if(row.header().bodyA < mBodies.size())
-				materialTangentBody[row.header().bodyA] = 1;
-			if(row.header().bodyB < mBodies.size())
-				materialTangentBody[row.header().bodyB] = 1;
-		}
-		if(row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_INACTIVE |
-			eAVBD_ROW_SOFT_PAIR | eAVBD_ROW_DRIVE))
-			continue;
-		if(row.header().bodyA < mBodies.size())
-			hasIncidentRow[row.header().bodyA] = 1;
-		if(row.header().bodyB < mBodies.size())
-			hasIncidentRow[row.header().bodyB] = 1;
 	}
 	for(PxU32 i = 0; i < mBodies.size(); ++i)
 	{
@@ -4059,11 +4038,6 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 		AvbdSolverBody& b = mBodies[i];
 		if(!b.core || b.invMass == 0.0f || b.isKinematic)
 			continue;
-		if(!mStep.commonProgram && !materialBody[i] && hasIncidentRow[i] && !materialTangentBody[i])
-		{
-			b.outputLinVel *= AVBD_VELOCITY_DAMPING;
-			b.outputAngVel *= AVBD_ANGULAR_DAMPING;
-		}
 		// Pose reconstruction includes constraint-generated velocity modes that
 		// did not exist when the inertial target was integrated.  Authored body
 		// damping therefore belongs at the final velocity boundary as well.
@@ -4091,7 +4065,7 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 		}
 	}
 
-	if(!mStep.commonProgram) prepareImpactMaterial(dt,materialBody);
+	if(!mStep.commonProgram) prepareImpactMaterial(dt,materialBody,materialEnd);
 }
 
 void AvbdDynamicsContext::finalizeRigidBodies(PxReal dt)

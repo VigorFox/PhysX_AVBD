@@ -66,6 +66,7 @@ void AvbdDynamicsContext::buildContactRows()
 	for(PxU32 i = 0; i < prevUsed.size(); ++i)
 		prevUsed[i] = 0;
 	mRows.truncate(0);
+    mNpImpulseOutputs.clear();
 	mContactPlaneGeometry.clear();
 	mContactFrameGeometry.clear();
 	mNpDomains.clear();
@@ -92,6 +93,9 @@ void AvbdDynamicsContext::buildContactRows()
 			continue;
 		PxsContactManagerOutput& output =
 			mOutputIterator.getContactManagerOutput(unit.mNpIndex);
+        // Bind the host report for the final accepted step.
+        if(output.contactForces)
+            mNpImpulseOutputs.pushBack({output.contactForces,output.nbContacts});
 		if(!output.contactPatches || !output.contactPoints || output.nbContacts == 0)
 			continue;
 		// NP reports every proximity point inside the inertial query distance
@@ -190,7 +194,7 @@ void AvbdDynamicsContext::buildContactRows()
 					row.scalar().minLambda = -maxImp / mDt;
 				row.scalar().maxLambda = 0.0f;
 				row.header().flags = PxU8(eAVBD_ROW_UNILATERAL | eAVBD_ROW_CONTACT);
-				row.scalar().forceWriteback =
+				row.scalar().reactionOutput =
 					output.contactForces ? output.contactForces + idx : NULL;
 
 				const PxVec3 point = iter.getContactPoint();
@@ -413,7 +417,13 @@ void AvbdDynamicsContext::buildContactRows()
 					if(gap>best){best=gap;axis=domain.normal;}
 				}
 		domain.normal=axis;
-		if(!avbdNpDomainPath(domain,poses,poses))
+        bool separated=avbdNpDomainPath(domain,poses,poses);
+        if(!separated && mStep.localBudget && avbdNpRecoverInitialAxis(domain,poses))
+        {
+            separated=true;
+            best=avbdNpGap(domain,poses);
+        }
+        if(!separated)
 		{
 			++mNpDomainUnseparated;
 			if(const char* path=std::getenv("PHYSX_AVBD_COMMON_FAILED_NP"))

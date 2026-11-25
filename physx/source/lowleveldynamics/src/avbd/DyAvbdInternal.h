@@ -89,11 +89,6 @@ static const PxReal AVBD_CONTACT_JOINT_BOOST_FRACTION = 0.005f;
 static const PxReal AVBD_BETA = 1000.0f;
 static const PxReal AVBD_ALPHA = 0.99f;
 static const PxReal AVBD_GAMMA = 0.999f;
-// Solver-level post-AL velocity stabilization from the AVBD_2 green path.
-// This is applied before material complementarity; authored body damping is
-// an additional public property, not a replacement for these step factors.
-static const PxReal AVBD_VELOCITY_DAMPING = 0.99f;
-static const PxReal AVBD_ANGULAR_DAMPING = 0.95f;
 // Spectral-radius estimate used by the AVBD_2 fixed-point accelerator.  It
 // accelerates the same in-place GS map; it is not a constraint stiffness.
 static const PxReal AVBD_JOINT_CHEBYSHEV_RHO = 0.92f;
@@ -115,7 +110,6 @@ static const PxReal AVBD_ARTIC_ROTATION_TOL = 1.0e-5f;
 // Material iterations terminate on the velocity natural-map certificate.
 // The cap is only a finite-work guard for extreme mass-ratio manifolds.
 static const PxU32 AVBD_MATERIAL_MAX_ITERS = 32;
-static const PxReal AVBD_MATERIAL_REL_TOL = 1.0e-5f;
 static const PxReal AVBD_BOUNCE_SOR = 0.5f;
 static const PxReal AVBD_REG = 1.0e-6f;
 static const PxReal AVBD_SOFT_RIGID_WAKE_COUNTER = 20.0f * 0.02f;
@@ -791,15 +785,10 @@ PX_FORCE_INLINE void avbdPoseDeltaVel(const AvbdSolverBody& b, PxReal invH,
 	ang = avbdQuatDeltaApply(b.qStart, b.q) * invH;
 }
 
-template<class Parent, class Child>
-PX_FORCE_INLINE bool avbdArticAxis(const Parent& parent, const Child& child,
-	const ArticulationJointCore& joint, PxU32 axis,
-	PxVec3& jLinA, PxVec3& jAngA, PxVec3& jLinB, PxVec3& jAngB, PxReal& C)
+PX_FORCE_INLINE bool avbdArticFrameAxis(const PxTransform& FA, const PxTransform& FB,
+    const PxVec3& parentPosition, const PxVec3& childPosition, const ArticulationJointCore& joint, PxU32 axis,
+    PxVec3& jLinA, PxVec3& jAngA, PxVec3& jLinB, PxVec3& jAngB, PxReal& C)
 {
-	const PxTransform poseA(parent.p, parent.q);
-	const PxTransform poseB(child.p, child.q);
-	const PxTransform FA = poseA * joint.parentPose;
-	const PxTransform FB = poseB * joint.childPose;
 	const bool linear = axis >= PxArticulationAxis::eX;
 	const PxU32 component = linear ? (axis - PxArticulationAxis::eX) : axis;
 	PxVec3 local(0.0f);
@@ -825,8 +814,8 @@ PX_FORCE_INLINE bool avbdArticAxis(const Parent& parent, const Child& child,
 		}
 		const PxVec3 d = FB.p - FA.p;
 		C = d.dot(worldAxis);
-		const PxVec3 rA = FA.p - parent.p;
-		const PxVec3 rB = FB.p - child.p;
+		const PxVec3 rA = FA.p - parentPosition;
+		const PxVec3 rB = FB.p - childPosition;
 		jLinA = -worldAxis;
 		// With a rotating axis: d C / d thetaA = -(rA x a) + (a x d). When
 		// the axis rotates with the parent (prismatic / partially locked), the
@@ -849,6 +838,18 @@ PX_FORCE_INLINE bool avbdArticAxis(const Parent& parent, const Child& child,
 		jAngB = gradient;
 	}
 	return PxIsFinite(C) && worldAxis.isFinite();
+}
+
+template<class Parent, class Child>
+PX_FORCE_INLINE bool avbdArticAxis(const Parent& parent, const Child& child,
+	const ArticulationJointCore& joint, PxU32 axis,
+	PxVec3& jLinA, PxVec3& jAngA, PxVec3& jLinB, PxVec3& jAngB, PxReal& C)
+{
+	const PxTransform poseA(parent.p, parent.q);
+	const PxTransform poseB(child.p, child.q);
+	const PxTransform FA = poseA * joint.parentPose;
+	const PxTransform FB = poseB * joint.childPose;
+    return avbdArticFrameAxis(FA, FB, parent.p, child.p, joint, axis, jLinA, jAngA, jLinB, jAngB, C);
 }
 
 // Geometric inbound C and J at the current parent/child poses.  Linearized

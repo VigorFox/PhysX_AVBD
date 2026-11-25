@@ -179,6 +179,17 @@ void AvbdDynamicsContext::buildArticJointSources()
 				break;
 			}
 		}
+        const auto& parent = mBodies[parentBody];
+        const PxTransform startA = PxTransform(parent.pStart, parent.qStart) * src.joint->parentPose;
+        const PxTransform startB = PxTransform(child.pStart, child.qStart) * src.joint->childPose;
+        for (PxU32 axis = 0; axis < PxArticulationAxis::eCOUNT; ++axis)
+        {
+            if (src.joint->motion[axis] == PxArticulationMotion::eFREE) continue;
+            PxVec3 la, aa, lb, ab;
+            if (avbdArticFrameAxis(startA, startB, parent.pStart, child.pStart, *src.joint, axis,
+                                   la, aa, lb, ab, src.startCoordinate[axis]))
+                src.validStartAxes |= 1u << axis;
+        }
 		mArticJoints.pushBack(src);
 	}
 }
@@ -211,7 +222,7 @@ static void avbdPushArticRow(AvbdRows& rows, AvbdArticJointSrc& src,
 	row.scalar().articAxis = PxU8(axis);
 	row.scalar().articFlip = flip;
 	row.scalar().articTarget = target;
-	row.scalar().forceWriteback = NULL;
+	row.scalar().reactionOutput = NULL;
 	rows.pushBack(row);
 	src.nbRows++;
 }
@@ -237,16 +248,14 @@ void AvbdDynamicsContext::refreshArticJointRows()
 		const ArticulationJointCore& joint = *src.joint;
 		const AvbdSolverBody& parent = mBodies[src.parentBody];
 		const AvbdSolverBody& child = mBodies[src.childBody];
-		// Re-evaluate C0 from the immutable DCD poses, never the warm guess
-		// or a later GS linearization. Targets/limit signs belong to this row.
-		AvbdSolverBody startParent = parent, startChild = child;
-		startParent.p = parent.pStart; startParent.q = parent.qStart;
-		startChild.p = child.pStart; startChild.q = child.qStart;
+        const PxTransform frameA = PxTransform(parent.p, parent.q) * joint.parentPose;
+        const PxTransform frameB = PxTransform(child.p, child.q) * joint.childPose;
 		for(PxU32 axis = 0; axis < PxArticulationAxis::eCOUNT; ++axis)
 		{
 			PxVec3 jLinA, jAngA, jLinB, jAngB;
 			PxReal C = 0.0f;
-			const bool ok = avbdArticAxis(parent, child, joint, axis,
+			const bool ok = joint.motion[axis] != PxArticulationMotion::eFREE &&
+                avbdArticFrameAxis(frameA, frameB, parent.p, child.p, joint, axis,
 				jLinA, jAngA, jLinB, jAngB, C);
 			const PxU8 motion = joint.motion[axis];
 			if(!ok)
@@ -277,11 +286,11 @@ void AvbdDynamicsContext::refreshArticJointRows()
 			else
 				avbdPushInactiveArticRow(mRows, src, src.parentBody, src.childBody);
 			AvbdRowRef compiled = mRows.back();
-			PxReal startC = 0.0f;
-			if(!(compiled.header().flags & eAVBD_ROW_INACTIVE) &&
-				avbdArticAxis(startParent, startChild, joint, axis,
-					jLinA, jAngA, jLinB, jAngB, startC))
-				compiled.scalar().C0 = compiled.scalar().articFlip ? compiled.scalar().articTarget - startC : startC - compiled.scalar().articTarget;
+            if (!(compiled.header().flags & eAVBD_ROW_INACTIVE) && (src.validStartAxes & (1u << axis)))
+            {
+                const PxReal startC=src.startCoordinate[axis];
+                compiled.scalar().C0 = compiled.scalar().articFlip ? compiled.scalar().articTarget - startC : startC - compiled.scalar().articTarget;
+            }
 		}
 		for(PxU32 axis = 0; axis < PxArticulationAxis::eCOUNT; ++axis)
 		{
@@ -292,7 +301,7 @@ void AvbdDynamicsContext::refreshArticJointRows()
 			if(joint.motion[axis] != PxArticulationMotion::eLOCKED &&
 				drive.driveType != PxArticulationDriveType::eNONE &&
 				drive.stiffness > 0.0f &&
-				avbdArticAxis(parent, child, joint, axis, jLinA, jAngA, jLinB, jAngB, C))
+				avbdArticFrameAxis(frameA, frameB, parent.p, child.p, joint, axis, jLinA, jAngA, jLinB, jAngB, C))
 			{
 				const PxReal err = C - joint.targetP[axis];
 				avbdPushArticRow(mRows, src, src.parentBody, src.childBody,
@@ -596,7 +605,7 @@ bool AvbdDynamicsContext::refreshJointRows(bool beginStep)
 					row.header().flags |= eAVBD_ROW_INACTIVE;
 			}
 			row.scalar().rho = pointLock ? AVBD_POINT_LOCK_PENALTY : state.rho[r];
-			row.scalar().forceWriteback = NULL;
+			row.scalar().reactionOutput = NULL;
 			mRows.pushBack(row);
 		}
 	}

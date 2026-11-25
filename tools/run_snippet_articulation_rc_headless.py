@@ -44,6 +44,8 @@ def run_exe(bin_dir, extra_args, timeout):
     argv = [exe, "--headless"] + extra_args
     env = os.environ.copy()
     env["PHYSX_SNIPPET_HEADLESS"] = "1"
+    if "--solver=avbd" in extra_args:
+        env["PHYSX_AVBD_SCHEDULE_STATS"] = "1"
     proc = subprocess.Popen(
         argv,
         cwd=bin_dir,
@@ -83,6 +85,12 @@ def run_gated(bin_dir, solver, case_name, frames, zero_keys, timeout):
     errors = []
     if timed_out:
         errors.append("timed out")
+    if solver == "avbd":
+        budgets = [parse_fields(line)[0].get("positionBudget") for line in stderr.splitlines()
+                   if line.startswith("[AVBD_SCHEDULE] ")]
+        if len(budgets) != frames or any(value != "4" for value in budgets):
+            errors.append("expected four position iterations budgeted on all %d frames, saw %s" %
+                          (frames, {value: budgets.count(value) for value in set(budgets)}))
     lines = gate_lines(combined)
     fields = {}
     if len(lines) != 1:
@@ -127,6 +135,12 @@ def run_gated(bin_dir, solver, case_name, frames, zero_keys, timeout):
         "[ARTIC_HEADLESS] case=%s solver=%s exit=%s runner=%s"
         % (case_name, solver, code, "PASS" if not errors else "FAIL")
     )
+    if not errors and solver == "avbd" and not os.environ.get("PHYSX_AVBD_SCHEDULE_STATS"):
+        print("[ARTIC_SWEEP_BUDGET] case=%s frames=%d positionBudget=4" % (case_name, len(budgets)))
+        per_frame_stats = ("[AVBD_SCHEDULE]", "[AVBD_STORAGE]", "[AVBD_ROW_STORAGE]",
+                           "[AVBD_ROW_PROGRAM]", "[AVBD_FRAME_STORAGE]", "[AVBD_GROUP_KERNEL]",
+                           "[AVBD_MATERIAL_ASSEMBLY]", "[AVBD_CONTACT_COVERAGE]")
+        combined = stdout + "\n" + "\n".join(s for s in stderr.splitlines() if not s.startswith(per_frame_stats))
     if combined:
         sys.stdout.write(combined.rstrip() + "\n")
     for error in errors:

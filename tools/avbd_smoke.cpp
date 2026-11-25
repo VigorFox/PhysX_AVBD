@@ -6,6 +6,7 @@
 #include "extensions/PxDeformableVolumeExt.h"
 #include "cooking/PxCooking.h"
 #include "cooking/PxTetrahedronMeshDesc.h"
+#include "avbd/DyKernelTable.h"
 #include "avbd_host_access.h"
 
 using namespace physx;
@@ -506,7 +507,10 @@ int main()
 	PxU32 kDevice = PX_MAX_U32;
 	bool kLdlt6 = false;
 	bool kLdlt3 = false;
-	if(!avbdHostKernelTableInfo(scene, &kDevice, &kLdlt6, &kLdlt3) || kDevice != 0 ||
+	const bool hasTable=avbdHostKernelTableInfo(scene,&kDevice,&kLdlt6,&kLdlt3);
+    const char* cpu=kDevice==Dy::DEVICE_SCALAR ? "SCALAR" : (kDevice==Dy::DEVICE_SSE2 ? "SSE2" :
+        (kDevice==Dy::DEVICE_AVX256 ? "AVX256" : NULL));
+    if(!hasTable || !cpu ||
 		!kLdlt6 || !kLdlt3 || !avbdHostKernelLdltSelfCheck())
 	{
 		std::printf("FAIL kernel table device=%u ldlt6=%d ldlt3=%d\n",
@@ -518,7 +522,7 @@ int main()
 		foundation->release();
 		return 1;
 	}
-	std::printf("PASS kernel table device=SCALAR LDLT6 LDLT3\n");
+	std::printf("PASS kernel table device=%s LDLT6 LDLT3\n",cpu);
 
 	PxMaterial* mat = physics->createMaterial(0.5f, 0.5f, 0.0f);
 	PxRigidStatic* ground = PxCreatePlane(*physics, PxPlane(0.0f, 1.0f, 0.0f, 0.0f), *mat);

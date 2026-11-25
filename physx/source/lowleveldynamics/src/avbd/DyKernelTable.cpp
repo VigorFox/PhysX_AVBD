@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "avbd/DyKernelTable.h"
+#include "avbd/DyAvbdPointResponse.h"
 #include "avbd/DyAvbdContactMaterial.h"
+#include "avbd/DyAvbdMaterialAssembly.h"
 #include "avbd/DyAvbdSparseSymmetric.h"
 #include "avbd/DyAvbdLocalResponse.h"
 #include "avbd/DyAvbdBoundedResponse.h"
@@ -21,6 +23,16 @@
 #include "foundation/PxMemory.h"
 #include "foundation/PxMath.h"
 
+#if defined(PX_AVBD_AVX256)
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+namespace physx { namespace Dy { void avbdContactMaterialAvx256(void*); void avbdRankOneAvx256(void*); } }
+#endif
+
 using namespace physx;
 using namespace Dy;
 
@@ -28,6 +40,47 @@ PX_COMPILE_TIME_ASSERT(DEVICE_SCALAR == 0);
 
 namespace
 {
+#if defined(PX_AVBD_AVX256)
+bool avbdUseAvx256()
+{
+    // The cap lets Checked headless exercise the baseline ISA on a newer CPU.
+    const char* cap=std::getenv("PHYSX_AVBD_CPU_ISA");
+    if(cap && std::strcmp(cap,"sse2")==0) return false;
+#if defined(_MSC_VER)
+    int cpu[4];
+    __cpuidex(cpu,1,0);
+    const int avxState=(1<<27)|(1<<28);
+    return (cpu[2]&avxState)==avxState && (_xgetbv(0)&6)==6;
+#else
+    return __builtin_cpu_supports("avx");
+#endif
+}
+#endif
+void launchScalarRankOne(void* data)
+{
+    const auto& a=*static_cast<AvbdRankOneArgs*>(data);
+    avbdAddOuter(a.matrix,a.linear,a.angular,a.scale);
+}
+
+#if PX_X64
+void launchRigidRankOne(void* data)
+{
+    const AvbdRankOneArgs& a=*static_cast<AvbdRankOneArgs*>(data);
+    const PxReal j[6]={a.linear.x,a.linear.y,a.linear.z,a.angular.x,a.angular.y,a.angular.z};
+    const __m128 low=_mm_loadu_ps(j), high=_mm_loadu_ps(j+2);
+    const __m128 middle=_mm_setr_ps(j[4],j[5],j[0],j[1]);
+    for(PxU32 r=0;r<6;r+=2)
+    {
+        const __m128 even=_mm_set1_ps(a.scale*j[r]), odd=_mm_set1_ps(a.scale*j[r+1]);
+        PxReal* x=a.matrix[r]; PxReal* y=a.matrix[r+1];
+        _mm_storeu_ps(x,_mm_add_ps(_mm_loadu_ps(x),_mm_mul_ps(even,low)));
+        const __m128 boundary=_mm_add_ps(_mm_loadu_ps(x+4),_mm_mul_ps(_mm_movelh_ps(even,odd),middle));
+        _mm_storeu_ps(x+4,boundary);
+        _mm_storeu_ps(y+2,_mm_add_ps(_mm_loadu_ps(y+2),_mm_mul_ps(odd,high)));
+    }
+}
+#endif
+
 void launchNodalShell(void* args)
 {auto& a=*static_cast<AvbdNodalShellArgs*>(args);*a.output=avbdSampleNodalShell(*a.rest,a.positions,a.mu,a.lambda,a.bending,a.corner,a.weights,a.work);}
 void launchNodalHingeBatch(void* args)
@@ -50,7 +103,12 @@ void launchNodalVolume(void* args)
 void launchNonlinearBlock(void* args)
 {static_cast<AvbdNonlinearBlockArgs*>(args)->block->solve();}
 void launchLocalNonlinearGroup(void* args)
-{static_cast<AvbdLocalNonlinearGroupArgs*>(args)->group->solve();}
+{
+    auto& a=*static_cast<AvbdLocalNonlinearGroupArgs*>(args);
+    if(a.loop)
+        a.solved=!a.loop->failed.load(std::memory_order_relaxed) && (a.reverse?a.loop->backColumn(a.pivot):a.loop->factorColumn(a.pivot));
+    else a.group->solve();
+}
 void launchNonlinearGroup(void* args)
 {static_cast<AvbdNonlinearGroupArgs*>(args)->group->solve();}
 void launchLocalReduction(void* args)
@@ -131,6 +189,12 @@ void launchElasticFrameMaterial(void* args)
 void launchFrameAssembly(void* args)
 {avbdAssembleFramePacket(*static_cast<AvbdFrameAssemblyArgs*>(args));}
 
+void launchPointResponse(void* args)
+{
+    auto& job = *static_cast<AvbdPointResponseArgs*>(args);
+    job.solved = job.patch->evaluate(job.jacobian, job.response);
+}
+
 void launchLdlt6(void* args)
 {
 	AvbdLdlt6Args* a = static_cast<AvbdLdlt6Args*>(args);
@@ -168,7 +232,8 @@ KernelTable KernelTable::makeAvbdCpuScalar()
     t.bound[AVBD_NODAL_SHELL]=&launchNodalShell;
     t.bound[AVBD_NODAL_HINGE_BATCH]=&launchNodalHingeBatch;
     t.bound[AVBD_MEMBRANE_BATCH]=&launchMembraneBatch;
-    t.bound[AVBD_CONTACT_MATERIAL_BATCH]=&avbdContactMaterialBatch;
+    t.bound[AVBD_CONTACT_MATERIAL_BATCH]=&avbdContactMaterialBatchImpl<contactMaterial::ScalarSpatial>;
+    t.bound[AVBD_RIGID_RANK_ONE]=&launchScalarRankOne;
     t.bound[AVBD_MEMBRANE_PRIMAL]=&launchMembranePrimal;
     t.bound[AVBD_NODAL_VOLUME]=&launchNodalVolume;
     t.bound[AVBD_NODAL_SOLVE3]=&launchNodalSolve3;
@@ -192,11 +257,34 @@ KernelTable KernelTable::makeAvbdCpuScalar()
     t.bound[AVBD_ELASTIC_FRAME_MATERIAL] = &launchElasticFrameMaterial;
     t.bound[AVBD_ELASTIC_FRAME_BATCH] = &launchFrameAssembly;
 	t.bound[AVBD_LDLT6] = &launchLdlt6;
+    t.bound[AVBD_POINT_RESPONSE] = &launchPointResponse;
 	t.bound[AVBD_LDLT3] = &launchLdlt3;
 	t.bound[AVBD_TRIANGLE_DOMAIN] = &launchTriangleDomain;
 	t.bound[AVBD_CONTACT_FRAME] = &launchContactFrame;
 	t.bound[AVBD_TRIANGLE_DOMAIN_SCREEN] = &launchTriangleDomainScreen;
 	return t;
+}
+
+KernelTable KernelTable::makeAvbdCpu()
+{
+    KernelTable t=makeAvbdCpuScalar();
+#if PX_X64
+    t.device=DEVICE_SSE2;
+    t.bound[AVBD_CONTACT_MATERIAL_BATCH]=&avbdContactMaterialBatch;
+    t.bound[AVBD_RIGID_RANK_ONE]=&launchRigidRankOne;
+#if defined(PX_AVBD_AVX256)
+    const bool wide=avbdUseAvx256();
+    if(std::getenv("PHYSX_AVBD_MATERIAL_STATS"))
+        std::fprintf(stderr,"[AVBD_CPU_KERNELS] rigidRankOne=%s contactMaterial=%s\n",wide?"avx256":"sse2",wide?"avx256":"sse2");
+    if(wide)
+    {
+        t.device=DEVICE_AVX256;
+        t.bound[AVBD_CONTACT_MATERIAL_BATCH]=&avbdContactMaterialAvx256;
+        t.bound[AVBD_RIGID_RANK_ONE]=&avbdRankOneAvx256;
+    }
+#endif
+#endif
+    return t;
 }
 
 bool Dy::avbdKernelLdltSelfCheck()

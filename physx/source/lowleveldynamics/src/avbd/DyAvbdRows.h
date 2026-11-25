@@ -129,7 +129,9 @@ struct AvbdScalarRowPayload
 	// NULL for contacts and solverPrep rows.
 	const ArticulationJointCore* articJoint;
 	PxReal articTarget;
-	PxReal* forceWriteback;
+	// Rigid NP prefix publishes a point impulse (N s). An attachment
+    // suffix binds its own persistent force coordinate (N).
+    PxReal* reactionOutput;
 };
 
 // Short-lived views never escape a synchronous solve/preparation operation.

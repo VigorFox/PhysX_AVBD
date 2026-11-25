@@ -4,6 +4,9 @@
 
 #include "avbd/DyAvbdBoundedResponse.h"
 #include "avbd/DyAvbdDynamics.h"
+#include "DyAvbdRigidLoop.h"
+#include "DyAvbdPointResponse.h"
+#include "DyAvbdNonlinearGroup.h"
 #include "avbd/DyAvbdColoring.h"
 #include "CmTask.h"
 #include "task/PxCpuDispatcher.h"
@@ -96,6 +99,21 @@ class AvbdAdvanceTask : public PxLightCpuTask, public PxUserAllocated
 		}
 	}
 };
+class AvbdReadyTask : public Cm::Task, public PxUserAllocated
+{
+    AvbdDynamicsContext& context;
+    PxU32 root=0,first=0,end=0;
+public:
+    AvbdReadyTask(AvbdDynamicsContext& ctx,PxU64 id):Cm::Task(id),context(ctx){}
+    void submit(AvbdAdvanceTask& join,PxU32 r,PxU32 a,PxU32 b)
+    {
+        root=r;first=a;end=b;mTm=join.getTaskManager();mCont=&join;
+        mTm->getCpuDispatcher()->submitTask(*this);
+    }
+    void runInternal() PX_OVERRIDE
+    {if(root==PX_MAX_U32)context.runReadySeed(first,end,true);else context.runReadySiblings(root,first);}
+    const char* getName() const PX_OVERRIDE {return "AVBD.sparseBranch";}
+};
 class AvbdBlockSolveTask : public Cm::Task, public PxUserAllocated
 {
 	AvbdDynamicsContext &mContext;
@@ -147,7 +165,7 @@ AvbdDynamicsContext::AvbdDynamicsContext(PxcNpMemBlockPool* memBlockPool,
 	, mIterations(AVBD_ITERS_CONTACT)
 	, mLengthScale(lengthScale)
 	, mGravity(0.0f)
-	, mKernels(KernelTable::makeAvbdCpuScalar())
+	, mKernels(KernelTable::makeAvbdCpu())
 {
 	mOgc.contactRadius = 0.04f * lengthScale;
 	mOgc.contactStiffness = 1.0e5f;
@@ -157,6 +175,8 @@ AvbdDynamicsContext::AvbdDynamicsContext(PxcNpMemBlockPool* memBlockPool,
 
 AvbdDynamicsContext::~AvbdDynamicsContext()
 {
+    for(auto* task:mReadyTasks)PX_DELETE(task);
+    for(auto* loop:mLoopScratch)PX_DELETE(loop);
     PX_DELETE(mLocalWork);
     PX_DELETE(mColorTasks);
     PX_DELETE(mWideNomination);
@@ -879,10 +899,13 @@ void AvbdDynamicsContext::solveIncidenceContact(PxU32 first)
     }
 }
 
+#include "DyAvbdRigidLoopSchedule.inl"
+
 void AvbdDynamicsContext::compileBlockColors()
 {
     const PxU64 profileStart=mStep.profile?PxTime::getCurrentCounterValue():0;
 	AvbdBlockColoring graph;
+    mLoopColors.clear();mLoopCursor=0;
     if(compileIncidencePrimal())return;
 	PxArray<PxU8> writable(mBlocks.size(), 0);
 	PxArray<PxU32> order;
@@ -938,13 +961,15 @@ void AvbdDynamicsContext::compileBlockColors()
     mRigidGroups.clear();mRigidGroupRoots.clear();mRigidGroupRows.clear();mRigidGroupSharedRows.clear();mRigidGroupFactorOffsets.clear();
     mRigidGroupFactorOffsets.pushBack(0);
     bool grouped=false;
-    if(!mTetrahedronMaterials.empty() || !mElasticFrameMaterials.empty())
+    const bool rigidJoints=!mStep.commonProgram && !mStep.localBudget && !mStep.hasParticleBlocks &&
+        mTetrahedronMaterials.empty() && mElasticFrameMaterials.empty() && (!mJoints.empty() || !mArticJoints.empty());
+    if(rigidJoints || !mTetrahedronMaterials.empty() || !mElasticFrameMaterials.empty())
     {
         mRigidGroups.resize(mBodies.size());mRigidGroupRoots.resize(mBodies.size());
         for(PxU32 i=0;i<mBodies.size();++i)
         { mRigidGroupRoots[i]=i;AvbdRigidGroup g={};g.blocks[0]=i;g.count=1;mRigidGroups[i]=g; }
         PxArray<PxU8> assigned(mBodies.size(),0);
-        PxArray<PxU32> scores(mStep.localBudget?mBodies.size():0,0);
+        PxArray<PxU32> scores((mStep.localBudget || rigidJoints)?mBodies.size():0,0);
         PxArray<double> frameStrength(mStep.localBudget?mBodies.size():0,0);
         if(mStep.localBudget)for(const auto& row:mRows)
             if(row.header().kernelId==eAVBD_ROW_KERNEL_ELASTIC_FRAME && !(row.header().flags&eAVBD_ROW_INACTIVE))
@@ -963,7 +988,7 @@ void AvbdDynamicsContext::compileBlockColors()
             const PxU32 kernel=row.header().kernelId;
             const PxU32 phase=kernel==eAVBD_ROW_KERNEL_NP_CONTACT?0:1;
             if(phase==0?!mStep.localBudget:
-                ((kernel!=eAVBD_ROW_KERNEL_TETRAHEDRON && kernel!=eAVBD_ROW_KERNEL_ELASTIC_FRAME) ||
+                ((kernel!=eAVBD_ROW_KERNEL_TETRAHEDRON && kernel!=eAVBD_ROW_KERNEL_ELASTIC_FRAME && !(rigidJoints && isLoopEquality(row))) ||
                     (row.header().flags&eAVBD_ROW_INACTIVE)))continue;
             PxU32 count=0;mRowProgram.forEachBlock(r,[&](PxU32 b){count+=b<mBodies.size() && writable[b];});
             if(count>=2 && count<=4)seeds[phase][count-2].pushBack(r);
@@ -997,17 +1022,17 @@ void AvbdDynamicsContext::compileBlockColors()
             }
             PxU32 references=0;
             for(PxU32 s=0;s<group.count;++s)references+=mRowProgram.blockOffsets[group.blocks[s]+1]-mRowProgram.blockOffsets[group.blocks[s]];
-            if(mStep.localBudget && references>256)continue;
+            if((mStep.localBudget || rigidJoints) && references>256)continue;
             // Grow bounded frame groups by internal adjacency, not geometry
             // or body class. Prefer a candidate joining several current nodes.
-            while(mStep.localBudget && group.count<((group.blocks[0]<mLocalTranslationClosed.size() && mLocalTranslationClosed[group.blocks[0]])?16u:4u))
+            while((mStep.localBudget || rigidJoints) && group.count<((group.blocks[0]<mLocalTranslationClosed.size() && mLocalTranslationClosed[group.blocks[0]])?16u:4u))
             {
                 PxInlineArray<PxU32,256> candidates;
                 for(PxU32 s=0;s<group.count;++s)
                     for(PxU32 slot=mRowProgram.blockOffsets[group.blocks[s]];slot<mRowProgram.blockOffsets[group.blocks[s]+1];++slot)
                     {
                         const auto& link=mRows[mRowProgram.blockRows[slot]];
-                        if(link.header().kernelId!=eAVBD_ROW_KERNEL_ELASTIC_FRAME || (link.header().flags&eAVBD_ROW_INACTIVE))continue;
+                        if((link.header().kernelId!=eAVBD_ROW_KERNEL_ELASTIC_FRAME && !(rigidJoints && isLoopEquality(link))) || (link.header().flags&eAVBD_ROW_INACTIVE))continue;
                         const PxU32 other=link.header().bodyA==group.blocks[s]?link.header().bodyB:link.header().bodyA;
                         if(other>=mBodies.size() || !writable[other] || assigned[other])continue;
                         bool inside=false;for(PxU32 k=0;k<group.count;++k)inside |= group.blocks[k]==other;
@@ -1025,6 +1050,7 @@ void AvbdDynamicsContext::compileBlockColors()
             { assigned[group.blocks[s]]=1;mRigidGroupRoots[group.blocks[s]]=root;mRigidGroups[group.blocks[s]].count=0; }
             mRigidGroups[root]=group;grouped=true;
         }
+        if(rigidJoints)grouped=compileRigidLoops(writable,seedRows,scores);
         for(PxU32 i=0;i<mRigidGroups.size();++i)
         {
             AvbdRigidGroup& group=mRigidGroups[i];if(group.count<2) continue;
@@ -1055,6 +1081,7 @@ void AvbdDynamicsContext::compileBlockColors()
             }
             group.rowCount=mRigidGroupRows.size()-group.rowStart;
             group.sharedCount=mRigidGroupSharedRows.size()-group.sharedStart;
+            if(group.leafCount)bindRigidLoopRows(i,scores);
         }
     }
     if(mStep.localBudget && std::getenv("PHYSX_AVBD_GROUP_TRACE"))
@@ -1118,11 +1145,20 @@ void AvbdDynamicsContext::compileBlockColors()
     }
 	// The finite policy preserves read/write conflicts, not the historical
 	// hard-joint visitation order. A grid must not become a serial wavefront.
-    const bool independentOrder=mStep.localBudget || (!mStep.hasParticleBlocks && mJoints.empty() && mArticJoints.empty());
+    const bool pointNetwork = rigidJoints && !grouped && pointContactProgram(jointPrograms);
+    if (pointNetwork && mStep.iteration == 0)
+    {
+        mStep.iterationLimit = mStep.minimumJointIterations = PxMax(4u, mStep.rigidPositionBudget);
+        mStep.pointInterfaceEnd = mNpContactRowCount;
+    }
+    const bool independentOrder=pointNetwork || mStep.localBudget || (!mStep.hasParticleBlocks && mJoints.empty() && mArticJoints.empty());
 	graph.build(order, mBlocks.size(), mColorOffsets, mColorBlocks,
         independentOrder?order.size():reorderableCount);
     if(mStep.profile)mStep.colorTicks+=PxTime::getCurrentCounterValue()-profileStart;
+    if(rigidJoints && grouped)bakeLoopWaves();
 }
+
+#include "DyAvbdPointResponse.inl"
 
 void AvbdDynamicsContext::preparePrimalSweep()
 {
@@ -1268,6 +1304,8 @@ void AvbdDynamicsContext::solveLocalBatch(PxU32 begin,PxU32 end,PxU32 stage,PxU3
     }
     if(mStep.countNodalSolves)PxAtomicMax(&mPeakPrimalTasks,PxAtomicIncrement(&mActivePrimalTasks));
     if(stage==SurfacePackStage)packSurfaceRows(begin,end);
+    else if(stage==PointInterfaceStage)
+        for(PxU32 i=begin;i<end;++i)conditionPointInterface(i);
     else if(stage==WarmCheckStage)for(PxU32 i=begin;i<end;++i)checkWarmRows(i);
     else if(stage==NodalImpactStage)for(PxU32 i=begin;i<end;++i)seedNodalImpact(mNodalImpactRows[i]);
     else if(stage==IncidenceHistoryStage)for(PxU32 i=begin;i<end;++i)prepareIncidenceHistory(i);
@@ -2035,7 +2073,7 @@ void AvbdDynamicsContext::compileNodalVolumeRows()
                 if(!(mobility>0)) { PxAtomicExchange(&mLocalDomainFailed,1); return; }
                 law.rho=1/(mDt*mDt*mobility);
                 law.lambda=-point.force[axis];
-                law.forceWriteback=&point.force[axis];
+                law.reactionOutput=&point.force[axis];
                 law.minLambda=-PX_MAX_REAL; law.maxLambda=PX_MAX_REAL;
                 mRows.pushBack(row);
             }
@@ -2609,6 +2647,7 @@ void AvbdDynamicsContext::solvePrimalBlock(PxU32 blockIndex)
 	{
         if(block.objectIndex<mRigidGroups.size() && mRigidGroups[block.objectIndex].count>1)
         {
+            if(mRigidGroups[block.objectIndex].leafCount){solveLoopGroup(block.objectIndex,invH2);return;}
             if(mStep.localBudget){solveLocalRigidGroup(block.objectIndex,invH2);return;}
             const AvbdRigidGroup& group=mRigidGroups[block.objectIndex];
             if(solvePrimalRigidGroup(block.objectIndex,invH2)) return;
@@ -3264,6 +3303,7 @@ void AvbdDynamicsContext::update(Cm::FlushPool& /*flushPool*/,
 	const PxU32 articCount = islandSim.getNbActiveNodes(IG::Node::eARTICULATION_TYPE);
 	const PxU32 contactCount = islandSim.getNbActiveEdges(IG::Edge::eCONTACT_MANAGER);
 
+	PxU32 rigidPositionBudget = 1;
 	if(bodyCount == 0 && articCount == 0 && !mStep.hasParticleBlocks)
 		return;
 
@@ -3297,6 +3337,8 @@ void AvbdDynamicsContext::update(Cm::FlushPool& /*flushPool*/,
 			if(!mBodyCoreArray[i] || !mRigidBodyArray[i])
 				continue;
 			initSolverBody(mBodies[i], *mBodyCoreArray[i], mRigidBodyArray[i], gravity, h);
+			if(avbdBodyResponds(mBodies[i]))
+				rigidPositionBudget = PxMax(rigidPositionBudget, PxU32(mBodyCoreArray[i]->solverIterationCounts & 0xff));
 		}
 		// Active kinematics are not dynamic island nodes. Retain them as
 		// read-only endpoints so NP and solverPrep do not freeze world anchors.
@@ -3352,7 +3394,11 @@ void AvbdDynamicsContext::update(Cm::FlushPool& /*flushPool*/,
 	if(!mJoints.empty())
 		refreshJointRows(true);
     markPrepare(3);
+	mStep.rigidPositionBudget = rigidPositionBudget;
 	mIterations = AVBD_ITERS_CONTACT;
+	// A pure rigid program shares a sweep across all its responsive bodies.
+	if(!mStep.commonProgram && !mStep.hasParticleBlocks && mJoints.empty() && !articCount)
+		mIterations = rigidPositionBudget;
 	if(mJoints.size())
 		mIterations = AVBD_ITERS_JOINT;
 	if(mArticJoints.size())
@@ -3644,6 +3690,11 @@ void AvbdDynamicsContext::advancePrimal()
             mStep.localCursor=mColorOffsets.empty()?0:localColorStart(mStep.nextColor);mStep.dualCursor=0;
 			mStep.sweepPrepared = true;
 		}
+        while (mStep.pointInterfaceCursor < mStep.pointInterfaceEnd)
+            if (!dispatchRowRanges(PointInterfaceStage, mStep.pointInterfaceCursor, mStep.pointInterfaceEnd, 8))
+                return;
+        if (mLocalDomainFailed)
+            break;
         if(mStep.boundedCommon)
         {
             // A pending wave is joined before any program/candidate state changes.
@@ -3688,6 +3739,24 @@ void AvbdDynamicsContext::advancePrimal()
 		while (mStep.nextColor + 1 < mColorOffsets.size())
 		{
 			const PxU32 begin = mColorOffsets[mStep.nextColor], end = mColorOffsets[mStep.nextColor + 1];
+            const auto color=mStep.nextColor;
+            if(color+1<mLoopColors.size() && mLoopColors[color]<mLoopColors[color+1])
+            {
+                const auto start=mLoopColors[color],stop=mLoopColors[color+1];
+                while(start+mLoopCursor<stop)
+                {
+                    const auto& w=mLoopWaves[start+mLoopCursor++];
+                    if(!dispatchReadyWave(w))return;
+                }
+                if(mLocalDomainFailed)break;
+                for (PxU32 i = mLoopOwnerOffsets[color]; i < mLoopOwnerOffsets[color + 1]; ++i)
+                {
+                    const PxU32 root = mLoopOwners[i];
+                    if (!mLoopScratch[mRigidGroups[root].loopSlot]->wholeLoopJob)
+                        solvePrimalBlock(root);
+                }
+                mLoopCursor=0;++mStep.nextColor;continue;
+            }
 			++mStep.nextColor;
 			// Batch independent blocks to amortize dispatcher overhead. Workers claim
 			// blocks dynamically because equal block counts need not mean equal work.
@@ -3726,6 +3795,7 @@ void AvbdDynamicsContext::advancePrimal()
 		mStep.lastCoupledDomainStationary = coupledDomainStationary;
 		const bool jointTopologyChanged = refreshJointRows();
 		applyDual();
+		++mStep.rigidDualSweeps;
 		if (mStep.useJointChebyshev && mStep.iteration >= 2)
 		{
 			const PxReal rhoSq = AVBD_JOINT_CHEBYSHEV_RHO * AVBD_JOINT_CHEBYSHEV_RHO;
@@ -3866,8 +3936,12 @@ void AvbdDynamicsContext::finishStep()
 		writeJointConstraintWriteback();
 		if(mStep.commonProgram)
 		{
-			for(auto row:mRows)if(row.hasScalar() && row.scalar().forceWriteback)*row.scalar().forceWriteback=0;
-			for(auto row:mRows)if(row.hasScalar() && row.scalar().forceWriteback)*row.scalar().forceWriteback-=row.scalar().lambda;
+            for(PxU32 i=mNpContactRowCount;i<mRows.size();++i)
+            {
+                const auto row=mRows[i];
+                if(row.hasScalar() && row.scalar().reactionOutput)
+                    *row.scalar().reactionOutput=-row.scalar().lambda;
+            }
 		}
 		if (mStep.hasParticleBlocks)
 			prepareDeformableVelocities(mDt);
@@ -3880,6 +3954,7 @@ void AvbdDynamicsContext::finishStep()
         mStep.materialPending=false;
     }
 	applyHeterogeneousContactMaterial();
+    publishNpContactImpulses();
 	traceLocalMomentum("velocity",true);
 	finalizeRigidBodies(mDt);
 	if (mStep.hasParticleBlocks)
@@ -4007,9 +4082,9 @@ complete:
 		for (PxU32 c = 0; c + 1 < mColorOffsets.size(); ++c)
 			width = PxMax(width, mColorOffsets[c + 1] - mColorOffsets[c]);
 		std::fprintf(stderr,
-		             "[AVBD_SCHEDULE] blocks=%u colors=%u maxWidth=%u tasks=%u peakTasks=%d workers=%u idleSkips=%u\n",
+		             "[AVBD_SCHEDULE] blocks=%u colors=%u maxWidth=%u tasks=%u peakTasks=%d workers=%u idleSkips=%u positionBudget=%u rigidDualSweeps=%u\n",
 		             mColorBlocks.size(), mColorOffsets.empty() ? 0 : mColorOffsets.size() - 1, width,
-		             mStep.submittedTasks, int(mPeakPrimalTasks), mStep.workers,idleSkips);
+		             mStep.submittedTasks, int(mPeakPrimalTasks), mStep.workers,idleSkips,mStep.iterationLimit,mStep.rigidDualSweeps);
 		std::fprintf(stderr,"[AVBD_STORAGE] bodies=%u rows=%u joints=%u bodyBytes=%llu rowBytes=%llu jointBytes=%llu rowStride=%llu supports=%u triangleDomains=%u trianglePoints=%u volumeCaches=%u surfaceCaches=%u softPairContacts=%u\n",
 			mBodies.size(),mRows.size(),mJoints.size(),static_cast<unsigned long long>(PxU64(mBodies.size())*sizeof(AvbdSolverBody)),
 			static_cast<unsigned long long>(mRows.bytes()),static_cast<unsigned long long>(PxU64(mJoints.size())*sizeof(AvbdJointSrc)+PxU64(mJointStates.size())*sizeof(AvbdJointState)),
@@ -4083,7 +4158,7 @@ void AvbdDynamicsContext::applyHeterogeneousContactMaterial()
 {
     // Budget contacts already own Coulomb in the shared primal/dual.
     // The legacy velocity material pass would apply it a second time.
-    if(mStep.localBudget)return;
+    if(mStep.localBudget || mRows.size()==mNpContactRowCount)return;
 	if(mBlocks.empty())
 		return;
 

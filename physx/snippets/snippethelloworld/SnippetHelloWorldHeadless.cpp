@@ -376,6 +376,7 @@ static PxReal gLockedAxisSpeed[eHELLO_LOCK_WITNESS_COUNT] = {};
 static PxReal gControlAxisMotion[eHELLO_LOCK_WITNESS_COUNT] = {};
 static PxReal gControlAxisSpeed[eHELLO_LOCK_WITNESS_COUNT] = {};
 static std::string gPoseLogPath;
+static PxU32 gPositionIterations = 0;
 static FILE* gPoseLog = NULL;
 static PxReal gPoseMaxPen = 0.0f;
 static PxU32 gPoseMaxPenFrame = 0;
@@ -733,6 +734,17 @@ static void setActorContactOffset(PxRigidActor* actor, PxReal offset)
 		shapes[i]->setContactOffset(offset);
 }
 
+static void addHeadlessBody(PxRigidDynamic& body)
+{
+	if(gPositionIterations)
+	{
+		PxU32 positionIterations, velocityIterations;
+		body.getSolverIterationCounts(positionIterations, velocityIterations);
+		body.setSolverIterationCounts(gPositionIterations, velocityIterations);
+	}
+	gScene->addActor(body);
+}
+
 static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geometry,
 	const PxVec3& velocity = PxVec3(0), PxU32 filterWord0 = 0)
 {
@@ -743,7 +755,7 @@ static PxRigidDynamic* createDynamic(const PxTransform& t, const PxGeometry& geo
 	dynamic->setLinearVelocity(velocity);
 	if(filterWord0)
 		setFilterWord(dynamic, filterWord0);
-	gScene->addActor(*dynamic);
+	addHeadlessBody(*dynamic);
 	return dynamic;
 }
 
@@ -774,7 +786,7 @@ static void createStack(const PxTransform& t, PxU32 size, PxReal halfExtent, boo
 				gInitializationFailed = true;
 				continue;
 			}
-			gScene->addActor(*body);
+			addHeadlessBody(*body);
 			BoxRecord rec;
 			rec.body = body;
 			rec.target = targetStack;
@@ -2469,6 +2481,7 @@ int snippetHelloWorldHeadlessMain(int argc, const char* const* argv)
 	if(!Snippets::parseCommonHeadlessOptions(argc, argv, defaults, options, parseError))
 		return reportConfigurationError(options, parseError.c_str());
 
+	gPositionIterations = 0;
 	bool legacyBallShotSeen = false;
 	bool caseSeen = false;
 	for(int i = 1; i < argc; ++i)
@@ -2481,6 +2494,12 @@ int snippetHelloWorldHeadlessMain(int argc, const char* const* argv)
 			if(Snippets::hasOptionPrefix(arg, "--case=") ||
 				Snippets::hasOptionPrefix(arg, "--scenario="))
 				caseSeen = true;
+			continue;
+		}
+		if(Snippets::hasOptionPrefix(arg, "--position-iters="))
+		{
+			if(gPositionIterations || !Snippets::parseU32(arg + std::strlen("--position-iters="), 1, 255, gPositionIterations))
+				return reportConfigurationError(options, "invalid_--position-iters");
 			continue;
 		}
 		if(Snippets::hasOptionPrefix(arg, "--pose-log="))

@@ -38,6 +38,8 @@ namespace Dy
 
 struct Constraint;
 class AvbdAdvanceTask;
+class AvbdReadyTask;
+struct AvbdRigidLoop;
 class AvbdBlockSolveTask;
 class AvbdColorLane;
 struct AvbdCommonProgram;
@@ -119,7 +121,9 @@ struct AvbdRigidGroupRow
 };
 struct AvbdRigidGroup
 {
-    PxU32 blocks[16],count,rowStart,rowCount,sharedStart,sharedCount;
+    PxU8 leafCount,cuts[9];
+    PxU32 loopSlot;
+    PxU32 blocks[32],count,rowStart,rowCount,sharedStart,sharedCount;
     // Written only by this colored group's task; read after the task barrier.
     PxU32 attempts,unsupported,kernelSolved,accepted,products;
     PxU32 frictionAttempts,frictionAccepted,sharedContactAttempts,sharedContactAccepted;
@@ -211,6 +215,9 @@ struct AvbdArticJointSrc
 	PxU32 parentBody;
 	PxU32 childBody;
 	PxU32 nbRows;
+    // DCD coordinates are immutable across the step, including axes whose limit activates later.
+    PxReal startCoordinate[PxArticulationAxis::eCOUNT];
+    PxU32 validStartAxes;
 	PxReal lambda[AVBD_MAX_ARTIC_ROWS];
 	PxReal rho[AVBD_MAX_ARTIC_ROWS];
 };
@@ -366,12 +373,16 @@ public:
 
 private:
 	friend class AvbdBlockSolveTask;
+    friend class AvbdReadyTask;
     friend class AvbdColorLane;
 	friend class AvbdAdvanceTask;
 	void compileBlockColors();
 	void advancePrimal();
 	void finishStep();
-	void preparePrimalSweep();
+	bool pointContactProgram(const PxArray<PxU8>& jointPrograms) const;
+    bool pointEndpointCompliance(PxU32 center, const PxVec3& arm, const PxVec3& normal, PxReal& value, bool& coupled);
+    void conditionPointInterface(PxU32 index);
+    void preparePrimalSweep();
 	void solvePrimalBatch();
     void solveLocalBatch(PxU32 begin,PxU32 end,PxU32 stage,PxU32 slot);
     bool dispatchLocalBatch(PxU32 stage);
@@ -468,7 +479,7 @@ private:
     PxArray<ContactPacket> mIncidencePackets;
     PxArray<const AvbdMembranePacket*> mIncidenceFacePackets;
     void solveIncidenceContact(PxU32 row);
-    enum { NodalMatchStage=4, NodalLoadStage=5, IncidenceHistoryStage=6, NodalImpactStage=7, WarmCheckStage=8, SurfacePackStage=9, MaterialSolveStage=10, MaterialResidualStage=11, MaterialIslandStage=12, LocalStageCount=13 };
+    enum { NodalMatchStage=4, NodalLoadStage=5, IncidenceHistoryStage=6, NodalImpactStage=7, WarmCheckStage=8, SurfacePackStage=9, MaterialSolveStage=10, MaterialResidualStage=11, MaterialIslandStage=12, PointInterfaceStage=13, LocalStageCount=14 };
     AvbdNodalShellSampleT<AvbdNodalReal> sampleNodalRow(PxU32 row,PxU32 block,const PxVec3* candidate=NULL,
         PxU32 peer=PX_MAX_U32,const PxVec3* peerCandidate=NULL,AvbdNodalWorkT<AvbdNodalReal>* work=NULL,
         AvbdNodalPlaneRange* plane=NULL,AvbdNodalTrialVertices* vertices=NULL);
@@ -515,7 +526,7 @@ private:
 	PxReal solvePrimalRigidBlock(PxU32 i, PxReal invH2);
 	void applyDual();
     void applyDualRange(PxU32 begin,PxU32 end);
-	void prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& materialBody);
+	void prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& materialBody,PxU32 materialEnd);
 	void applyHeterogeneousContactMaterial();
 	void seedAnchoredJointReactions();
 	void writeJointDualState();
@@ -550,6 +561,25 @@ private:
     PxArray<AvbdTetrahedronMaterial> mTetrahedronMaterials;
     AvbdElasticFrameMaterials mElasticFrameMaterials;
     PxArray<AvbdRigidGroup> mRigidGroups;
+    PxArray<AvbdRigidLoop*> mLoopScratch;
+    void solveLoopGroup(PxU32 root,PxReal invH2);
+    struct LoopJob {PxU32 root,pivot;};
+    PxArray<LoopJob> mLoopJobs;
+    PxArray<PxU32> mLoopOwners;
+    struct LoopWave {PxU32 count,start[32],end[32],beginOwner,endOwner,forks;};
+    PxArray<AvbdReadyTask*> mReadyTasks;
+    bool dispatchReadyWave(const LoopWave& w);
+    void runReadySeed(unsigned first,unsigned end,bool parallel);
+    void runReadyBack(unsigned root,unsigned i,bool parallel);
+    void runReadySiblings(unsigned root,unsigned pivot);
+    void prepareBackTrial(unsigned root,unsigned i);
+    PxArray<LoopWave> mLoopWaves;
+    PxArray<PxU32> mLoopColors,mLoopOwnerOffsets;
+    PxU32 mLoopCursor=0;
+    void bakeLoopWaves();
+    void sampleLoopRows(PxU32 root,PxU32 pivot);
+    bool compileRigidLoops(const PxArray<PxU8>& writable,const PxArray<PxU32>& seedRows,PxArray<PxU32>& scores);
+    void bindRigidLoopRows(PxU32 root,const PxArray<PxU32>& memberIndex);
     PxArray<PxU8> mLocalTranslationClosed; // Step-local numerical chart, derived from complete row supports.
     PxArray<PxU32> mRigidGroupRoots,mRigidGroupSharedRows;
     PxArray<PxU32> mRigidGroupFactorOffsets;
@@ -564,15 +594,16 @@ private:
 	PxArray<AvbdJointState> mJointStates;
 	PxArray<AvbdArticJointSrc> mArticJoints;
 	PxArray<AvbdContactWarm> mContactWarm;
+    struct NpImpulseOutput { PxReal* impulses; PxU32 count; };
+    PxArray<NpImpulseOutput> mNpImpulseOutputs;
 	PxArray<PxU8> mMaterialBodyScratch;
 	PxArray<PxU8> mMaterialIncidentScratch;
-	PxArray<PxU8> mMaterialTangentBodyScratch;
 	PxArray<PxU32> mMaterialComponentParentScratch;
-	PxArray<PxU8> mMaterialJointComponentScratch;
 	PxArray<AvbdMaterialRow> mMaterialRowsScratch;
     AvbdContactMaterial mContactMaterial;
     bool advanceContactMaterial();
     void publishContactMaterial();
+    void publishNpContactImpulses();
     PxArray<AvbdFixedReaction> mFixedReactions;
     PxArray<PxU32> mReleasedRigidBodies;
 	AvbdRowProgram mRowProgram;
@@ -678,7 +709,8 @@ private:
         PxI64 localPrimalPointVisits=0;
         PxI32 localTransportedProofs=0;
         PxI32 localReselectedProofs=0;
-		bool materialPending = false;
+        PxU32 rigidPositionBudget = 1, rigidDualSweeps = 0, pointInterfaceCursor = 0, pointInterfaceEnd = 0;
+        bool materialPending = false;
         bool useJointChebyshev = false, requiresDomainClosure = false, heterogeneousConverged = false;
 		bool contactJointConverged = false, lastCoupledDomainStationary = false, sweepPrepared = false;
 	};

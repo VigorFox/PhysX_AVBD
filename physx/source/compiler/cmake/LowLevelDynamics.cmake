@@ -37,6 +37,20 @@ include(${PHYSX_ROOT_DIR}/${PROJECT_CMAKE_FILES_DIR}/${TARGET_BUILD_PLATFORM}/Lo
 
 SET(LLDYNAMICS_BASE_DIR ${PHYSX_ROOT_DIR}/source/lowleveldynamics)
 
+# Only this translation unit may issue 256-bit instructions. The kernel table
+# and the rest of the SDK must remain executable on baseline x86-64 systems.
+IF((MSVC AND (CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64" OR CMAKE_GENERATOR_PLATFORM STREQUAL "x64")) OR
+   (NOT MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "arm"))
+    SET(AVBD_CONTACT_AVX_SOURCE ${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdContactAvx256.cpp)
+    SET_PROPERTY(SOURCE ${LLDYNAMICS_BASE_DIR}/src/avbd/DyKernelTable.cpp APPEND PROPERTY COMPILE_DEFINITIONS PX_AVBD_AVX256)
+    # Both kernels use AVX floating-point arithmetic. Keep unrelated FMA/BMI instructions optional.
+    IF(MSVC)
+        SET_PROPERTY(SOURCE ${AVBD_CONTACT_AVX_SOURCE} APPEND PROPERTY COMPILE_OPTIONS /arch:AVX)
+    ELSE()
+        SET_PROPERTY(SOURCE ${AVBD_CONTACT_AVX_SOURCE} APPEND PROPERTY COMPILE_OPTIONS -mavx -mno-fma)
+    ENDIF()
+ENDIF()
+
 SET(LLDYNAMICS_INCLUDES
 	${LLDYNAMICS_BASE_DIR}/include/DyArticulationCore.h
 	${LLDYNAMICS_BASE_DIR}/include/DyVArticulation.h
@@ -129,6 +143,11 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/DySleep.h
 	${LLDYNAMICS_BASE_DIR}/src/DySleep.cpp
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdDynamics.h
+	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdRigidLoop.h
+	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdPointResponse.h
+	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdPointResponse.inl
+	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdRigidLoopSchedule.inl
+	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdRigidLoopSolve.inl
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdColoring.h
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdRowProgram.h
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdTetrahedron.h
@@ -148,6 +167,7 @@ SET(LLDYNAMICS_SOURCE
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyAvbdKernelsScalar.h
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyKernelTable.h
 	${LLDYNAMICS_BASE_DIR}/src/avbd/DyKernelTable.cpp
+    ${AVBD_CONTACT_AVX_SOURCE}
 )
 SOURCE_GROUP("src" FILES ${LLDYNAMICS_SOURCE})
 

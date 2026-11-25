@@ -24,6 +24,51 @@ struct Modify:PxContactModifyCallback
 static PxFilterFlags filter(PxFilterObjectAttributes,PxFilterData,PxFilterObjectAttributes,
     PxFilterData,PxPairFlags& flags,const void*,PxU32)
 { flags=PxPairFlag::eCONTACT_DEFAULT|PxPairFlag::eMODIFY_CONTACTS;return PxFilterFlag::eDEFAULT; }
+
+static bool slidingLoad(PxPhysics& physics,PxCpuDispatcher& dispatcher)
+{
+    const PxReal mu=0.5f,dt=1.0f/60.0f;
+    PxSceneDesc desc(physics.getTolerancesScale());
+    desc.gravity=PxVec3(0,-9.81f,0);
+    desc.solverType=PxSolverType::eAVBD;
+    desc.cpuDispatcher=&dispatcher;
+    desc.filterShader=PxDefaultSimulationFilterShader;
+    PxScene* scene=physics.createScene(desc);
+    PxMaterial* material=physics.createMaterial(mu,mu,0);
+    PxRigidStatic* ground=PxCreatePlane(physics,PxPlane(0,1,0,0),*material);
+    PxRigidDynamic* box=PxCreateDynamic(physics,PxTransform(PxVec3(0,.5f,0)),PxBoxGeometry(.5f,.5f,.5f),*material,10.f);
+    scene->addActor(*ground);
+    box->setSolverIterationCounts(4,1);
+    box->setLinearDamping(0);
+    box->setAngularDamping(0);
+    box->setSleepThreshold(0);
+    box->setRigidDynamicLockFlags(PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+        PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y | PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z);
+    scene->addActor(*box);
+    double normal=0,tangent=0;
+    bool valid=true;
+    for(unsigned step=0;step<84 && valid;++step)
+    {
+        if(step==60)box->setLinearVelocity(PxVec3(6,0,0));
+        const PxVec3 before=box->getLinearVelocity();
+        scene->simulate(dt);
+        valid=scene->fetchResults(true);
+        if(!valid || step<60)continue;
+        const PxVec3 after=box->getLinearVelocity();
+        // Gravity is the only external linear impulse. Sustained sliding
+        // saturates the Coulomb disk at the total measured support load.
+        normal+=box->getMass()*(double(after.y)-before.y-double(desc.gravity.y)*dt);
+        tangent+=box->getMass()*(double(before.x)-after.x);
+        valid=after.isFinite() && after.x>0.f;
+    }
+    const double ratio=normal>0?tangent/normal:0;
+    const bool pass=valid && normal>0 && std::abs(ratio-mu)<.005;
+    std::printf("[NP_SLIDING_LOAD] normal=%.9g tangent=%.9g effectiveMu=%.9g status=%s\n",
+        normal,tangent,ratio,pass?"PASS":"FAIL");
+    box->release();ground->release();scene->release();material->release();
+    return pass;
+}
+
 int main()
 {
     PxDefaultAllocator allocator;Errors errors;
@@ -108,6 +153,7 @@ int main()
         for(unsigned i=0;i<count;++i) bodies[i]->release();
         scene->release();
     }
+    failures+=!slidingLoad(*physics,*dispatcher);
     material->release();dispatcher->release();PxCloseExtensions();physics->release();foundation->release();
     return failures+errors.count?1:0;
 }

@@ -4,6 +4,7 @@
 #include "avbd/DyAvbdRowProgram.h"
 #include "avbd/DyAvbdColoring.h"
 #include "avbd/DyAvbdContactMaterial.h"
+#include "avbd/DyKernelTable.h"
 #include <vector>
 #include <algorithm>
 #include <random>
@@ -26,65 +27,243 @@ static bool materialPatchSchedule()
         program.patches.pushBack({0,1,{i,large ? 0 : PX_MAX_U32},{1,large ? 1.f : 0.f}});
     }
     program.schedule(components,8);
-    if(program.offsets.size()!=spokes+1 || program.order.size()!=spokes ||
+    if(program.order.size()!=spokes ||
         program.islandPatches.size()!=isolated) return false;
+    PxU32 nextSpoke=0;
     for(PxU32 c=1;c<program.offsets.size();++c)
     {
-        std::vector<bool> written(bodies);
-        for(PxU32 j=program.offsets[c-1];j<program.offsets[c];++j)
+        for(PxU32 job=program.offsets[c-1];job<program.offsets[c];++job)
         {
-            const PxU32 index=program.order[j];
-            ++visits[index];
-            for(PxU32 b:program.patches[index].body)
-            {
-                if(written[b]) return false;
-                written[b]=true;
-            }
+            // Every spoke writes the hub, so a wave has just one lane.
+            if(program.offsets[c]-program.offsets[c-1]!=1) return false;
+            for(PxU32 j=program.jobs[job].begin;j<program.jobs[job].end;++j)
+                if(program.order[j]!=nextSpoke++ || ++visits[program.order[j]]!=1) return false;
         }
     }
-    for(PxU32 i=1;i<program.islandOffsets.size();++i)
+    for(PxU32 i=program.coloredJobs();i<program.jobs.size();++i)
     {
-        if(program.islandOffsets[i]-program.islandOffsets[i-1]>AvbdContactMaterial::IslandPatchLimit) return false;
-        for(PxU32 j=program.islandOffsets[i-1];j<program.islandOffsets[i];++j)
-            ++visits[program.islandPatches[j]];
+        PxU32 count=0;
+        for(PxU32 c=program.jobs[i].begin;c<program.jobs[i].end;++c)
+        {
+            const auto& local=program.islands[c];
+            count+=local.end-local.begin;
+            for(PxU32 j=local.begin;j<local.end;++j) ++visits[program.islandPatches[j]];
+        }
+        if(count>AvbdContactMaterial::IslandPatchLimit) return false;
     }
     return std::all_of(visits.begin(),visits.end(),[](unsigned n){return n==1;});
 }
 
-static bool materialContactLaw()
+static bool materialColorWaves(PxU32 chainSize)
+{
+    // The 70-edge chain cannot share one lane. Short disjoint chains can.
+    // Reconstruct the unmerged color schedule and check the dependency order
+    // at every writable endpoint, including those at a fixed world contact.
+    AvbdContactMaterial p;
+    p.begin(400);
+    PxArray<PxU32> components(400,0);
+    for(PxU32 i=0;i<chainSize;++i) p.patches.pushBack({0,1,{i,i+1},{1,1}});
+    for(PxU32 i=72;i<360;++i)
+        p.patches.pushBack({0,1,{i,(i%8==7) ? PX_MAX_U32 : i+1},{1,(i%8==7) ? 0.f : 1.f}});
+    std::vector<std::vector<PxU32>> expected(400),actual(400);
+    std::vector<PxU32> masks(400);
+    std::vector<std::vector<PxU32>> colors(2);
+    for(PxU32 i=0;i<p.patches.size();++i)
+    {
+        const auto& patch=p.patches[i];
+        PxU32 mask=masks[patch.body[0]];
+        if(patch.invMass[1]) mask|=masks[patch.body[1]];
+        const PxU32 c=PxLowestSetBit(~mask);
+        if(c>=colors.size()) return false;
+        colors[c].push_back(i);
+        for(PxU32 s=0;s<2;++s) if(patch.invMass[s]) masks[patch.body[s]]|=1u<<c;
+    }
+    for(const auto& color:colors) for(PxU32 i:color)
+        for(PxU32 s=0;s<2;++s) if(p.patches[i].invMass[s]) expected[p.patches[i].body[s]].push_back(i);
+    p.schedule(components,8);
+    if((p.offsets.size()==2)!=(chainSize<=AvbdContactMaterial::PatchesPerTask) ||
+        p.coloredJobs()<=1) return false;
+    for(PxU32 w=1;w<p.offsets.size();++w)
+    {
+        std::vector<PxU32> lane(400,PX_MAX_U32);
+        for(PxU32 job=p.offsets[w-1];job<p.offsets[w];++job)
+        {
+            if(p.jobs[job].end-p.jobs[job].begin>AvbdContactMaterial::PatchesPerTask) return false;
+            for(PxU32 j=p.jobs[job].begin;j<p.jobs[job].end;++j)
+            {
+                const PxU32 i=p.order[j];
+                for(PxU32 s=0;s<2;++s) if(p.patches[i].invMass[s])
+                {
+                    const PxU32 b=p.patches[i].body[s];
+                    if(lane[b]!=PX_MAX_U32 && lane[b]!=job) return false;
+                    lane[b]=job;
+                    actual[b].push_back(i);
+                }
+            }
+        }
+    }
+    return actual==expected;
+}
+
+static bool materialContactLaw(const KernelTable& table)
 {
     AvbdContactMaterial p;
     p.begin(2);
     p.patches.pushBack({0,1,{0,1},{1,1}});
-    p.order.pushBack(0); p.residual.resize(1); p.friction=true;
+    p.jobs.pushBack({0,1,{}});
+    p.order.pushBack(0); p.friction=true;
     AvbdMaterialPoint point={};
     point.friction=.5f;
     const PxVec3 axes[3]={PxVec3(1,0,0),PxVec3(0,1,0),PxVec3(0,0,1)};
     for(PxU32 k=0;k<3;++k)
     {
         auto& axis=point.axes[k];
-        axis.direction=axes[k];
-        for(PxU32 s=0;s<2;++s) axis.angular[s]=axis.angularResponse[s]=PxVec3(0.f);
+        for(PxU32 s=0;s<2;++s) axis.setEndpoint(s,axes[k],PxVec3(0.f),PxVec3(0.f),1.f);
     }
     point.axes[0].baseSpeed=-3; point.axes[1].baseSpeed=2;
     p.points.pushBack(point);
     AvbdMaterialRow state={};
     state.solveNormal=state.solveTangent=1;
-    state.normalResponse=2; state.maxNormalImpulse=1; state.tangentStep=.5f;
+    state.normalEffectiveMass=.5f; state.maxNormalImpulse=1; state.tangentStep=.5f;
     state.tangentInverse=PxVec3(.5f,0,.5f);
     AvbdMaterialBatch args={p,&state,0,1,AvbdMaterialBatch::Update};
-    avbdContactMaterialBatch(&args);
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
     if(state.normalImpulse!=1 || state.tangentImpulse0!=-.5f || state.tangentImpulse1!=0 ||
         p.delta[0].linearPx()!=PxVec3(1,-.5f,0) || p.delta[1].linearPx()!=-p.delta[0].linearPx()) return false;
     args.operation=AvbdMaterialBatch::Residual;
-    avbdContactMaterialBatch(&args);
-    if(p.residual[0].error!=0) return false;
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
+    if(p.jobs[0].residual.error!=0) return false;
     // Releasing the normal also releases the stored friction impulse.
     args.operation=AvbdMaterialBatch::Update;
     p.points[0].axes[0].baseSpeed=1;
-    avbdContactMaterialBatch(&args);
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
     return state.normalImpulse==0 && state.tangentImpulse0==0 &&
         p.delta[0].linearPx().isZero() && p.delta[1].linearPx().isZero();
+}
+
+static bool materialIslandCheckpoint(const KernelTable& table)
+{
+    AvbdContactMaterial p;
+    p.begin(3);
+    // Patches 0 and 1 write the same body. Their last update can reopen
+    // the first contact. Patch 2 owns the other residual slot.
+    p.patches.pushBack({0,1,{0,1},{1,1}});
+    p.patches.pushBack({1,1,{1,PX_MAX_U32},{1,0}});
+    p.patches.pushBack({2,1,{2,PX_MAX_U32},{1,0}});
+    AvbdMaterialRow states[3]={};
+    for(PxU32 i=0;i<3;++i)
+    {
+        AvbdMaterialPoint point={};
+        point.state=i;
+        for(PxU32 s=0;s<2;++s)
+            point.axes[0].setEndpoint(s,PxVec3(1,0,0),PxVec3(0.f),PxVec3(0.f),p.patches[i].invMass[s]);
+        point.axes[0].baseSpeed=-1;
+        p.points.pushBack(point);
+        states[i].solveNormal=1; states[i].normalEffectiveMass=i==0?.5f:1.f;
+        states[i].maxNormalImpulse=PX_MAX_F32;
+    }
+    p.order.pushBack(2);
+    p.offsets.pushBack(0); p.offsets.pushBack(1);
+    p.jobs.pushBack({0,1,{}}); p.jobs.pushBack({0,1,{}});
+    p.islands.pushBack({0,2,{}});
+    p.islandPatches.pushBack(0); p.islandPatches.pushBack(1);
+    p.sweepsPerCheck=2;
+    p.nextCheck=4;
+    AvbdMaterialBatch args={p,states,0,1,AvbdMaterialBatch::IndependentIslands};
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
+    if(p.jobs[1].residual.error!=0.f || p.delta[0].linearPx().x!=1.25f) return false;
+    p.iteration+=p.sweepsPerCheck;
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
+    // Exact GS on these two unilateral rows leaves body 1 at unit speed;
+    // body 0 closes half the remaining distance to its target each sweep.
+    return p.delta[0].linearPx().x==1.8125f && p.delta[1].linearPx().x==1.f &&
+        p.delta[2].linearPx().isZero() && p.jobs[1].residual.error==.1875f &&
+        p.jobs[0].residual.error==0.f;
+}
+
+static bool singleMaterialPoint(const KernelTable& table)
+{
+    const PxVec3 axes[]={PxVec3(1,0,0),PxVec3(0,1,0),PxVec3(0,0,1)};
+    const PxVec3 arm(.4f,1.1f,-.7f), inverseInertia(.3f,2.4f,1.2f);
+    const PxVec3 impulses[]={PxVec3(1,.1f,-.2f), PxVec3(1,-.3f,-.4f), PxVec3(.5f,-.15f,-.2f), PxVec3(0.f)};
+    const PxVec3 speeds[]={PxVec3(0.f), PxVec3(0,1.2f,1.6f), PxVec3(-.7f,.6f,.8f), PxVec3(1,2,3)};
+    for(PxU32 test=0;test<4;++test)
+    {
+        AvbdContactMaterial p;
+        p.begin(1);
+        p.patches.pushBack({0,1,{0,PX_MAX_U32},{1,0}});
+        PxArray<PxU32> components(1,0);
+        p.schedule(components,4);
+        AvbdMaterialPoint point={};
+        point.friction=.5f;
+        PxReal w[3][3];
+        for(PxU32 i=0;i<3;++i)
+        {
+            const PxVec3 angular=arm.cross(axes[i]);
+            point.axes[i].setEndpoint(0,axes[i],angular,angular.multiply(inverseInertia),1.f);
+            for(PxU32 j=0;j<3;++j)
+                w[i][j]=axes[i].dot(axes[j])+angular.dot(arm.cross(axes[j]).multiply(inverseInertia));
+            point.axes[i].baseSpeed=speeds[test][i]-PxVec3(w[i][0],w[i][1],w[i][2]).dot(impulses[test]);
+        }
+        p.points.pushBack(point);
+        AvbdMaterialRow row={};
+        row.solveNormal=row.solveTangent=1;
+        row.maxNormalImpulse=test==2?.5f:PX_MAX_F32;
+        row.normalEffectiveMass=1.f/w[0][0];
+        row.tangentStep=1.f/(w[1][1]+w[2][2]);
+        const PxReal det=w[1][1]*w[2][2]-w[1][2]*w[1][2];
+        row.tangentInverse=PxVec3(w[2][2],-w[1][2],w[1][1])/det;
+        AvbdMaterialBatch args={p,&row,0,1,AvbdMaterialBatch::IndependentIslands};
+        table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
+        if(!p.islands[0].certified) return false;
+        // The normal checkpoint must release its certificate when friction starts.
+        p.friction=true;
+        table.launch(AVBD_CONTACT_MATERIAL_BATCH,&args);
+        const PxVec3 solved(row.normalImpulse,row.tangentImpulse0,row.tangentImpulse1);
+        if(!p.islands[0].certified || !p.jobs[0].residual.converged() ||
+            (solved-impulses[test]).magnitude()>1.e-5f) return false;
+    }
+    return true;
+}
+
+static bool spatialNormalReaction(const KernelTable& table)
+{
+    AvbdContactMaterial p;
+    p.begin(2);
+    p.patches.pushBack({0,1,{0,1},{.5f,.25f}});
+    p.order.pushBack(0); p.jobs.pushBack({0,1,{}});
+    AvbdMaterialPoint point={};
+    auto& normal=point.axes[0];
+    normal.setEndpoint(0,PxVec3(0,1,0),PxVec3(2,0,1),PxVec3(1,0,.5f),.5f);
+    normal.setEndpoint(1,PxVec3(0,1,0),PxVec3(-1,0,2),PxVec3(-.25f,0,.5f),.25f);
+    normal.baseSpeed=-4.5;
+    p.points.pushBack(point);
+    AvbdMaterialRow row={};
+    row.solveNormal=1; row.normalEffectiveMass=1.f/4.5f; row.maxNormalImpulse=2.f;
+    AvbdMaterialBatch batch={p,&row,0,1,AvbdMaterialBatch::Update};
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&batch);
+    if(row.normalImpulse!=1 || p.delta[0].linearPx()!=PxVec3(0,.5f,0) ||
+        p.delta[1].linearPx()!=PxVec3(0,-.25f,0) ||
+        p.delta[0].angularPx()!=PxVec3(1,0,.5f) || p.delta[1].angularPx()!=PxVec3(.25f,0,-.5f))
+        return false;
+    batch.operation=AvbdMaterialBatch::Residual;
+    table.launch(AVBD_CONTACT_MATERIAL_BATCH,&batch);
+    return p.jobs[0].residual.error==0;
+}
+
+static bool rigidRankOne(const KernelTable& table)
+{
+    // Unequal coordinates expose lane swaps, including the two row boundaries.
+    struct Guarded { PxReal before; PxReal h[6][6]; PxReal after; };
+    Guarded matrix={}; matrix.before=7.f; matrix.after=-9.f;
+    const PxReal j[6]={-2.f,.5f,3.f,4.f,-1.5f,.25f};
+    for(PxU32 r=0;r<6;++r) for(PxU32 c=0;c<6;++c) matrix.h[r][c]=PxReal(r*6+c);
+    const PxVec3 linear(j[0],j[1],j[2]), angular(j[3],j[4],j[5]);
+    AvbdRankOneArgs args={matrix.h,linear,angular,2.f};
+    table.launch(AVBD_RIGID_RANK_ONE,&args);
+    for(PxU32 r=0;r<6;++r) for(PxU32 c=0;c<6;++c)
+        if(matrix.h[r][c]!=PxReal(r*6+c)+2.f*j[r]*j[c]) return false;
+    return matrix.before==7.f && matrix.after==-9.f;
 }
 
 int main()
@@ -92,7 +271,9 @@ int main()
     AvbdProbeFoundation foundation;
     AvbdRowProgram program;
     std::mt19937 random(20261016);
-    bool pass = materialPatchSchedule() && materialContactLaw();
+    const auto table=KernelTable::makeAvbdCpu();
+    bool pass = rigidRankOne(table) && spatialNormalReaction(table) && materialPatchSchedule() && materialColorWaves(70) && materialColorWaves(7) &&
+        materialContactLaw(table) && materialIslandCheckpoint(table) && singleMaterialPoint(table);
     std::printf("[MATERIAL_PATCH] spill_islands_cone_release=%s\n",pass ? "PASS" : "FAIL");
     for(PxU32 trial = 0; trial < 600; ++trial)
     {

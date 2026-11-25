@@ -52,7 +52,7 @@ struct AvbdMaterialRow
 	PxReal tangentImpulse0;
 	PxReal tangentImpulse1;
 	PxReal normalTarget;
-	PxReal normalResponse;
+	PxReal normalEffectiveMass;
 	PxReal maxNormalImpulse;
 	PxReal tangentStep;
     // Inverse of the 2D tangential mobility in the frozen contact frame.
@@ -66,41 +66,39 @@ struct AvbdMaterialRow
 
 struct AvbdMaterialVelocityDelta
 {
-	double linear[3];
-	double angular[3];
-	AvbdMaterialVelocityDelta()
-	{
-		linear[0] = linear[1] = linear[2] = 0.0;
-		angular[0] = angular[1] = angular[2] = 0.0;
-	}
-	void addLinear(const PxVec3& value, double scale = 1.0)
-	{
-		linear[0] += double(value.x) * scale;
-		linear[1] += double(value.y) * scale;
-		linear[2] += double(value.z) * scale;
-	}
-	void addAngular(const PxVec3& value, double scale = 1.0)
-	{
-		angular[0] += double(value.x) * scale;
-		angular[1] += double(value.y) * scale;
-		angular[2] += double(value.z) * scale;
-	}
-	PxVec3 linearPx() const
-	{
-		return PxVec3(PxReal(linear[0]), PxReal(linear[1]), PxReal(linear[2]));
-	}
-	PxVec3 angularPx() const
-	{
-		return PxVec3(PxReal(angular[0]), PxReal(angular[1]), PxReal(angular[2]));
-	}
+    // One adjacent pair per coordinate can be loaded by either SIMD width.
+    double coordinate[3][2] = {};
+    void addLinear(const PxVec3& value, double scale=1.)
+    {
+        for(PxU32 k=0;k<3;++k) coordinate[k][0]+=double(value[k])*scale;
+    }
+    void addAngular(const PxVec3& value, double scale=1.)
+    {
+        for(PxU32 k=0;k<3;++k) coordinate[k][1]+=double(value[k])*scale;
+    }
+    PxVec3 linearPx() const {return PxVec3(PxReal(coordinate[0][0]),PxReal(coordinate[1][0]),PxReal(coordinate[2][0]));}
+    PxVec3 angularPx() const {return PxVec3(PxReal(coordinate[0][1]),PxReal(coordinate[1][1]),PxReal(coordinate[2][1]));}
 };
 
 struct AvbdMaterialAxis
 {
-    PxVec3 direction;
-    PxVec3 angular[2]={PxVec3(0.f),PxVec3(0.f)};
-    PxVec3 angularResponse[2]={PxVec3(0.f),PxVec3(0.f)};
+    // Lanes are linear A, angular A, linear B, angular B (including signs).
+    // Gather uses J. Scatter uses M^-1 J^T prepared at the material epoch.
+    PxReal jacobian[3][4], response[3][4];
     double baseSpeed;
+
+    void setEndpoint(PxU32 side, const PxVec3& direction, const PxVec3& angular,
+        const PxVec3& angularResponse, PxReal inverseMass)
+    {
+        const PxReal sign=side ? -1.f : 1.f;
+        for(PxU32 k=0;k<3;++k)
+        {
+            jacobian[k][2*side]=sign*direction[k];
+            response[k][2*side]=jacobian[k][2*side]*inverseMass;
+            jacobian[k][2*side+1]=sign*angular[k];
+            response[k][2*side+1]=inverseMass>0.f ? sign*angularResponse[k] : 0.f;
+        }
+    }
 };
 
 struct AvbdMaterialPoint
@@ -121,32 +119,143 @@ struct AvbdMaterialPatch
 struct AvbdMaterialResidual
 {
     PxReal error = 0, scale = 1;
+    bool converged() const { return error <= 1.0e-5f * scale; }
     void include(PxReal e, PxReal s) { error=PxMax(error,e); scale=PxMax(scale,s); }
+};
+
+struct AvbdMaterialComponent
+{
+    PxU32 begin, end;  // Patch span inside islandPatches.
+    AvbdMaterialResidual residual;
+    bool certified = false;
+    bool friction = false;
+};
+
+struct AvbdMaterialJob
+{
+    PxU32 begin, end;
+    AvbdMaterialResidual residual;
 };
 
 struct AvbdContactMaterial
 {
-    enum { PointsPerPatch=4, PatchesPerTask=32, IslandPatchLimit=192 };
+    enum { PointsPerPatch=4, PatchesPerTask=32, IslandPatchLimit=192, MaxSweepsPerCheck=4, MaxColorsPerWave=4 };
     PxArray<AvbdMaterialVelocityDelta> delta;
     PxArray<AvbdMaterialPoint> points;
     PxArray<AvbdMaterialPatch> patches;
+    // After scheduling: wave -> job, job -> ordered patches.
     PxArray<PxU32> offsets, order;
-    PxArray<PxU32> islandOffsets, islandPatches;
-    PxArray<AvbdMaterialResidual> residual;
+    PxArray<PxU32> colorOffsets, islandPatches;
+    // Colored jobs index order; independent jobs index contiguous components.
+    PxArray<AvbdMaterialJob> jobs;
+    PxArray<AvbdMaterialComponent> islands;
     PxU32 color=0, cursor=0, iteration=0, islandCursor=0;
+    PxU8 sweepsPerCheck=1, coloredSweeps=0;
+    // Separate convergence checks from the bounded per-job update window.
+    PxU32 nextCheck=1;
+    bool checksResidual() const {return iteration+sweepsPerCheck==nextCheck;}
     bool friction=false;
 
     void begin(PxU32 bodies)
     {
         delta.clear(); delta.resize(bodies);
-        points.clear(); patches.clear(); offsets.clear(); order.clear(); residual.clear();
-        islandOffsets.clear(); islandPatches.clear();
-        color=cursor=iteration=islandCursor=0; friction=false;
+        points.clear(); patches.clear(); offsets.clear(); order.clear(); jobs.clear();
+        colorOffsets.clear(); islandPatches.clear(); islands.clear();
+        color=cursor=iteration=islandCursor=coloredSweeps=0;
+        sweepsPerCheck=1; nextCheck=1; friction=false;
     }
     void schedule(const PxArray<PxU32>& components, PxU32 workers);
+    void packColorWaves(const PxArray<PxU32>& colored);
+    PxU32 coloredJobs() const { return offsets.empty() ? 0 : offsets.back(); }
 };
 
-// Compact independent components share a single job per sweep. Larger components
+// In a short run of colors, patches that touch the same writable endpoint
+// stay in original GS order on one lane. Separate connected components of
+// that run commute. Split the run if a component cannot fit a bounded lane.
+inline void AvbdContactMaterial::packColorWaves(const PxArray<PxU32>& colored)
+{
+    if(colored.empty()) return;
+    order.reserve(colored.size());
+    offsets.pushBack(0);
+    PxU32 firstInJob=0;
+    const auto finishJob=[&](PxU32 end)
+    {
+        jobs.pushBack({firstInJob,end,{}});
+        firstInJob=end;
+    };
+    struct Owner { PxU32 epoch=0, patch=0; };
+    PxArray<Owner> owner(delta.size());
+    PxArray<PxU32> parent(colored.size()), size(colored.size()), next(colored.size());
+    PxU32 epoch=0;
+    const auto root=[&](PxU32 i)
+    {
+        while(i!=parent[i])
+        {
+            parent[i]=parent[parent[i]];
+            i=parent[i];
+        }
+        return i;
+    };
+    const auto connect=[&](PxU32 first, PxU32 last)
+    {
+        ++epoch;
+        for(PxU32 i=first;i<last;++i)
+        {
+            parent[i]=i;
+            size[i]=1;
+            PxU32 joined=i;
+            const auto& patch=patches[colored[i]];
+            for(PxU32 s=0;s<2;++s) if(patch.invMass[s]>0)
+            {
+                Owner& entry=owner[patch.body[s]];
+                if(entry.epoch==epoch)
+                {
+                    PxU32 other=root(entry.patch);
+                    if(other==joined) continue;
+                    if(size[other]>size[joined]) PxSwap(other,joined);
+                    size[joined]+=size[other];
+                    size[other]=0;
+                    parent[other]=joined;
+                    if(size[joined]>PatchesPerTask) return false;
+                }
+                entry.epoch=epoch;
+                entry.patch=joined;
+            }
+        }
+        return true;
+    };
+    for(PxU32 firstColor=0;firstColor+1<colorOffsets.size();)
+    {
+        const PxU32 first=colorOffsets[firstColor];
+        PxU32 span=PxMin(PxU32(MaxColorsPerWave),colorOffsets.size()-1-firstColor);
+        while(span>1 && !connect(first,colorOffsets[firstColor+span])) span=(span+1)/2;
+        const PxU32 last=colorOffsets[firstColor+span];
+        if(span==1)
+        {
+            for(PxU32 i=first;i<last;++i) order.pushBack(colored[i]);
+            for(PxU32 i=first;i<last;i+=PatchesPerTask)
+                finishJob(i+PxMin(PxU32(PatchesPerTask),last-i));
+        }
+        else
+        {
+            PxU32 write=first;
+            for(PxU32 i=first;i<last;++i) if(size[i])
+            {
+                if(write-firstInJob+size[i]>PatchesPerTask) finishJob(write);
+                next[i]=write;
+                write+=size[i];
+            }
+            if(write!=firstInJob) finishJob(write);
+            order.resize(last);
+            for(PxU32 i=first;i<last;++i)
+                order[next[root(i)]++]=colored[i];
+        }
+        firstColor+=span;
+        offsets.pushBack(jobs.size());
+    }
+}
+
+// Compact independent components share a job up to the next residual check. Larger components
 // expose disjoint endpoint pairs through colors; bits 0..31 have a bounded
 // first-fit search and higher colors advance monotonically per endpoint.
 inline void AvbdContactMaterial::schedule(const PxArray<PxU32>& components,PxU32 workers)
@@ -161,17 +270,23 @@ inline void AvbdContactMaterial::schedule(const PxArray<PxU32>& components,PxU32
     PxU32 total=0;
     for(PxU32 n:counts) if(n<=IslandPatchLimit) total+=n;
     const PxU32 target=PxClamp(total/(2*PxClamp(workers,1u,32u)),8u,PxU32(IslandPatchLimit));
+    PxArray<PxU32> islandOffsets;
     islandPatches.resize(total);
-    PxU32 offset=0;
+    PxU32 offset=0,firstPatch=0;
     for(PxU32 i=0;i<counts.size();++i)
     {
         const PxU32 n=counts[i];
         if(!n || n>IslandPatchLimit) continue;
-        if(islandOffsets.empty() || n>target || offset-islandOffsets.back()>target-n)
-            islandOffsets.pushBack(offset);
-        starts[i]=offset; offset+=n;
+        if(islandOffsets.empty() || n>target || offset-firstPatch>target-n)
+        {
+            firstPatch=offset;
+            islandOffsets.pushBack(islands.size());
+        }
+        starts[i]=offset;
+        islands.pushBack({offset,offset+n,{}});
+        offset+=n;
     }
-    if(total) islandOffsets.pushBack(total);
+    if(total) islandOffsets.pushBack(islands.size());
     for(PxU32 i=0;i<patches.size();++i)
     {
         const auto& patch=patches[i];
@@ -195,14 +310,16 @@ inline void AvbdContactMaterial::schedule(const PxArray<PxU32>& components,PxU32
             else body.spill=c+1;
         }
         colors[i]=c;
-        if(offsets.size()<c+2) offsets.resize(c+2,0);
-        ++offsets[c+1];
+        if(colorOffsets.size()<c+2) colorOffsets.resize(c+2,0);
+        ++colorOffsets[c+1];
     }
-    for(PxU32 i=1;i<offsets.size();++i) offsets[i]+=offsets[i-1];
-    PxArray<PxU32> colorStarts(offsets);
-    order.resize(patches.size()-total); residual.resize(patches.size());
+    for(PxU32 i=1;i<colorOffsets.size();++i) colorOffsets[i]+=colorOffsets[i-1];
+    PxArray<PxU32> colorStarts(colorOffsets), colored(patches.size()-total);
     for(PxU32 i=0;i<patches.size();++i)
-        if(colors[i]!=PX_MAX_U32) order[colorStarts[colors[i]]++]=i;
+        if(colors[i]!=PX_MAX_U32) colored[colorStarts[colors[i]]++]=i;
+    packColorWaves(colored);
+    for(PxU32 i=1;i<islandOffsets.size();++i)
+        jobs.pushBack({islandOffsets[i-1],islandOffsets[i],{}});
 }
 
 struct AvbdMaterialBatch
@@ -214,74 +331,88 @@ struct AvbdMaterialBatch
 };
 
 namespace contactMaterial {
-PX_FORCE_INLINE double project(const PxVec3& j, const double* v)
+// All backends evaluate the same four spatial coefficients and the same contact law.
+struct ScalarSpatial
 {
-    return j.x*v[0]+j.y*v[1]+j.z*v[2];
-}
+    double x[4];
+    static ScalarSpatial load(const PxReal* f) {return {{f[0],f[1],f[2],f[3]}};}
+    static ScalarSpatial join(const double* a,const double* b) {return {{a[0],a[1],b[0],b[1]}};}
+    static ScalarSpatial splat(double v) {return {{v,v,v,v}};}
+    void split(double* a,double* b) const {a[0]=x[0];a[1]=x[1];b[0]=x[2];b[1]=x[3];}
+    double sum() const {return (x[0]+x[2])+(x[1]+x[3]);}
+    ScalarSpatial operator+(const ScalarSpatial& r) const {return {{x[0]+r.x[0],x[1]+r.x[1],x[2]+r.x[2],x[3]+r.x[3]}};}
+    ScalarSpatial operator*(const ScalarSpatial& r) const {return {{x[0]*r.x[0],x[1]*r.x[1],x[2]*r.x[2],x[3]*r.x[3]}};}
+};
 
-PX_FORCE_INLINE PxReal speed(const AvbdMaterialAxis& axis, const AvbdMaterialVelocityDelta* const v[2])
-{
-    double value=axis.baseSpeed;
-    for(PxU32 s=0;s<2;++s) if(v[s])
-    {
-        const double dv=project(axis.direction,v[s]->linear)+project(axis.angular[s],v[s]->angular);
-        value+=s ? -dv : dv;
-    }
-    return PxReal(value);
-}
-
-// Both tangent velocities observe the same pre-projection velocity. Evaluate
-// them together in double precision before projecting the accumulated impulse.
-PX_FORCE_INLINE void tangentSpeed(const AvbdMaterialPoint& point,
-    const AvbdMaterialVelocityDelta* const v[2], PxReal& t0, PxReal& t1)
-{
 #if PX_X64
-    const AvbdMaterialAxis& a=point.axes[1];
-    const AvbdMaterialAxis& b=point.axes[2];
-    __m128d value=_mm_set_pd(b.baseSpeed,a.baseSpeed);
-    for(PxU32 s=0;s<2;++s) if(v[s])
-    {
-        __m128d dv=_mm_setzero_pd();
-        for(PxU32 k=0;k<3;++k)
-        {
-            dv=_mm_add_pd(dv,_mm_mul_pd(_mm_set_pd(b.direction[k],a.direction[k]),_mm_set1_pd(v[s]->linear[k])));
-            dv=_mm_add_pd(dv,_mm_mul_pd(_mm_set_pd(b.angular[s][k],a.angular[s][k]),_mm_set1_pd(v[s]->angular[k])));
-        }
-        value=s ? _mm_sub_pd(value,dv) : _mm_add_pd(value,dv);
-    }
-    double lanes[2]; _mm_storeu_pd(lanes,value);
-    t0=PxReal(lanes[0]); t1=PxReal(lanes[1]);
-#else
-    t0=speed(point.axes[1],v); t1=speed(point.axes[2],v);
-#endif
-}
-
-PX_FORCE_INLINE void scatter(const AvbdMaterialAxis& axis, const AvbdMaterialPatch& patch,
-    AvbdMaterialVelocityDelta* const v[2], PxReal impulse)
+struct Sse2Spatial
 {
-    if(!PxIsFinite(impulse) || PxAbs(impulse)<1e-12f) return;
-    for(PxU32 s=0;s<2;++s) if(v[s])
+    __m128d a,b;
+    static Sse2Spatial load(const PxReal* f)
     {
-        const double dj=s ? -double(impulse) : double(impulse);
-        v[s]->addLinear(axis.direction,dj*patch.invMass[s]);
-        v[s]->addAngular(axis.angularResponse[s],dj);
+        const __m128 x=_mm_loadu_ps(f);
+        return {_mm_cvtps_pd(x),_mm_cvtps_pd(_mm_movehl_ps(x,x))};
     }
-}
+    static Sse2Spatial join(const double* a,const double* b) {return {_mm_loadu_pd(a),_mm_loadu_pd(b)};}
+    static Sse2Spatial splat(double v) {return {_mm_set1_pd(v),_mm_set1_pd(v)};}
+    void split(double* lo,double* hi) const {_mm_storeu_pd(lo,a);_mm_storeu_pd(hi,b);}
+    double sum() const
+    {
+        const __m128d pair=_mm_add_pd(a,b);
+        return _mm_cvtsd_f64(_mm_add_sd(pair,_mm_unpackhi_pd(pair,pair)));
+    }
+    Sse2Spatial operator+(const Sse2Spatial& r) const {return {_mm_add_pd(a,r.a),_mm_add_pd(b,r.b)};}
+    Sse2Spatial operator*(const Sse2Spatial& r) const {return {_mm_mul_pd(a,r.a),_mm_mul_pd(b,r.b)};}
+};
+typedef Sse2Spatial NativeSpatial;
+#else
+typedef ScalarSpatial NativeSpatial;
+#endif
 
-template<bool Measure>
+template<class V> struct PatchVelocity
+{
+    V coordinate[3];
+    AvbdMaterialVelocityDelta zero;
+    AvbdMaterialVelocityDelta *a,*b;
+
+    PatchVelocity(AvbdContactMaterial& p,const AvbdMaterialPatch& patch)
+    {
+        a=patch.invMass[0]>0 ? &p.delta[patch.body[0]] : &zero;
+        b=patch.invMass[1]>0 && patch.body[1]!=patch.body[0] ? &p.delta[patch.body[1]] : &zero;
+        for(PxU32 k=0;k<3;++k) coordinate[k]=V::join(a->coordinate[k],b->coordinate[k]);
+    }
+
+    PxReal speed(const AvbdMaterialAxis& axis) const
+    {
+        const V dot=V::load(axis.jacobian[0])*coordinate[0]+V::load(axis.jacobian[1])*coordinate[1]+V::load(axis.jacobian[2])*coordinate[2];
+        return PxReal(axis.baseSpeed+dot.sum());
+    }
+
+    void scatter(const AvbdMaterialAxis& axis,PxReal impulse)
+    {
+        if(!PxIsFinite(impulse) || PxAbs(impulse)<1e-12f) return;
+        const V force=V::splat(impulse);
+        for(PxU32 k=0;k<3;++k) coordinate[k]=coordinate[k]+V::load(axis.response[k])*force;
+    }
+
+    void store()
+    {
+        for(PxU32 k=0;k<3;++k) coordinate[k].split(a->coordinate[k],b->coordinate[k]);
+    }
+};
+
+template<bool Measure,bool Friction,class V>
 inline void visit(AvbdContactMaterial& p, const AvbdMaterialPatch& patch,
     AvbdMaterialRow* states, AvbdMaterialResidual& residual)
 {
-    AvbdMaterialVelocityDelta* v[2];
-    for(PxU32 s=0;s<2;++s)
-        v[s]=patch.invMass[s]>0 ? &p.delta[patch.body[s]] : NULL;
+    PatchVelocity<V> v(p,patch);
     for(PxU32 i=patch.begin;i<patch.begin+patch.count;++i)
     {
         const AvbdMaterialPoint& point=p.points[i];
         AvbdMaterialRow& state=states[point.state];
         if(state.solveNormal)
         {
-            const PxReal gap=speed(point.axes[0],v)-state.normalTarget;
+            const PxReal gap=v.speed(point.axes[0])-state.normalTarget;
             if(Measure)
             {
                 // At the authored impulse limit, a closing residual satisfies
@@ -294,15 +425,14 @@ inline void visit(AvbdContactMaterial& p, const AvbdMaterialPatch& patch,
             else
             {
                 const PxReal old=state.normalImpulse;
-                state.normalImpulse=PxClamp(old-gap/state.normalResponse,0.f,state.maxNormalImpulse);
+                state.normalImpulse=PxClamp(old-gap*state.normalEffectiveMass,0.f,state.maxNormalImpulse);
                 state.normalCapacity=state.positionNormalImpulse+state.normalImpulse;
-                scatter(point.axes[0],patch,v,state.normalImpulse-old);
+                v.scatter(point.axes[0],state.normalImpulse-old);
             }
         }
-        if(p.friction && state.solveTangent)
+        if(Friction && state.solveTangent)
         {
-            PxReal vt0,vt1;
-            tangentSpeed(point,v,vt0,vt1);
+            const PxReal vt0=v.speed(point.axes[1]), vt1=v.speed(point.axes[2]);
             PxReal j0=state.tangentImpulse0-state.tangentStep*vt0;
             PxReal j1=state.tangentImpulse1-state.tangentStep*vt1;
             bool stick=false;
@@ -322,14 +452,17 @@ inline void visit(AvbdContactMaterial& p, const AvbdMaterialPatch& patch,
             else
             {
                 state.tangentImpulse0=j0; state.tangentImpulse1=j1;
-                scatter(point.axes[1],patch,v,d0); scatter(point.axes[2],patch,v,d1);
+                v.scatter(point.axes[1],d0); v.scatter(point.axes[2],d1);
             }
         }
     }
+    if(!Measure) v.store();
 }
 }
 
-inline void avbdContactMaterialBatch(void* data)
+#include "DyAvbdSingleContact.inl"
+
+template<class V,bool Friction> inline void avbdRunContactMaterialBatch(void* data)
 {
     AvbdMaterialBatch& args=*static_cast<AvbdMaterialBatch*>(data);
     auto& p=args.program;
@@ -338,27 +471,62 @@ inline void avbdContactMaterialBatch(void* data)
         AvbdMaterialResidual result;
         if(args.operation==AvbdMaterialBatch::IndependentIslands)
         {
-            const PxU32 first=p.islandOffsets[i],last=p.islandOffsets[i+1];
-            for(PxU32 j=first;j<last;++j)
-                contactMaterial::visit<false>(p,p.patches[p.islandPatches[j]],args.states,result);
-            for(PxU32 j=first;j<last;++j)
+            auto& job=p.jobs[p.coloredJobs()+i];
+            // Once verified, a disconnected component has no external velocity
+            // writes. Its residual stays valid until the contact law changes.
+            for(PxU32 id=job.begin; id<job.end; ++id)
             {
-                const PxU32 index=p.islandPatches[j];
-                AvbdMaterialResidual local;
-                contactMaterial::visit<true>(p,p.patches[index],args.states,local);
-                p.residual[index]=local;
+                AvbdMaterialComponent& local=p.islands[id];
+                if(local.friction!=Friction)
+                {
+                    local.certified=false;
+                    local.friction=Friction;
+                }
+                if(!local.certified)
+                {
+                    PxU32 firstSweep=0;
+                    if(Friction && !p.iteration && local.end-local.begin==1)
+                    {
+                        const AvbdMaterialPatch& patch=p.patches[p.islandPatches[local.begin]];
+                        if(patch.count==1 && contactMaterial::solveSinglePoint<V>(p,patch,args.states))
+                            firstSweep=1;
+                    }
+                    for(PxU32 sweep=firstSweep; sweep<p.sweepsPerCheck; ++sweep)
+                        for(PxU32 j=local.begin; j<local.end; ++j)
+                            contactMaterial::visit<false,Friction,V>(p,p.patches[p.islandPatches[j]],args.states,result);
+                    if(p.checksResidual())
+                    {
+                        AvbdMaterialResidual measured;
+                        for(PxU32 j=local.begin; j<local.end; ++j)
+                            contactMaterial::visit<true,Friction,V>(p,p.patches[p.islandPatches[j]],args.states,measured);
+                        local.residual=measured;
+                        local.certified=measured.converged();
+                    }
+                }
+                if(p.checksResidual()) result.include(local.residual.error,local.residual.scale);
             }
+            if(p.checksResidual()) job.residual=result;
         }
         else if(args.operation==AvbdMaterialBatch::Residual)
         {
-            const PxU32 index=p.order[i];
-            contactMaterial::visit<true>(p,p.patches[index],args.states,result);
-            p.residual[index]=result;
+            auto& job=p.jobs[i];
+            for(PxU32 j=job.begin;j<job.end;++j)
+                contactMaterial::visit<true,Friction,V>(p,p.patches[p.order[j]],args.states,result);
+            job.residual=result;
         }
         else
-            contactMaterial::visit<false>(p,p.patches[p.order[i]],args.states,result);
+            for(PxU32 j=p.jobs[i].begin;j<p.jobs[i].end;++j)
+                contactMaterial::visit<false,Friction,V>(p,p.patches[p.order[j]],args.states,result);
     }
 }
+
+template<class V> inline void avbdContactMaterialBatchImpl(void* data)
+{
+    if(static_cast<AvbdMaterialBatch*>(data)->program.friction) avbdRunContactMaterialBatch<V,true>(data);
+    else avbdRunContactMaterialBatch<V,false>(data);
+}
+
+inline void avbdContactMaterialBatch(void* data) {avbdContactMaterialBatchImpl<contactMaterial::NativeSpatial>(data);}
 
 } }
 #endif

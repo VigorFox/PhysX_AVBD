@@ -12,6 +12,19 @@ static bool report(const char* name,bool pass)
 int main()
 {
     AvbdProbeFoundation foundation;bool pass=true;
+    {
+        AvbdNpDomain boxes={}; boxes.normal=PxVec3d(1,0,0);
+        for(PxU32 i=0;i<8;++i) for(PxU32 side=0;side<2;++side)
+            boxes.points[side].pushBack(PxVec3d((i&1)?1:-1,(i&2)?1:-1,(i&4)?1:-1));
+        PxTransform poses[]={PxTransform(PxVec3(.2f,2.02f,.4f)),PxTransform(PxIdentity)};
+        pass&=report("recover_initial_full_support_axis",!avbdNpDomainPath(boxes,poses,poses) &&
+            avbdNpRecoverInitialAxis(boxes,poses) && avbdNpGap(boxes,poses)>0.);
+        poses[0].p.y=1.98f;
+        const PxVec3d old=boxes.normal;
+        pass&=report("initial_overlap_has_no_proof",!avbdNpRecoverInitialAxis(boxes,poses) && boxes.normal==old);
+        poses[0].p.y=2.02f;boxes.normal=PxVec3d(1,0,0);boxes.fixedAxis=true;
+        pass&=report("fixed_plane_axis_preserved",!avbdNpRecoverInitialAxis(boxes,poses));
+    }
     AvbdNpDomain d;d.normal=PxVec3d(0,1,0);d.radius[0]=d.radius[1]=0;
     // The old center witness misses a rotated corner of the complete box.
     for(PxU32 i=0;i<8;++i) d.points[0].pushBack(PxVec3d((i&1)?1:-1,(i&2)?.1:-.1,(i&4)?.1:-.1));

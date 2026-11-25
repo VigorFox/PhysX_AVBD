@@ -3,6 +3,7 @@
 #ifndef DY_AVBD_NONLINEAR_GROUP_H
 #define DY_AVBD_NONLINEAR_GROUP_H
 #include "DyAvbdNonlinearBlock.h"
+#include "DyAvbdRigidLoop.h"
 namespace physx { namespace Dy {
 // A bounded numerical grouping of physical Rigid6 blocks. No inner iteration,
 // poses, duals or material history are owned by this Table leaf.
@@ -111,7 +112,7 @@ template<PxU32 Capacity> struct AvbdNonlinearGroupT
 };
 typedef AvbdNonlinearGroupT<4> AvbdNonlinearGroup;
 typedef AvbdNonlinearGroupT<16> AvbdLocalNonlinearGroup;
-struct AvbdLocalNonlinearGroupArgs { AvbdLocalNonlinearGroup* group; };
+struct AvbdLocalNonlinearGroupArgs { AvbdLocalNonlinearGroup* group;AvbdRigidLoop* loop=NULL;bool solved=false;unsigned pivot=0;bool reverse=false; };
 struct AvbdNonlinearGroupArgs { AvbdNonlinearGroup* group; };
 
 inline void avbdAccumulateFrameGroup(const AvbdElasticFrameContribution& e,

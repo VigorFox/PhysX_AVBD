@@ -14,7 +14,7 @@ extern "C"
 // P4a Host unlock: active IG::Node::eDEFORMABLE_VOLUME count with non-null Dy object.
 PX_PHYSX_CORE_API physx::PxU32 avbdHostActiveDeformableVolumeNodeCount(physx::PxScene* scene);
 
-// P5 Kernel table (Dy API, not Scene *Avbd*). deviceKind 0 = SCALAR.
+// P5 Kernel table (Dy API, not Scene *Avbd*). deviceKind is the selected Dy::DeviceKind.
 PX_PHYSX_CORE_API bool avbdHostKernelTableInfo(physx::PxScene* scene, physx::PxU32* deviceKind,
 	bool* ldlt6Bound, bool* ldlt3Bound);
 PX_PHYSX_CORE_API bool avbdHostKernelLdltSelfCheck();

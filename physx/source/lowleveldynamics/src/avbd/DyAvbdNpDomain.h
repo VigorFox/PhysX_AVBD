@@ -339,6 +339,90 @@ struct AvbdNpQuery
     PxVec3d proofAxis=PxVec3d(0);
     bool valid=false,accepted=false;
 };
+// Closest boundary feature of a simplex of up to four support vertices.
+PX_INLINE PxU32 avbdNpReduceSimplex(PxVec3d simplex[4],PxU32 count,PxVec3d& closest)
+{
+    double square=DBL_MAX;
+    PxU32 mask=0;
+    const auto consider=[&](const PxVec3d& point,PxU32 feature)
+    {
+        const double norm=point.magnitudeSquared();
+        if(norm<square){square=norm;closest=point;mask=feature;}
+    };
+    for(PxU32 i=0;i<count;++i)
+    {
+        const PxVec3d& a=simplex[i];
+        consider(a,1u<<i);
+        for(PxU32 j=0;j<i;++j)
+        {
+            const PxVec3d u=simplex[j]-a;
+            const double length=u.magnitudeSquared();
+            if(!(length>0.)) continue;
+            const double t=-a.dot(u)/length;
+            const PxU32 edge=(1u<<i)|(1u<<j);
+            if(t>0. && t<1.) consider(a+u*t,edge);
+            for(PxU32 k=0;k<j;++k)
+            {
+                const PxVec3d v=simplex[k]-a, n=u.cross(v);
+                const double area=n.magnitudeSquared();
+                if(!(area>0.)) continue;
+                const double x=v.cross(a).dot(n)/area, y=a.cross(u).dot(n)/area;
+                if(x>0. && y>0. && x+y<1.) consider(a+u*x+v*y,edge|(1u<<k));
+            }
+        }
+    }
+    PxU32 kept=0;
+    for(PxU32 i=0;i<count;++i) if(mask&(1u<<i)) simplex[kept++]=simplex[i];
+    return kept;
+}
+
+// A reduced NP witness can overlap in projection while two complete convex
+// supports are separated on another axis. Search the Minkowski difference
+// only when the initial certificate failed. A local simplex step proposes a
+// direction; acceptance always uses the existing full-support path proof.
+PX_INLINE bool avbdNpRecoverInitialAxis(AvbdNpDomain& domain,const PxTransform poses[2])
+{
+    if(domain.fixedAxis || domain.points[0].empty() || domain.points[1].empty() ||
+        domain.points[0].size()>AvbdNpQuery::PointLimit || domain.points[1].size()>AvbdNpQuery::PointLimit)
+        return false;
+    const PxVec3d seed=domain.normal;
+    const PxQuatd rotations[2]={avbdNpRotation(poses[0].q),avbdNpRotation(poses[1].q)};
+    const PxVec3d offset=avbdOgcDouble(poses[0].p)-avbdOgcDouble(poses[1].p);
+    PxVec3d closest=seed, simplex[4];
+    PxU32 count=0;
+    for(PxU32 iteration=0;iteration<32;++iteration)
+    {
+        const double length=closest.magnitude();
+        if(!(length>0.) || !PxIsFinite(length)) break;
+        const PxVec3d axis=closest/length;
+        PxVec3d support=offset;
+        for(PxU32 side=0;side<2;++side)
+        {
+            const double sign=side ? -1. : 1.;
+            const PxVec3d local=rotations[side].rotateInv(axis)*sign;
+            const auto& points=domain.points[side];
+            PxU32 best=0; double minimum=local.dot(points[0]);
+            for(PxU32 j=1;j<points.size();++j)
+            {
+                const double projection=local.dot(points[j]);
+                if(projection<minimum){minimum=projection;best=j;}
+            }
+            support+=rotations[side].rotate(points[best])*sign;
+        }
+        if(axis.dot(support)>domain.radius[0]+domain.radius[1])
+        {
+            domain.normal=axis;
+            if(avbdNpDomainPath(domain,poses,poses)) return true;
+            domain.normal=seed;
+        }
+        for(PxU32 i=0;i<count;++i) if(simplex[i]==support) return false;
+        simplex[count++]=support;
+        count=avbdNpReduceSimplex(simplex,count,closest);
+        if(!count) break;
+    }
+    return false;
+}
+
 // A continuous separating axis may rotate with either finite convex body.
 // Multiply the gap by both quaternion squared norms: translation is degree
 // five, the relative support rotations degree four. No temporal sampling.

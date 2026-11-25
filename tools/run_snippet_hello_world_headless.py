@@ -80,7 +80,7 @@ def gate_lines(text):
     ]
 
 
-def run_gated(bin_dir, solver, case_name, frames, zero_keys, timeout):
+def run_gated(bin_dir, solver, case_name, frames, zero_keys, timeout, position_iters=None):
     extra = [
         "--solver=%s" % solver,
         "--case=%s" % case_name,
@@ -89,6 +89,8 @@ def run_gated(bin_dir, solver, case_name, frames, zero_keys, timeout):
         "--dispatcher-threads=2",
         "--seed=1",
     ]
+    if position_iters is not None:
+        extra.append("--position-iters=%s" % position_iters)
     code, stdout, stderr, timed_out = run_exe(bin_dir, extra, timeout)
     combined = stdout + (("\n" + stderr) if stderr else "")
     errors = []
@@ -176,6 +178,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin-dir", default=DEFAULT_BIN_DIR)
     parser.add_argument("--solver", default="avbd")
+    parser.add_argument("--position-iters", type=int, help="override the authored rigid position iterations (1-255)")
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument(
         "--cases",
@@ -183,6 +186,8 @@ def main():
         help="all, gated, unsupported, or a comma-separated case list",
     )
     args = parser.parse_args()
+    if args.position_iters is not None and not 1 <= args.position_iters <= 255:
+        parser.error("--position-iters must be in [1, 255]")
     bin_dir = os.path.abspath(args.bin_dir)
     exe = os.path.join(bin_dir, EXECUTABLE)
     if not os.path.isfile(exe):
@@ -213,7 +218,7 @@ def main():
                 continue
             executed += 1
             passed = (
-                run_gated(bin_dir, args.solver, case_name, frames, zero_keys, args.timeout)
+                run_gated(bin_dir, args.solver, case_name, frames, zero_keys, args.timeout, args.position_iters)
                 and passed
             )
     if run_unsupported_cases:
