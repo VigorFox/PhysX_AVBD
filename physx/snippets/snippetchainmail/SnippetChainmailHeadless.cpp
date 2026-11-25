@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <cmath>
 
 using namespace physx;
 namespace {
@@ -23,11 +24,25 @@ struct Metrics {
 };
 
 struct Callback : PxSimulationEventCallback {
+	struct Witness { const PxRigidBody* a; const PxRigidBody* b; PxVec3 point, normal; };
+	std::vector<Witness> witnesses;
+	bool observeSlip = false;
 	Metrics* metrics; Callback():metrics(NULL){}
 	void onConstraintBreak(PxConstraintInfo*,PxU32){} void onWake(PxActor**,PxU32){}
 	void onSleep(PxActor**,PxU32){} void onTrigger(PxTriggerPair*,PxU32){}
 	void onAdvance(const PxRigidBody*const*,const PxTransform*,const PxU32){}
 	void onContact(const PxContactPairHeader& h,const PxContactPair* p,PxU32 n){
+		if(observeSlip && !(h.flags & (PxContactPairHeaderFlag::eREMOVED_ACTOR_0 | PxContactPairHeaderFlag::eREMOVED_ACTOR_1)) &&
+			(h.actors[0]->userData==&gBallTag || h.actors[1]->userData==&gBallTag)){
+			const auto* a=h.actors[0]->is<PxRigidBody>(); const auto* b=h.actors[1]->is<PxRigidBody>();
+			for(PxU32 i=0;i<n;++i){
+				PxContactPairPoint points[64];
+				const PxU32 count=p[i].extractContacts(points,64);
+				for(PxU32 j=0;j<count;++j)
+					if(points[j].separation<=0)
+						witnesses.push_back({a,b,points[j].position,points[j].normal});
+			}
+		}
 		if(!metrics) return; const bool hit=(h.actors[0]->userData==&gBallTag&&h.actors[1]->userData==&gNetTag)||(h.actors[1]->userData==&gBallTag&&h.actors[0]->userData==&gNetTag);
 		if(hit) for(PxU32 i=0;i<n;++i){ if(metrics->firstContactFrame==PX_MAX_U32)metrics->firstContactFrame=metrics->completed; ++metrics->contacts; metrics->contactPoints+=p[i].contactCount; }
 	}
@@ -93,7 +108,8 @@ struct Fixture {
 	}
 };
 
-static bool supportedCase(const char* c){return Snippets::equalsIgnoreCase(c,"topology")||Snippets::equalsIgnoreCase(c,"sag")||Snippets::equalsIgnoreCase(c,"impact")||Snippets::equalsIgnoreCase(c,"projectile");}
+#include "SnippetChainmailVolley.inl"
+static bool supportedCase(const char* c){return Snippets::equalsIgnoreCase(c,"topology")||Snippets::equalsIgnoreCase(c,"sag")||Snippets::equalsIgnoreCase(c,"impact")||Snippets::equalsIgnoreCase(c,"projectile")||Snippets::equalsIgnoreCase(c,"volley");}
 }
 
 bool snippetChainmailHeadlessShouldRun(int argc,const char*const*argv){if(Snippets::isEnabledEnvironmentValue(std::getenv("PHYSX_SNIPPET_HEADLESS")))return true;for(int i=1;i<argc;++i)if(argv[i]&&std::strcmp(argv[i],"--headless")==0)return true;return false;}
@@ -102,7 +118,10 @@ int snippetChainmailHeadlessMain(int argc,const char*const*argv){
 	Snippets::HeadlessOptions d;d.headless=true;d.caseName="impact";d.frames=600; Snippets::HeadlessOptions o;std::string error;
 	if(!Snippets::parseCommonHeadlessOptions(argc,argv,d,o,error)||!supportedCase(o.caseName.c_str())){std::fprintf(stderr,"[AVBD_GATE_CONFIG_ERROR] snippet=SnippetChainmail reason=%s\n",error.empty()?"unsupported_case":error.c_str());return Snippets::eHEADLESS_CONFIG_ERROR;}
 	for(int i=1;i<argc;++i)if(!Snippets::isCommonHeadlessOption(argv[i])){std::fprintf(stderr,"[AVBD_GATE_CONFIG_ERROR] snippet=SnippetChainmail reason=unknown_option\n");return Snippets::eHEADLESS_CONFIG_ERROR;}
+	const bool volley=Snippets::equalsIgnoreCase(o.caseName.c_str(),"volley");
+	if(volley && !o.framesExplicit)o.frames=4200;
 	if(!Snippets::applyExecutionEnvironment(o))return Snippets::eHEADLESS_CONFIG_ERROR; Snippets::printHeadlessConfig("SnippetChainmail",o);
+	if(volley)return runVolley(o);
 	const bool topology=Snippets::equalsIgnoreCase(o.caseName.c_str(),"topology"),sag=Snippets::equalsIgnoreCase(o.caseName.c_str(),"sag"),projectile=Snippets::equalsIgnoreCase(o.caseName.c_str(),"projectile");
 	Fixture f; bool ok=f.init(o,!topology&&!sag,projectile); const PxU32 frames=topology?1:o.frames; for(PxU32 i=0;ok&&i<frames;++i)ok=f.step(o.dt);
 	const Metrics&m=f.metrics;const bool activity=topology||(m.centerMinY<NET_Y-1e-4f); const bool contact=(topology||sag)||(m.contacts>0&&m.contactPoints>0); const bool retained=(topology||sag)||(m.finalBallY>20.0f&&m.ballMinY>20.0f&&m.finalCenterY>20.0f&&m.maxBallPlanarSeparation==0.0f); const bool impactEnergy=topology||sag||(projectile?(m.maxBallSpeed<70.0f&&m.maxNetSpeed<60.0f):(m.maxBallSpeed<35.0f&&m.maxNetSpeed<60.0f));

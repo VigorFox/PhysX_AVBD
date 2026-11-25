@@ -76,6 +76,137 @@ static bool impactReport(PxPhysics& physics,PxSceneDesc desc,float cap,float dt)
     return ok;
 }
 
+static bool sphereRolling(PxPhysics& physics, PxSceneDesc desc, PxU32 hz, bool friction, bool rolling)
+{
+    desc.simulationEventCallback=nullptr;
+    PxScene* scene=physics.createScene(desc);
+    auto* material=physics.createMaterial(friction ? .5f : 0.f, friction ? .5f : 0.f, 0);
+    auto* ground=PxCreatePlane(physics,PxPlane(0,1,0,0),*material);
+    auto* ball=PxCreateDynamic(physics,PxTransform(PxVec3(0,1,0)),PxSphereGeometry(1),*material,100);
+    ball->setAngularDamping(0);
+    ball->setLinearDamping(0);
+    ball->setAngularVelocity(PxVec3(0,0,-5));
+    if(rolling)ball->setLinearVelocity(PxVec3(5,0,0));
+    scene->addActor(*ground);
+    scene->addActor(*ball);
+    bool valid=true;
+    for(PxU32 i=0;i<hz*10 && valid;++i)
+    {
+        scene->simulate(1.f/hz);
+        valid=scene->fetchResults(true);
+    }
+    // I=2*m*R^2/5. Coulomb sliding conserves angular momentum about the
+    // plane contact until v=-R*w. Pure rolling needs no tangential impulse.
+    const PxReal vx=rolling ? 5.f : friction ? 10.f/7.f : 0.f;
+    const PxReal wz=friction ? -vx : -5.f;
+    const auto v=ball->getLinearVelocity(),w=ball->getAngularVelocity();
+    valid &= (v-PxVec3(vx,0,0)).magnitude()<.02f && (w-PxVec3(0,0,wz)).magnitude()<.02f &&
+        PxAbs(ball->getGlobalPose().p.y-1)<.02f;
+    std::printf("[SPHERE_ROLL] hz=%u friction=%u rolling=%u vx=%g wz=%g status=%s\n",
+        hz,unsigned(friction),unsigned(rolling),double(v.x),double(w.z),valid?"PASS":"FAIL");
+    ball->release();ground->release();scene->release();material->release();
+    return valid;
+}
+
+static bool offsetSphereImpact(PxPhysics& physics, PxSceneDesc desc, PxReal dt)
+{
+    desc.gravity=PxVec3(0);
+    desc.simulationEventCallback=nullptr;
+    auto* scene=physics.createScene(desc);
+    auto* material=physics.createMaterial(0,0,.2f);
+    auto* ground=PxCreatePlane(physics,PxPlane(0,1,0,0),*material);
+    auto* ball=PxCreateDynamic(physics,PxTransform(PxVec3(0,1.02f,0)),PxSphereGeometry(1),*material,100);
+    PxShape* shape=nullptr;
+    ball->getShapes(&shape,1);
+    shape->setLocalPose(PxTransform(PxVec3(.15f,0,0)));
+    ball->setCMassLocalPose(PxTransform(PxVec3(.5f,0,0)));
+    ball->setLinearVelocity(PxVec3(0,-4,0));
+    ball->setLinearDamping(0);
+    ball->setAngularDamping(0);
+    scene->addActor(*ground);
+    scene->addActor(*ball);
+    bool ok=true;
+    for(PxU32 i=0;i<8 && ok && ball->getLinearVelocity().y < -3.99f;++i)
+    {
+        scene->simulate(dt);
+        ok=scene->fetchResults(true);
+    }
+    // A vertical impulse has a real moment about the displaced center of mass.
+    const PxReal impulse=ball->getMass()*(ball->getLinearVelocity().y+4);
+    const PxReal expected=-.35f*impulse/ball->getMassSpaceInertiaTensor().z;
+    const PxReal spin=ball->getAngularVelocity().z;
+    ok &= expected < -1 && PxAbs(spin-expected)<.02f*PxAbs(expected);
+    std::printf("[SPHERE_OFFSET] wz=%g expected=%g status=%s\n",double(spin),double(expected),ok?"PASS":"FAIL");
+    ball->release();ground->release();scene->release();material->release();
+    return ok;
+}
+
+static bool sphereGlance(PxPhysics& physics, PxSceneDesc desc, PxReal dt)
+{
+    desc.gravity=PxVec3(0);
+    desc.simulationEventCallback=nullptr;
+    auto* scene=physics.createScene(desc);
+    auto* material=physics.createMaterial(0,0,.5f);
+    auto* a=PxCreateDynamic(physics,PxTransform(PxVec3(-2,.8f,0)),PxSphereGeometry(1),*material,100);
+    auto* b=PxCreateDynamic(physics,PxTransform(PxVec3(2,0,0)),PxSphereGeometry(1),*material,100);
+    PxRigidDynamic* spheres[]={a,b};
+    for(auto* sphere : spheres)
+    {
+        sphere->setLinearDamping(0);
+        sphere->setAngularDamping(0);
+    }
+    a->setLinearVelocity(PxVec3(16,0,0));
+    scene->addActor(*a);scene->addActor(*b);
+    bool ok=true;
+    for(PxU32 i=0;i<PxU32(.6f/dt) && ok;++i)
+    {
+        scene->simulate(dt);ok=scene->fetchResults(true);
+    }
+    const PxReal spin=PxMax(a->getAngularVelocity().magnitude(),b->getAngularVelocity().magnitude());
+    const PxReal speedB=b->getLinearVelocity().magnitude();
+    const PxReal momentumError=(a->getLinearVelocity()+b->getLinearVelocity()-PxVec3(16,0,0)).magnitude();
+    ok &= spin<.002f && speedB>1 && momentumError<.02f;
+    std::printf("[SPHERE_GLANCE] spin=%g speedB=%g momentumErrorPerMass=%g status=%s\n",
+        double(spin),double(speedB),double(momentumError),ok?"PASS":"FAIL");
+    a->release();b->release();scene->release();material->release();
+    return ok;
+}
+
+static bool groundedSphereFriction(PxPhysics& physics, PxSceneDesc desc, PxReal dt)
+{
+    desc.gravity=PxVec3(0);
+    desc.simulationEventCallback=nullptr;
+    auto* scene=physics.createScene(desc);
+    auto* material=physics.createMaterial(.8f,.8f,0);
+    auto* fixed=PxCreateDynamic(physics,PxTransform(PxIdentity),PxSphereGeometry(1),*material,100);
+    auto* ball=PxCreateDynamic(physics,PxTransform(PxVec3(-3,0,0)),PxSphereGeometry(1),*material,100);
+    auto* joint=PxFixedJointCreate(physics,fixed,PxTransform(PxIdentity),nullptr,PxTransform(PxIdentity));
+    ball->setLinearDamping(0);
+    ball->setAngularDamping(0);
+    ball->setLinearVelocity(PxVec3(8,0,0));
+    ball->setAngularVelocity(PxVec3(0,0,6));
+    scene->addActor(*fixed);
+    scene->addActor(*ball);
+    bool ok=true;
+    PxReal expected=0, reported=0;
+    for(PxU32 i=0;i<PxU32(.5f/dt) && ok;++i)
+    {
+        const PxVec3 arm=ball->getGlobalPose().p, v=ball->getLinearVelocity(), w=ball->getAngularVelocity();
+        scene->simulate(dt);
+        ok=scene->fetchResults(true);
+        const PxVec3 impulse=(ball->getLinearVelocity()-v)*ball->getMass();
+        // Angular impulse about the fixed joint origin, at the same DCD epoch.
+        expected+=(arm.cross(impulse)+(ball->getAngularVelocity()-w)*ball->getMassSpaceInertiaTensor().z).z;
+        PxVec3 force, torque;
+        joint->getConstraint()->getForce(force,torque);
+        reported+=dt*torque.z;
+    }
+    ok &= PxAbs(expected)>10 && PxAbs(reported-expected)<.03f*PxAbs(expected);
+    std::printf("[SPHERE_FIXED] expected=%g reported=%g status=%s\n",double(expected),double(reported),ok?"PASS":"FAIL");
+    joint->release();ball->release();fixed->release();scene->release();material->release();
+    return ok;
+}
+
 static bool freeJointSpin(PxPhysics& physics, PxSceneDesc desc, unsigned hz)
 {
     desc.gravity = PxVec3(0);
@@ -217,6 +348,14 @@ int main(int argc,char** argv)
     const float limits[]={0.f,.01f,20.f};
     for(float limit:limits) impacts&=impactReport(*physics,desc,limit,dt);
     const bool spin = freeJointSpin(*physics, desc, hz);
+    bool spheres=sphereGlance(*physics,desc,dt);
+    spheres &= offsetSphereImpact(*physics,desc,dt);
+    if(desc.solverType==PxSolverType::eAVBD)
+        spheres &= groundedSphereFriction(*physics,desc,dt);
+    const bool choices[]={false,true};
+    for(bool friction : choices)
+        for(bool rolling : choices)
+            spheres &= sphereRolling(*physics,desc,hz,friction,rolling);
     dispatcher->release();PxCloseExtensions();physics->release();foundation->release();
-    return pass && impacts && spin ? 0 : 1;
+    return pass && impacts && spin && spheres ? 0 : 1;
 }

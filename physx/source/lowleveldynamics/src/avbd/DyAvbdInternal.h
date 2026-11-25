@@ -552,13 +552,13 @@ PX_FORCE_INLINE PxReal avbdEndpointCrossResponse(const AvbdSolverBody& b,
 }
 
 PX_FORCE_INLINE PxReal avbdContactAxisResponse(const AvbdRowConstRef& row,
-	const PxArray<AvbdSolverBody>& bodies, const PxVec3& axis)
+	const PxArray<AvbdSolverBody>& bodies, const PxVec3& axis, bool tangent = false)
 {
 	PxReal w = 0.0f;
 	if(row.header().bodyA != PX_MAX_U32 && row.header().bodyA < bodies.size())
-		w += avbdEndpointAxisResponse(bodies[row.header().bodyA], axis, row.scalar().ogcRA);
+		w += avbdEndpointAxisResponse(bodies[row.header().bodyA], axis, tangent ? row.scalar().rA : row.scalar().ogcRA);
 	if(row.header().bodyB != PX_MAX_U32 && row.header().bodyB < bodies.size())
-		w += avbdEndpointAxisResponse(bodies[row.header().bodyB], axis, row.scalar().ogcRB);
+		w += avbdEndpointAxisResponse(bodies[row.header().bodyB], axis, tangent ? row.scalar().rB : row.scalar().ogcRB);
 	return (PxIsFinite(w) && w > 1.0e-12f) ? w : 0.0f;
 }
 
@@ -603,8 +603,8 @@ PX_FORCE_INLINE void avbdFloorLoadedContactTangentRho(AvbdRowRef row,
 	if((row.header().flags & eAVBD_ROW_CONTACT) == 0 || row.scalar().mu <= 0.0f ||
 		(row.header().flags & (eAVBD_ROW_INACTIVE | eAVBD_ROW_SOFT_PAIR)) || dt <= 0.0f)
 		return;
-	const PxReal w0 = avbdContactAxisResponse(row, bodies, row.scalar().t0);
-	const PxReal w1 = avbdContactAxisResponse(row, bodies, row.scalar().t1);
+	const PxReal w0 = avbdContactAxisResponse(row, bodies, row.scalar().t0, true);
+	const PxReal w1 = avbdContactAxisResponse(row, bodies, row.scalar().t1, true);
 	if(w0 <= 0.0f || w1 <= 0.0f)
 		return;
 	const PxReal invH2 = 1.0f / (dt * dt);

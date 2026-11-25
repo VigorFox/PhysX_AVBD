@@ -705,8 +705,11 @@ void AvbdDynamicsContext::seedAnchoredJointReactions()
                 { complete = false; break; }
                 other = free;
                 const PxReal sign = sideA ? 1.f : -1.f;
-                hits[hitCount++] = {edge/2, i, sign, sign*row.scalar().n, body.pStart +
-                    body.qStart.rotate(sideA ? row.scalar().ogcRA : row.scalar().ogcRB)};
+                const auto& law = row.scalar();
+                const auto& detection = mContactWarm[edge/2];
+                const PxVec3 arm = law.sphereSupports ? (sideA ? detection.detectionRA : detection.detectionRB) :
+                    (sideA ? law.ogcRA : law.ogcRB);
+                hits[hitCount++] = {edge/2, i, sign, sign*law.n, body.pStart + body.qStart.rotate(arm)};
                 axis += sign*row.scalar().n;
             }
             if(!complete) break;

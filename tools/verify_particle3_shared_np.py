@@ -30,13 +30,15 @@ def main():
                     for line in text.splitlines() if line.startswith(tag + ' ')]
         if name.startswith('chainmail-four-'):
             case = name[len('chainmail-four-'):]
-            frames = 600 if case == 'impact' else 360
+            frames = {'impact': 600, 'projectile': 360, 'volley': 4200}[case]
             gates, schedules = fields('[AVBD_GATE]'), fields('[AVBD_SCHEDULE]')
             record['passed'] &= (len(gates) == 1 and gates[0].get('case') == case and
                 gates[0].get('status') == 'PASS' and gates[0].get('completedFrames') == str(frames) and
                 len(schedules) == frames and all(s.get('positionBudget') == s.get('rigidDualSweeps') == '4'
                                                  for s in schedules))
             record['gate'] = gates
+            if case == 'volley':
+                record['passed'] &= bool(gates) and gates[0].get('balls') == '25' and gates[0].get('steadyCohort') == '1'
         if name.startswith('warm-admission-'):
             epochs, checks = fields('[WARM_ORACLE]'), fields('[AVBD_WARM_CHECKS]')
             record['warmOracle'], record['warmChecks'] = epochs, checks
@@ -222,7 +224,7 @@ def main():
     run('row-program', [sys.executable, 'tools/run_avbd_row_program_probe.py'])
     run('rigid-contact-reaction', [sys.executable, 'tools/run_avbd_contact_reaction_probe.py'])
     run('rigid-loop-factor', [sys.executable, 'tools/run_avbd_rigid_loop_probe.py'])
-    for case, frames, workers in [('impact', 600, 4), ('projectile', 360, 8)]:
+    for case, frames, workers in [('impact', 600, 4), ('projectile', 360, 8), ('volley', 4200, 8)]:
         run('chainmail-four-' + case, [sdk / 'SnippetChainmail_64.exe', '--headless', '--solver=avbd',
             '--case=' + case, f'--frames={frames}', '--execution=parallel', f'--dispatcher-threads={workers}'],
             env=dict(PHYSX_AVBD_SCHEDULE_STATS='1'))

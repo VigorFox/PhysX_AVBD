@@ -225,6 +225,24 @@ void AvbdDynamicsContext::buildContactRows()
 					row.scalar().contactOffset=-unit.mRestDistance;
 				}
 				row.scalar().contactRadius = 0.0f;
+				if(output.geometry && !(unit.mFlags & PxcNpWorkUnitFlag::eMODIFIABLE_CONTACT))
+				{
+					const PxU32 ids[2] = {ia, ib};
+					for(PxU32 side=0; side<2; ++side)
+					{
+						const auto& shape = output.geometry->shapes[side];
+						if(ids[side]>=mBodies.size() || shape.kind!=PxsContactShapeGeometry::eSPHERE)
+							continue;
+						// Keep the measured DCD separation. Only the offset of the
+						// sphere center from the COM can give a normal force a torque.
+						PxVec3& arm = side ? row.scalar().ogcRB : row.scalar().ogcRA;
+						const PxVec3 center = shape.shapeToBody.p;
+						const PxReal radial = n.dot(mBodies[ids[side]].q.rotate(arm-center));
+						row.scalar().contactOffset += side ? -radial : radial;
+						arm = center;
+						row.scalar().sphereSupports |= PxU8(1u << side);
+					}
+				}
 				row.scalar().contactStiffness = 0.0f;
 				if(ia == PX_MAX_U32 || ib == PX_MAX_U32)
 				{
@@ -481,6 +499,7 @@ void AvbdDynamicsContext::buildContactRows()
 					if(d<distance){distance=d;nearest=r;}
 				}
 				AvbdRowBuilder row=source[nearest];AvbdContactWarm warm=warmSource[nearest];
+				row.scalar().sphereSupports=0; // regenerated feature anchors below
 				row.header().kernelId=eAVBD_ROW_KERNEL_NP_CONTACT;row.header().geometryIndex=mNpDomains.size();
 				row.scalar().n=PxVec3(PxReal(axis.x),PxReal(axis.y),PxReal(axis.z));avbdOrthonormalBasis(row.scalar().n,row.scalar().t0,row.scalar().t1);
 				row.scalar().rA=ia<mBodies.size()?poses[0].transformInv(point):point;

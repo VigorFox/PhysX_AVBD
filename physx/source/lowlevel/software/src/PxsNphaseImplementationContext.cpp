@@ -546,7 +546,10 @@ public:
                         PxsContactManagerStatusFlag::eHAS_TOUCH:PxsContactManagerStatusFlag::eHAS_NO_TOUCH;
                 }
 #endif
-				if(publishGeometry && !(unit.mFlags & PxcNpWorkUnitFlag::eSOFT_BODY) && output.nbContacts)
+				// A sphere's normal support rotates about its shape center. Publish
+				// the mass-frame center even when full separation queries are off.
+				const bool spherePair = unit.getGeomType0()==PxGeometryType::eSPHERE || unit.getGeomType1()==PxGeometryType::eSPHERE;
+				if((publishGeometry || spherePair) && !(unit.mFlags & PxcNpWorkUnitFlag::eSOFT_BODY) && output.nbContacts)
 				{
 					if(!cm->mContactGeometry) cm->mContactGeometry=PX_NEW(PxsContactGeometry);
 					if(cm->mContactGeometry)
@@ -565,9 +568,11 @@ public:
 					publishContactShapeGeometry(cm->mContactGeometry->shapes[1],*unit.getShapeCore1(),*unit.mRigidCore1,
 						(unit.mFlags & (PxcNpWorkUnitFlag::eDYNAMIC_BODY1 | PxcNpWorkUnitFlag::eARTICULATION_BODY1))!=0,
 						threadContext->mTransformCache->getTransformCache(unit.mTransformCache1).transform);
-					publishContactSeparatingAxis(*cm->mContactGeometry,
-						threadContext->mContactDistances[unit.mTransformCache0]+threadContext->mContactDistances[unit.mTransformCache1],
-						threadContext->mNarrowPhaseParams.mToleranceLength);
+					cm->mContactGeometry->axisValid=false;
+					if(publishGeometry)
+						publishContactSeparatingAxis(*cm->mContactGeometry,
+							threadContext->mContactDistances[unit.mTransformCache0]+threadContext->mContactDistances[unit.mTransformCache1],
+							threadContext->mNarrowPhaseParams.mToleranceLength);
 					output.geometry=cm->mContactGeometry;
 					}
 				}

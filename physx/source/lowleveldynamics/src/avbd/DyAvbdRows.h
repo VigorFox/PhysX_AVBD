@@ -125,6 +125,9 @@ struct AvbdScalarRowPayload
 	// passive tangents participate only when this row's velocity program gives
 	// Position-AL (or a later pose-residual owner) that source.
 	PxU8 positionTangent;
+	// Endpoint bits for analytic spherical normal supports. Tangential
+	// coordinates still act at the physical surface.
+	PxU8 sphereSupports;
 	// Inbound artic 1D: geometric C/J from current parent/child poses.
 	// NULL for contacts and solverPrep rows.
 	const ArticulationJointCore* articJoint;

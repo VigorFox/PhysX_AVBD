@@ -19,6 +19,7 @@
 #include <string>
 #include <cstdlib>
 #include "foundation/PxTime.h"
+#include "foundation/PxMathUtils.h"
 #include "avbd/DyAvbdKernelsScalar.h"
 #include "avbd/DyKernelTable.h"
 #include "avbd/DyAvbdNonlinearGroup.h"
@@ -3469,15 +3470,32 @@ void AvbdDynamicsContext::applyDualRange(PxU32 begin,PxU32 end)
 	}
 }
 
+static void avbdMaterialDirections(const AvbdRowConstRef& row, const PxArray<AvbdSolverBody>& bodies,
+    PxVec3 (&axes)[3], bool frozen)
+{
+    const auto& law=row.scalar();
+    axes[0]=law.n; axes[1]=law.t0; axes[2]=law.t1;
+    if(frozen || law.sphereSupports!=3)
+        return;
+    // At the velocity epoch the unique common normal of two spheres passes
+    // through both current shape centers. Transport the Coulomb disk with it.
+    PxVec3 normal=avbdWorldPoint(bodies[row.header().bodyA],law.ogcRA)-
+                  avbdWorldPoint(bodies[row.header().bodyB],law.ogcRB);
+    if(normal.normalize()>0)
+    {
+        const PxQuat transport=PxShortestRotation(law.n,normal);
+        axes[0]=normal; axes[1]=transport.rotate(law.t0); axes[2]=transport.rotate(law.t1);
+    }
+}
+
 // Compile the Jacobians, inverse-inertia products and local mobility
 // together at the material epoch. The velocity solve reuses these coefficients.
 static void avbdPrepareMaterialPoint(const AvbdRowConstRef& row, const AvbdMaterialRow& material,
-    const PxArray<AvbdSolverBody>& bodies, bool useTangents, AvbdMaterialPoint& point,
+    const PxArray<AvbdSolverBody>& bodies, const PxVec3 (&directions)[3], bool useTangents, AvbdMaterialPoint& point,
     PxReal (&diagonal)[3], PxReal& tangentCross)
 {
     const PxU32 ids[2]={row.header().bodyA,row.header().bodyB};
     const PxVec3 arms[2]={material.armA,material.armB};
-    const PxVec3 directions[3]={row.scalar().n,row.scalar().t0,row.scalar().t1};
     for(PxU32 side=0;side<2;++side)
     {
         if(ids[side]>=bodies.size() || !bodies[ids[side]].core) continue;
@@ -3589,7 +3607,7 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		// same PhysX/TGS eligibility inequality used by the distilled AVBD_2
 		// manifold owner, expressed with AvbdRow's signed solve-start separation.
 		const PxReal approach = -vnIn;
-		const PxReal detectionRate = dt > 0.0f ? row.scalar().contactOffset / dt : PX_MAX_F32;
+		const PxReal detectionRate = dt > 0.0f ? row.scalar().C0 / dt : PX_MAX_F32;
 		const bool impactRow = vnIn < bounceThreshold && approach > detectionRate;
 		const bool jointLinearRestitution = jointCoupledPair && impactRow &&
 			row.scalar().restitution > 0.0f;
@@ -3614,22 +3632,45 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 			(!dynamicA || reconstructA) && (!dynamicB || reconstructB);
 		AvbdMaterialRow material;
 		material.rowIndex = ri;
+		const auto condensed = [&](PxU32 index) {
+			return index < mBodies.size() && mBodies[index].core && !mBodies[index].isKinematic &&
+				!mBodies[index].invMass && mBodies[index].core->inverseMass > 0;
+		};
+		const bool fixedA=condensed(row.header().bodyA), fixedB=condensed(row.header().bodyB);
+		const PxU8 sphereMask=row.scalar().sphereSupports;
+		const bool frozen=sphereMask && (fixedA || fixedB);
+		PxVec3 axes[3];
+		avbdMaterialDirections(row,mBodies,axes,frozen);
 		PxVec3 freshA = row.scalar().ogcRA;
 		PxVec3 freshB = row.scalar().ogcRB;
 		if(row.header().bodyA < mBodies.size())
 			freshA = avbdWorldPoint(mBodies[row.header().bodyA], row.scalar().ogcRA);
 		if(row.header().bodyB < mBodies.size())
 			freshB = avbdWorldPoint(mBodies[row.header().bodyB], row.scalar().ogcRB);
-		const auto condensed = [&](PxU32 index) {
-            return index < mBodies.size() && mBodies[index].core && !mBodies[index].isKinematic &&
-                !mBodies[index].invMass && mBodies[index].core->inverseMass > 0;
-        };
-        const PxVec3 materialPoint = condensed(row.header().bodyA) ? freshA :
-            (condensed(row.header().bodyB) ? freshB : (freshA + freshB)*.5f);
+		if(frozen)
+		{
+			// The grounded tree's wrench and fracture bound were compiled at
+			// DCD. Use that same spatial point, normal and COM epoch for both ends.
+			const auto& warm=mContactWarm[ri];
+			const auto& fixed=mBodies[fixedA ? row.header().bodyA : row.header().bodyB];
+			freshA=freshB=fixed.pStart+fixed.qStart.rotate(fixedA ? warm.detectionRA : warm.detectionRB);
+		}
+		else if(sphereMask)
+		{
+			// Only the center offset follows body rotation. Reconstruct the
+			// surface lever along the contact normal from the fresh NP witness.
+			const auto& warm=mContactWarm[ri];
+			if(sphereMask & 1)
+				freshA += axes[0]*row.scalar().n.dot(mBodies[row.header().bodyA].qStart.rotate(warm.detectionRA-row.scalar().ogcRA));
+			if(sphereMask & 2)
+				freshB += axes[0]*row.scalar().n.dot(mBodies[row.header().bodyB].qStart.rotate(warm.detectionRB-row.scalar().ogcRB));
+		}
+		const PxVec3 materialPoint = fixedA ? freshA : fixedB ? freshB : sphereMask==1 ? freshA :
+			sphereMask==2 ? freshB : (freshA+freshB)*.5f;
 		material.armA = row.header().bodyA < mBodies.size() ?
-			materialPoint - mBodies[row.header().bodyA].p : PxVec3(0.0f);
+			materialPoint - (frozen ? mBodies[row.header().bodyA].pStart : mBodies[row.header().bodyA].p) : PxVec3(0.0f);
 		material.armB = row.header().bodyB < mBodies.size() ?
-			materialPoint - mBodies[row.header().bodyB].p : PxVec3(0.0f);
+			materialPoint - (frozen ? mBodies[row.header().bodyB].pStart : mBodies[row.header().bodyB].p) : PxVec3(0.0f);
 		material.positionNormalImpulse = replayCertificate ?
 			0.0f : PxMax(0.0f, -row.scalar().lambda * dt);
 		material.normalImpulse = 0.0f;
@@ -3670,7 +3711,7 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
         PxReal mobility[3]={}, tangentCross=0.f;
         const bool useTangents=solveRow && row.scalar().mu>0.f && !jointLinearRestitution && !jointPoseOwnedMaterial;
         if(solveRow && !jointPoseOwnedMaterial)
-            avbdPrepareMaterialPoint(row,material,mBodies,useTangents,point,mobility,tangentCross);
+            avbdPrepareMaterialPoint(row,material,mBodies,axes,useTangents,point,mobility,tangentCross);
         material.normalEffectiveMass=mobility[0]>0.f ? 1.f/mobility[0] : 0.f;
 		if(!replayCertificate && !jointLinearRestitution &&
 			(row.header().flags & eAVBD_ROW_FRESH) == 0)
@@ -3687,7 +3728,6 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 				-row.scalar().lambdaT0 * dt,
 				-row.scalar().lambdaT1 * dt
 			};
-			const PxVec3 axes[3] = { row.scalar().n, row.scalar().t0, row.scalar().t1 };
 			const PxU32 componentCount = row.scalar().positionTangent ? 3u : 1u;
 			for(PxU32 endpoint = 0; endpoint < 2; ++endpoint)
 			{
@@ -3756,11 +3796,11 @@ void AvbdDynamicsContext::prepareImpactMaterial(PxReal dt,const PxArray<PxU8>& m
 		// in its pose-derived velocity, so only later impulse deltas are scattered.
 		if(replayCertificate)
 		{
-			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, row.scalar().n,
+			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, axes[0],
 				material.normalImpulse);
-			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, row.scalar().t0,
+			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, axes[1],
 				material.tangentImpulse0);
-			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, row.scalar().t1,
+			avbdApplyMaterialAxisImpulse(row, material, mBodies, velocityDelta, axes[2],
 				material.tangentImpulse1);
 		}
         if(!material.solveNormal && !material.solveTangent) continue;
@@ -3881,8 +3921,10 @@ void AvbdDynamicsContext::publishContactMaterial()
         if(lo==mMaterialRowsScratch.size() || mMaterialRowsScratch[lo].rowIndex!=reaction.row) continue;
         const auto& material=mMaterialRowsScratch[lo];
         const auto row=mRows[reaction.row];
-        const PxVec3 impulse = reaction.sign*(row.scalar().n*material.normalImpulse +
-            row.scalar().t0*material.tangentImpulse0 + row.scalar().t1*material.tangentImpulse1);
+        PxVec3 axes[3];
+        avbdMaterialDirections(row,mBodies,axes,true);
+        const PxVec3 impulse = reaction.sign*(axes[0]*material.normalImpulse +
+            axes[1]*material.tangentImpulse0 + axes[2]*material.tangentImpulse1);
         auto& result=getConstraintWriteBackPool()[reaction.writeback];
         result.linearImpulse += impulse;
         result.angularImpulse += reaction.arm.cross(impulse);
@@ -3966,35 +4008,13 @@ void AvbdDynamicsContext::prepareRigidVelocities(PxReal dt)
 	// Velocity epoch belongs to the complete dynamic component. Resetting a
 	// contact-only projectile while its spring/joint endpoint retains BDF
 	// replaces only half of the coupled impulse and creates net momentum.
-    // A released component has no physical impulse from a broken equality.
-    // Restart all its free endpoints at the same incoming momentum epoch.
-    for(PxU32 i=0; i<released.size(); ++i)
-        if(released[i]) released[epochParent[i]] = 1;
+	// For a free contact component, restitution acts on the incoming
+	// momenta through equal and opposite material impulses. Taking BDF
+	// velocities instead would retain the finite-primal momentum residual.
 	for(PxU32 i = 0; i < mBlocks.size(); ++i)
 		if(!materialBody[i]) materialBody[epochParent[i]] = 0;
 	for(PxU32 i = 0; i < mBodies.size(); ++i)
 		materialBody[i] = materialBody[epochParent[i]];
-	// An ordinary dynamic-dynamic restitution manifold is reconstructed from
-	// the Position-AL residual in AVBD_2: geometry already supplied the
-	// inelastic normal reaction, and material adds only the bounce/cone delta.
-	// Restoring solve-start velocity here would first erase that reaction and
-	// then ask a pointwise free-body solve to rediscover the mobility of an
-	// attached endpoint.
-	for(PxU32 ri = 0; ri < materialEnd; ++ri)
-	{
-		const AvbdRowConstRef& row = mRows[ri];
-		if((row.header().flags & (eAVBD_ROW_CONTACT | eAVBD_ROW_INACTIVE |
-			eAVBD_ROW_SOFT_PAIR)) != eAVBD_ROW_CONTACT ||
-			row.scalar().restitution <= 0.0f || row.header().bodyA >= mBodies.size() ||
-			row.header().bodyB >= mBodies.size() ||
-			!avbdBodyResponds(mBodies[row.header().bodyA]) ||
-			!avbdBodyResponds(mBodies[row.header().bodyB]) ||
-			row.scalar().minLambda > -1.0e15f ||
-            (!released.empty() && released[epochParent[row.header().bodyA]]))
-			continue;
-		materialBody[row.header().bodyA] = 0;
-		materialBody[row.header().bodyB] = 0;
-	}
 	for(PxU32 i = 0; i < mBodies.size(); ++i)
 	{
 		AvbdSolverBody& b = mBodies[i];
