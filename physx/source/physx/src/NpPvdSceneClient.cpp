@@ -182,14 +182,16 @@ namespace
 		case PxActorType::eDEFORMABLE_SURFACE:
 			op(*static_cast<const PxDeformableSurface*>(actor));
 			break;
+#else
+		case PxActorType::eDEFORMABLE_SURFACE:
+			PX_ASSERT(false);
+			break;
 #endif
 #if PX_SUPPORT_DEFORMABLE_VOLUME
 		case PxActorType::eDEFORMABLE_VOLUME:
 			op(*static_cast<const PxDeformableVolume*>(actor));
 			break;
-#endif
-#if !PX_SUPPORT_GPU_PHYSX && !PX_SUPPORT_DEFORMABLE_VOLUME
-		case PxActorType::eDEFORMABLE_SURFACE:
+#else
 		case PxActorType::eDEFORMABLE_VOLUME:
 			PX_ASSERT(false);
 			break;

@@ -15,7 +15,10 @@
 #include "avbd/DyAvbdNonlinearBlock.h"
 #include "avbd/DyAvbdFrameAssembly.h"
 #include "avbd/DyAvbdProgramSchedule.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <cstdlib>
 #include "foundation/PxTime.h"
