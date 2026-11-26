@@ -85,8 +85,15 @@ struct AvbdLocalWork : PxUserAllocated
     PxArray<AvbdNodalTrial> nodalTrials;
     PxArray<PxU32> leaves;
     PxArray<PxArray<PxU32>> levels;
-    PxU32 cursor=0,level=0,search=0;
+    PxU32 cursor=0,level=0,search=0,executed=0;
     Phase phase=Assemble;
+    // Drop one color's scratch so the same object can own the next wide block.
+    void reset()
+    {
+        states.clear();nodes.clear();partials.clear();nodal.clear();
+        nodalEnergy.clear();nodalTrials.clear();leaves.clear();levels.clear();
+        cursor=level=search=executed=0;phase=Assemble;
+    }
     void add(PxU32 body,PxU32 begin,PxU32 end)
     {
         AvbdLocalBlockState state;state.body=body;

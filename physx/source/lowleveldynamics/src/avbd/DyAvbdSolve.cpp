@@ -15,7 +15,10 @@
 #include "avbd/DyAvbdNonlinearBlock.h"
 #include "avbd/DyAvbdFrameAssembly.h"
 #include "avbd/DyAvbdProgramSchedule.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <cstdlib>
 #include "foundation/PxTime.h"
@@ -2321,9 +2324,8 @@ PxReal AvbdDynamicsContext::finishRigidAssembly(AvbdLocalBlockState& state,AvbdL
     return state.result;
 }
 
-void AvbdDynamicsContext::solveLocalWorkJob(PxU32 job)
+void AvbdDynamicsContext::solveLocalWorkJob(AvbdLocalWork& work,PxU32 job)
 {
-    auto& work=*mLocalWork;
     if(work.phase==AvbdLocalWork::Direction || work.phase==AvbdLocalWork::Accept)
     {
         auto& state=work.states[job];if(state.done)return;

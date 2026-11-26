@@ -1,7 +1,11 @@
-"""Measure 4 -> 8 strong scaling in one Checked scene. Windows process CPU includes headless observers."""
+"""Measure 4 -> 8 strong scaling in one Checked scene.
+
+Process CPU includes headless observers. Windows uses ``*_64.exe`` under
+``physx/bin/win.x86_64.vc143.md``. Linux uses the same cases against
+``physx/bin/linux.x86_64/<config>`` (``SnippetDeformable*AVBD`` or ``*_64``).
+"""
 import argparse
 import csv
-import ctypes
 import hashlib
 import json
 import math
@@ -10,7 +14,7 @@ from pathlib import Path
 import statistics as st
 import subprocess
 
-from benchmark_particle3_showcases import cpu_ticks
+from avbd_benchmark_host import cpu_ticks, process_affinity, runtime_binaries, wait_child
 
 
 SLOW = [*range(91, 98), *range(163, 168), *range(274, 280)]
@@ -29,33 +33,15 @@ def require(condition, message):
 
 
 def digest(sdk):
-    files = list(sdk.glob("*.dll")) + [sdk / f"SnippetDeformable{s}AVBD_64.exe" for s in ("Surface", "Volume")]
+    files = runtime_binaries(sdk, ("SnippetDeformableSurfaceAVBD", "SnippetDeformableVolumeAVBD"))
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 
 
-def process_affinity(mask):
-    if os.name != "nt":
-        require(mask is None, "The optional CPU mask requires Windows")
-        return None
-    dll = ctypes.windll.kernel32
-    handle = ctypes.c_void_p(-1)
-    current, system = ctypes.c_size_t(), ctypes.c_size_t()
-    def read():
-        if not dll.GetProcessAffinityMask(handle, ctypes.byref(current), ctypes.byref(system)):
-            raise ctypes.WinError()
-    read()
-    if mask is not None:
-        require(mask > 0 and mask & current.value == mask, "CPU mask exceeds process affinity")
-        if not dll.SetProcessAffinityMask(handle, ctypes.c_size_t(mask)):
-            raise ctypes.WinError()
-        read()
-        require(current.value == mask, "Requested affinity unavailable")
-    return hex(current.value)
-
-
-def run(sdk, out, case, workers, rep, profile):
+def run(sdk, out, case, workers, rep, profile, timeout):
     kind, name, frames = CASES[case]
-    exe = sdk / f"SnippetDeformable{kind}AVBD_64.exe"
+    exe = next((p for p in runtime_binaries(sdk, (f"SnippetDeformable{kind}AVBD",))
+                if p.name.startswith(f"SnippetDeformable{kind}AVBD")), None)
+    require(exe is not None and exe.is_file(), f"Missing SnippetDeformable{kind}AVBD under {sdk}")
     stem = f"{case}-{workers}-" + ("profile" if profile else str(rep))
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PHYSX_AVBD_", "PHYSX_NP_", "PHYSX_SNIPPET_"))}
     env.update(PHYSX_AVBD_COMMON_STEP="budget", PHYSX_AVBD_LOCAL_ITERATIONS="4")
@@ -67,14 +53,12 @@ def run(sdk, out, case, workers, rep, profile):
     log = out / (stem + ".log")
     with log.open("wb") as stream:
         before = cpu_ticks()
-        with subprocess.Popen([exe, "--headless", "--case=" + name, f"--frames={frames}",
+        with subprocess.Popen([str(exe), "--headless", "--case=" + name, f"--frames={frames}",
                                f"--dispatcher-threads={workers}"], env=env, stdout=stream, stderr=subprocess.STDOUT) as child:
             try:
-                rc = child.wait(timeout=300)
+                rc, cpu = wait_child(child, timeout)
             except subprocess.TimeoutExpired:
-                child.kill()
                 raise
-            cpu = cpu_ticks(child)
         after = cpu_ticks()
     lines = log.read_text(errors="replace").splitlines()
     gates = tags(lines, "AVBD_GATE")
@@ -154,6 +138,7 @@ def main():
     cli.add_argument("--cases", nargs="+", choices=CASES, default=list(CASES))
     cli.add_argument("--target", type=float, default=1.8, help="Proposed dense whole-run speedup target.")
     cli.add_argument("--affinity-mask", type=lambda s: int(s, 0), help="Optional common process mask inherited by both worker counts.")
+    cli.add_argument("--timeout", type=float, default=300, help="Per-run wall timeout in seconds.")
     cli.add_argument("--compare-sdk", type=Path, help="Interleave a second solver DLL using identical snippets and dependencies.")
     args = cli.parse_args()
     if args.pairs < 2 or not math.isfinite(args.target) or args.target <= 0:
@@ -173,7 +158,7 @@ def main():
         result.update(candidateBinary=identities["candidate"], candidateSummary={})
         (out / "candidate").mkdir()
     def acquire(arm, case, workers, i, profile):
-        row = run(sdks[arm], out if arm == "production" else out / arm, case, workers, i, profile)
+        row = run(sdks[arm], out if arm == "production" else out / arm, case, workers, i, profile, args.timeout)
         return dict(row, arm=arm)
     def save():
         (out / "summary.json").write_text(json.dumps(result, indent=2))
