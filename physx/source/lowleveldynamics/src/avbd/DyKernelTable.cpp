@@ -22,6 +22,7 @@
 #include "avbd/DyAvbdMembraneBatch.h"
 #include "foundation/PxMemory.h"
 #include "foundation/PxMath.h"
+#include <cstring>
 
 #if defined(PX_AVBD_AVX256)
 #include <cstdio>

@@ -80,7 +80,7 @@ template<class T> inline AvbdNodalShellSampleT<T> avbdSampleNodalShell(
     const AvbdNodalShellRestT<T>& rest,const PxVec3T<T>* x,T mu,T lambda,T bend,PxU32 corner,const T* weights=NULL,
     AvbdNodalWorkT<T>* work=NULL)
 {
-    typedef PxVec3T<T> V;typedef PxMat33T<T> M;
+    typedef PxVec3T<T> V;
     AvbdNodalShellSampleT<T> out;
     for(PxU32 i=0;i<rest.arity();++i)if(!x[i].isFinite())return out;
     if(rest.kind==rest.Membrane)

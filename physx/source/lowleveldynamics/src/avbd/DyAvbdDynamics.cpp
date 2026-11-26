@@ -12,6 +12,7 @@
 #include "task/PxCpuDispatcher.h"
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include "avbd/DyAvbdVbd.h"
 #include "avbd/DyAvbdInternal.h"
@@ -1177,7 +1178,7 @@ void AvbdDynamicsContext::preparePrimalSweep()
 
 void AvbdDynamicsContext::solveBoundedBatch(PxU32 begin,PxU32 end,PxU32 slot)
 {
-    PX_COMPILE_TIME_ASSERT(AvbdCpuBatch::TileWidth==AvbdBoundedResponse::BatchWidth);
+    PX_COMPILE_TIME_ASSERT(int(AvbdCpuBatch::TileWidth)==int(AvbdBoundedResponse::BatchWidth));
     PX_ASSERT(slot<AvbdCpuBatch::TaskLimit && end>=begin && end-begin<=AvbdCpuBatch::TileWidth*AvbdCpuBatch::TilesPerTask);
     if(slot>=AvbdCpuBatch::TaskLimit || end<begin || end-begin>AvbdCpuBatch::TileWidth*AvbdCpuBatch::TilesPerTask)
     {PxAtomicExchange(&mLocalDomainFailed,1);return;}
