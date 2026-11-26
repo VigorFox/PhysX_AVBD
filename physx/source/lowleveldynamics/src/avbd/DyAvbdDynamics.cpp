@@ -179,6 +179,7 @@ AvbdDynamicsContext::~AvbdDynamicsContext()
     for(auto* task:mReadyTasks)PX_DELETE(task);
     for(auto* loop:mLoopScratch)PX_DELETE(loop);
     PX_DELETE(mLocalWork);
+    for(auto* work:mWidePool)PX_DELETE(work);
     PX_DELETE(mColorTasks);
     PX_DELETE(mWideNomination);
     clearCommonPublication();
@@ -1312,7 +1313,11 @@ void AvbdDynamicsContext::solveLocalBatch(PxU32 begin,PxU32 end,PxU32 stage,PxU3
     else if(stage==IncidenceHistoryStage)for(PxU32 i=begin;i<end;++i)prepareIncidenceHistory(i);
     else if(stage==NodalLoadStage)for(PxU32 i=begin;i<end;++i)conditionNodalLoad(i);
     else if(stage==NodalMatchStage)for(PxU32 i=begin;i<end;++i)nominateNodalPartner(i);
-    else if(stage==3)for(PxU32 i=begin;i<end;++i)solveLocalWorkJob(i);
+    else if(stage==3)
+    {
+        if(mWideFusedDrain)while(drainOneWide()){}
+        else if(mLocalWork)for(PxU32 i=begin;i<end;++i)solveLocalWorkJob(*mLocalWork,i);
+    }
     else if(stage==2)for(PxU32 i=begin;i<end;++i)
         validateLocalRow(i<mContactRowCount?i:mNativeMaterialEnd-mNodalContacts.size()+i-mContactRowCount);
     else if(stage==1)applyDualRange(begin,end);
@@ -1523,39 +1528,21 @@ void AvbdDynamicsContext::bakeLocalColorTasks()
         flush(end);
     }
     plan.wideOffsets.pushBack(plan.wideBlocks.size());plan.offsets.pushBack(plan.tiles.size());
-    const PxU32 waveLimit=workers==1?1:workers*LocalQueueDepth;
     for(PxU32 c=0;c+1<plan.offsets.size();++c)
     {
         const PxU32 first=plan.offsets[c],end=plan.offsets[c+1];
         plan.offsets[c]=plan.waves.size();
-        for(PxU32 t=first;t<end;)
+        if(first==end)continue;
+        // Keep authored tile order. Same-color blocks do not read each other,
+        // but reordering them still changes the published floating-point path.
+        AvbdColorTasks::Wave wave={first,end-first,0,0,0,0,0};
+        for(PxU32 t=first;t<end;++t)
         {
-            AvbdColorTasks::Wave wave={t,PxMin(end-t,waveLimit),0,0,0,0,0};
-            const PxU32 stop=t+wave.count;
-            for(;t<stop;++t)
-            {
-                const auto& tile=plan.tiles[t];wave.blocks+=tile.blocks;
-                wave.maxBlocks=PxMax(wave.maxBlocks,tile.blocks);wave.maxRows=PxMax(wave.maxRows,tile.rows);
-                if(tile.split!=PX_MAX_U32){wave.splitBlocks+=tile.blocks;++wave.leaves;}
-            }
-            // Ordinary tiles of one color have no intervening write dependency.
-            // Bake a larger window once for all sweeps. Each callback can
-            // consume up to LocalQueueDepth tiles with the usual row limit.
-            if(workers>1 && !wave.leaves && plan.wideOffsets[c]==plan.wideOffsets[c+1] &&
-                plan.waves.size()>plan.offsets[c])
-            {
-                auto& previous=plan.waves.back();
-                if(!previous.leaves && previous.count+wave.count<=waveLimit*LocalQueueDepth)
-                {
-                    previous.count+=wave.count;
-                    previous.blocks+=wave.blocks;
-                    previous.maxBlocks=PxMax(previous.maxBlocks,wave.maxBlocks);
-                    previous.maxRows=PxMax(previous.maxRows,wave.maxRows);
-                    continue;
-                }
-            }
-            plan.waves.pushBack(wave);
+            const auto& tile=plan.tiles[t];wave.blocks+=tile.blocks;
+            wave.maxBlocks=PxMax(wave.maxBlocks,tile.blocks);wave.maxRows=PxMax(wave.maxRows,tile.rows);
+            if(tile.split!=PX_MAX_U32){wave.splitBlocks+=tile.blocks;++wave.leaves;}
         }
+        plan.waves.pushBack(wave);
     }
     plan.offsets.back()=plan.waves.size();
     if(incidence){plan.incidenceOffsets=mColorOffsets;plan.incidenceShape=mIncidenceTaskShape;}
@@ -1619,7 +1606,8 @@ bool AvbdDynamicsContext::dispatchLocalBatch(PxU32 stage)
         mStep.splitPrimalBlocks+=w.splitBlocks;mStep.splitRowLeaves+=w.leaves;
         mStep.localPrimalMaxBlocks=PxMax(mStep.localPrimalMaxBlocks,w.maxBlocks);
         mStep.localPrimalMaxRows=PxMax(mStep.localPrimalMaxRows,w.maxRows);
-        const PxU32 lanes=PxMin(w.count,mColorTasks->workers*LocalQueueDepth);
+        // One cohort per color, the same shape as a single color-group launch.
+        const PxU32 lanes=PxMin(w.count,PxMax(1u,mColorTasks->workers));
         mColorTasks->tileCount=w.count;
         if(lanes<w.count)mColorTasks->nextTile=PxI32(lanes);
         return submitLocalWave(stage,lanes,NULL,NULL,w.first);
@@ -1715,30 +1703,41 @@ bool AvbdDynamicsContext::dispatchLocalBatch(PxU32 stage)
 void AvbdDynamicsContext::runColorLane(PxU32 slot)
 {
     const PxU32 lanes=mColorTasks->lanes;
-    const PxU32 first=3*slot+1,stop=PxMin(lanes,first+3);
-    for(PxU32 child=first;child<stop;++child)
+    // Flat submit. A 3-ary fan leaves later workers asleep while the first
+    // lane is already inside a wide vertex.
+    if(slot==0)
     {
-        if(mStep.localTimeline)mStep.localWaveTaskReady[child]=PxTime::getCurrentCounterValue();
-        mColorLanes[child-1]->submit(*mColorContinuation);
+        for(PxU32 child=1;child<lanes;++child)
+        {
+            if(mStep.localTimeline)mStep.localWaveTaskReady[child]=PxTime::getCurrentCounterValue();
+            mColorLanes[child-1]->submit(*mColorContinuation);
+        }
     }
-    const PxU32 tile=mColorTasks->firstTile+slot;
-    solveLocalBatch(tile,tile+1,0,slot);
-    if(mColorTasks->tileCount<=lanes)return;
-    const PxU64 started=mStep.profile?mStep.localWaveTaskStarts[slot]:0;
-    auto hottest=mStep.hotItems[slot];
-    for(PxU32 n=1;n<LocalQueueDepth;++n)
+    const PxU64 laneStart=mStep.profile?PxTime::getCurrentCounterValue():0;
+    StepState::HotItem hottest={};
+    if(mWideArmed)drainOneWide();
+    const auto runTile=[&](PxU32 tile)
     {
-        const PxU32 index=PxU32(PxAtomicIncrement(&mColorTasks->nextTile)-1);
-        if(index>=mColorTasks->tileCount)break;
-        const PxU32 next=mColorTasks->firstTile+index;
-        solveLocalBatch(next,next+1,0,slot);
-        if(mStep.profile && mStep.hotItems[slot].ticks>hottest.ticks)hottest=mStep.hotItems[slot];
+        solveLocalBatch(tile,tile+1,0,slot);
+        if(mStep.profile && mStep.hotItems[slot].ticks>=hottest.ticks)hottest=mStep.hotItems[slot];
+    };
+    if(slot<mColorTasks->tileCount)
+        runTile(mColorTasks->firstTile+slot);
+    if(mColorTasks->tileCount>lanes)
+    {
+        for(;;)
+        {
+            const PxU32 index=PxU32(PxAtomicIncrement(&mColorTasks->nextTile)-1);
+            if(index>=mColorTasks->tileCount)break;
+            runTile(mColorTasks->firstTile+index);
+        }
     }
+    while(mWideArmed && drainOneWide()){}
     if(mStep.profile)
     {
         mStep.hotItems[slot]=hottest;
-        mStep.localWaveTaskStarts[slot]=started;
-        mStep.localWaveTaskTicks[slot]=PxTime::getCurrentCounterValue()-started;
+        mStep.localWaveTaskStarts[slot]=laneStart;
+        mStep.localWaveTaskTicks[slot]=PxTime::getCurrentCounterValue()-laneStart;
     }
 }
 
@@ -1777,64 +1776,165 @@ bool AvbdDynamicsContext::submitLocalWave(PxU32 stage,PxU32 count,const PxU32* s
         solveLocalBatch(starts[count-1],stops[count-1],stage,count-1);
         const bool complete=next->completeInline();if(complete)finishLocalProfileWave();return complete;
     }
+    if(!starts)
+    {
+        mColorTasks->firstTile=firstTile;mColorTasks->lanes=1;
+        if(mStep.localTimeline)mStep.localWaveTaskReady[0]=PxTime::getCurrentCounterValue();
+        runColorLane(0);finishLocalProfileWave();return true;
+    }
     if(mStep.localTimeline)mStep.localWaveTaskReady[0]=PxTime::getCurrentCounterValue();
-    solveLocalBatch(starts?starts[0]:firstTile,stops?stops[0]:firstTile+1,stage,0);finishLocalProfileWave();return true;
+    solveLocalBatch(starts[0],stops[0],stage,0);finishLocalProfileWave();return true;
 }
 
-bool AvbdDynamicsContext::dispatchLocalWork()
+void AvbdDynamicsContext::armWideColor()
 {
+    if(mWidePrepared==mStep.nextColor)return;
+    mWidePrepared=mStep.nextColor;
+    mWideActive=0;mWideArmed=false;mWideCursor=0;mWideFusedDrain=false;
     const bool baked=mColorTasks && !mColorTasks->offsets.empty();
-    if(baked && mColorTasks->wideOffsets[mStep.nextColor]==mColorTasks->wideOffsets[mStep.nextColor+1])return true;
-    if(!mLocalWork)
+    const PxArray<PxU32>& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
+    const PxArray<PxU32>& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
+    if(mStep.nextColor+1>=offsets.size())return;
+    PxArray<PxU32> chosen;
+    for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
     {
-        const auto& offsets=baked?mColorTasks->wideOffsets:mColorOffsets;
-        const auto& blocks=baked?mColorTasks->wideBlocks:mColorBlocks;
-        bool hasNodes=false,hasRigids=false;
-        for(PxU32 k=offsets[mStep.nextColor];k<offsets[mStep.nextColor+1];++k)
-        {
-            const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
-            const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
-            if(end-begin<=AvbdLocalWork::RowLimit)continue;
-            if(!mLocalWork)mLocalWork=PX_NEW(AvbdLocalWork)();
-            mLocalWork->add(b,begin,end);
-            if(b<mBodies.size())
-            {mLocalWork->states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);hasRigids=true;}
-            else hasNodes=true;
-            ++mStep.tiledBlocks;++mStep.localBlocks;mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
-        }
-        if(!mLocalWork)return true;
-        if(hasNodes)
-        {mLocalWork->nodal.resize(mLocalWork->nodes.size());mLocalWork->nodalEnergy.resize(mLocalWork->nodes.size());mLocalWork->nodalTrials.resize(mLocalWork->states.size());}
-        if(hasRigids)mLocalWork->partials.resize(mLocalWork->nodes.size());
-        mStep.tiledLeaves+=mLocalWork->leaves.size();
-        mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,PxU64(mLocalWork->nodes.size())*
-            sizeof(AvbdLocalWork::Node)+PxU64(mLocalWork->partials.size())*sizeof(AvbdLocalPartial)+PxU64(mLocalWork->states.size())*sizeof(AvbdLocalBlockState)+
-            PxU64(mLocalWork->nodal.size())*sizeof(AvbdNodalAssembly)+PxU64(mLocalWork->nodalEnergy.size())*sizeof(AvbdNodalEnergy)+
-            PxU64(mLocalWork->nodalTrials.size())*sizeof(AvbdNodalTrial));
+        const PxU32 b=blocks[k];if(b>=mBlocks.size())continue;
+        const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
+        if(end>begin && end-begin>AvbdLocalWork::RowLimit)chosen.pushBack(b);
     }
-    auto& work=*mLocalWork;
+    if(chosen.empty())return;
+    std::sort(chosen.begin(),chosen.end(),[&](PxU32 a,PxU32 b)
+    {
+        const PxU32 ra=mRowProgram.blockOffsets[a+1]-mRowProgram.blockOffsets[a];
+        const PxU32 rb=mRowProgram.blockOffsets[b+1]-mRowProgram.blockOffsets[b];
+        return ra!=rb?ra>rb:a<b;
+    });
+    PxU64 scratch=0;
+    for(PxU32 n=0;n<chosen.size();++n)
+    {
+        const PxU32 b=chosen[n];
+        const PxU32 begin=mRowProgram.blockOffsets[b],end=mRowProgram.blockOffsets[b+1];
+        while(mWidePool.size()<=n)mWidePool.pushBack(PX_NEW(AvbdLocalWork)());
+        AvbdLocalWork& work=*mWidePool[n];
+        work.reset();work.add(b,begin,end);
+        const bool node=b>=mBodies.size();
+        if(node)
+        {
+            work.nodal.resize(work.nodes.size());work.nodalEnergy.resize(work.nodes.size());
+            work.nodalTrials.resize(work.states.size());
+        }
+        else
+        {
+            work.states.back().original=PxTransform(mBodies[b].p,mBodies[b].q);
+            work.partials.resize(work.nodes.size());
+        }
+        ++mStep.tiledBlocks;++mStep.localBlocks;
+        mStep.tiledLeaves+=work.leaves.size();
+        mStep.tiledMaxRows=PxMax(mStep.tiledMaxRows,end-begin);
+        scratch+=PxU64(work.nodes.size())*sizeof(AvbdLocalWork::Node)+PxU64(work.partials.size())*sizeof(AvbdLocalPartial)+
+            PxU64(work.states.size())*sizeof(AvbdLocalBlockState)+PxU64(work.nodal.size())*sizeof(AvbdNodalAssembly)+
+            PxU64(work.nodalEnergy.size())*sizeof(AvbdNodalEnergy)+PxU64(work.nodalTrials.size())*sizeof(AvbdNodalTrial);
+    }
+    mStep.tiledScratchBytes=PxMax(mStep.tiledScratchBytes,scratch);
+    mWideActive=chosen.size();mWideArmed=true;mWideCursor=0;++mStep.tiledWaves;
+}
+
+void AvbdDynamicsContext::retireWide()
+{
+    PxU64 jobs=0;
+    for(PxU32 i=0;i<mWideActive;++i)jobs+=mWidePool[i]->executed;
+    mStep.tiledJobs+=jobs;
+    mWideActive=0;mWideArmed=false;mWideFusedDrain=false;mWideCursor=0;
+}
+
+bool AvbdDynamicsContext::drainOneWide()
+{
+    if(!mWideArmed || mLocalDomainFailed)return false;
+    const PxU32 i=PxU32(PxAtomicIncrement(&mWideCursor)-1);
+    if(i>=mWideActive)return false;
+    runWideBlock(*mWidePool[i]);
+    return true;
+}
+
+void AvbdDynamicsContext::runWideBlock(AvbdLocalWork& work)
+{
+    // The binary reduction and the bounded line search are unchanged. They
+    // used to be a dispatcher wave per phase; the leaves stay within RowLimit.
     while(!mLocalDomainFailed)
     {
-        if(work.cursor<work.jobs())
-        {if(!dispatchLocalBatch(3))return false;continue;}
-        work.cursor=0;
+        const PxU32 n=work.jobs();
+        for(PxU32 job=0;job<n;++job)
+        {
+            const bool dir=work.phase==AvbdLocalWork::Direction || work.phase==AvbdLocalWork::Accept;
+            PxU32 state;
+            if(dir)state=job;
+            else
+            {
+                const bool leaf=work.phase==AvbdLocalWork::Assemble || work.phase==AvbdLocalWork::Trial;
+                const PxU32 id=leaf?work.leaves[job]:work.levels[work.level][job];
+                state=work.nodes[id].state;
+            }
+            if(work.states[state].done)continue;
+            solveLocalWorkJob(work,job);
+            ++work.executed;
+        }
         switch(work.phase)
         {
-        case AvbdLocalWork::Assemble:work.phase=AvbdLocalWork::ReduceAssembly;work.level=0;break;
+        case AvbdLocalWork::Assemble:
+            work.phase=work.levels.empty()?AvbdLocalWork::Direction:AvbdLocalWork::ReduceAssembly;work.level=0;break;
         case AvbdLocalWork::ReduceAssembly:
             if(++work.level==work.levels.size())work.phase=AvbdLocalWork::Direction;break;
         case AvbdLocalWork::Direction:work.phase=AvbdLocalWork::Trial;break;
-        case AvbdLocalWork::Trial:work.phase=AvbdLocalWork::ReduceTrial;work.level=0;break;
+        case AvbdLocalWork::Trial:
+            work.phase=work.levels.empty()?AvbdLocalWork::Accept:AvbdLocalWork::ReduceTrial;work.level=0;break;
         case AvbdLocalWork::ReduceTrial:
             if(++work.level==work.levels.size())work.phase=AvbdLocalWork::Accept;break;
         case AvbdLocalWork::Accept:
+        {
             bool done=true;for(const auto& state:work.states)done &= state.done;
-            if(done){PX_DELETE(mLocalWork);mLocalWork=NULL;return true;}
-            if(++work.search>=AvbdLocalWork::SearchLimit){PxAtomicExchange(&mLocalDomainFailed,1);break;}
+            if(done)return;
+            if(++work.search>=AvbdLocalWork::SearchLimit){PxAtomicExchange(&mLocalDomainFailed,1);return;}
             work.phase=AvbdLocalWork::Trial;break;
         }
+        }
     }
-    PX_DELETE(mLocalWork);mLocalWork=NULL;return true;
+}
+
+bool AvbdDynamicsContext::dispatchFusedWide()
+{
+    if(!mWideActive){mWideArmed=false;return true;}
+    const PxU32 workers=mStep.continuation?PxClamp(mStep.workers,1u,32u):1u;
+    const PxU32 lanes=PxMin(mWideActive,workers);
+    mWideCursor=0;mWideFusedDrain=true;
+    if(workers<=1)
+    {
+        while(drainOneWide()){}
+        retireWide();return true;
+    }
+    if(lanes==1)
+    {
+        if(!mColorContinuation)mColorContinuation=PX_NEW(AvbdAdvanceTask)(*this,mContextID);
+        auto* next=mColorContinuation;auto& tm=*mStep.continuation->getTaskManager();
+        next->setContinuation(tm,NULL);
+        if(mBlockTasks.empty())mBlockTasks.pushBack(PX_NEW(AvbdBlockSolveTask)(*this,mContextID));
+        auto* task=mBlockTasks[0];
+        task->local=true;task->bounded=false;task->localStage=3;task->begin=0;task->end=1;task->slot=0;
+        ++mStep.submittedTasks;
+        mStep.localQueuePeak=PxMax(mStep.localQueuePeak,1u);
+        if(mStep.profile)
+        {mStep.localWaveStart=PxTime::getCurrentCounterValue();mStep.localWaveStage=3;
+            mStep.localWaveJobs=1;mStep.localWaveTaskCount=1;}
+        if(mStep.localTimeline)mStep.localWaveTaskReady[0]=PxTime::getCurrentCounterValue();
+        task->setContinuation(next);task->removeReference();
+        const bool complete=next->completeInline();
+        if(complete){finishLocalProfileWave();retireWide();}
+        return complete;
+    }
+    PxU32 starts[32],stops[32];
+    for(PxU32 i=0;i<lanes;++i){starts[i]=0;stops[i]=1;}
+    const bool done=submitLocalWave(3,lanes,starts,stops);
+    if(done)retireWide();
+    return done;
 }
 
 void AvbdDynamicsContext::compileNodalSurfaceRows()
@@ -3683,6 +3783,7 @@ void AvbdDynamicsContext::advancePrimal()
                 continue;
             }
 			mStep.nextColor = 0;
+            mWidePrepared=PX_MAX_U32;
             // Alternate the traversal of the same independent color batches
             // to avoid keeping one side of a loaded interface last.
             mStep.reverseColors=mStep.localBudget && mStep.hasParticleBlocks &&
@@ -3719,9 +3820,18 @@ void AvbdDynamicsContext::advancePrimal()
                 if(!dispatchLocalBatch(IncidenceHistoryStage))return;
             while(mStep.nextColor+1<mColorOffsets.size() && !mLocalDomainFailed)
             {
+                if(mWideInFlight){mWideInFlight=false;retireWide();}
+                if(mStep.localCursor==localColorStart(mStep.nextColor))
+                    armWideColor();
                 if(mStep.localCursor<localColorStart(mStep.nextColor+1))
-                {if(!dispatchLocalBatch(false))return;continue;}
-                if(!dispatchLocalWork())return;
+                {
+                    const bool laneDrain=mWideArmed && mColorTasks && !mColorTasks->offsets.empty();
+                    if(!dispatchLocalBatch(false)){if(laneDrain)mWideInFlight=true;return;}
+                    if(laneDrain)retireWide();
+                    continue;
+                }
+                if(mWideArmed)
+                {if(!dispatchFusedWide()){mWideInFlight=true;return;}}
                 if(mLocalDomainFailed)break;
                 if(mStep.reverseColors)
                     mStep.nextColor=mStep.nextColor?mStep.nextColor-1:mColorOffsets.size()-1;

@@ -2324,9 +2324,8 @@ PxReal AvbdDynamicsContext::finishRigidAssembly(AvbdLocalBlockState& state,AvbdL
     return state.result;
 }
 
-void AvbdDynamicsContext::solveLocalWorkJob(PxU32 job)
+void AvbdDynamicsContext::solveLocalWorkJob(AvbdLocalWork& work,PxU32 job)
 {
-    auto& work=*mLocalWork;
     if(work.phase==AvbdLocalWork::Direction || work.phase==AvbdLocalWork::Accept)
     {
         auto& state=work.states[job];if(state.done)return;

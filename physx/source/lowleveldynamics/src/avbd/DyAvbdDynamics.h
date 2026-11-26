@@ -397,14 +397,18 @@ private:
     void assembleNodalRows(PxU32 block,PxU32 begin,PxU32 end,AvbdNodalAssembly& out);
     void finishNodalAssembly(PxU32 block,const AvbdNodalAssembly& rows);
     PxReal finishRigidAssembly(AvbdLocalBlockState& state,AvbdLocalPartial& partial);
-    bool dispatchLocalWork();
+    void armWideColor();
+    void retireWide();
+    bool drainOneWide();
+    void runWideBlock(AvbdLocalWork& work);
+    bool dispatchFusedWide();
     void beginNodalTrial(PxU32 block,const AvbdNodalAssembly& rows,AvbdNodalTrial& trial);
     void makeNodalCandidate(AvbdNodalTrial& trial);
     bool sampleNodalCandidate(PxU32 row,PxU32 block,const PxVec3& candidate,AvbdNodalReal& energy,
         PxU32 peer=PX_MAX_U32,const PxVec3* peerCandidate=NULL,AvbdNodalTrialVertices* vertices=NULL);
     void sampleNodalTrial(PxU32 block,PxU32 begin,PxU32 end,const AvbdNodalTrial& trial,AvbdNodalEnergy& out);
     void acceptNodalTrial(PxU32 block,const AvbdNodalAssembly& rows,AvbdNodalTrial& trial,const AvbdNodalEnergy& sample);
-    void solveLocalWorkJob(PxU32 job);
+    void solveLocalWorkJob(AvbdLocalWork& work,PxU32 job);
     void sampleLocalBlock(const AvbdLocalBlockState& state,PxU32 begin,PxU32 end,AvbdLocalPartial& partial,bool trial);
     void directLocalBlock(AvbdLocalBlockState& state,const AvbdLocalPartial& partial);
     void finishLocalBlockTrial(AvbdLocalBlockState& state,const AvbdLocalPartial& partial);
@@ -721,6 +725,12 @@ private:
     AvbdCommonPublication* mCommonPublication=NULL;
     AvbdBoundedResponse* mBoundedResponse=NULL;
     AvbdLocalWork* mLocalWork=NULL;
+    // One scratch object per wide block of the color currently in flight.
+    // A block's leaves, reduction and line search stay inside one task.
+    PxArray<AvbdLocalWork*> mWidePool;
+    PxU32 mWideActive=0,mWidePrepared=PX_MAX_U32;
+    volatile PxI32 mWideCursor=0;
+    bool mWideArmed=false,mWideInFlight=false,mWideFusedDrain=false;
     PxU32 mBoundedCursor=0;
 	PxArray<PxU32> mColorOffsets,mColorBlocks;
 	volatile PxI32 mColorCursor=0;
