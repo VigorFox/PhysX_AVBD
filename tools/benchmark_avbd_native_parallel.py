@@ -7,7 +7,6 @@ average occupied logical cores across setup, physics, observer and teardown;
 it is not solver-only utilization. Diagnostic logging is opt-in.
 """
 import argparse
-import ctypes
 import hashlib
 import json
 import math
@@ -19,6 +18,7 @@ import statistics
 import subprocess
 import time
 
+from avbd_benchmark_host import default_sdk_dir, find_snippet, inherited_cpus, wait_child
 from avbd_gate import parse_fields
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,19 +28,6 @@ EXES = {"surface": "SnippetDeformableSurfaceAVBD_64.exe",
 
 def telemetry_fields(line):
     return dict(re.findall(r"(\w+)=([^\s]+)", line))
-
-
-def process_cpu_seconds(process):
-    if os.name != "nt":
-        return None  # No guessed CPU utilization on unsupported platforms.
-    from ctypes import wintypes
-    get_times = ctypes.WinDLL("kernel32", use_last_error=True).GetProcessTimes
-    get_times.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-    get_times.restype = wintypes.BOOL
-    times = [wintypes.FILETIME() for _ in range(4)]
-    if not get_times(int(process._handle), *(ctypes.byref(t) for t in times)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    return sum((t.dwHighDateTime << 32) + t.dwLowDateTime for t in times[2:]) / 1e7
 
 
 def physical_pass(gate, code, timed_out, frames, case, snippet):
@@ -80,19 +67,16 @@ def run(exe, args, workers, repeat):
         process = subprocess.Popen(command, cwd=exe.parent, env=env,
                                    stdout=stream, stderr=subprocess.STDOUT)
         requested_cpus = getattr(args, 'cpus', None)
-        inherited_cpus = None
-        if requested_cpus:
-            import psutil
-            inherited_cpus = psutil.Process(process.pid).cpu_affinity()
+        cpus = inherited_cpus(process.pid) if requested_cpus else None
         timed_out = False
         try:
-            code = process.wait(timeout=args.timeout)
+            code, cpu_100ns = wait_child(process, args.timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
-            code = process.wait()
+            # wait_child already reaped the child after killing it.
+            code, cpu_100ns = process.returncode, None
             timed_out = True
         wall = time.perf_counter() - started
-        cpu = process_cpu_seconds(process)
+        cpu = None if cpu_100ns is None else cpu_100ns / 1e7
     lines = log.read_text(encoding="utf8", errors="replace").splitlines()
     gates = [parse_fields(line) for line in lines if line.startswith("[AVBD_GATE] ")]
     gate = gates[0][0] if len(gates) == 1 and not gates[0][1] else {}
@@ -101,7 +85,7 @@ def run(exe, args, workers, repeat):
                     and route[0].get("workers") == str(workers)
                     and gate.get("dispatcherThreads") == str(workers))
     if requested_cpus:
-        native_route = native_route and sorted(inherited_cpus) == sorted(requested_cpus)
+        native_route = native_route and sorted(cpus) == sorted(requested_cpus)
     if getattr(args, "grid", None) is not None:
         native_route = native_route and gate.get("grid") == str(args.grid)
     step = float(gate.get("averageStepMs", "nan"))
@@ -111,7 +95,7 @@ def run(exe, args, workers, repeat):
                   wallSeconds=wall, processCpuSeconds=cpu,
                   averageOccupiedCores=cpu / wall if cpu is not None else None,
                   averageStepMs=step if finite_time else None, gate=gate, nativeRoute=native_route,
-                  logicalCpus=inherited_cpus, physicalPass=native_route and finite_time and physical_pass(
+                  logicalCpus=cpus, physicalPass=native_route and finite_time and physical_pass(
                       gate, code, timed_out, args.frames, args.case, args.snippet), log=str(log))
     if args.diagnostics:
         local = [telemetry_fields(line) for line in lines if line.startswith("[AVBD_LOCAL_BUDGET] ")
@@ -175,14 +159,15 @@ def main():
             or (args.grid is not None and not 2 <= args.grid <= 32) \
             or (args.budget is not None and not 1 <= args.budget <= 128):
         parser.error("invalid frames, repeats, timeout, or worker counts (0..16, unique)")
-    binary = args.binary_dir.resolve() if args.binary_dir else ROOT / "physx/bin/win.x86_64.vc143.md" / args.config
-    exe = binary / EXES[args.snippet]
+    binary = args.binary_dir.resolve() if args.binary_dir else default_sdk_dir(ROOT, args.config)
+    base = "SnippetDeformableSurfaceAVBD" if args.snippet == "surface" else "SnippetDeformableVolumeAVBD"
+    exe = find_snippet(binary, base) or (binary / EXES[args.snippet])
     if not exe.is_file():
         parser.error("missing executable: " + str(exe))
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     fingerprint = lambda: {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                           for p in [exe] + sorted(exe.parent.glob("*.dll"))}
+                           for p in [exe] + sorted(exe.parent.glob("*.dll")) + sorted(exe.parent.glob("*.so"))}
     report = dict(acceptancePolicy="parallel-quality-not-bitwise-20261109", snippet=args.snippet,
                   route="bounded-reference" if args.reference_bounded else "budget",
                   localBudget=None if args.reference_bounded else (args.budget if args.budget is not None else 4),
