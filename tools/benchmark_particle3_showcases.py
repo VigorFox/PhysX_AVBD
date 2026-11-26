@@ -1,6 +1,5 @@
 """Paired, headless, 360-frame acceptance for both authored deformable snippets."""
 import argparse
-import ctypes
 import hashlib
 import json
 import os
@@ -8,22 +7,7 @@ from pathlib import Path
 import statistics
 import subprocess
 
-
-def cpu_ticks(process=None):
-    # Windows cumulative times in 100 ns units. GetSystemTimes' kernel time
-    # includes idle time. A terminated child's process handle is still valid.
-    if os.name != 'nt':
-        return None
-    times = [ctypes.c_ulonglong() for _ in range(3 if process is None else 4)]
-    pointers = [ctypes.byref(t) for t in times]
-    if process is None:
-        if not ctypes.windll.kernel32.GetSystemTimes(*pointers):
-            raise ctypes.WinError()
-        idle, kernel, user = (t.value for t in times)
-        return kernel + user, kernel + user - idle
-    if not ctypes.windll.kernel32.GetProcessTimes(ctypes.c_void_p(int(process._handle)), *pointers):
-        raise ctypes.WinError()
-    return times[2].value + times[3].value
+from avbd_benchmark_host import cpu_ticks, default_sdk_dir, find_snippet, wait_child
 
 
 def records(text):
@@ -38,12 +22,12 @@ def main():
     parser.add_argument('--cloth-case', choices=('static-box', 'static-box-25'), default='static-box',
                         help='Use static-box-25 for a 4.8 m Particle3 / Rigid6 cloth comparison.')
     args = parser.parse_args()
-    sdk = Path(os.environ['AVBD_PROBE_BINARY_DIR']).resolve()
+    sdk = Path(os.environ.get('AVBD_PROBE_BINARY_DIR') or default_sdk_dir(Path(__file__).resolve().parents[1])).resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     scenes = {'cloth': ('Surface', 'static-box'), 'volume': ('Volume', 'visual-showcase')}
     def identity():
         return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sdk.iterdir()
-                if p.suffix.lower() in ('.dll', '.exe')}
+                if p.is_file() and (p.suffix.lower() in ('.dll', '.exe', '.so') or p.name.startswith('Snippet'))}
     env = {k: v for k, v in os.environ.items() if not k.startswith(('PHYSX_AVBD_', 'PHYSX_NP_', 'PHYSX_SNIPPET_'))}
     env.update(PHYSX_AVBD_COMMON_STEP='budget', PHYSX_AVBD_LOCAL_ITERATIONS='4')
     report = dict(before=identity(), clothCase=args.cloth_case, runs=[], scenes={})
@@ -59,7 +43,9 @@ def main():
         for repeat in range(3):
             for workers in counts[repeat:]+counts[:repeat]:
                 for model in (('rigid6', 'particle3') if repeat%2 == 0 else ('particle3', 'rigid6')):
-                    exe = sdk/f'SnippetDeformable{suffix}AVBD_64.exe'
+                    exe = find_snippet(sdk, f'SnippetDeformable{suffix}AVBD')
+                    if exe is None:
+                        raise SystemExit('missing executable SnippetDeformable%sAVBD under %s' % (suffix, sdk))
                     scene_case = args.cloth_case if scene == 'cloth' and model == 'particle3' else case
                     cmd = [str(exe), '--headless', '--case='+scene_case, '--frames=360', f'--dispatcher-threads={workers}']
                     if model == 'rigid6':
@@ -69,12 +55,11 @@ def main():
                         start=cpu_ticks()
                         with subprocess.Popen(cmd,env=env,stdout=stream,stderr=subprocess.STDOUT) as child:
                             try:
-                                code=child.wait(timeout=600)
+                                code, proc = wait_child(child, 600)
                             except subprocess.TimeoutExpired:
-                                child.kill()
                                 raise
                             end=cpu_ticks()
-                            other=None if not start else 100*max(0,end[1]-start[1]-cpu_ticks(child))/max(1,end[0]-start[0])
+                            other=None if not start or proc is None else 100*max(0,end[1]-start[1]-proc)/max(1,end[0]-start[0])
                     raw=path.read_bytes()
                     tags = records(raw.decode('utf8', errors='replace'))
                     gate = tags.get('[AVBD_GATE]', {})
